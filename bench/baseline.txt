@@ -1,0 +1,9 @@
+# ベンチマークの基準値（ADR 0044）。CI はこの上限を超えたら失敗する。
+# 上限は「基準値」に CI の実行環境のぶれを見込んだ余裕を足したもの。
+#
+# name                 max_ns_per_op   基準値（目標）と意味
+BenchmarkGetHit        2000          # 1µs：セッションの有効性のキャッシュに当たった検証（5.3）
+BenchmarkDecrypt       20000         # 10µs：個人情報1件の復号（データ鍵の取り出しを含む）
+BenchmarkEmailIndex    20000         # 10µs：ブラインドインデックス1件
+BenchmarkPointLookup   500000        # 200µs：キャッシュに外れたときの ID での1件取得（SQLite）
+BenchmarkAuditRecord   3000000       # 1ms：監査ログ1件の追記（ハッシュチェーン + outbox、SQLite）

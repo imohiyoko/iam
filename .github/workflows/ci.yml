@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: "**/go.sum"
+      - name: go vet
+        run: scripts/modules.sh go vet ./...
+      - name: go test
+        run: scripts/modules.sh go test -race -count=1 ./...
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+
+  generated:
+    # 生成コード（sqlc、oapi-codegen）が定義と一致しているか。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: "**/go.sum"
+      - name: sqlc
+        working-directory: adapters/storage/sqlite
+        run: go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+      - name: oapi-codegen
+        working-directory: api
+        run: |
+          go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.1 -config oapi-public.yaml public.yaml
+          go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.1 -config oapi-admin.yaml admin.yaml
+      - name: diff
+        run: git diff --exit-code
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: "**/go.sum"
+      - name: install tools
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+      - name: staticcheck
+        run: scripts/modules.sh staticcheck ./...
+      - name: gosec
+        run: scripts/modules.sh gosec -quiet -exclude-generated ./...
+      - name: govulncheck
+        run: scripts/modules.sh govulncheck ./...
+
+  bench:
+    # 主要操作のレイテンシを計測し、bench/baseline.txt の上限と比べる（ADR 0044）。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: "**/go.sum"
+      - name: benchmarks
+        run: |
+          set -o pipefail
+          {
+            (cd . && GOWORK=off go test -run '^$' -bench . -count 5 ./...)
+            (cd adapters/storage/sqlite && GOWORK=off go test -run '^$' -bench . -count 5 ./...)
+          } | tee bench.txt | scripts/benchcheck.sh bench/baseline.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench
+          path: bench.txt

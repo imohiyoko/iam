@@ -1,0 +1,79 @@
+package config
+
+import (
+	"testing"
+	"time"
+)
+
+func TestParse(t *testing.T) {
+	c, err := Parse([]byte(`
+dev: true
+storage:
+  driver: memory
+keystore:
+  driver: file
+  path: /etc/iam/keys.json
+features: [org]
+security:
+  session:
+    absolute_lifetime: {default: 7d, min: 1h, max: 30d}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Storage.Driver != "memory" || c.Storage.Options["path"] != "" {
+		t.Fatalf("storage = %+v", c.Storage)
+	}
+	if c.KeyStore.Options["path"] != "/etc/iam/keys.json" {
+		t.Fatalf("keystore = %+v", c.KeyStore)
+	}
+	if c.Ephemeral.Driver != "memory" || c.Notifier.Driver != "dev" {
+		t.Fatalf("defaults not applied: %+v %+v", c.Ephemeral, c.Notifier)
+	}
+	if c.Features == nil || len(*c.Features) != 1 {
+		t.Fatalf("features = %v", c.Features)
+	}
+	if got := c.Security.Session.AbsoluteLifetime.Default.D(); got != 7*24*time.Hour {
+		t.Fatalf("lifetime = %v", got)
+	}
+}
+
+func TestParseEmptyUsesDefaults(t *testing.T) {
+	c, err := Parse([]byte("dev: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Storage.Driver != "sqlite" || c.Features != nil {
+		t.Fatalf("%+v", c)
+	}
+}
+
+func TestParseRejects(t *testing.T) {
+	cases := map[string]string{
+		"unknown field": "dev: true\nbogus: 1\n",
+		"dev notifier":  "notifier: {driver: dev}\n",
+		"same addr":     "dev: true\nserver: {public_addr: ':1', admin_addr: ':1'}\n",
+		"bad range":     "dev: true\nsecurity: {session: {absolute_lifetime: {default: 100d, min: 1h, max: 90d}}}\n",
+		"bad timezone":  "dev: true\nrealm: {slug: x, timezone: Mars/Base}\n",
+		"bad duration":  "dev: true\noutbox: {interval: 1x}\n",
+	}
+	for name, y := range cases {
+		if _, err := Parse([]byte(y)); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+}
+
+func TestParseDuration(t *testing.T) {
+	for in, want := range map[string]time.Duration{"30d": 30 * 24 * time.Hour, "15m": 15 * time.Minute} {
+		got, err := ParseDuration(in)
+		if err != nil || got != want {
+			t.Errorf("%s: %v %v", in, got, err)
+		}
+	}
+	for _, in := range []string{"d", "1.5d", "xd"} {
+		if _, err := ParseDuration(in); err == nil {
+			t.Errorf("%s: want error", in)
+		}
+	}
+}

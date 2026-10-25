@@ -1,0 +1,45 @@
+# IAM の設定ファイルの例（開発用）。`iam serve -config iam.yaml` で使う。
+# 起動時に決まるもの（アダプタ、フィーチャー、realm・Org が設定できる範囲）をここに書く（design.md 2.8）。
+
+dev: true # 開発モード。本番では false（notifier の dev が使えなくなる）
+
+server:
+  public_addr: ":8080"
+  admin_addr: "127.0.0.1:8081" # 管理 API は公開 API とポートを分ける
+  multi_instance: false
+  clock_skew_warn: 1s
+
+storage:
+  driver: sqlite
+  path: iam.db
+  auto_migrate: "true" # false なら `iam migrate` を明示的に実行する
+
+ephemeral:
+  driver: memory
+
+keystore:
+  driver: file
+  path: keys.json # `iam keys generate -out keys.json` で作る。失うとデータを復号できない
+
+event_sink:
+  driver: stdout
+
+notifier:
+  driver: dev
+
+# features: [org, warnings]  # 省略すると各フィーチャーの既定に従う
+
+realm:
+  slug: default
+  timezone: UTC
+
+security:
+  session:
+    absolute_lifetime: { default: 30d, min: 1h, max: 90d }
+    idle_timeout: { default: 7d, min: 5m, max: 30d }
+    max_auth_age: { default: 15m, min: 1m, max: 1d }
+    validity_max_delay: 30s
+
+outbox:
+  interval: 1s
+  batch: 100
