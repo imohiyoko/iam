@@ -77,16 +77,25 @@ func (s *Service) CreateWithEmail(ctx context.Context, tx port.Tx, realmID, emai
 	if err != nil {
 		return Created{}, err
 	}
+	// 書き込みの前に重複を確かめる。ユーザーを作った後でメールの一意制約に当たると、呼び出し側が
+	// errs.Conflict を受けて処理を続けたとき、メールの無いユーザーが残る（13.5 の不変条件に反する）。
+	// 一意制約は同時に登録されたときの最後の守りとして残す。
+	ix, err := s.Crypter.EmailIndex(ctx, email)
+	if err != nil {
+		return Created{}, err
+	}
+	switch _, err := tx.Emails().GetByIndex(ctx, realmID, ix.Value); {
+	case err == nil:
+		return Created{}, errs.New(errs.KindConflict, "email already registered")
+	case !errors.Is(err, errs.NotFound):
+		return Created{}, err
+	}
 	now := s.Clock.Now()
 	u := port.User{ID: id.New(id.User), PublicID: id.NewExternal(id.User), RealmID: realmID, Status: port.UserActive, CreatedAt: now, UpdatedAt: now}
 	if err := tx.Users().Create(ctx, u); err != nil {
 		return Created{}, err
 	}
 	if err := s.Crypter.CreateDataKey(ctx, tx.DataKeys(), u.ID, now); err != nil {
-		return Created{}, err
-	}
-	ix, err := s.Crypter.EmailIndex(ctx, email)
-	if err != nil {
 		return Created{}, err
 	}
 	dom, err := s.Crypter.DomainIndex(ctx, email)

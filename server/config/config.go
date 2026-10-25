@@ -274,7 +274,9 @@ func (c Config) Validate() error {
 		problems = append(problems, "server.public_addr and server.admin_addr must differ")
 	}
 	if u := c.Server.PublicURL; u != "" {
-		if p, err := url.Parse(u); err != nil || p.Host == "" || (p.Scheme != "https" && !(c.Dev && p.Scheme == "http")) || p.Path != "" && p.Path != "/" {
+		p, err := url.Parse(u)
+		schemeOK := err == nil && (p.Scheme == "https" || (c.Dev && p.Scheme == "http"))
+		if !schemeOK || p.Host == "" || p.User != nil || p.RawQuery != "" || p.ForceQuery || p.Fragment != "" || (p.Path != "" && p.Path != "/") {
 			problems = append(problems, "server.public_url must be an https origin (http only with dev: true)")
 		}
 	}

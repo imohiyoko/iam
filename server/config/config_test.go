@@ -60,10 +60,23 @@ func TestParseRejects(t *testing.T) {
 		"overflow days":          "dev: true\noutbox: {interval: 106752d}\n",
 		"negative min":           "dev: true\nsecurity: {session: {max_auth_age: {default: 15m, min: -1h, max: 1d}}}\n",
 		"options without driver": "dev: true\nstorage: {path: /var/lib/iam/iam.db}\n",
+		"public_url path":        "dev: true\nserver: {public_url: 'https://id.example.com/iam'}\n",
+		"public_url query":       "dev: true\nserver: {public_url: 'https://id.example.com?x=1'}\n",
+		"public_url empty query": "dev: true\nserver: {public_url: 'https://id.example.com/?'}\n",
+		"public_url fragment":    "dev: true\nserver: {public_url: 'https://id.example.com#a'}\n",
+		"public_url userinfo":    "dev: true\nserver: {public_url: 'https://u:p@id.example.com'}\n",
 	}
 	for name, y := range cases {
 		if _, err := Parse([]byte(y)); err == nil {
 			t.Errorf("%s: want error", name)
+		}
+	}
+}
+
+func TestPublicURLAcceptsOrigin(t *testing.T) {
+	for _, u := range []string{"https://id.example.com", "https://id.example.com/", "http://localhost:8080"} {
+		if _, err := Parse([]byte("dev: true\nserver: {public_url: '" + u + "'}\n")); err != nil {
+			t.Errorf("%s: %v", u, err)
 		}
 	}
 }

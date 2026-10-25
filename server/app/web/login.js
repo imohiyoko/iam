@@ -12,6 +12,11 @@
   }
 
   function say(code, isError) {
+    if (!code) {
+      msg.textContent = "";
+      msg.className = "";
+      return;
+    }
     msg.textContent = messages[code] || messages.error || code;
     msg.className = isError ? "error" : "";
   }
@@ -32,10 +37,18 @@
     say((r.data && r.data.error) || "error", true);
   }
 
-  // 戻り先は同じオリジンのパスだけを許す（オープンリダイレクトを防ぐ）。
+  // 戻り先は同じオリジンのパスだけを許す（オープンリダイレクトを防ぐ）。URL の解析はタブや改行を
+  // 取り除くため（"/\t/evil.example" は "//evil.example" になる）、制御文字とバックスラッシュを拒み、
+  // 解決した結果のオリジンも確かめる。
   function safeReturnTo() {
     const r = app.dataset.returnTo || "";
-    return r.startsWith("/") && !r.startsWith("//") && !r.startsWith("/\\") ? r : "";
+    if (!r.startsWith("/") || /[\u0000-\u001f\u007f\\]/.test(r)) return "";
+    try {
+      const u = new URL(r, window.location.origin);
+      return u.origin === window.location.origin ? u.pathname + u.search + u.hash : "";
+    } catch (_) {
+      return "";
+    }
   }
 
   function done(r) {
