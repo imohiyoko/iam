@@ -2,6 +2,7 @@
 
 - Status: Draft
 - Last updated: 2026-10-25
+- 設計判断の理由は [ADR](adr/README.md) に記録している（このドキュメントは「今どうなっているか」を書く）
 
 ## 1. 目的
 
