@@ -167,6 +167,12 @@ type VerifyEmailLoginJSONBody struct {
 	Token       *string `json:"token,omitempty"`
 }
 
+// RedeemLoginLinkJSONBody defines parameters for RedeemLoginLink.
+type RedeemLoginLinkJSONBody struct {
+	ReturnToken *bool  `json:"return_token,omitempty"`
+	Token       string `json:"token"`
+}
+
 // StartOAuthLoginJSONBody defines parameters for StartOAuthLogin.
 type StartOAuthLoginJSONBody struct {
 	RedirectUri *string `json:"redirect_uri,omitempty"`
@@ -186,6 +192,9 @@ type StartEmailLoginJSONRequestBody StartEmailLoginJSONBody
 // VerifyEmailLoginJSONRequestBody defines body for VerifyEmailLogin for application/json ContentType.
 type VerifyEmailLoginJSONRequestBody VerifyEmailLoginJSONBody
 
+// RedeemLoginLinkJSONRequestBody defines body for RedeemLoginLink for application/json ContentType.
+type RedeemLoginLinkJSONRequestBody RedeemLoginLinkJSONBody
+
 // StartOAuthLoginJSONRequestBody defines body for StartOAuthLogin for application/json ContentType.
 type StartOAuthLoginJSONRequestBody StartOAuthLoginJSONBody
 
@@ -203,6 +212,9 @@ type ServerInterface interface {
 	// VerifyEmailLogin コードかマジックリンクのトークンでフローを完了する
 	// (POST /v1/login/email:verify)
 	VerifyEmailLogin(w http.ResponseWriter, r *http.Request)
+	// RedeemLoginLink 運営者が発行したログイン用リンクでログインする
+	// (POST /v1/login/link:redeem)
+	RedeemLoginLink(w http.ResponseWriter, r *http.Request)
 	// StartOAuthLogin 外部プロバイダ（OAuth / OIDC）による登録・ログインを始める
 	// (POST /v1/login/oauth/{connection}:start)
 	StartOAuthLogin(w http.ResponseWriter, r *http.Request, connection string)
@@ -262,6 +274,20 @@ func (siw *ServerInterfaceWrapper) VerifyEmailLogin(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.VerifyEmailLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RedeemLoginLink operation middleware
+func (siw *ServerInterfaceWrapper) RedeemLoginLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RedeemLoginLink(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -488,6 +514,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/healthz", wrapper.GetHealth)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/email:start", wrapper.StartEmailLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/email:verify", wrapper.VerifyEmailLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/link:redeem", wrapper.RedeemLoginLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth/{connection}:start", wrapper.StartOAuthLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth:complete", wrapper.CompleteOAuthLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/logout", wrapper.Logout)
@@ -656,6 +683,71 @@ func (response VerifyEmailLogin403JSONResponse) VisitVerifyEmailLoginResponse(w 
 type VerifyEmailLogin429JSONResponse struct{ RateLimitedJSONResponse }
 
 func (response VerifyEmailLogin429JSONResponse) VisitVerifyEmailLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemLoginLinkRequestObject struct {
+	Body *RedeemLoginLinkJSONRequestBody
+}
+
+type RedeemLoginLinkResponseObject interface {
+	VisitRedeemLoginLinkResponse(w http.ResponseWriter) error
+}
+
+type RedeemLoginLink200JSONResponse LoginResult
+
+func (response RedeemLoginLink200JSONResponse) VisitRedeemLoginLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemLoginLink401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RedeemLoginLink401JSONResponse) VisitRedeemLoginLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemLoginLink403JSONResponse struct{ DeniedJSONResponse }
+
+func (response RedeemLoginLink403JSONResponse) VisitRedeemLoginLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemLoginLink429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response RedeemLoginLink429JSONResponse) VisitRedeemLoginLinkResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -946,6 +1038,9 @@ type StrictServerInterface interface {
 	// VerifyEmailLogin コードかマジックリンクのトークンでフローを完了する
 	// (POST /v1/login/email:verify)
 	VerifyEmailLogin(ctx context.Context, request VerifyEmailLoginRequestObject) (VerifyEmailLoginResponseObject, error)
+	// RedeemLoginLink 運営者が発行したログイン用リンクでログインする
+	// (POST /v1/login/link:redeem)
+	RedeemLoginLink(ctx context.Context, request RedeemLoginLinkRequestObject) (RedeemLoginLinkResponseObject, error)
 	// StartOAuthLogin 外部プロバイダ（OAuth / OIDC）による登録・ログインを始める
 	// (POST /v1/login/oauth/{connection}:start)
 	StartOAuthLogin(ctx context.Context, request StartOAuthLoginRequestObject) (StartOAuthLoginResponseObject, error)
@@ -1081,6 +1176,37 @@ func (sh *strictHandler) VerifyEmailLogin(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(VerifyEmailLoginResponseObject); ok {
 		if err := validResponse.VisitVerifyEmailLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RedeemLoginLink operation middleware
+func (sh *strictHandler) RedeemLoginLink(w http.ResponseWriter, r *http.Request) {
+	var request RedeemLoginLinkRequestObject
+
+	var body RedeemLoginLinkJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RedeemLoginLink(ctx, request.(RedeemLoginLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RedeemLoginLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RedeemLoginLinkResponseObject); ok {
+		if err := validResponse.VisitRedeemLoginLinkResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -86,6 +86,33 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/login/link:redeem:
+    post:
+      operationId: redeemLoginLink
+      summary: 運営者が発行したログイン用リンクでログインする
+      description: |
+        トークンは1回限りで、期限がある（管理 API の `issueLoginLink` と `iam operator create` が発行する）。
+        成功するとセッションを発行する。ブラウザには Cookie で、`return_token: true` なら本文でトークンを返す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, maxLength: 1024 }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: ログインした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   /v1/login/oauth/{connection}:start:
     post:
       operationId: startOAuthLogin

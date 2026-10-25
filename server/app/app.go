@@ -19,6 +19,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/emailflow"
+	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/session"
@@ -61,6 +62,7 @@ type App struct {
 	email    *emailflow.Service
 	oauth    *oauth.Service
 	perIP    *ratelimit.Limiter
+	links    *loginlink.Service
 	notifier *eventlog.Relay
 	public   http.Handler
 	admin    http.Handler
@@ -148,6 +150,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		PerAccount: a.limiter(cfg.Security.Login.RateLimit.PerAccount),
 	}
 	a.perIP = a.limiter(cfg.Security.Login.RateLimit.PerIP)
+	a.links = &loginlink.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Sessions: a.sessions, Log: d.Logger}
 	a.oauth = &oauth.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Dev: cfg.Dev, TTL: cfg.Security.EmailFlow.TTL.D(), Log: d.Logger,
