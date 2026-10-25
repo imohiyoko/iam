@@ -131,6 +131,7 @@ passkeys
   user_id (FK users)
   credential_id (UNIQUE)
   public_key
+  alg               -- COSE アルゴリズム (ES256 / EdDSA / RS256)。RS256 は警告対象（9.4）
   sign_count
   transports
   name              -- ユーザーが付ける名前
@@ -274,7 +275,6 @@ check(user_id, org_id, permission) -> allow / deny
 
 - HTTP フレームワーク（標準 `net/http` で足りるか）
 - SQL 生成方式（sqlc / 素の `database/sql` など）とマイグレーションツール
-- passkey で RS256 の認証器を受け入れるか（9.4 参照）
 - パスワード認証を提供するか（マジックリンク + OAuth + passkey だけで済ませる選択肢もある）
 - 個人コンテキスト（Org に属さない状態）を許すか、全ユーザーに個人 Org を自動作成するか
 - ID 形式（UUIDv7 / ULID など）
@@ -319,4 +319,12 @@ check(user_id, org_id, permission) -> allow / deny
   - 認可コードフローで、トークンエンドポイントから TLS 経由で直接受け取る場合、ID トークンの署名検証の代わりに TLS のサーバー検証で代替できる（OIDC Core 3.1.3.7）。この方式を採り、RSA の検証処理を持たない
 - **passkey（WebAuthn）**
   - 認証器側が鍵方式を決める。多くは ES256 / EdDSA だが、一部の Windows Hello などは RS256 しか使えない
-  - 受け入れる方式は ES256 / EdDSA に限定する方針。RS256 の認証器では passkey を登録できなくなる（他の認証手段は使える）。最終判断は未決事項とする
+  - **ES256 / EdDSA / RS256 を受け入れる**。ただし RS256 は「互換性のために許容している方式」として扱い、警告を出せるようにする
+    - これは外部の公開鍵の検証であり、自前で RSA 鍵を持つわけではないので 9.1 の原則には反しない
+  - 登録時の WebAuthn `pubKeyCredParams` の優先順は ES256 → EdDSA → RS256 とし、RSA は他に選択肢がない認証器でだけ選ばれるようにする
+  - `passkeys.alg` に方式を保存し、RS256 の passkey に対して以下を行えるようにする
+    - 登録時と passkey 一覧画面で警告を表示し、別の認証器の追加を促す
+    - 監査ログに方式を記録する
+  - 受け入れ可否はサーバー設定（`passkey.allow_rs256`、既定は true）で切り替えられるようにする
+  - 将来、Org のログインポリシーに `disallow_rsa_passkey` を追加し、Org 単位で RS256 の passkey による入場を拒否できるようにする
+  - 優先度は低い。M2 では ES256 / EdDSA のみで実装し、RS256 と警告は後から追加してもよい
