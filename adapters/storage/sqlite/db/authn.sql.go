@@ -683,7 +683,7 @@ func (q *Queries) ListRoleBindingsByRole(ctx context.Context, arg ListRoleBindin
 }
 
 const listSessionsByPrincipal = `-- name: ListSessionsByPrincipal :many
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY id DESC
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at DESC, id DESC
 `
 
 type ListSessionsByPrincipalParams struct {

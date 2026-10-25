@@ -222,8 +222,13 @@ func (r sessions) ListByPrincipal(_ context.Context, realmID string, t port.Prin
 			out = append(out, cloneSession(s))
 		}
 	}
-	// ID は UUIDv7 なので、ID の降順が新しい順。
-	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	// 作成の新しい順。ID は乱数なので順序には使わない（同時刻の並びを決めるだけ）。
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
 	return out, nil
 }
 

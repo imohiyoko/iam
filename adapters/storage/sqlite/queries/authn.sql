@@ -47,7 +47,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 SELECT * FROM authn_sessions WHERE realm_id = ? AND id = ?;
 
 -- name: ListSessionsByPrincipal :many
-SELECT * FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY id DESC;
+SELECT * FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at DESC, id DESC;
 
 -- name: TouchSession :execrows
 UPDATE authn_sessions SET last_seen_at = max(last_seen_at, sqlc.arg(at)) WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
