@@ -15,7 +15,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 SELECT * FROM authn_user_emails WHERE realm_id = ? AND email_index = ?;
 
 -- name: ListEmailsByUser :many
-SELECT * FROM authn_user_emails WHERE realm_id = ? AND user_id = ? ORDER BY id;
+SELECT * FROM authn_user_emails WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
 
 -- name: CreateIdentity :exec
 INSERT INTO authn_user_identities (id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?);
@@ -24,7 +24,7 @@ INSERT INTO authn_user_identities (id, realm_id, user_id, connection_id, provide
 SELECT * FROM authn_user_identities WHERE realm_id = ? AND connection_id = ? AND provider_subject = ?;
 
 -- name: ListIdentitiesByUser :many
-SELECT * FROM authn_user_identities WHERE realm_id = ? AND user_id = ? ORDER BY id;
+SELECT * FROM authn_user_identities WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
 
 -- name: CreateConnection :exec
 INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at) VALUES (?, ?, ?, ?, ?, ?);
@@ -84,7 +84,7 @@ UPDATE authn_service_account_credentials SET revoked_at = coalesce(revoked_at, s
 INSERT INTO authz_role_bindings (id, realm_id, role, principal_type, principal_id, org_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- name: ListRoleBindingsByPrincipal :many
-SELECT * FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY id;
+SELECT * FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at, id;
 
 -- name: ListRoleBindingsByRole :many
-SELECT * FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY id;
+SELECT * FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY created_at, id;

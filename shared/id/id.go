@@ -12,10 +12,13 @@
 package id
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -25,10 +28,23 @@ type Generator interface {
 	Generate() (uuid.UUID, error)
 }
 
-// UUIDv7 は時刻の順に並ぶ UUIDv7（RFC 9562。乱数部は crypto/rand）。内部 ID の既定。
+// UUIDv7 は時刻（ミリ秒）の順に並ぶ UUIDv7（RFC 9562）。内部 ID の既定。
+// 時刻の 48bit 以外の 74bit（rand_a と rand_b）をすべて crypto/rand で埋める。
+// 同じミリ秒の中の順序は付けない（uuid.NewV7 は rand_a を連番に使い、乱数が 62bit に減るため使わない）。
 type UUIDv7 struct{}
 
-func (UUIDv7) Generate() (uuid.UUID, error) { return uuid.NewV7() }
+func (UUIDv7) Generate() (uuid.UUID, error) {
+	var u uuid.UUID
+	if _, err := rand.Read(u[6:]); err != nil {
+		return uuid.UUID{}, err
+	}
+	var ts [8]byte
+	binary.BigEndian.PutUint64(ts[:], uint64(time.Now().UnixMilli())) // #nosec G115 -- 1970 年より後の時刻
+	copy(u[:6], ts[2:])
+	u[6] = u[6]&0x0f | 0x70 // version 7
+	u[8] = u[8]&0x3f | 0x80 // variant 10
+	return u, nil
+}
 
 // Random は 122bit の乱数の UUIDv4（crypto/rand）。外部 ID の既定。
 type Random struct{}

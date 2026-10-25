@@ -25,6 +25,7 @@ type RoleBinding struct {
 type RoleBindingRepo interface {
 	// Create は (realm, role, principal, org) が重複すれば errs.Conflict を返す。
 	Create(ctx context.Context, b RoleBinding) error
+	// ListByPrincipal と ListByRole は作成時刻の順（同時刻は ID の順）に返す。
 	ListByPrincipal(ctx context.Context, realmID string, t PrincipalType, principalID string) ([]RoleBinding, error)
 	ListByRole(ctx context.Context, realmID, role string) ([]RoleBinding, error)
 }

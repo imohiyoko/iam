@@ -71,7 +71,7 @@ type EmailRepo interface {
 	// Create は (realm, Index) が重複すれば errs.Conflict を返す（1つのアドレスは1ユーザーにだけ紐付く。4.2）。
 	Create(ctx context.Context, e UserEmail) error
 	GetByIndex(ctx context.Context, realmID string, index []byte) (UserEmail, error)
-	// ListByUser はユーザーのメールを作成順に返す。
+	// ListByUser はユーザーのメールを作成時刻の順（同時刻は ID の順）に返す。
 	ListByUser(ctx context.Context, realmID, userID string) ([]UserEmail, error)
 }
 
@@ -91,6 +91,7 @@ type IdentityRepo interface {
 	// Create は (ConnectionID, ProviderSubject) が重複すれば errs.Conflict を返す。
 	Create(ctx context.Context, i Identity) error
 	GetBySubject(ctx context.Context, realmID, connectionID, subject string) (Identity, error)
+	// ListByUser はユーザーの外部 ID を作成時刻の順（同時刻は ID の順）に返す。
 	ListByUser(ctx context.Context, realmID, userID string) ([]Identity, error)
 }
 

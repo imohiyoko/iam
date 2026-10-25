@@ -518,7 +518,7 @@ func (q *Queries) ListConnections(ctx context.Context, realmID string) ([]AuthnC
 }
 
 const listEmailsByUser = `-- name: ListEmailsByUser :many
-SELECT id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at FROM authn_user_emails WHERE realm_id = ? AND user_id = ? ORDER BY id
+SELECT id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at FROM authn_user_emails WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
 `
 
 type ListEmailsByUserParams struct {
@@ -562,7 +562,7 @@ func (q *Queries) ListEmailsByUser(ctx context.Context, arg ListEmailsByUserPara
 }
 
 const listIdentitiesByUser = `-- name: ListIdentitiesByUser :many
-SELECT id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at FROM authn_user_identities WHERE realm_id = ? AND user_id = ? ORDER BY id
+SELECT id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at FROM authn_user_identities WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
 `
 
 type ListIdentitiesByUserParams struct {
@@ -602,7 +602,7 @@ func (q *Queries) ListIdentitiesByUser(ctx context.Context, arg ListIdentitiesBy
 }
 
 const listRoleBindingsByPrincipal = `-- name: ListRoleBindingsByPrincipal :many
-SELECT id, realm_id, role, principal_type, principal_id, org_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY id
+SELECT id, realm_id, role, principal_type, principal_id, org_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at, id
 `
 
 type ListRoleBindingsByPrincipalParams struct {
@@ -643,7 +643,7 @@ func (q *Queries) ListRoleBindingsByPrincipal(ctx context.Context, arg ListRoleB
 }
 
 const listRoleBindingsByRole = `-- name: ListRoleBindingsByRole :many
-SELECT id, realm_id, role, principal_type, principal_id, org_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY id
+SELECT id, realm_id, role, principal_type, principal_id, org_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY created_at, id
 `
 
 type ListRoleBindingsByRoleParams struct {

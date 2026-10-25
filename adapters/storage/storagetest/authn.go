@@ -113,6 +113,8 @@ func testEmails(t *testing.T, h Harness) {
 	e1 := newEmail(r1, u1, "a")
 	e2 := newEmail(r1, u1, "b")
 	e2.VerifiedAt, e2.IsPrimary = nil, false
+	// 作成時刻の順に並ぶことを確かめるため、後に作る e2 の時刻を前にする（ID の順とは逆になりうる）。
+	e2.CreatedAt = T0.Add(-time.Minute)
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		r := tx.Emails()
 		for _, e := range []port.UserEmail{e1, e2} {
@@ -140,7 +142,7 @@ func testEmails(t *testing.T, h Harness) {
 			return err
 		}
 		list, err := r.ListByUser(ctx, r1, u1)
-		if err != nil || len(list) != 2 || list[0].ID != e1.ID || !reflect.DeepEqual(list[1], e2) {
+		if err != nil || len(list) != 2 || !reflect.DeepEqual(list[0], e2) || list[1].ID != e1.ID {
 			return fmt.Errorf("emails.ListByUser = %+v, %v", list, err)
 		}
 		return nil
@@ -412,7 +414,7 @@ func testRoleBindings(t *testing.T, h Harness) {
 		if err := conflict("same binding", repo.Create(ctx, dup)); err != nil {
 			return err
 		}
-		dup.Role = "realm:security"
+		dup.Role, dup.CreatedAt = "realm:security", T0.Add(time.Minute)
 		if err := repo.Create(ctx, dup); err != nil {
 			return err
 		}

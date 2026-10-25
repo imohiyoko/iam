@@ -3,6 +3,9 @@ package id
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestRoundTrip(t *testing.T) {
@@ -25,9 +28,11 @@ func TestPrefixMismatch(t *testing.T) {
 	}
 }
 
+// 内部 ID はミリ秒が違えば作成の順に並ぶ（同じミリ秒の中は乱数で、順序は付けない）。
 func TestOrdered(t *testing.T) {
 	prev := New(Event)
-	for range 1000 {
+	for range 20 {
+		time.Sleep(2 * time.Millisecond)
 		next := New(Event)
 		if next <= prev {
 			t.Fatalf("not ordered: %q <= %q", next, prev)
@@ -78,5 +83,34 @@ func TestExternalIsRandom(t *testing.T) {
 			t.Fatalf("external id %q: %v", s, err)
 		}
 		seen[s] = true
+	}
+}
+
+// UUIDv7 は時刻の 48bit 以外をすべて乱数で埋める（同じミリ秒でも連番にしない。ADR 0045）。
+func TestUUIDv7RandomBits(t *testing.T) {
+	before := time.Now().UnixMilli()
+	a, err := UUIDv7{}.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Version() != 7 || a.Variant() != uuid.RFC4122 {
+		t.Fatalf("version %d variant %v", a.Version(), a.Variant())
+	}
+	ms := int64(a[0])<<40 | int64(a[1])<<32 | int64(a[2])<<24 | int64(a[3])<<16 | int64(a[4])<<8 | int64(a[5])
+	if ms < before || ms > time.Now().UnixMilli() {
+		t.Fatalf("timestamp %d not in [%d, now]", ms, before)
+	}
+	// rand_a（12bit）が連番でないこと：続けて作った ID の rand_a が 1 ずつ増えたりしない。
+	randA := func(u uuid.UUID) int { return int(u[6]&0x0f)<<8 | int(u[7]) }
+	prev, steps := a, 0
+	for range 64 {
+		u, _ := UUIDv7{}.Generate()
+		if randA(u) == randA(prev)+1 {
+			steps++
+		}
+		prev = u
+	}
+	if steps > 4 {
+		t.Fatalf("rand_a looks like a counter: %d of 64 steps were +1", steps)
 	}
 }

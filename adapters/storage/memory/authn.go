@@ -104,7 +104,7 @@ func (r emails) ListByUser(_ context.Context, realmID, userID string) ([]port.Us
 			out = append(out, cloneEmail(x))
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sortByCreated(out, func(x port.UserEmail) (time.Time, string) { return x.CreatedAt, x.ID })
 	return out, nil
 }
 
@@ -143,7 +143,7 @@ func (r identities) ListByUser(_ context.Context, realmID, userID string) ([]por
 			out = append(out, cloneIdentity(x))
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sortByCreated(out, func(x port.Identity) (time.Time, string) { return x.CreatedAt, x.ID })
 	return out, nil
 }
 
@@ -349,7 +349,7 @@ func (r roleBindings) list(match func(port.RoleBinding) bool) []port.RoleBinding
 			out = append(out, x)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sortByCreated(out, func(x port.RoleBinding) (time.Time, string) { return x.CreatedAt, x.ID })
 	return out
 }
 
@@ -361,4 +361,16 @@ func (r roleBindings) ListByPrincipal(_ context.Context, realmID string, t port.
 
 func (r roleBindings) ListByRole(_ context.Context, realmID, role string) ([]port.RoleBinding, error) {
 	return r.list(func(x port.RoleBinding) bool { return x.RealmID == realmID && x.Role == role }), nil
+}
+
+// sortByCreated は作成時刻の順（同時刻は ID の順）に並べる。ID は乱数のことがあるので、順序の主には使わない。
+func sortByCreated[T any](out []T, key func(T) (time.Time, string)) {
+	sort.Slice(out, func(i, j int) bool {
+		ti, ii := key(out[i])
+		tj, ij := key(out[j])
+		if !ti.Equal(tj) {
+			return ti.Before(tj)
+		}
+		return ii < ij
+	})
 }
