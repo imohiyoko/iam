@@ -16,6 +16,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/settings"
 )
@@ -85,6 +86,26 @@ var KnownVerifiedVia = []string{"code", "oauth_provider", "sso", "invitation", "
 type Security struct {
 	Session   SessionRules `yaml:"session"`
 	EmailFlow EmailFlow    `yaml:"email_flow"`
+	Login     Login        `yaml:"login"`
+	// Warnings は警告のコードごとのアクション（ignore / warn / deny。design.md 10章）。無いコードは既定に従う。
+	Warnings map[string]string `yaml:"warnings"`
+}
+
+// Login はログインの要求に共通の守り（design.md 4.9、4.1）。
+type Login struct {
+	// MinResponseTime はログインの要求（POST /v1/login/...）の応答時間の下限。本人確認の前の応答時間から、
+	// アカウントの有無や失敗の理由を読めないようにする。0 なら揃えない。
+	MinResponseTime Duration  `yaml:"min_response_time"`
+	RateLimit       RateLimit `yaml:"rate_limit"`
+}
+
+// RateLimit はログインの要求の回数の上限（固定窓）。0 なら制限しない。
+type RateLimit struct {
+	Window Duration `yaml:"window"`
+	// PerIP は接続元ごとの上限（IPv6 は /64 で数える）。
+	PerIP int `yaml:"per_ip"`
+	// PerAccount はメールアドレスごとの、メールのフローの開始の上限。
+	PerAccount int `yaml:"per_account"`
 }
 
 // EmailFlow はメールのコード・マジックリンクの設定（design.md 4.1）。
@@ -181,7 +202,10 @@ func Default() Config {
 			ValidityMaxDelay: Duration(30 * time.Second),
 			RotationInterval: Duration(time.Hour),
 			RotationGrace:    Duration(time.Minute),
-		}, EmailFlow: EmailFlow{TTL: Duration(10 * time.Minute), MaxAttempts: 5}},
+		}, EmailFlow: EmailFlow{TTL: Duration(10 * time.Minute), MaxAttempts: 5},
+			Login: Login{MinResponseTime: Duration(300 * time.Millisecond),
+				RateLimit: RateLimit{Window: Duration(10 * time.Minute), PerIP: 100, PerAccount: 5}},
+		},
 		Outbox: Outbox{Interval: Duration(time.Second), Batch: 100},
 		IDs:    IDs{Internal: "uuidv7", External: "random"},
 	}
@@ -227,6 +251,15 @@ func Parse(b []byte) (Config, error) {
 	return c, c.Validate()
 }
 
+// WarningActions は security.warnings を評価器の形にする。
+func (c Config) WarningActions() map[string]warning.Action {
+	out := make(map[string]warning.Action, len(c.Security.Warnings))
+	for code, a := range c.Security.Warnings {
+		out[code] = warning.Action(a)
+	}
+	return out
+}
+
 // Validate は設定の矛盾を検出する。危険な構成は起動を拒否する（design.md 2.5）。
 func (c Config) Validate() error {
 	var problems []string
@@ -248,6 +281,15 @@ func (c Config) Validate() error {
 	}
 	if ef := c.Security.EmailFlow; ef.TTL.D() <= 0 || ef.TTL.D() > time.Hour || ef.MaxAttempts < 1 || ef.MaxAttempts > 10 {
 		problems = append(problems, "security.email_flow: ttl must be within (0, 1h] and max_attempts within [1, 10]")
+	}
+	if l := c.Security.Login; l.MinResponseTime.D() < 0 || l.MinResponseTime.D() > 5*time.Second {
+		problems = append(problems, "security.login.min_response_time must be within [0, 5s]")
+	}
+	if rl := c.Security.Login.RateLimit; rl.PerIP < 0 || rl.PerAccount < 0 || ((rl.PerIP > 0 || rl.PerAccount > 0) && rl.Window.D() <= 0) {
+		problems = append(problems, "security.login.rate_limit: limits must not be negative and window must be positive")
+	}
+	if err := warning.Validate(c.WarningActions()); err != nil {
+		problems = append(problems, "security."+err.Error())
 	}
 	if _, err := time.LoadLocation(c.Realm.Timezone); err != nil {
 		problems = append(problems, fmt.Sprintf("realm.timezone: %v", err))

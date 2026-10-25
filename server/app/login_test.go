@@ -12,6 +12,8 @@ import (
 
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authz/role"
+	"github.com/imohiyoko/iam/server/config"
+	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -52,10 +54,19 @@ type loginEnv struct {
 
 func newLoginEnv(t *testing.T) *loginEnv {
 	t.Helper()
+	return newLoginEnvWith(t, nil, nil)
+}
+
+// newLoginEnvWith は設定を変え、binary のフィーチャーを含めて組み立てる。
+func newLoginEnvWith(t *testing.T, edit func(*config.Config), binary []feature.Feature) *loginEnv {
+	t.Helper()
 	e := newEnv(t)
+	if edit != nil {
+		edit(&e.cfg)
+	}
 	notes := &recorder{}
 	e.deps.Notifier = notes
-	a, err := New(context.Background(), e.cfg, e.deps, nil)
+	a, err := New(context.Background(), e.cfg, e.deps, binary)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -31,6 +32,7 @@ import (
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/pii"
 	"github.com/imohiyoko/iam/shared/port"
+	"github.com/imohiyoko/iam/shared/ratelimit"
 )
 
 // Deps はアダプタ（ポートの実装）。
@@ -58,6 +60,7 @@ type App struct {
 	notify   *notify.Service
 	email    *emailflow.Service
 	oauth    *oauth.Service
+	perIP    *ratelimit.Limiter
 	notifier *eventlog.Relay
 	public   http.Handler
 	admin    http.Handler
@@ -85,15 +88,19 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		return nil, err
 	}
 
+	enabled := derefFeatures(cfg.Features)
 	var ledger []port.FeatureRecord
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		ledger, err = tx.Features().List(ctx)
+		if ledger, err = tx.Features().List(ctx); err != nil {
+			return err
+		}
+		ledger, err = activateOnFreshInstall(ctx, tx, d.Clock, ledger, binary, enabled)
 		return err
 	}); err != nil {
 		return nil, fmt.Errorf("app: read feature ledger: %w", err)
 	}
-	plan, err := feature.Resolve(ledger, binary, derefFeatures(cfg.Features))
+	plan, err := feature.Resolve(ledger, binary, enabled)
 	if err != nil {
 		return nil, err
 	}
@@ -112,8 +119,14 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	}
 	a.pii = pii.New(d.KeyStore)
 	ss := cfg.Security.Session
+	var warnings *warning.Evaluator
+	if plan.IsActive(feature.Warnings) {
+		if warnings, err = warning.New(cfg.WarningActions()); err != nil {
+			return nil, err
+		}
+	}
 	a.sessions = &session.Manager{
-		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Log: d.Logger,
+		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Log: d.Logger, Warnings: warnings,
 		Config: session.Config{
 			AbsoluteLifetime: ss.AbsoluteLifetime.Default.D(), IdleTimeout: ss.IdleTimeout.Default.D(),
 			ValidityMaxDelay: ss.ValidityMaxDelay.D(), RotationInterval: ss.RotationInterval.D(), RotationGrace: ss.RotationGrace.D(),
@@ -131,8 +144,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.email = &emailflow.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Notify: a.notify, Log: d.Logger,
-		Config: emailflow.Config{TTL: cfg.Security.EmailFlow.TTL.D(), MaxAttempts: cfg.Security.EmailFlow.MaxAttempts},
+		Config:     emailflow.Config{TTL: cfg.Security.EmailFlow.TTL.D(), MaxAttempts: cfg.Security.EmailFlow.MaxAttempts},
+		PerAccount: a.limiter(cfg.Security.Login.RateLimit.PerAccount),
 	}
+	a.perIP = a.limiter(cfg.Security.Login.RateLimit.PerIP)
 	a.oauth = &oauth.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Dev: cfg.Dev, TTL: cfg.Security.EmailFlow.TTL.D(), Log: d.Logger,
@@ -144,6 +159,44 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.public = withCommon(newPublicHandler(a))
 	a.admin = withCommon(newAdminHandler(a))
 	return a, nil
+}
+
+func (a *App) limiter(limit int) *ratelimit.Limiter {
+	rl := a.cfg.Security.Login.RateLimit
+	return &ratelimit.Limiter{Cache: a.deps.Ephemeral, Clock: a.deps.Clock, Window: rl.Window.D(), Limit: int64(limit)}
+}
+
+// activateOnFreshInstall は、空の DB（台帳も realm も無い）で起動したとき、有効にするフィーチャーを台帳に
+// active で記録する。片付けるデータも準備するデータも無いため、enable の手順（11.12）を省ける。
+// 既存の DB では何もしない（`iam features enable` で明示的に進める）。
+func activateOnFreshInstall(ctx context.Context, tx port.Tx, clk clock.Clock, ledger []port.FeatureRecord, binary []feature.Feature, enabled []string) ([]port.FeatureRecord, error) {
+	if len(ledger) > 0 {
+		return ledger, nil
+	}
+	realms, err := tx.Realms().List(ctx)
+	if err != nil || len(realms) > 0 {
+		return ledger, err
+	}
+	now := clk.Now()
+	var names []string
+	for _, f := range binary {
+		if (enabled == nil && f.DefaultEnabled) || slices.Contains(enabled, f.Name) {
+			r := port.FeatureRecord{Feature: f.Name, State: port.FeatureActive, DataVersion: f.DataVersion, UpdatedAt: now}
+			if err := tx.Features().Put(ctx, r); err != nil {
+				return nil, err
+			}
+			ledger = append(ledger, r)
+			names = append(names, f.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ledger, nil
+	}
+	_, err = eventlog.Record(ctx, tx, clk, audit.Event{
+		Type: "feature.enabled", Result: audit.ResultSuccess, Actor: audit.Actor{Type: "system"},
+		Details: map[string]any{"features": names, "reason": "fresh_install"},
+	})
+	return ledger, err
 }
 
 func derefFeatures(f *[]string) []string {

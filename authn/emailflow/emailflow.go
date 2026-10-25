@@ -25,12 +25,14 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/pii"
 	"github.com/imohiyoko/iam/shared/port"
+	"github.com/imohiyoko/iam/shared/ratelimit"
 )
 
 // Config はフローの設定。
@@ -50,6 +52,8 @@ type Service struct {
 	Notify   *notify.Service
 	Config   Config
 	Log      *slog.Logger
+	// PerAccount はアドレスごとの開始の回数の上限（通知の送りつけと総当たりを防ぐ）。nil なら制限しない。
+	PerAccount *ratelimit.Limiter
 }
 
 // Client は要求の接続元（監査ログとセッションに残す）。
@@ -127,6 +131,9 @@ func (s *Service) Start(ctx context.Context, realmID, email string, c Client) (S
 	if err != nil {
 		return Started{}, err
 	}
+	if err := s.limit(ctx, realmID, email, c); err != nil {
+		return Started{}, err
+	}
 	flowID, err := randomToken()
 	if err != nil {
 		return Started{}, err
@@ -190,6 +197,32 @@ func (s *Service) Start(ctx context.Context, realmID, email string, c Client) (S
 	return Started{FlowID: flowID, ExpiresAt: st.ExpiresAt}, nil
 }
 
+// limit はアドレスごとの回数を数える。登録の有無に関係なく数えるので、制限されたことからアカウントの有無は分からない。
+// キーはブラインドインデックスにし、アドレスそのものを EphemeralStore に置かない。
+func (s *Service) limit(ctx context.Context, realmID, email string, c Client) error {
+	if s.PerAccount == nil {
+		return nil
+	}
+	idx, err := s.Crypter.EmailIndex(ctx, email)
+	if err != nil {
+		return err
+	}
+	err = s.PerAccount.Allow(ctx, "email:"+realmID+":"+base64.RawURLEncoding.EncodeToString(idx.Value))
+	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok && ex.First {
+		if aerr := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			_, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{
+				Type: "rate_limit.triggered", Result: audit.ResultFailure, RealmID: realmID, Actor: audit.Actor{Type: "anonymous"},
+				IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+				Details: map[string]any{"scope": "account", "endpoint": "login.email.start"},
+			})
+			return err
+		}); aerr != nil {
+			s.logger().WarnContext(ctx, "could not record rate limit", "error", aerr)
+		}
+	}
+	return err
+}
+
 // Verify はフローを完了する入力。Code か LinkToken のどちらか。
 type Verify struct {
 	FlowID    string
@@ -212,6 +245,10 @@ func (s *Service) Verify(ctx context.Context, realmID string, in Verify) (Verifi
 	out, err := s.verify(ctx, realmID, in)
 	if err != nil {
 		s.recordFailure(ctx, realmID, in.Client, err)
+		// 警告による拒否は本人確認の後なので、理由を返す（4.9）。
+		if denied, ok := errors.AsType[*warning.DeniedError](err); ok {
+			return Verified{}, denied
+		}
 		return Verified{}, ErrAuthFailed
 	}
 	return out, nil

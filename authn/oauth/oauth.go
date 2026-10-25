@@ -29,6 +29,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -294,6 +295,9 @@ func (s *Service) Complete(ctx context.Context, realmID string, in Complete) (Re
 		if errors.Is(err, ErrAccountExists) || errors.Is(err, ErrEmailUnverified) {
 			return Result{}, err
 		}
+		if denied, ok := errors.AsType[*warning.DeniedError](err); ok {
+			return Result{}, denied
+		}
 		return Result{}, ErrAuthFailed
 	}
 	return out, nil
@@ -513,7 +517,8 @@ func (s *Service) login(ctx context.Context, realmID string, conn port.Connectio
 		}
 		is, err := s.Sessions.Issue(ctx, tx, session.Issue{
 			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"fed"}, Credentials: []string{ident.ID},
-			IP: in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID, ReplaceToken: in.ReplaceToken,
+			Evidence: warning.Evidence{OAuthEmailVerified: new(bool(c.EmailVerified))},
+			IP:       in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID, ReplaceToken: in.ReplaceToken,
 		})
 		if err != nil {
 			return err

@@ -46,6 +46,8 @@ func newEnv(t *testing.T) *env {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg := config.Default()
 	cfg.Dev = true
+	// 応答時間の下限は guard_test で確かめる。ほかのテストでは待たない。
+	cfg.Security.Login.MinResponseTime = 0
 	return &env{cfg: cfg, out: out, deps: Deps{
 		Storage: memory.New(clk), Ephemeral: ephemeral.New(clk), KeyStore: ks,
 		EventSink: stdout.New(out), Notifier: &dev.Notifier{Log: log}, Clock: clk, Logger: log,
