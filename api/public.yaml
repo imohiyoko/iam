@@ -4,7 +4,11 @@ info:
   version: v1
   description: |
     公開 API（ヘッドレス）。`/v1` でバージョニングする（design.md 2.5）。
-    M0 ではヘルスチェックのみ。
+
+    認証：ブラウザは Cookie（`__Host-iam_session`）、別ドメインのアプリは `Authorization: Bearer <token>`（5.2）。
+    本人確認の前の失敗は理由を問わず `authentication_failed` を返す（4.9）。
+
+    パスの `{id}:revoke` のような動詞は、資源に対する操作を表す（design.md 4.13）。
 paths:
   /healthz:
     get:
@@ -21,7 +25,59 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
+
+  /v1/logout:
+    post:
+      operationId: logout
+      summary: 今のセッションを失効させる
+      description: セッションが無い・無効でも 204 を返し、Cookie を消す。
+      responses:
+        "204":
+          description: 失効した
+          headers:
+            Set-Cookie: { schema: { type: string } }
+
+  /v1/me/sessions:
+    get:
+      operationId: listMySessions
+      summary: 本人の有効なセッションの一覧
+      responses:
+        "200":
+          description: 新しい順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  /v1/me/sessions/{id}:revoke:
+    post:
+      operationId: revokeMySession
+      summary: 本人のセッションを失効させる
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 失効した（既に失効していても 204） }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
+  responses:
+    Unauthenticated:
+      description: 本人確認の失敗（理由は返さない）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: 見つからない
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
   schemas:
     Health:
       type: object
@@ -30,3 +86,22 @@ components:
         status:
           type: string
           enum: [ok, unavailable]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: 公開の契約のコード（design.md 4.9、11.10）
+    Session:
+      type: object
+      required: [id, authenticated_at, last_seen_at, expires_at, auth_methods, current]
+      properties:
+        id: { type: string, description: 公開のセッション ID（ses_…） }
+        authenticated_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        auth_methods:
+          type: array
+          items: { type: string }
+        current: { type: boolean, description: このリクエストのセッションか }

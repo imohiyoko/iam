@@ -38,7 +38,9 @@ security:
     absolute_lifetime: { default: 30d, min: 1h, max: 90d }
     idle_timeout: { default: 7d, min: 5m, max: 30d }
     max_auth_age: { default: 15m, min: 1m, max: 1d }
-    validity_max_delay: 30s
+    validity_max_delay: 30s  # 失効などが検証に反映されるまでの遅れの上限
+    rotation_interval: 1h    # Cookie のセッションの ID を入れ替える間隔（0 で入れ替えない）
+    rotation_grace: 1m       # 入れ替え前の ID を使える猶予
 
 outbox:
   interval: 1s

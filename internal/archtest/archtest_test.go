@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,14 +20,18 @@ import (
 const module = "github.com/imohiyoko/iam/"
 
 // rules は「from 以下のパッケージは forbidden 以下を import してはならない」。
+// テスト（_test.go）は参照実装を使えるよう、internal/testkit だけを例外にする（design.md 12章）。
 var rules = []struct {
 	from      string
 	forbidden []string
 }{
-	{"authn", []string{"adapters", "server", "cmd", "authz"}},
-	{"authz", []string{"adapters", "server", "cmd", "authn"}},
-	{"shared", []string{"adapters", "server", "cmd", "authn", "authz"}},
+	{"authn", []string{"adapters", "server", "cmd", "authz", "internal/testkit"}},
+	{"authz", []string{"adapters", "server", "cmd", "authn", "internal/testkit"}},
+	{"shared", []string{"adapters", "server", "cmd", "authn", "authz", "internal/testkit"}},
 }
+
+// testAllowed は _test.go が例外として import してよいもの。
+var testAllowed = []string{"internal/testkit"}
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -64,6 +69,9 @@ func TestModuleBoundaries(t *testing.T) {
 				p, _ := strconv.Unquote(imp.Path.Value)
 				target, ok := strings.CutPrefix(p, module)
 				if !ok {
+					continue
+				}
+				if strings.HasSuffix(path, "_test.go") && slices.ContainsFunc(testAllowed, func(a string) bool { return under(target, a) }) {
 					continue
 				}
 				for _, bad := range r.forbidden {

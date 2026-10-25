@@ -86,6 +86,10 @@ type SessionRules struct {
 	MaxAuthAge       DurationRule `yaml:"max_auth_age"`
 	// ValidityMaxDelay は変更がセッション検証に反映されるまでの遅れの上限（保証値。design.md 5.3）。
 	ValidityMaxDelay Duration `yaml:"validity_max_delay"`
+	// RotationInterval ごとに Cookie のセッションの ID を入れ替える（5.2）。0 なら入れ替えない。
+	RotationInterval Duration `yaml:"rotation_interval"`
+	// RotationGrace は入れ替え前の ID を使える猶予。
+	RotationGrace Duration `yaml:"rotation_grace"`
 }
 
 // DurationRule は時間の項目の、既定値と realm・Org が設定できる範囲。
@@ -161,6 +165,8 @@ func Default() Config {
 			IdleTimeout:      DurationRule{Default: Duration(7 * day), Min: Duration(5 * time.Minute), Max: Duration(30 * day)},
 			MaxAuthAge:       DurationRule{Default: Duration(15 * time.Minute), Min: Duration(time.Minute), Max: Duration(day)},
 			ValidityMaxDelay: Duration(30 * time.Second),
+			RotationInterval: Duration(time.Hour),
+			RotationGrace:    Duration(time.Minute),
 		}},
 		Outbox: Outbox{Interval: Duration(time.Second), Batch: 100},
 		IDs:    IDs{Internal: "uuidv7", External: "random"},
@@ -245,6 +251,11 @@ func (c Config) Validate() error {
 	// 外部 ID に時刻の読める方式は使わない。
 	if _, ok := id.Generators[c.IDs.External]; !ok || c.IDs.External == "uuidv7" {
 		problems = append(problems, fmt.Sprintf("ids.external: %q is not allowed (use random)", c.IDs.External))
+	}
+	if ss := c.Security.Session; ss.RotationInterval.D() < 0 || ss.RotationGrace.D() <= 0 {
+		problems = append(problems, "security.session.rotation_interval must not be negative and rotation_grace must be positive")
+	} else if ss.RotationInterval.D() > 0 && ss.RotationInterval.D() <= ss.RotationGrace.D() {
+		problems = append(problems, "security.session.rotation_interval must be longer than rotation_grace")
 	}
 	if c.Outbox.Interval.D() <= 0 {
 		problems = append(problems, "outbox.interval must be positive")
