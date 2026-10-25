@@ -8,11 +8,14 @@ info:
     認証：`Authorization: Bearer <トークン>`。サービスアカウントの API キーか、運営者のセッションのトークン（design.md 4.11）。
     運営者のセッションでは、直近の認証（`security.session.max_auth_age` 以内）を求める。過ぎていれば
     `401 reauthentication_required`。権限は組み込みのロール（`realm:owner` など）で判定する。
+security:
+  - bearerAuth: []
 paths:
   /healthz:
     get:
       operationId: getHealth
       summary: ヘルスチェック
+      security: []
       responses:
         "200":
           description: 稼働中
@@ -155,6 +158,11 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: サービスアカウントの API キーか、運営者のセッションのトークン。
   responses:
     Error:
       description: エラー

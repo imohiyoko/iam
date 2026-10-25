@@ -16,6 +16,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -54,6 +55,12 @@ const (
 
 // ErrInvalid は検証の失敗。理由は外部に返さない（authentication_failed に統一する。4.9）。
 var ErrInvalid = errs.WithCode(errs.KindUnauthenticated, errs.CodeAuthenticationFailed, "session invalid")
+
+// errRejected はセッションが使えないことを表す（ErrInvalid になる）。これに当たらないエラーは
+// ストレージの障害などで、セッションの有効・無効は分からない。
+var errRejected = errors.New("rejected")
+
+func rejected(reason string) error { return fmt.Errorf("%w: %s", errRejected, reason) }
 
 // ErrNotRotated は入れ替えなかったことを表す（呼び出し側は今のトークンを使い続ける）。
 var ErrNotRotated = errors.New("session: not rotated")
@@ -248,7 +255,8 @@ type cached struct {
 
 func cacheKey(realmID, sessionID string) string { return "session:v1:" + realmID + ":" + sessionID }
 
-// Validate はトークンを検証する。失敗はすべて ErrInvalid（理由はログにだけ出す）。
+// Validate はトークンを検証する。使えないセッションは ErrInvalid（理由はログにだけ出す）。
+// ストレージの障害では ErrInvalid 以外のエラーを返す（呼び出し側は Cookie を消さない）。
 func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validated, error) {
 	sid, secret, ok := SplitToken(token)
 	if !ok {
@@ -275,7 +283,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 			return err
 		}
 		if subtle.ConstantTimeCompare(s.TokenHash, hash) != 1 {
-			return errors.New("token mismatch")
+			return rejected("token mismatch")
 		}
 		next, u, err := m.check(ctx, tx, s, now)
 		if err != nil {
@@ -292,9 +300,12 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 			AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next}
 		return nil
 	})
-	if err != nil {
+	if errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) {
 		m.logger().DebugContext(ctx, "session rejected", "session_id", sid, "reason", err.Error())
 		return Validated{}, ErrInvalid
+	}
+	if err != nil {
+		return Validated{}, errs.Wrap(errs.KindUnavailable, err, "session: validate")
 	}
 	if ttl := c.NextCheck.Sub(now); ttl > 0 {
 		if b, err := json.Marshal(c); err == nil {
@@ -318,27 +329,27 @@ func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Valida
 // check はセッションが今有効かを確かめ、次に状態が変わる時刻（再検証の期限）と主体を返す。
 func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now time.Time) (time.Time, port.User, error) {
 	if s.RevokedAt != nil && !now.Before(*s.RevokedAt) {
-		return time.Time{}, port.User{}, errors.New("revoked")
+		return time.Time{}, port.User{}, rejected("revoked")
 	}
 	if !now.Before(s.ExpiresAt) {
-		return time.Time{}, port.User{}, errors.New("expired")
+		return time.Time{}, port.User{}, rejected("expired")
 	}
 	if m.Config.IdleTimeout > 0 && !now.Before(s.LastSeenAt.Add(m.Config.IdleTimeout)) {
-		return time.Time{}, port.User{}, errors.New("idle timeout")
+		return time.Time{}, port.User{}, rejected("idle timeout")
 	}
 	next := earliest(s.ExpiresAt, now.Add(m.Config.ValidityMaxDelay))
 	if s.RevokedAt != nil {
 		next = earliest(next, *s.RevokedAt) // 入れ替え後の猶予の終わり
 	}
 	if s.PrincipalType != port.PrincipalUser {
-		return time.Time{}, port.User{}, errors.New("unsupported principal")
+		return time.Time{}, port.User{}, rejected("unsupported principal")
 	}
 	u, err := tx.Users().Get(ctx, s.RealmID, s.PrincipalID)
 	if err != nil {
 		return time.Time{}, port.User{}, err
 	}
 	if !account.CanLogin(u, now) {
-		return time.Time{}, port.User{}, errors.New("user cannot log in")
+		return time.Time{}, port.User{}, rejected("user cannot log in")
 	}
 	if u.ValidUntil != nil {
 		next = earliest(next, *u.ValidUntil)
@@ -366,13 +377,13 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 		for _, i := range identities {
 			if i.ID == c {
 				if i.RevokedAt != nil {
-					return errors.New("credential revoked")
+					return rejected("credential revoked")
 				}
 				found = true
 			}
 		}
 		if !found {
-			return errors.New("credential missing")
+			return rejected("credential missing")
 		}
 	}
 	return nil

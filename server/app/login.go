@@ -70,9 +70,9 @@ func (s publicServer) VerifyEmailLogin(ctx context.Context, req publicapi.Verify
 		UserId: v.UserID, Created: v.Created, Warnings: warningsOut(v.Session.Warnings)}
 	if req.Body.ReturnToken != nil && *req.Body.ReturnToken {
 		out.Token = &v.Session.Token
-	} else {
-		setCookie(ctx, sessionCookieFor(v.Session.Token, v.Session.Session.ExpiresAt, s.a.deps.Clock.Now()))
 	}
+	// return_token でも Cookie は差し替える。送られてきた Cookie のセッションは入れ替えで失効しているため。
+	setCookie(ctx, sessionCookieFor(v.Session.Token, v.Session.Session.ExpiresAt, s.a.deps.Clock.Now()))
 	return out, nil
 }
 
@@ -108,8 +108,8 @@ func (s publicServer) RedeemLoginLink(ctx context.Context, req publicapi.RedeemL
 		UserId: uid, Created: false, Warnings: warningsOut(is.Warnings)}
 	if req.Body.ReturnToken != nil && *req.Body.ReturnToken {
 		out.Token = &is.Token
-	} else {
-		setCookie(ctx, sessionCookieFor(is.Token, is.Session.ExpiresAt, s.a.deps.Clock.Now()))
 	}
+	// return_token でも Cookie は差し替える。送られてきた Cookie のセッションは入れ替えで失効しているため。
+	setCookie(ctx, sessionCookieFor(is.Token, is.Session.ExpiresAt, s.a.deps.Clock.Now()))
 	return out, nil
 }

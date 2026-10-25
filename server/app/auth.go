@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"strings"
@@ -53,7 +54,7 @@ func clearSessionCookie() *http.Cookie {
 
 // withSession はセッションを検証し、リクエストの context に載せる。
 // Cookie のセッションは、入れ替えの時期を過ぎていれば ID を入れ替えて Cookie を差し替える（5.2）。
-// 無効なトークンは未ログインとして扱う（理由は返さない。4.9）。
+// 無効なトークンは未ログインとして扱う（理由は返さない。4.9）。ストレージの障害は 503。
 func (a *App) withSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, viaCookie := sessionToken(r)
@@ -63,6 +64,11 @@ func (a *App) withSession(next http.Handler) http.Handler {
 		}
 		ctx := r.Context()
 		v, err := a.sessions.Validate(ctx, a.realm.ID, token)
+		if err != nil && !errors.Is(err, session.ErrInvalid) {
+			// ストレージの障害では有効なセッションかもしれないので、Cookie を消さずに 503 を返す。
+			a.unavailable(w, r, err)
+			return
+		}
 		if err != nil {
 			if viaCookie {
 				http.SetCookie(w, clearSessionCookie())

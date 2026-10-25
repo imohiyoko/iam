@@ -198,6 +198,9 @@ paths:
     get:
       operationId: listMySessions
       summary: 本人の有効なセッションの一覧
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
       responses:
         "200":
           description: 新しい順
@@ -216,6 +219,9 @@ paths:
     post:
       operationId: revokeMySession
       summary: 本人のセッションを失効させる
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -224,6 +230,14 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
 
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-iam_session
+    bearerAuth:
+      type: http
+      scheme: bearer
   responses:
     BadRequest:
       description: 要求の形式の誤り

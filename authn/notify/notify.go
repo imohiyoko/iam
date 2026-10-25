@@ -114,8 +114,9 @@ func (s *Service) Claim(ctx context.Context, realmID, notificationID string) (Se
 }
 
 // Deliverer は outbox の通知を Notifier に渡す関数を返す（eventlog.Relay の Deliver）。
-// 読めないメッセージは配送済みにして飛ばす（送出全体を止めない）。
-func Deliverer(n port.Notifier, log *slog.Logger) func(context.Context, []port.OutboxMessage) ([]string, error) {
+// 読めないメッセージと、秘密の期限が過ぎたメッセージは配送済みにして飛ばす（送出全体を止めない。
+// 期限切れのリンクやコードを届けても使えない）。
+func Deliverer(n port.Notifier, clk clock.Clock, log *slog.Logger) func(context.Context, []port.OutboxMessage) ([]string, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -125,6 +126,11 @@ func Deliverer(n port.Notifier, log *slog.Logger) func(context.Context, []port.O
 			var x port.Notification
 			if err := json.Unmarshal(m.Payload, &x); err != nil {
 				log.ErrorContext(ctx, "skipping unreadable notification", "id", m.ID, "error", err)
+				done = append(done, m.ID)
+				continue
+			}
+			if x.ExpiresAt != nil && !clk.Now().Before(*x.ExpiresAt) {
+				log.WarnContext(ctx, "skipping expired notification", "id", m.ID)
 				done = append(done, m.ID)
 				continue
 			}

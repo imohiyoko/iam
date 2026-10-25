@@ -283,3 +283,24 @@ func TestRevokeAllEndsRotationGrace(t *testing.T) {
 	mustInvalid(t, m, k.RealmID, is.Token)
 	mustInvalid(t, m, k.RealmID, next.Token)
 }
+
+// downStorage はトランザクションを始められないストレージ。
+type downStorage struct{ port.Storage }
+
+func (downStorage) Tx(context.Context, func(context.Context, port.Tx) error) error {
+	return errors.New("db down")
+}
+
+// ストレージの障害は ErrInvalid にしない（呼び出し側が有効なセッションの Cookie を消さないため）。
+func TestValidateStorageErrorIsNotInvalid(t *testing.T) {
+	k, m, u := setup(t)
+	is := issue(t, k, m, u, "")
+	m.Storage = downStorage{k.Storage}
+	_, err := m.Validate(context.Background(), k.RealmID, is.Token)
+	if err == nil || errors.Is(err, session.ErrInvalid) {
+		t.Fatalf("want a non-ErrInvalid error, got %v", err)
+	}
+	if errs.KindOf(err) != errs.KindUnavailable {
+		t.Fatalf("kind: %v", errs.KindOf(err))
+	}
+}

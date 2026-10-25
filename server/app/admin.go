@@ -43,6 +43,10 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 		var p adminPrincipal
 		if _, _, isSession := session.SplitToken(key); isSession {
 			v, err := a.sessions.Validate(r.Context(), a.realm.ID, key)
+			if err != nil && !errors.Is(err, session.ErrInvalid) {
+				a.unavailable(w, r, err)
+				return
+			}
 			if err != nil || v.PrincipalType != port.PrincipalUser {
 				next.ServeHTTP(w, r)
 				return
