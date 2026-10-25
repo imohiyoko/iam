@@ -104,7 +104,8 @@ iam/
 
 - 特定の DB を必須にしない。**単一インスタンスなら SQLite だけで動く**ことを最低ラインにする
   - SQLite は cgo 不要のドライバを使い、単一バイナリで配布できるようにする
-  - SQLite は書き込みが直列になるため、複数インスタンス構成や高負荷では PostgreSQL / MySQL を選んでもらう
+  - SQLite は小規模・単一インスタンス向け。書き込みが直列になるため、規模が大きくなったら PostgreSQL / MySQL に移行してもらう前提とする
+  - **アダプタ間のデータ移行ツール**（`iam storage export` / `iam storage import`）を用意する。Repository インターフェース越しに全データを書き出し・読み込むので、どのアダプタ間でも移せる。暗号化済みのデータは暗号化されたまま移す（KeyStore はそのまま使う）
 - 各モジュール（authn / authz）は自分の永続化を Repository インターフェースとして定義し、ドメイン層は SQL を知らない
 - **Repository はドメインの言葉で定義し、DB の機能では定義しない**
   - 例：`FindMembershipsByUser(userID)`、`SaveLoginPolicy(orgID, policy)` のように「何をしたいか」だけを表す
@@ -218,6 +219,9 @@ POST /v1/admin/notifications/{notification_id}:claim
 - **ブラウザから直接呼ばれる前提の対策**：CSRF 対策、CORS の許可オリジン設定、レートリミット
 - **passkey の制約**：passkey は RP ID（ドメイン）に結び付くため、アプリが IAM と別ドメインで自前 UI を作ると、IAM ドメインで登録した passkey が使えない
   - RP ID を設定可能にし、複数ドメインで使う場合は WebAuthn の Related Origin Requests（`/.well-known/webauthn`）に対応する
+    - 主要ブラウザは対応済み（Chrome / Edge 128 以降、Safari 18 以降（macOS 15・iOS 18）、Firefox 152 以降。passkeys.dev の対応表による）
+    - 1つの RP ID に関連付けられるドメインは、実質**5種類まで**（`example.com` と `example.co.jp` のように、名前部分が同じものは1つと数える）
+    - サーバー側は、go-webauthn が複数の origin の検証に対応しているので、`/.well-known/webauthn` の JSON を配信するだけでよい
 - **OAuth ログインを API で行う場合**：プロバイダからの戻り先 URL を、アプリ側に向けられるようにする（許可リスト方式）
 
 #### セルフホスト前提で必要になること
@@ -1264,6 +1268,7 @@ POST /v1/me/credentials/{cred_id}:revoke
 ### 9.3 トークン署名
 
 - JWKS には **ML-DSA-65（`kty: AKP`、RFC 9964）と ES256 の鍵を両方公開**する
+- 実装：ML-DSA の署名・JWK（`AKP`）は lestrrat-go/jwx（v4、Go 1.27 以上で ML-DSA に対応済み）を使う。OIDC の土台にする zitadel/oidc が使う go-jose は ML-DSA に未対応のため、go-jose の `OpaqueSigner`（任意のアルゴリズム名で署名処理を差し込める仕組み）で ML-DSA の署名を差し込み、JWKS の出力は自前で jwx の形式にする（13.2）
 - クライアント（RP）ごとに署名アルゴリズムを選ぶ（OIDC の `id_token_signed_response_alg`）
   - ML-DSA に対応した RP には ML-DSA-65 で署名
   - 未対応の RP には ES256 で署名
@@ -1726,8 +1731,13 @@ DB のテスト        │ 契約テスト × 各アダプタ          │  ← 
 脆弱性が入りやすいのは、暗号やプロトコルを自前で実装した部分。ここを広く使われているライブラリに任せ、自前のコードを「ライブラリの組み合わせ方」に限定する。
 
 - 暗号：Go 標準ライブラリ（`crypto/*`、`crypto/mldsa`）のみを使う。暗号アルゴリズムは自前で実装しない
-- WebAuthn：実績のあるライブラリを使う（例：go-webauthn）
-- OAuth / OIDC：実績のあるライブラリを土台にする（例：zitadel/oidc、ory/fosite などを比較して選ぶ）
+- WebAuthn：go-webauthn を使う。複数 origin の検証（Related Origin Requests）、RS256、ML-DSA（`AKP`）の passkey にも対応している（ML-DSA の passkey は将来の受け入れ候補）
+- OAuth / OIDC：**zitadel/oidc（`op` パッケージ）を土台にする**（2026年10月時点の調査。ADR 0038）
+  - 対応済み：認可コード + PKCE、クライアントクレデンシャル、リフレッシュトークン、Discovery、イントロスペクション、トークン失効、クライアントごとの不透明（Bearer）/ JWT アクセストークンの切り替え、ログアウト（end_session）
+  - 自前で補うもの：ML-DSA での ID トークン署名と JWKS の出力（9.3）、Back-Channel Logout のログアウトトークンの送信（ライブラリは型と Discovery の項目のみ提供）
+  - v3 が安定版、v4 は開発中（プレリリース）。v3 で始め、v4 の正式版を追う
+  - ory/fosite は、最後の更新が 2025年7月で、以降は止まっているため採らない
+- JWT / JWK：lestrrat-go/jwx（v4）。ML-DSA と `AKP` 鍵に対応済み
 - SAML：XML 署名まわりは脆弱性の温床なので、Org 専用 SSO（11.3）を実装する時点で最も慎重に選定する
 - **セキュリティ上重要なコード**（トークン発行・検証、セッション、アカウント連携・統合、認可判定、フィーチャー台帳の fail-closed 判定）は、ディレクトリを分けて範囲を明示する。レビューと監査の対象をここに集中させる
 

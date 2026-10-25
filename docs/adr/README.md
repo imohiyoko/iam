@@ -49,3 +49,4 @@
 | [0035](0035-id-login-requires-second-factor.md) | ID（ユーザー名）でのログインには2要素目を必須にする | 置き換え: 0037 |
 | [0036](0036-membership-email-and-login-hints.md) | Membership ごとにメールアドレスを結び付け、ログインの手がかりで Org を選ぶ | 承認 |
 | [0037](0037-no-usernames.md) | ユーザー名（独自の ID）は持たず、パスワードはメールアドレスと組み合わせる | 承認 |
+| [0038](0038-library-selection.md) | OIDC は zitadel/oidc、JOSE は jwx、WebAuthn は go-webauthn を使う | 承認 |
