@@ -76,7 +76,7 @@ iam/
 
 - 外部サービスへの認証結果の受け渡しは **OIDC（OpenID Connect）** に準拠する。ID トークンのクレーム名も標準に従う
 - passkey は **WebAuthn** 準拠
-- 認可 API は当面独自でよいが、`check(subject, action, resource)` の形に寄せ、OpenFGA / Cedar 等へ載せ替えやすくしておく
+- 認可 API は当面独自でよいが、`check(principal, action, resource, context)` の形にし（4.5）、OpenFGA / Cedar 等へ載せ替えやすくしておく
 - 暗号方式は「9. 暗号方針」に従う
 
 ### 2.4 技術スタックと外部依存
@@ -180,33 +180,78 @@ IAM 自身はメールを送らない。**「何を誰に通知すべきか」�
 - **アップグレード**：DB マイグレーションはバージョン間で前進のみ。起動時に自動適用するか、明示的なコマンドで適用するかを選べるようにする
 - **初期セットアップ**：最初の管理者を作る手段（CLI コマンドなど）
 
+### 2.6 拡張性と機能の取捨選択
+
+**拡張性は最大限確保し、そのうえで使わない機能は捨てて最適化できる**ようにする。
+
+- 機能は「フィーチャー」という単位でまとめ、設定でオン・オフできるようにする（一覧は 11章）
+- **オフにした機能はコストゼロ**にする：余計なクエリ、JOIN、フック呼び出し、キャッシュ参照を一切発生させない
+  - どの処理経路を使うかは**起動時に決めて組み立てる**。リクエストごとに「この機能は有効か」を判定して分岐しない
+  - 例：Group のネストがオフなら、Group 展開は再帰なしの単純な実装を組み込む
+- データモデルは**最初から拡張可能な形**にしておく（realm、principal、リソース単位の権限など）。機能をオフにした場合も、スキーマは同じで、使わない列に既定値が入るだけにする
+  - 後から機能を足すときに全テーブルの移行が要らないようにするため
+  - 使わない列のコストは「インデックスの先頭に固定値が1つ増える」程度に抑える
+- **レイテンシが過剰になる機能は捨てられる**ことを前提にする
+  - フィーチャーごとにレイテンシのメトリクスを取り、どの機能が遅さの原因かを計測で判断できるようにする
+  - ホットパス（トークン検証、認可判定）には同期の外部呼び出しを入れない。入れる場合はフィーチャーとしてオプトインにし、タイムアウトを必須にする
+
 ## 3. ドメインモデル
+
+### 3.0 全体に共通の決まり
+
+- **すべてのテーブルに `realm_id` を持たせる**（11.1）。一意制約も realm 内で効かせる
+- ID は型付きの接頭辞を付ける（`usr_`、`org_`、`grp_`、`sa_` など）。ログや API での取り違えを防ぐ
+- 認可の主体は `principal`（user / service_account / group）として扱い、ロール付与は principal に対して行う（11.2）
 
 ### 3.1 認証側 (authn)
 
 ```
+realms              -- ユーザープール。既定は1つだけ作られる
+  id (PK)
+  slug (UNIQUE)
+  settings          -- realm 単位の設定
+
 users
   id (PK)
+  realm_id
+  owner_org_id      -- NULL なら個人所有。値があればその Org が管理するユーザー（11.3）
   display_name
-  status            -- active / suspended / deleted
+  status            -- active / suspended / deleted / merged
+  merged_into       -- アカウント統合で吸収された場合の統合先（11.6）
   created_at, updated_at
+
+user_attributes     -- ホストが定義する独自項目（11.7）
+  user_id
+  key
+  value
+  PRIMARY KEY (user_id, key)
 
 user_emails
   id (PK)
+  realm_id
   user_id (FK users)
-  email (UNIQUE, 正規化して保存)
+  email             -- 正規化して保存（小文字化のみ。Gmail のドット除去などはしない）
   verified_at       -- NULL なら未検証
   is_primary
   created_at
+  UNIQUE (realm_id, email)
 
-user_identities     -- OAuth などの外部 ID
+user_identities     -- OAuth / SSO などの外部 ID
   id (PK)
+  realm_id
   user_id (FK users)
-  provider          -- google / github / ...
+  connection_id     -- どの接続経由か（google、github、Org の SSO など）
   provider_subject  -- プロバイダ側の不変 ID (sub)
   email_at_link     -- 連携時点のメール（参考情報。識別には使わない）
   created_at
-  UNIQUE (provider, provider_subject)
+  UNIQUE (connection_id, provider_subject)
+
+connections         -- 外部 IdP との接続設定
+  id (PK)
+  realm_id
+  owner_org_id      -- NULL なら realm 共通（Google 等）。値があればその Org 専用の SSO
+  type              -- oauth2 / oidc / saml ...
+  config
 
 passkeys
   id (PK)
@@ -219,11 +264,33 @@ passkeys
   name              -- ユーザーが付ける名前
   created_at, last_used_at
 
-orgs
+service_accounts    -- 人間以外の主体（11.2）
   id (PK)
-  slug (UNIQUE)
+  realm_id
+  org_id            -- 所属 Org
   name
   created_at
+
+service_account_credentials
+  id (PK)
+  service_account_id
+  type              -- client_secret / private_key_jwt / api_key
+  secret_hash or public_key
+  expires_at, revoked_at
+
+orgs
+  id (PK)
+  realm_id
+  parent_org_id     -- Org の階層（11.4）。NULL ならトップレベル
+  slug
+  name
+  created_at
+  UNIQUE (realm_id, slug)
+
+org_domains         -- Org が所有を証明したメールドメイン（11.3）
+  org_id
+  domain
+  verified_at
 
 memberships         -- User と Org の所属関係（所属の有無のみ）
   id (PK)
@@ -235,17 +302,19 @@ memberships         -- User と Org の所属関係（所属の有無のみ）
 
 sessions
   id (PK)
-  user_id (FK users)
+  realm_id
+  principal_type    -- user / service_account
+  principal_id
   active_org_id (FK orgs, NULL 可)  -- 個人コンテキストなら NULL
   auth_methods      -- どの手段で認証したか (amr)
   warnings          -- 認証時に出た警告コードの一覧（10章）
   ip, user_agent
   created_at, last_seen_at, expires_at, revoked_at
 
-org_login_policies  -- 将来：Org への入り方の制約
+org_login_policies  -- Org への入り方の制約
   org_id (FK orgs)
-  type              -- ip_allowlist / require_passkey / email_domain ...
-  config (JSON)
+  type              -- ip_allowlist / require_passkey / email_domain / require_sso ...
+  config
 ```
 
 ### 3.2 認可側 (authz)
@@ -257,29 +326,33 @@ groups
   name
   UNIQUE (org_id, name)
 
-group_members       -- User と Group の多対多
+group_members       -- principal と Group の多対多
   group_id (FK groups)
-  user_id           -- authn の users.id を ID として参照するだけ
-  PRIMARY KEY (group_id, user_id)
+  member_type       -- user / service_account / group（group はネスト。11.5）
+  member_id
+  PRIMARY KEY (group_id, member_type, member_id)
 
 roles
   id (PK)
-  org_id (NULL ならシステム共通ロール)
+  realm_id
+  org_id            -- NULL なら realm 共通ロール
   name
 
 role_permissions
   role_id (FK roles)
   permission        -- "project:read" のような文字列
 
-role_bindings       -- 誰にどのロールを与えるか
+role_bindings       -- 誰に、どの範囲で、どのロールを与えるか
   role_id (FK roles)
-  subject_type      -- user / group
-  subject_id
+  principal_type    -- user / service_account / group
+  principal_id
   org_id
+  resource_type     -- NULL なら Org 全体に効く。値があればそのリソースだけ（11.5）
+  resource_id
 ```
 
-- `group_members.user_id` は authn の `users.id` を参照するが、DB の外部キーはモジュール境界をまたいで張らない（アプリ側で整合性を保つ）
-- Group に所属できるのは、その Org の Membership が active なユーザーのみ（authz は authn の公開 API で確認する）
+- authz は principal を ID として参照するだけ。DB の外部キーはモジュール境界をまたいで張らない（アプリ側で整合性を保つ）
+- Group に所属できるのは、その Org の Membership が active なユーザー、またはその Org のサービスアカウントのみ（authz は authn の公開 API で確認する）
 
 ## 4. 主要フロー
 
@@ -319,17 +392,23 @@ role_bindings       -- 誰にどのロールを与えるか
 ### 4.5 認可の判定
 
 ```
-check(user_id, org_id, permission) -> allow / deny
+check(principal, action, resource, context) -> allow / deny
+  principal : user / service_account
+  action    : "project:read" などの permission
+  resource  : (type, id)。Org 全体への操作なら (org, org_id)
+  context   : active_org_id、IP、時刻など
 ```
 
-- `org_id` はセッションの `active_org_id` から取る
-- user に直接付いたロール + 所属 Group に付いたロールを合算して判定する
+- `active_org_id` はセッションから取る
+- principal に直接付いたロール + 所属 Group（ネスト有効時は祖先 Group も）に付いたロールのうち、範囲（Org 全体 / そのリソース / Org 階層有効時は親 Org）が一致するものを合算して判定する
+- 有効なフィーチャーに応じて判定の実装を起動時に組み立てる（11章）。最小構成なら「Org 単位の RBAC」だけの単純な判定になる
+- 将来 OpenFGA / Cedar 等に載せ替える場合も、このシグネチャのまま実装を差し替える
 
 ## 5. トークン・セッション
 
 - ブラウザ向け：サーバーサイドセッション（Cookie）。失効を即時反映できるようにする
 - 他サービス向け：OIDC の ID トークン / アクセストークン（署名方式は 9.3）
-  - クレームには `sub`（user_id）, `org_id`（active org）, `amr` を入れる
+  - クレームには `sub`（principal の ID。ユーザーまたはサービスアカウント）, `org_id`（active org）, `amr` を入れる
   - **Group / Role はトークンに載せない**（肥大化と反映遅延を避ける）。必要なら authz の API で引く
 - リフレッシュトークンはローテーションし、再利用を検知したらそのファミリーごと失効させる
 - ユーザーは自分のセッション一覧を見て個別に失効できる
@@ -471,3 +550,108 @@ check(user_id, org_id, permission) -> allow / deny
 
 - `tls_no_pq_kex` は Go が TLS を終端する場合のみ判定できる。リバースプロキシで終端する構成では、プロキシから情報を受け取る必要がある
 - 最初は枠組みと 1〜2 個のルールだけ実装し、ルールは必要になったら足す
+
+## 11. フィーチャーと拡張ポイント
+
+2.6 の方針に従い、機能をフィーチャー単位で切り替えられるようにする。フィーチャーのオン・オフは**起動時の設定**で決め、実行中には変えない（処理経路を起動時に組み立てるため）。
+
+### 11.0 一覧
+
+| フィーチャー | 既定 | オフにしたときの動き |
+|---|---|---|
+| 複数 realm（11.1） | オフ | realm は1つ固定。realm の解決処理をしない |
+| サービスアカウント（11.2） | オフ | client credentials などの機械向け認証を無効化 |
+| Org 管理ユーザー・Org 専用 SSO（11.3） | オフ | `owner_org_id` は常に NULL。ドメイン検証も無効 |
+| Org 階層（11.4） | オフ | 親 Org をたどらない |
+| リソース単位の権限（11.5） | オン | Org 単位の RBAC のみで判定 |
+| Group のネスト（11.5） | オフ | Group 展開は1段のみ |
+| アカウント統合（11.6） | オフ | 統合 API を無効化 |
+| カスタム属性（11.7） | オフ | 属性の読み書きをしない |
+| フロー フック（11.8） | オフ | フック呼び出しを一切しない |
+| 認証の警告（10章） | オン（ルールは最小限） | 評価器を通さない |
+
+### 11.1 複数 realm（ユーザープール）
+
+- 1つの IAM インスタンスで、互いに独立したユーザー集合を複数持てるようにする（アプリ A と B のユーザーを完全に分けたい、など）
+- メールの一意性、Org の slug、外部 IdP の接続設定はすべて realm 単位
+- realm はリクエストのホスト名やパス（`/realms/{slug}/...`）から決める。オフのときはこの解決処理を行わない
+
+### 11.2 サービスアカウント（人間以外の主体）
+
+- Org に所属する機械用の主体。ロール付与・Group 所属はユーザーと同じ principal として扱う
+- 認証は OAuth の client credentials（`client_secret` または `private_key_jwt`）と API キー
+- `private_key_jwt` の鍵も 9章の方針に従い、RSA は受け付けない（ES256 / EdDSA / ML-DSA）
+
+### 11.3 Org 管理ユーザーと Org 専用 SSO
+
+ユーザーの所有者を2種類に分ける。
+
+- **個人ユーザー**（`owner_org_id` が NULL）：本人が所有する。複数の Org に所属できる。Org ができるのは所属から外すことだけで、アカウントの停止・削除はできない
+- **Org 管理ユーザー**（`owner_org_id` に値がある）：その Org が所有する（エンプラの社員アカウント）。Org の管理者が停止・削除でき、ログイン方法も Org のポリシー（`require_sso` など）に従わせられる
+
+関連する仕組み：
+
+- **ドメインの所有証明**（`org_domains`）：DNS の TXT レコードなどで、Org がメールドメインを所有していることを証明する
+- 証明済みドメインのメールで新規登録したユーザーは、その Org の管理ユーザーにできる
+- 既存の個人ユーザーを管理ユーザーに切り替える場合は、本人に通知して同意を得る
+- **Org 専用 SSO**：`connections.owner_org_id` に Org を指定し、その Org の IdP（SAML / OIDC）でログインさせる
+
+### 11.4 Org 階層
+
+- Org に親子関係を持たせる（会社 → 部署 など）。親 Org で付与したロールを子 Org にも効かせられる
+- 祖先をたどるコストを抑えるため、祖先の一覧（closure table など）を**書き込み時に計算しておく**。どう持つかは Storage アダプタが DB に応じて決める（PostgreSQL なら再帰 CTE や ltree も選択肢）
+- 階層の深さには上限を設ける
+
+### 11.5 認可の粒度
+
+- **リソース単位の権限**：`role_bindings` に `resource_type` / `resource_id` を指定すると、そのリソースだけに効くロールになる
+- **Group のネスト**：Group を Group のメンバーにできる
+  - 展開のコストを抑えるため、所属の推移閉包を書き込み時に計算しておく。深さの上限と循環の禁止を設ける
+- 認可判定の結果は EphemeralStore に短期キャッシュする。関係する所属・ロールの変更時に無効化する
+- これで足りなくなったら、4.5 のシグネチャのまま OpenFGA 等の ReBAC エンジンに差し替える
+
+### 11.6 アカウント統合
+
+複数の OAuth に対応すると、同じ人が別のアカウントを作ってしまうことは避けられない。そのため統合の手順を用意する。
+
+1. アカウント A にログインした状態で、アカウント B にもログインして所有を証明する
+2. B のメール・外部 ID・passkey・Membership・ロール付与を A に移す（Org 管理ユーザーが絡む場合は、その Org の許可が必要）
+3. B は `status = merged`、`merged_into = A` にし、B のセッションとトークンはすべて失効させる
+4. `user.merged` イベントを出す
+
+- **連携先から見るとユーザー ID（`sub`）が変わる**ため、連携先はこのイベントを処理する必要がある。これがオプトインにしている理由
+- 統合は取り消せない操作として扱い、監査ログに残す
+
+### 11.7 カスタム属性
+
+- ホストが realm ごとにユーザーの独自項目を定義できる（型、検証ルール、本人が編集できるか、トークンのクレームに載せるか）
+- 保存方法は Storage アダプタが決める（汎用的には `user_attributes` のキー・値形式、PostgreSQL なら JSONB 列でもよい）
+- トークンに載せる属性は最小限にする（トークンの肥大化を避ける）
+
+### 11.8 フロー フック
+
+ホスト独自のロジックを認証フローの途中に差し込む仕組み。
+
+| フック | タイミング | 用途の例 |
+|---|---|---|
+| `pre_registration` | ユーザー作成の直前 | 登録の許可リスト、招待制にする |
+| `post_authentication` | 認証成功後、セッション作成前 | 独自の拒否判定、追加の認証要求。10章の警告評価もここで動く |
+| `pre_token` | トークン発行の直前 | クレームの追加 |
+| 非同期イベント | 各操作の後 | 外部システムへの同期（EventSink 経由） |
+
+- 同期フックの実装方法は、Go のインターフェース（ライブラリとして組み込む場合）と Webhook の2通り
+- **同期フックはタイムアウト必須**。失敗時に拒否するか（fail-closed）、無視して続けるか（fail-open）はフックごとに設定する
+- トークン検証と認可判定（ホットパス）にはフックを置かない
+
+### 11.9 設定の置き場所
+
+- **起動時に決まるもの**は設定ファイル：使うアダプタ、フィーチャーのオン・オフ、警告のサーバー既定アクション
+- **実行中に変わるもの**は Storage：realm、外部 IdP の接続設定、Org のポリシー、カスタム属性の定義。管理 API で変更し、複数インスタンスで共有される
+
+### 11.10 公開する契約のバージョン管理
+
+公開 API に加えて、以下も外部との契約としてバージョンを付けて管理する。
+
+- Webhook（Notifier、フロー フック、イベント）のペイロード
+- トークンのクレーム構成
+- Go ライブラリとして公開するポートのインターフェース
