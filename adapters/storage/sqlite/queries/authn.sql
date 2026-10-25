@@ -50,18 +50,16 @@ SELECT * FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND princ
 UPDATE authn_sessions SET last_seen_at = max(last_seen_at, sqlc.arg(at)) WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
 
 -- name: RevokeSession :execrows
-UPDATE authn_sessions SET revoked_at = coalesce(revoked_at, sqlc.arg(at)),
-    revoke_reason = CASE WHEN revoked_at IS NULL THEN sqlc.arg(reason) ELSE revoke_reason END
+UPDATE authn_sessions SET
+    revoke_reason = CASE WHEN revoked_at IS NULL OR revoked_at > sqlc.arg(at) THEN sqlc.arg(reason) ELSE revoke_reason END,
+    revoked_at = CASE WHEN revoked_at IS NULL OR revoked_at > sqlc.arg(at) THEN sqlc.arg(at) ELSE revoked_at END
 WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
 
 -- name: RevokeSessionsByPrincipal :many
 UPDATE authn_sessions SET revoked_at = sqlc.arg(at), revoke_reason = sqlc.arg(reason)
 WHERE realm_id = sqlc.arg(realm_id) AND principal_type = sqlc.arg(principal_type) AND principal_id = sqlc.arg(principal_id)
-    AND id <> sqlc.arg(except_id) AND revoked_at IS NULL
+    AND id <> sqlc.arg(except_id) AND (revoked_at IS NULL OR revoked_at > sqlc.arg(at))
 RETURNING id;
-
--- name: ShortenSession :execrows
-UPDATE authn_sessions SET expires_at = min(expires_at, sqlc.arg(at)) WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
 
 -- name: CreateServiceAccount :exec
 INSERT INTO authn_service_accounts (id, realm_id, name, created_at) VALUES (?, ?, ?, ?);

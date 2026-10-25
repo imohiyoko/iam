@@ -244,11 +244,6 @@ func (r sessions) RevokeByPrincipal(ctx context.Context, realmID string, t port.
 	return ids, mapErr(err)
 }
 
-func (r sessions) Shorten(ctx context.Context, realmID, id string, at time.Time) error {
-	n, err := r.q.ShortenSession(ctx, db.ShortenSessionParams{At: formatTime(at), RealmID: realmID, ID: id})
-	return affected(n, err, "session")
-}
-
 // ---------------------------------------------------------------------------
 
 type accounts struct{ q *db.Queries }

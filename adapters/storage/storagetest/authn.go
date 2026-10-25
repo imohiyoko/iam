@@ -251,42 +251,36 @@ func testSessions(t *testing.T, h Harness) {
 		if err := repo.Touch(ctx, r, a.ID, T0.Add(time.Minute)); err != nil {
 			return err
 		}
-		// Shorten は期限を延ばさない。
-		if err := repo.Shorten(ctx, r, a.ID, T0.Add(2*time.Hour)); err != nil {
+		// Revoke は失効の時刻を早めるだけで遅らせない（予定の失効を前倒しできる）。
+		if err := repo.Revoke(ctx, r, a.ID, T0.Add(4*time.Hour), "rotated"); err != nil {
 			return err
 		}
-		if err := repo.Shorten(ctx, r, a.ID, T0.Add(48*time.Hour)); err != nil {
-			return err
-		}
-		// Revoke は最初の失効を保つ。
 		if err := repo.Revoke(ctx, r, a.ID, T0.Add(3*time.Hour), "logout"); err != nil {
 			return err
 		}
-		if err := repo.Revoke(ctx, r, a.ID, T0.Add(4*time.Hour), "admin"); err != nil {
+		if err := repo.Revoke(ctx, r, a.ID, T0.Add(5*time.Hour), "admin"); err != nil {
 			return err
 		}
 		got, err = repo.Get(ctx, r, a.ID)
 		if err != nil {
 			return err
 		}
-		if !got.LastSeenAt.Equal(T0.Add(time.Hour)) || !got.ExpiresAt.Equal(T0.Add(2*time.Hour)) ||
-			got.RevokedAt == nil || !got.RevokedAt.Equal(T0.Add(3*time.Hour)) || got.RevokeReason != "logout" {
+		if !got.LastSeenAt.Equal(T0.Add(time.Hour)) || got.RevokedAt == nil || !got.RevokedAt.Equal(T0.Add(3*time.Hour)) || got.RevokeReason != "logout" {
 			return fmt.Errorf("after updates: %+v", got)
 		}
 
 		other := id.New(id.Realm)
 		for name, err := range map[string]error{
-			"Get":     func() error { _, err := repo.Get(ctx, other, a.ID); return err }(),
-			"Touch":   repo.Touch(ctx, other, b.ID, T0.Add(time.Hour)),
-			"Revoke":  repo.Revoke(ctx, other, b.ID, T0, "x"),
-			"Shorten": repo.Shorten(ctx, other, b.ID, T0),
+			"Get":    func() error { _, err := repo.Get(ctx, other, a.ID); return err }(),
+			"Touch":  repo.Touch(ctx, other, b.ID, T0.Add(time.Hour)),
+			"Revoke": repo.Revoke(ctx, other, b.ID, T0, "x"),
 		} {
 			if err := notFound("sessions."+name+" from another realm", err); err != nil {
 				return err
 			}
 		}
 		got, err = repo.Get(ctx, r, b.ID)
-		if err != nil || got.RevokedAt != nil || !got.ExpiresAt.Equal(b.ExpiresAt) || !got.LastSeenAt.Equal(b.LastSeenAt) {
+		if err != nil || got.RevokedAt != nil || !got.LastSeenAt.Equal(b.LastSeenAt) {
 			return fmt.Errorf("another realm changed the session: %+v, %v", got, err)
 		}
 		return nil
@@ -297,6 +291,8 @@ func testSessionRevokeByPrincipal(t *testing.T, h Harness) {
 	s, _ := open(t, h)
 	r, u, v := id.New(id.Realm), id.New(id.User), id.New(id.User)
 	keep, x1, x2, done, otherUser := newSession(r, u, T0), newSession(r, u, T0), newSession(r, u, T0), newSession(r, u, T0), newSession(r, v, T0)
+	// 失効の予定（ID の入れ替え後の猶予）があるセッションも、一括失効で前倒しする。
+	x2.RevokedAt, x2.RevokeReason = ptr(T0.Add(24*time.Hour)), "rotated"
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Sessions()
 		for _, x := range []port.Session{keep, x1, x2, done, otherUser} {

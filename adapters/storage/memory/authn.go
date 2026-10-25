@@ -234,7 +234,7 @@ func (r sessions) Touch(_ context.Context, realmID, id string, at time.Time) err
 
 func (r sessions) Revoke(_ context.Context, realmID, id string, at time.Time, reason string) error {
 	return r.update(realmID, id, func(s *port.Session) {
-		if s.RevokedAt == nil {
+		if s.RevokedAt == nil || at.Before(*s.RevokedAt) {
 			s.RevokedAt, s.RevokeReason = &at, reason
 		}
 	})
@@ -243,7 +243,7 @@ func (r sessions) Revoke(_ context.Context, realmID, id string, at time.Time, re
 func (r sessions) RevokeByPrincipal(_ context.Context, realmID string, t port.PrincipalType, principalID, exceptID string, at time.Time, reason string) ([]string, error) {
 	var ids []string
 	for _, s := range r.t.s.sessions {
-		if s.RealmID == realmID && s.PrincipalType == t && s.PrincipalID == principalID && s.ID != exceptID && s.RevokedAt == nil {
+		if s.RealmID == realmID && s.PrincipalType == t && s.PrincipalID == principalID && s.ID != exceptID && (s.RevokedAt == nil || at.Before(*s.RevokedAt)) {
 			ids = append(ids, s.ID)
 		}
 	}
@@ -254,14 +254,6 @@ func (r sessions) RevokeByPrincipal(_ context.Context, realmID string, t port.Pr
 		}
 	}
 	return ids, nil
-}
-
-func (r sessions) Shorten(_ context.Context, realmID, id string, at time.Time) error {
-	return r.update(realmID, id, func(s *port.Session) {
-		if at.Before(s.ExpiresAt) {
-			s.ExpiresAt = at
-		}
-	})
 }
 
 // ---------------------------------------------------------------------------

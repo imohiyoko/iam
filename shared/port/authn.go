@@ -134,8 +134,9 @@ type Session struct {
 	CreatedAt       time.Time // この ID を発行した時刻（ID の入れ替えの判定に使う）
 	LastSeenAt      time.Time
 	ExpiresAt       time.Time
-	RevokedAt       *time.Time
-	RevokeReason    string
+	// RevokedAt は失効の時刻。未来の時刻は失効の予定（ID の入れ替え後の猶予）を表す。
+	RevokedAt    *time.Time
+	RevokeReason string
 }
 
 // SessionRepo は sessions の Repository。
@@ -146,12 +147,11 @@ type SessionRepo interface {
 	ListByPrincipal(ctx context.Context, realmID string, t PrincipalType, principalID string) ([]Session, error)
 	// Touch は最終利用時刻を進める（戻さない）。
 	Touch(ctx context.Context, realmID, id string, at time.Time) error
-	// Revoke は失効させる。既に失効していれば何もしない。無ければ errs.NotFound。
+	// Revoke は at に失効させる。既に at 以前に失効していれば何もしない（失効の時刻は早まるだけで遅れない）。
+	// 失効の時刻を早めたときは理由も置き換える。無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
-	// RevokeByPrincipal は主体の有効なセッションを exceptID 以外すべて失効させ、失効させた ID を返す。
+	// RevokeByPrincipal は主体の、at の時点で失効していないセッションを exceptID 以外すべて at に失効させ、その ID を返す。
 	RevokeByPrincipal(ctx context.Context, realmID string, t PrincipalType, principalID, exceptID string, at time.Time, reason string) ([]string, error)
-	// Shorten は期限を at まで早める（ID の入れ替え後の猶予）。遅くはしない。
-	Shorten(ctx context.Context, realmID, id string, at time.Time) error
 }
 
 // ServiceAccount は service_accounts の1行（design.md 11.2）。

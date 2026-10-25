@@ -724,8 +724,9 @@ func (q *Queries) RevokeServiceAccountCredential(ctx context.Context, arg Revoke
 }
 
 const revokeSession = `-- name: RevokeSession :execrows
-UPDATE authn_sessions SET revoked_at = coalesce(revoked_at, ?1),
-    revoke_reason = CASE WHEN revoked_at IS NULL THEN ?2 ELSE revoke_reason END
+UPDATE authn_sessions SET
+    revoke_reason = CASE WHEN revoked_at IS NULL OR revoked_at > ?1 THEN ?2 ELSE revoke_reason END,
+    revoked_at = CASE WHEN revoked_at IS NULL OR revoked_at > ?1 THEN ?1 ELSE revoked_at END
 WHERE realm_id = ?3 AND id = ?4
 `
 
@@ -752,7 +753,7 @@ func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) (i
 const revokeSessionsByPrincipal = `-- name: RevokeSessionsByPrincipal :many
 UPDATE authn_sessions SET revoked_at = ?1, revoke_reason = ?2
 WHERE realm_id = ?3 AND principal_type = ?4 AND principal_id = ?5
-    AND id <> ?6 AND revoked_at IS NULL
+    AND id <> ?6 AND (revoked_at IS NULL OR revoked_at > ?1)
 RETURNING id
 `
 
@@ -793,24 +794,6 @@ func (q *Queries) RevokeSessionsByPrincipal(ctx context.Context, arg RevokeSessi
 		return nil, err
 	}
 	return items, nil
-}
-
-const shortenSession = `-- name: ShortenSession :execrows
-UPDATE authn_sessions SET expires_at = min(expires_at, ?1) WHERE realm_id = ?2 AND id = ?3
-`
-
-type ShortenSessionParams struct {
-	At      interface{}
-	RealmID string
-	ID      string
-}
-
-func (q *Queries) ShortenSession(ctx context.Context, arg ShortenSessionParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, shortenSession, arg.At, arg.RealmID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
 }
 
 const touchSession = `-- name: TouchSession :execrows
