@@ -16,7 +16,7 @@ M0 で、主要操作（セッション検証、認可判定に使うクエリ�
 | `BenchmarkDecrypt`（shared/pii） | 個人情報1件の復号（データ鍵の取り出しを含む） | 約 2.7µs |
 | `BenchmarkEmailIndex`（shared/pii） | ブラインドインデックス1件 | 約 2.3µs |
 | `BenchmarkPointLookup`（SQLite） | キャッシュに外れたときの ID での1件取得（1トランザクション） | 約 45µs |
-| `BenchmarkAuditRecord`（SQLite） | 監査ログ1件の追記（ハッシュチェーン + outbox） | 約 0.3ms |
+| `BenchmarkAuditRecord`（SQLite） | 監査ログ1件の追記（ハッシュチェーン + outbox） | 約 0.7ms（`synchronous(FULL)`。コミットごとに fsync する） |
 
 ## 決定
 

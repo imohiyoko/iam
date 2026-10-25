@@ -45,7 +45,9 @@ jobs:
           go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.1 -config oapi-public.yaml public.yaml
           go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.1 -config oapi-admin.yaml admin.yaml
       - name: diff
-        run: git diff --exit-code
+        run: |
+          git add -N .
+          git diff --exit-code
 
   lint:
     runs-on: ubuntu-latest

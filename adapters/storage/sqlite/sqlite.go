@@ -67,7 +67,8 @@ func DSN(path string) string {
 	q.Set("_txlock", "immediate")
 	q.Add("_pragma", "busy_timeout(10000)")
 	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "synchronous(NORMAL)")
+	// 監査ログは外部に chain.seq を出した後で失われてはいけないので、コミットごとに fsync する。
+	q.Add("_pragma", "synchronous(FULL)")
 	q.Add("_pragma", "foreign_keys(1)")
 	// 削除したデータ（データ鍵など）の内容を空き領域に残さない（crypto-shredding。design.md 9.5）。
 	q.Add("_pragma", "secure_delete(ON)")
