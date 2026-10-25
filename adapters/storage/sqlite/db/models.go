@@ -54,6 +54,7 @@ type AuthnSession struct {
 	Warnings          []byte
 	Ip                []byte
 	UserAgent         []byte
+	AuthenticatedAt   string
 	CreatedAt         string
 	LastSeenAt        string
 	ExpiresAt         string

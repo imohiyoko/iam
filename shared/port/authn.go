@@ -129,11 +129,13 @@ type Session struct {
 	Warnings          []byte   // JSON
 	IP                []byte   // ユーザーのデータ鍵で暗号化したもの
 	UserAgent         []byte   // 同上
-	CreatedAt         time.Time
-	LastSeenAt        time.Time
-	ExpiresAt         time.Time
-	RevokedAt         *time.Time
-	RevokeReason      string
+	// AuthenticatedAt は最後に本人確認した時刻（max_auth_age の判定に使う）。ID を入れ替えても引き継ぐ。
+	AuthenticatedAt time.Time
+	CreatedAt       time.Time // この ID を発行した時刻（ID の入れ替えの判定に使う）
+	LastSeenAt      time.Time
+	ExpiresAt       time.Time
+	RevokedAt       *time.Time
+	RevokeReason    string
 }
 
 // SessionRepo は sessions の Repository。

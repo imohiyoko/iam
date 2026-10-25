@@ -61,7 +61,7 @@ func newEmail(realmID, userID string, index string) port.UserEmail {
 func newSession(realmID, userID string, created time.Time) port.Session {
 	return port.Session{ID: id.New(id.Session), RealmID: realmID, PrincipalType: port.PrincipalUser, PrincipalID: userID,
 		TokenHash: []byte("hash"), AuthMethods: []string{"otp"}, AuthCredentialIDs: []string{"eml_x"}, Warnings: []byte(`[]`),
-		IP: []byte("ip-ct"), UserAgent: []byte("ua-ct"), CreatedAt: created, LastSeenAt: created, ExpiresAt: created.Add(24 * time.Hour)}
+		IP: []byte("ip-ct"), UserAgent: []byte("ua-ct"), AuthenticatedAt: created.Add(-time.Second), CreatedAt: created, LastSeenAt: created, ExpiresAt: created.Add(24 * time.Hour)}
 }
 
 func testUsers(t *testing.T, h Harness) {

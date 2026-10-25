@@ -178,8 +178,8 @@ func (q *Queries) CreateServiceAccountCredential(ctx context.Context, arg Create
 
 const createSession = `-- name: CreateSession :exec
 INSERT INTO authn_sessions (id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids,
-    warnings, ip, user_agent, created_at, last_seen_at, expires_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateSessionParams struct {
@@ -194,6 +194,7 @@ type CreateSessionParams struct {
 	Warnings          []byte
 	Ip                []byte
 	UserAgent         []byte
+	AuthenticatedAt   string
 	CreatedAt         string
 	LastSeenAt        string
 	ExpiresAt         string
@@ -214,6 +215,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 		arg.Warnings,
 		arg.Ip,
 		arg.UserAgent,
+		arg.AuthenticatedAt,
 		arg.CreatedAt,
 		arg.LastSeenAt,
 		arg.ExpiresAt,
@@ -396,7 +398,7 @@ func (q *Queries) GetServiceAccountCredential(ctx context.Context, arg GetServic
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, created_at, last_seen_at, expires_at, revoked_at, revoke_reason FROM authn_sessions WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason FROM authn_sessions WHERE realm_id = ? AND id = ?
 `
 
 type GetSessionParams struct {
@@ -419,6 +421,7 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (AuthnSe
 		&i.Warnings,
 		&i.Ip,
 		&i.UserAgent,
+		&i.AuthenticatedAt,
 		&i.CreatedAt,
 		&i.LastSeenAt,
 		&i.ExpiresAt,
@@ -652,7 +655,7 @@ func (q *Queries) ListRoleBindingsByRole(ctx context.Context, arg ListRoleBindin
 }
 
 const listSessionsByPrincipal = `-- name: ListSessionsByPrincipal :many
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, created_at, last_seen_at, expires_at, revoked_at, revoke_reason FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY id DESC
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY id DESC
 `
 
 type ListSessionsByPrincipalParams struct {
@@ -682,6 +685,7 @@ func (q *Queries) ListSessionsByPrincipal(ctx context.Context, arg ListSessionsB
 			&i.Warnings,
 			&i.Ip,
 			&i.UserAgent,
+			&i.AuthenticatedAt,
 			&i.CreatedAt,
 			&i.LastSeenAt,
 			&i.ExpiresAt,

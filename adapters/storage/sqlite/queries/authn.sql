@@ -37,8 +37,8 @@ SELECT * FROM authn_connections WHERE realm_id = ? ORDER BY slug;
 
 -- name: CreateSession :exec
 INSERT INTO authn_sessions (id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids,
-    warnings, ip, user_agent, created_at, last_seen_at, expires_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetSession :one
 SELECT * FROM authn_sessions WHERE realm_id = ? AND id = ?;

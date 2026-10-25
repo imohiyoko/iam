@@ -64,6 +64,7 @@ CREATE TABLE authn_sessions (
     warnings            BLOB NOT NULL,
     ip                  BLOB NOT NULL,
     user_agent          BLOB NOT NULL,
+    authenticated_at    TEXT NOT NULL,
     created_at          TEXT NOT NULL,
     last_seen_at        TEXT NOT NULL,
     expires_at          TEXT NOT NULL,

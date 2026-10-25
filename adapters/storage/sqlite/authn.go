@@ -191,7 +191,7 @@ func toSession(r db.AuthnSession) (port.Session, error) {
 	var p times
 	s := port.Session{ID: r.ID, RealmID: r.RealmID, PrincipalType: port.PrincipalType(r.PrincipalType), PrincipalID: r.PrincipalID,
 		ActiveOrgID: r.ActiveOrgID, TokenHash: r.TokenHash, Warnings: r.Warnings, IP: r.Ip, UserAgent: r.UserAgent,
-		CreatedAt: p.at(r.CreatedAt), LastSeenAt: p.at(r.LastSeenAt), ExpiresAt: p.at(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt),
+		AuthenticatedAt: p.at(r.AuthenticatedAt), CreatedAt: p.at(r.CreatedAt), LastSeenAt: p.at(r.LastSeenAt), ExpiresAt: p.at(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt),
 		RevokeReason: r.RevokeReason}
 	if p.err != nil {
 		return s, p.err
@@ -214,7 +214,7 @@ func (r sessions) Create(ctx context.Context, s port.Session) error {
 	return mapErr(r.q.CreateSession(ctx, db.CreateSessionParams{ID: s.ID, RealmID: s.RealmID, PrincipalType: string(s.PrincipalType),
 		PrincipalID: s.PrincipalID, ActiveOrgID: s.ActiveOrgID, TokenHash: nonNil(s.TokenHash), AuthMethods: jsonList(s.AuthMethods),
 		AuthCredentialIds: jsonList(s.AuthCredentialIDs), Warnings: nonNil(s.Warnings), Ip: nonNil(s.IP), UserAgent: nonNil(s.UserAgent),
-		CreatedAt: formatTime(s.CreatedAt), LastSeenAt: formatTime(s.LastSeenAt), ExpiresAt: formatTime(s.ExpiresAt),
+		AuthenticatedAt: formatTime(s.AuthenticatedAt), CreatedAt: formatTime(s.CreatedAt), LastSeenAt: formatTime(s.LastSeenAt), ExpiresAt: formatTime(s.ExpiresAt),
 		RevokedAt: nullTime(s.RevokedAt), RevokeReason: s.RevokeReason}))
 }
 
