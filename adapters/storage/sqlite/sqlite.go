@@ -184,6 +184,14 @@ func (t *tx) DataKeys() port.DataKeyRepo   { return dataKeys{t.q} }
 func (t *tx) Audit() port.AuditRepo        { return auditRepo{t.q} }
 func (t *tx) Outbox() port.OutboxRepo      { return outbox{t.q} }
 
+func (t *tx) Users() port.UserRepo                     { return users{t.q} }
+func (t *tx) Emails() port.EmailRepo                   { return emails{t.q} }
+func (t *tx) Identities() port.IdentityRepo            { return identities{t.q} }
+func (t *tx) Connections() port.ConnectionRepo         { return connections{t.q} }
+func (t *tx) Sessions() port.SessionRepo               { return sessions{t.q} }
+func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t.q} }
+func (t *tx) RoleBindings() port.RoleBindingRepo       { return roleBindings{t.q} }
+
 // ---------------------------------------------------------------------------
 
 type realms struct{ q *db.Queries }

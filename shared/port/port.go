@@ -37,6 +37,14 @@ type Tx interface {
 	DataKeys() DataKeyRepo
 	Audit() AuditRepo
 	Outbox() OutboxRepo
+
+	Users() UserRepo
+	Emails() EmailRepo
+	Identities() IdentityRepo
+	Connections() ConnectionRepo
+	Sessions() SessionRepo
+	ServiceAccounts() ServiceAccountRepo
+	RoleBindings() RoleBindingRepo
 }
 
 // Realm はユーザー集合の単位（design.md 3.1）。
