@@ -93,3 +93,23 @@ func BenchmarkGetHit(b *testing.B) {
 		}
 	}
 }
+
+func TestTakeOnce(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC))
+	s := New(clk)
+	ctx := context.Background()
+	if err := s.Set(ctx, "k", []byte("v"), time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, err := s.Take(ctx, "k"); err != nil || !ok || string(v) != "v" {
+		t.Fatalf("Take = %q, %v, %v", v, ok, err)
+	}
+	if _, ok, _ := s.Take(ctx, "k"); ok {
+		t.Fatal("second Take must miss")
+	}
+	_ = s.Set(ctx, "e", []byte("v"), time.Minute)
+	clk.Advance(time.Minute)
+	if _, ok, _ := s.Take(ctx, "e"); ok {
+		t.Fatal("expired entry must not be taken")
+	}
+}

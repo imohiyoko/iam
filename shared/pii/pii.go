@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -137,6 +138,53 @@ func (c *Crypter) index(ctx context.Context, purpose, normalized string) (Index,
 		return Index{}, err
 	}
 	return c.IndexWith(ctx, kid, purpose, normalized)
+}
+
+// Seal は短命のデータ（EphemeralStore に置くフローの状態や通知の秘密）を、現在のマスター鍵から
+// 用途ごとに導いた鍵で暗号化する。ユーザーのデータ鍵に結び付かないため、crypto-shredding の対象外。
+// 結果は keyID の長さ || keyID || seal(...)。
+func (c *Crypter) Seal(ctx context.Context, purpose string, plaintext []byte) ([]byte, error) {
+	kid, err := c.keys.CurrentMasterKeyID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	k, err := c.ephemeralKey(ctx, kid, purpose)
+	if err != nil {
+		return nil, err
+	}
+	if len(kid) > 255 {
+		return nil, errs.New(errs.KindInvalid, "pii: key id too long")
+	}
+	ct, err := seal(k, plaintext, ephemeralAAD(purpose, kid))
+	if err != nil {
+		return nil, err
+	}
+	return append(append([]byte{byte(len(kid))}, kid...), ct...), nil // #nosec G115 -- 上で 255 以下を確かめた
+}
+
+// Open は Seal の逆。
+func (c *Crypter) Open(ctx context.Context, purpose string, sealed []byte) ([]byte, error) {
+	if len(sealed) < 1 || len(sealed) < 1+int(sealed[0]) {
+		return nil, ErrDecrypt
+	}
+	kid := string(sealed[1 : 1+int(sealed[0])])
+	k, err := c.ephemeralKey(ctx, kid, purpose)
+	if err != nil {
+		return nil, err
+	}
+	return open(k, sealed[1+int(sealed[0]):], ephemeralAAD(purpose, kid))
+}
+
+func (c *Crypter) ephemeralKey(ctx context.Context, kid, purpose string) ([]byte, error) {
+	mk, err := c.keys.MasterKey(ctx, kid)
+	if err != nil {
+		return nil, err
+	}
+	return hkdf.Key(sha256.New, mk, nil, "iam/ephemeral/v1\x00"+purpose, KeySize)
+}
+
+func ephemeralAAD(purpose, kid string) []byte {
+	return []byte("iam/eph/v1\x00" + purpose + "\x00" + kid)
 }
 
 // NormalizeEmail はメールアドレスを小文字化する。それ以外の正規化（ドットや + の除去）はしない。

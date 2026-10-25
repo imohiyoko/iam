@@ -49,8 +49,8 @@ func (s publicServer) Logout(ctx context.Context, _ publicapi.LogoutRequestObjec
 			return nil, err
 		}
 	}
-	c := clearSessionCookie().String()
-	return publicapi.Logout204Response{Headers: publicapi.Logout204ResponseHeaders{SetCookie: &c}}, nil
+	setCookie(ctx, clearSessionCookie())
+	return publicapi.Logout204Response{}, nil
 }
 
 func unauthenticated() publicapi.UnauthenticatedJSONResponse {
@@ -100,10 +100,11 @@ func (s adminServer) GetHealth(ctx context.Context, _ adminapi.GetHealthRequestO
 }
 
 func newAdminHandler(a *App) http.Handler {
-	return adminapi.Handler(adminapi.NewStrictHandlerWithOptions(adminServer{a}, nil, adminapi.StrictHTTPServerOptions{
+	h := adminapi.HandlerWithOptions(adminapi.NewStrictHandlerWithOptions(adminServer{a}, nil, adminapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.responseError,
-	}))
+	}), adminapi.StdHTTPServerOptions{BaseRouter: newColonMux(), ErrorHandlerFunc: a.requestError})
+	return a.withAdminAuth(h)
 }
 
 // requestError は要求の形式の誤りを返す。内部の説明は返さない。
@@ -137,6 +138,9 @@ func withCommon(h http.Handler) http.Handler {
 		rid := id.NewExternal(id.Request)
 		ctx := context.WithValue(r.Context(), requestIDKey{}, rid)
 		ctx = context.WithValue(ctx, clientKey{}, clientOf(r))
+		// 生成されたハンドラ（strict server）は *http.Request と ResponseWriter を受け取らないため、
+		// Cookie の読み書きに使えるよう context に載せる。
+		ctx = context.WithValue(ctx, httpKey{}, httpPair{w: w, r: r})
 		r = r.WithContext(ctx)
 		hdr.Set("X-Request-Id", rid)
 		hdr.Set("X-Content-Type-Options", "nosniff")
@@ -145,4 +149,32 @@ func withCommon(h http.Handler) http.Handler {
 		hdr.Set("X-Frame-Options", "DENY")
 		h.ServeHTTP(w, r)
 	})
+}
+
+type httpKey struct{}
+
+type httpPair struct {
+	w http.ResponseWriter
+	r *http.Request
+}
+
+func httpFrom(ctx context.Context) httpPair {
+	p, _ := ctx.Value(httpKey{}).(httpPair)
+	return p
+}
+
+// setCookie は応答に Cookie を足す。ハンドラが応答を書く前に呼ぶ。
+func setCookie(ctx context.Context, c *http.Cookie) {
+	if p := httpFrom(ctx); p.w != nil {
+		http.SetCookie(p.w, c)
+	}
+}
+
+func cookie(ctx context.Context, name string) string {
+	if p := httpFrom(ctx); p.r != nil {
+		if c, err := p.r.Cookie(name); err == nil {
+			return c.Value
+		}
+	}
+	return ""
 }

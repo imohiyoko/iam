@@ -76,15 +76,26 @@ func Verify(ctx context.Context, s port.Storage) (last []byte, n int64, err erro
 	}
 }
 
-// Relay は outbox の監査イベントを EventSink に送る（少なくとも1回）。
-// 受け取る側はイベント ID で重複排除する。
+// Relay は outbox のメッセージを外部に送る（少なくとも1回）。受け取る側は ID で重複排除する。
+//
+// 既定では監査イベント（TopicAudit）を Sink に送る。Deliver を指定すると Topic のメッセージを Deliver に渡す
+// （通知など）。Deliver は送れたメッセージの ID を返す。
 type Relay struct {
 	Storage  port.Storage
 	Sink     port.EventSink
+	Topic    string
+	Deliver  func(ctx context.Context, msgs []port.OutboxMessage) (delivered []string, err error)
 	Clock    clock.Clock
 	Interval time.Duration
 	Batch    int
 	Log      *slog.Logger
+}
+
+func (r *Relay) topic() string {
+	if r.Topic == "" {
+		return TopicAudit
+	}
+	return r.Topic
 }
 
 // Run は ctx が終わるまで送出を繰り返す。
@@ -108,11 +119,22 @@ func (r *Relay) Flush(ctx context.Context) (int, error) {
 	var pending []port.OutboxMessage
 	err := r.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		pending, err = tx.Outbox().Pending(ctx, TopicAudit, r.batch())
+		pending, err = tx.Outbox().Pending(ctx, r.topic(), r.batch())
 		return err
 	})
 	if err != nil || len(pending) == 0 {
 		return 0, err
+	}
+	if r.Deliver != nil {
+		ids, derr := r.Deliver(ctx, pending)
+		if len(ids) > 0 {
+			if err := r.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+				return tx.Outbox().MarkDelivered(ctx, ids, r.Clock.Now())
+			}); err != nil {
+				return 0, err
+			}
+		}
+		return len(ids), derr
 	}
 	events := make([]audit.Event, 0, len(pending))
 	ids := make([]string, 0, len(pending))

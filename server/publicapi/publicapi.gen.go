@@ -48,6 +48,20 @@ type Health struct {
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
 
+// LoginResult defines model for LoginResult.
+type LoginResult struct {
+	// Created 新規登録だったか
+	Created   bool      `json:"created"`
+	ExpiresAt time.Time `json:"expires_at"`
+	SessionId string    `json:"session_id"`
+
+	// Token `return_token: true` のときだけ。Bearer で使う
+	Token *string `json:"token,omitempty"`
+
+	// UserId 公開のユーザー ID（内部 ID は返さない。ADR 0045）
+	UserId string `json:"user_id"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	AuthMethods     []string  `json:"auth_methods"`
@@ -62,17 +76,45 @@ type Session struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
+// BadRequest defines model for BadRequest.
+type BadRequest = Error
+
 // NotFound defines model for NotFound.
 type NotFound = Error
 
 // Unauthenticated defines model for Unauthenticated.
 type Unauthenticated = Error
 
+// StartEmailLoginJSONBody defines parameters for StartEmailLogin.
+type StartEmailLoginJSONBody struct {
+	Email string `json:"email"`
+}
+
+// VerifyEmailLoginJSONBody defines parameters for VerifyEmailLogin.
+type VerifyEmailLoginJSONBody struct {
+	Code        *string `json:"code,omitempty"`
+	FlowId      *string `json:"flow_id,omitempty"`
+	ReturnToken *bool   `json:"return_token,omitempty"`
+	Token       *string `json:"token,omitempty"`
+}
+
+// StartEmailLoginJSONRequestBody defines body for StartEmailLogin for application/json ContentType.
+type StartEmailLoginJSONRequestBody StartEmailLoginJSONBody
+
+// VerifyEmailLoginJSONRequestBody defines body for VerifyEmailLogin for application/json ContentType.
+type VerifyEmailLoginJSONRequestBody VerifyEmailLoginJSONBody
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// StartEmailLogin メールのコード・マジックリンクによる登録・ログインを始める
+	// (POST /v1/login/email:start)
+	StartEmailLogin(w http.ResponseWriter, r *http.Request)
+	// VerifyEmailLogin コードかマジックリンクのトークンでフローを完了する
+	// (POST /v1/login/email:verify)
+	VerifyEmailLogin(w http.ResponseWriter, r *http.Request)
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
@@ -98,6 +140,34 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartEmailLogin operation middleware
+func (siw *ServerInterfaceWrapper) StartEmailLogin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartEmailLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyEmailLogin operation middleware
+func (siw *ServerInterfaceWrapper) VerifyEmailLogin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyEmailLogin(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -282,12 +352,16 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/healthz", wrapper.GetHealth)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/email:start", wrapper.StartEmailLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/email:verify", wrapper.VerifyEmailLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/logout", wrapper.Logout)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/sessions", wrapper.ListMySessions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/sessions/{id}:revoke", wrapper.RevokeMySession)
 
 	return m
 }
+
+type BadRequestJSONResponse Error
 
 type NotFoundJSONResponse Error
 
@@ -324,6 +398,81 @@ func (response GetHealth503JSONResponse) VisitGetHealthResponse(w http.ResponseW
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailLoginRequestObject struct {
+	Body *StartEmailLoginJSONRequestBody
+}
+
+type StartEmailLoginResponseObject interface {
+	VisitStartEmailLoginResponse(w http.ResponseWriter) error
+}
+
+type StartEmailLogin200JSONResponse struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	FlowId    string    `json:"flow_id"`
+}
+
+func (response StartEmailLogin200JSONResponse) VisitStartEmailLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailLogin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response StartEmailLogin400JSONResponse) VisitStartEmailLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyEmailLoginRequestObject struct {
+	Body *VerifyEmailLoginJSONRequestBody
+}
+
+type VerifyEmailLoginResponseObject interface {
+	VisitVerifyEmailLoginResponse(w http.ResponseWriter) error
+}
+
+type VerifyEmailLogin200JSONResponse LoginResult
+
+func (response VerifyEmailLogin200JSONResponse) VisitVerifyEmailLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyEmailLogin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response VerifyEmailLogin401JSONResponse) VisitVerifyEmailLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -437,6 +586,12 @@ type StrictServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
+	// StartEmailLogin メールのコード・マジックリンクによる登録・ログインを始める
+	// (POST /v1/login/email:start)
+	StartEmailLogin(ctx context.Context, request StartEmailLoginRequestObject) (StartEmailLoginResponseObject, error)
+	// VerifyEmailLogin コードかマジックリンクのトークンでフローを完了する
+	// (POST /v1/login/email:verify)
+	VerifyEmailLogin(ctx context.Context, request VerifyEmailLoginRequestObject) (VerifyEmailLoginResponseObject, error)
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
@@ -504,6 +659,68 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
 		if err := validResponse.VisitGetHealthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartEmailLogin operation middleware
+func (sh *strictHandler) StartEmailLogin(w http.ResponseWriter, r *http.Request) {
+	var request StartEmailLoginRequestObject
+
+	var body StartEmailLoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartEmailLogin(ctx, request.(StartEmailLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartEmailLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartEmailLoginResponseObject); ok {
+		if err := validResponse.VisitStartEmailLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyEmailLogin operation middleware
+func (sh *strictHandler) VerifyEmailLogin(w http.ResponseWriter, r *http.Request) {
+	var request VerifyEmailLoginRequestObject
+
+	var body VerifyEmailLoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyEmailLogin(ctx, request.(VerifyEmailLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyEmailLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyEmailLoginResponseObject); ok {
+		if err := validResponse.VisitVerifyEmailLoginResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

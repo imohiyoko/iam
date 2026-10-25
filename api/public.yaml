@@ -26,6 +26,61 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
 
+  /v1/login/email:start:
+    post:
+      operationId: startEmailLogin
+      summary: メールのコード・マジックリンクによる登録・ログインを始める
+      description: |
+        登録済みのアドレスならログイン、未登録なら登録のコードとリンクを通知する。どちらも同じ応答を返す（4.9）。
+        `flow_id` は要求した側だけが持つ秘密で、検証のときに必要になる。ブラウザには `__Host-iam_flow` Cookie でも渡す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, maxLength: 254 }
+      responses:
+        "200":
+          description: 開始した（送信したかどうかは返さない）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flow_id, expires_at]
+                properties:
+                  flow_id: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/login/email:verify:
+    post:
+      operationId: verifyEmailLogin
+      summary: コードかマジックリンクのトークンでフローを完了する
+      description: |
+        `flow_id` は本文か `__Host-iam_flow` Cookie で渡す。`code` と `token` のどちらか1つを渡す。
+        成功するとセッションを発行する。ブラウザには Cookie で、`return_token: true` なら本文でトークンを返す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                flow_id: { type: string }
+                code: { type: string }
+                token: { type: string }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: ログインした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
   /v1/logout:
     post:
       operationId: logout
@@ -68,6 +123,11 @@ paths:
 
 components:
   responses:
+    BadRequest:
+      description: 要求の形式の誤り
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     Unauthenticated:
       description: 本人確認の失敗（理由は返さない）
       content:
@@ -93,6 +153,15 @@ components:
         error:
           type: string
           description: 公開の契約のコード（design.md 4.9、11.10）
+    LoginResult:
+      type: object
+      required: [session_id, expires_at, user_id, created]
+      properties:
+        session_id: { type: string }
+        expires_at: { type: string, format: date-time }
+        user_id: { type: string, description: 公開のユーザー ID（内部 ID は返さない。ADR 0045） }
+        created: { type: boolean, description: 新規登録だったか }
+        token: { type: string, description: "`return_token: true` のときだけ。Bearer で使う" }
     Session:
       type: object
       required: [id, authenticated_at, last_seen_at, expires_at, auth_methods, current]

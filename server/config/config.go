@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -72,11 +73,24 @@ type Adapter struct {
 type Realm struct {
 	Slug     string `yaml:"slug"`
 	Timezone string `yaml:"timezone"`
+	// VerifiedVia はメールを「確認済み」とみなす経路（design.md 4.1）。
+	// メールを送れない環境では code を外し、OAuth と運営者による登録で運用する。
+	VerifiedVia []string `yaml:"verified_via"`
 }
+
+// KnownVerifiedVia は経路の名前。
+var KnownVerifiedVia = []string{"code", "oauth_provider", "sso", "invitation", "admin"}
 
 // Security はセキュリティ設定の階層の、ホスト先の段。
 type Security struct {
-	Session SessionRules `yaml:"session"`
+	Session   SessionRules `yaml:"session"`
+	EmailFlow EmailFlow    `yaml:"email_flow"`
+}
+
+// EmailFlow はメールのコード・マジックリンクの設定（design.md 4.1）。
+type EmailFlow struct {
+	TTL         Duration `yaml:"ttl"`
+	MaxAttempts int      `yaml:"max_attempts"`
 }
 
 // SessionRules はセッションの寿命の規則（design.md 5.4）。短いほど厳しい。
@@ -159,7 +173,7 @@ func Default() Config {
 		KeyStore:  Adapter{Driver: "file", Options: map[string]string{"path": "keys.json"}},
 		EventSink: Adapter{Driver: "stdout"},
 		Notifier:  Adapter{Driver: "dev"},
-		Realm:     Realm{Slug: "default", Timezone: "UTC"},
+		Realm:     Realm{Slug: "default", Timezone: "UTC", VerifiedVia: []string{"code", "oauth_provider", "sso", "admin"}},
 		Security: Security{Session: SessionRules{
 			AbsoluteLifetime: DurationRule{Default: Duration(30 * day), Min: Duration(time.Hour), Max: Duration(90 * day)},
 			IdleTimeout:      DurationRule{Default: Duration(7 * day), Min: Duration(5 * time.Minute), Max: Duration(30 * day)},
@@ -167,7 +181,7 @@ func Default() Config {
 			ValidityMaxDelay: Duration(30 * time.Second),
 			RotationInterval: Duration(time.Hour),
 			RotationGrace:    Duration(time.Minute),
-		}},
+		}, EmailFlow: EmailFlow{TTL: Duration(10 * time.Minute), MaxAttempts: 5}},
 		Outbox: Outbox{Interval: Duration(time.Second), Batch: 100},
 		IDs:    IDs{Internal: "uuidv7", External: "random"},
 	}
@@ -226,6 +240,14 @@ func (c Config) Validate() error {
 	}
 	if c.Realm.Slug == "" {
 		problems = append(problems, "realm.slug is required")
+	}
+	for _, v := range c.Realm.VerifiedVia {
+		if !slices.Contains(KnownVerifiedVia, v) {
+			problems = append(problems, fmt.Sprintf("realm.verified_via: unknown %q (known: %v)", v, KnownVerifiedVia))
+		}
+	}
+	if ef := c.Security.EmailFlow; ef.TTL.D() <= 0 || ef.TTL.D() > time.Hour || ef.MaxAttempts < 1 || ef.MaxAttempts > 10 {
+		problems = append(problems, "security.email_flow: ttl must be within (0, 1h] and max_attempts within [1, 10]")
 	}
 	if _, err := time.LoadLocation(c.Realm.Timezone); err != nil {
 		problems = append(problems, fmt.Sprintf("realm.timezone: %v", err))
