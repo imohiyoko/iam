@@ -9,7 +9,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -98,11 +100,30 @@ type VerifyEmailLoginJSONBody struct {
 	Token       *string `json:"token,omitempty"`
 }
 
+// StartOAuthLoginJSONBody defines parameters for StartOAuthLogin.
+type StartOAuthLoginJSONBody struct {
+	RedirectUri *string `json:"redirect_uri,omitempty"`
+}
+
+// CompleteOAuthLoginJSONBody defines parameters for CompleteOAuthLogin.
+type CompleteOAuthLoginJSONBody struct {
+	Code        string  `json:"code"`
+	FlowId      *string `json:"flow_id,omitempty"`
+	ReturnToken *bool   `json:"return_token,omitempty"`
+	State       string  `json:"state"`
+}
+
 // StartEmailLoginJSONRequestBody defines body for StartEmailLogin for application/json ContentType.
 type StartEmailLoginJSONRequestBody StartEmailLoginJSONBody
 
 // VerifyEmailLoginJSONRequestBody defines body for VerifyEmailLogin for application/json ContentType.
 type VerifyEmailLoginJSONRequestBody VerifyEmailLoginJSONBody
+
+// StartOAuthLoginJSONRequestBody defines body for StartOAuthLogin for application/json ContentType.
+type StartOAuthLoginJSONRequestBody StartOAuthLoginJSONBody
+
+// CompleteOAuthLoginJSONRequestBody defines body for CompleteOAuthLogin for application/json ContentType.
+type CompleteOAuthLoginJSONRequestBody CompleteOAuthLoginJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -115,6 +136,12 @@ type ServerInterface interface {
 	// VerifyEmailLogin コードかマジックリンクのトークンでフローを完了する
 	// (POST /v1/login/email:verify)
 	VerifyEmailLogin(w http.ResponseWriter, r *http.Request)
+	// StartOAuthLogin 外部プロバイダ（OAuth / OIDC）による登録・ログインを始める
+	// (POST /v1/login/oauth/{connection}:start)
+	StartOAuthLogin(w http.ResponseWriter, r *http.Request, connection string)
+	// CompleteOAuthLogin プロバイダからの戻り（state と code）でフローを完了する
+	// (POST /v1/login/oauth:complete)
+	CompleteOAuthLogin(w http.ResponseWriter, r *http.Request)
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
@@ -168,6 +195,46 @@ func (siw *ServerInterfaceWrapper) VerifyEmailLogin(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.VerifyEmailLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOAuthLogin operation middleware
+func (siw *ServerInterfaceWrapper) StartOAuthLogin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection" -------------
+	var connection string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection", r.PathValue("connection"), &connection, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOAuthLogin(w, r, connection)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteOAuthLogin operation middleware
+func (siw *ServerInterfaceWrapper) CompleteOAuthLogin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteOAuthLogin(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -354,6 +421,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/healthz", wrapper.GetHealth)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/email:start", wrapper.StartEmailLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/email:verify", wrapper.VerifyEmailLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth/{connection}:start", wrapper.StartOAuthLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth:complete", wrapper.CompleteOAuthLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/logout", wrapper.Logout)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/sessions", wrapper.ListMySessions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/sessions/{id}:revoke", wrapper.RevokeMySession)
@@ -477,6 +546,125 @@ func (response VerifyEmailLogin401JSONResponse) VisitVerifyEmailLoginResponse(w 
 	return err
 }
 
+type StartOAuthLoginRequestObject struct {
+	Connection string `json:"connection"`
+	Body       *StartOAuthLoginJSONRequestBody
+}
+
+type StartOAuthLoginResponseObject interface {
+	VisitStartOAuthLoginResponse(w http.ResponseWriter) error
+}
+
+type StartOAuthLogin200JSONResponse struct {
+	AuthorizationUrl string    `json:"authorization_url"`
+	ExpiresAt        time.Time `json:"expires_at"`
+	FlowId           string    `json:"flow_id"`
+}
+
+func (response StartOAuthLogin200JSONResponse) VisitStartOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartOAuthLogin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response StartOAuthLogin400JSONResponse) VisitStartOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartOAuthLogin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response StartOAuthLogin404JSONResponse) VisitStartOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteOAuthLoginRequestObject struct {
+	Body *CompleteOAuthLoginJSONRequestBody
+}
+
+type CompleteOAuthLoginResponseObject interface {
+	VisitCompleteOAuthLoginResponse(w http.ResponseWriter) error
+}
+
+type CompleteOAuthLogin200JSONResponse LoginResult
+
+func (response CompleteOAuthLogin200JSONResponse) VisitCompleteOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteOAuthLogin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CompleteOAuthLogin400JSONResponse) VisitCompleteOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteOAuthLogin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteOAuthLogin401JSONResponse) VisitCompleteOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteOAuthLogin409JSONResponse Error
+
+func (response CompleteOAuthLogin409JSONResponse) VisitCompleteOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type LogoutRequestObject struct {
 }
 
@@ -592,6 +780,12 @@ type StrictServerInterface interface {
 	// VerifyEmailLogin コードかマジックリンクのトークンでフローを完了する
 	// (POST /v1/login/email:verify)
 	VerifyEmailLogin(ctx context.Context, request VerifyEmailLoginRequestObject) (VerifyEmailLoginResponseObject, error)
+	// StartOAuthLogin 外部プロバイダ（OAuth / OIDC）による登録・ログインを始める
+	// (POST /v1/login/oauth/{connection}:start)
+	StartOAuthLogin(ctx context.Context, request StartOAuthLoginRequestObject) (StartOAuthLoginResponseObject, error)
+	// CompleteOAuthLogin プロバイダからの戻り（state と code）でフローを完了する
+	// (POST /v1/login/oauth:complete)
+	CompleteOAuthLogin(ctx context.Context, request CompleteOAuthLoginRequestObject) (CompleteOAuthLoginResponseObject, error)
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
@@ -721,6 +915,73 @@ func (sh *strictHandler) VerifyEmailLogin(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(VerifyEmailLoginResponseObject); ok {
 		if err := validResponse.VisitVerifyEmailLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartOAuthLogin operation middleware
+func (sh *strictHandler) StartOAuthLogin(w http.ResponseWriter, r *http.Request, connection string) {
+	var request StartOAuthLoginRequestObject
+
+	request.Connection = connection
+
+	var body StartOAuthLoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartOAuthLogin(ctx, request.(StartOAuthLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartOAuthLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartOAuthLoginResponseObject); ok {
+		if err := validResponse.VisitStartOAuthLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteOAuthLogin operation middleware
+func (sh *strictHandler) CompleteOAuthLogin(w http.ResponseWriter, r *http.Request) {
+	var request CompleteOAuthLoginRequestObject
+
+	var body CompleteOAuthLoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteOAuthLogin(ctx, request.(CompleteOAuthLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteOAuthLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteOAuthLoginResponseObject); ok {
+		if err := validResponse.VisitCompleteOAuthLoginResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

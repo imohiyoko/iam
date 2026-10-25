@@ -81,6 +81,73 @@ paths:
               schema: { $ref: "#/components/schemas/LoginResult" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
 
+  /v1/login/oauth/{connection}:start:
+    post:
+      operationId: startOAuthLogin
+      summary: 外部プロバイダ（OAuth / OIDC）による登録・ログインを始める
+      description: |
+        プロバイダの認可 URL を返す。ブラウザをそこへ移し、戻り先で受け取った `state` と `code` を
+        `/v1/login/oauth:complete` に渡す。`flow_id` は要求した側だけが持つ秘密で、ブラウザには
+        `__Host-iam_oauth` Cookie でも渡す。`redirect_uri` は connection の許可リストにあるものに限る（2.5）。
+      parameters:
+        - { name: connection, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                redirect_uri: { type: string }
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flow_id, authorization_url, expires_at]
+                properties:
+                  flow_id: { type: string }
+                  authorization_url: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/login/oauth:complete:
+    post:
+      operationId: completeOAuthLogin
+      summary: プロバイダからの戻り（state と code）でフローを完了する
+      description: |
+        `flow_id` は本文か `__Host-iam_oauth` Cookie で渡す。外部 ID が紐付いていればログイン、未登録で
+        プロバイダが確認済みのメールなら登録する。メールが別のユーザーで登録済みなら自動リンクせず
+        `409 account_exists` を返す（4.2。ログインしてから連携する）。プロバイダがメールを確認済みとしていなければ
+        `400 email_unverified`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, code]
+              properties:
+                flow_id: { type: string }
+                state: { type: string }
+                code: { type: string }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: ログインした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409":
+          description: メールが別のユーザーで登録済み（自動リンクしない）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /v1/logout:
     post:
       operationId: logout

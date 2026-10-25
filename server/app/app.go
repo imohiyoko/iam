@@ -20,6 +20,7 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/emailflow"
 	"github.com/imohiyoko/iam/authn/notify"
+	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -56,6 +57,7 @@ type App struct {
 	accounts *account.Service
 	notify   *notify.Service
 	email    *emailflow.Service
+	oauth    *oauth.Service
 	notifier *eventlog.Relay
 	public   http.Handler
 	admin    http.Handler
@@ -130,6 +132,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Notify: a.notify, Log: d.Logger,
 		Config: emailflow.Config{TTL: cfg.Security.EmailFlow.TTL.D(), MaxAttempts: cfg.Security.EmailFlow.MaxAttempts},
+	}
+	a.oauth = &oauth.Service{
+		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
+		Dev: cfg.Dev, TTL: cfg.Security.EmailFlow.TTL.D(), Log: d.Logger,
 	}
 	a.notifier = &eventlog.Relay{
 		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Logger), Clock: d.Clock,
