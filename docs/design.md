@@ -237,7 +237,7 @@ users
   realm_id
   owner_org_id      -- NULL なら個人所有。値があればその Org が管理するユーザー（11.3）
   display_name
-  status            -- active / suspended / deleted / merged
+  status            -- active / deleted / merged（停止は suspensions で管理する。4.7）
   merged_into       -- アカウント統合で吸収された場合の統合先（11.6）
   created_at, updated_at
 
@@ -268,6 +268,7 @@ user_identities     -- OAuth / SSO などの外部 ID
   provider_subject  -- プロバイダ側の不変 ID (sub)
   email_at_link     -- 連携時点のメール（参考情報。識別には使わない。暗号化して保存）
   created_at
+  revoked_at, revoked_by, revoke_reason   -- 無効化の記録（4.6）
   UNIQUE (connection_id, provider_subject)
 
 connections         -- 外部 IdP との接続設定
@@ -287,6 +288,7 @@ passkeys
   transports
   name              -- ユーザーが付ける名前
   created_at, last_used_at
+  revoked_at, revoked_by, revoke_reason   -- 無効化の記録（4.6）
 
 service_accounts    -- 人間以外の主体（11.2）
   id (PK)
@@ -300,7 +302,8 @@ service_account_credentials
   service_account_id
   type              -- client_secret / private_key_jwt / api_key
   secret_hash or public_key
-  expires_at, revoked_at
+  expires_at
+  revoked_at, revoked_by, revoke_reason   -- 無効化の記録（4.6）
 
 orgs                -- Org フィーチャー（11.13）がオンのときだけ使う
   id (PK)
@@ -333,9 +336,27 @@ sessions
   principal_id
   active_org_id (FK orgs, NULL 可)  -- Org フィーチャーがオンなら常に値がある（個人 Org を含む）。オフなら常に NULL
   auth_methods      -- どの手段で認証したか (amr)
+  auth_credential_ids -- 認証に使った認証手段の ID（認証手段の無効化時に、関連するセッションを特定するため。4.6）
   warnings          -- 認証時に出た警告コードの一覧（10章）
   ip, user_agent
   created_at, last_seen_at, expires_at, revoked_at
+
+suspensions         -- 停止（4.7）
+  id (PK)
+  realm_id
+  target_type       -- user / org / service_account / membership
+  target_id
+  reason
+  starts_at         -- 停止の開始時刻（未来の時刻を指定して予約もできる）
+  ends_at           -- 停止の終了時刻。NULL なら無期限
+  created_by, created_at
+  lifted_at, lifted_by   -- 期限前に解除した場合の記録
+
+revoked_passkey_credentials  -- 無効化した passkey の credential_id（再登録を防ぐ）
+  realm_id
+  credential_id
+  revoked_at
+  PRIMARY KEY (realm_id, credential_id)
 
 org_login_policies  -- Org への入り方の制約
   org_id (FK orgs)
@@ -435,6 +456,97 @@ check(principal, action, resource, context) -> allow / deny
 - 有効なフィーチャーに応じて判定の実装を起動時に組み立てる（11章）。最小構成なら「Org 単位の RBAC」だけの単純な判定になる
 - 将来 OpenFGA / Cedar 等に載せ替える場合も、このシグネチャのまま実装を差し替える
 
+### 4.6 認証情報の無効化
+
+漏洩・紛失・退職などに備え、認証情報を個別にも一括でも無効化できる口を用意する。
+
+#### 対象と操作
+
+| 対象 | 個別 | 一括 |
+|---|---|---|
+| セッション | 指定したセッションを失効 | ユーザーの全セッション / 指定したセッション以外を失効 |
+| リフレッシュトークン | 指定したファミリーを失効 | ユーザー・クライアント単位で失効 |
+| passkey | 指定した passkey を無効化 | ユーザーの全 passkey を無効化 |
+| 外部 ID（OAuth / SSO の連携） | 指定した連携を無効化 | ユーザーの全連携を無効化 |
+| パスワード（有効な場合） | 無効化して再設定を必須にする | ― |
+| サービスアカウントの認証情報 | 指定したシークレット・鍵・API キーを無効化 | サービスアカウントの全認証情報を無効化 |
+
+- **全部まとめて**：「このユーザーの全認証情報と全セッションを無効化する」操作も用意する（侵害が疑われるときの初動用）
+
+#### 無効化の扱い
+
+- **削除ではなく無効化**：行は残し、`revoked_at`・実行者・理由を記録する。監査とインシデント調査のため
+- **無効化は取り消せない**：同じ認証情報を再び有効にはしない。必要なら新しく登録し直す
+  - passkey は `revoked_passkey_credentials` に credential_id を記録し、同じ認証器の鍵の再登録も拒否する
+- **関連するセッションも失効させる**：無効化した認証情報で認証したセッション（`sessions.auth_credential_ids` で特定）を同時に失効させる
+- OIDC の Back-Channel Logout で連携先にも通知する（5.2）
+
+#### 誰が実行できるか
+
+- **本人**：自分の認証情報・セッション（公開 API）。ただし 4.3 の通り、最後の1つの認証手段は無効化できない
+- **管理者**：管理 API から実行する。管理者は最後の1つも無効化できる（その場合、ユーザーはアカウント復旧の手順でしか戻れない）
+- **Org の管理者**：その Org の管理ユーザー（11.3）とサービスアカウントについてのみ
+
+### 4.7 停止（ユーザー・Org）
+
+ユーザー・Org・サービスアカウント・Membership を、**無期限または期間を指定して**停止できるようにする。削除とは違い、解除すれば元に戻る。
+
+#### 停止の指定
+
+- `starts_at`（省略時は即時）と `ends_at`（省略時は無期限）を指定する
+- 未来の開始時刻を指定して予約できる（「来月1日から停止」など）
+- 期限が来れば自動的に解除される。期限前に手動で解除することもできる
+- 1つの対象に複数の停止が重なってもよい。どれか1つでも有効なら停止中とみなす（別々の理由・担当者による停止を独立に管理できる）
+
+#### 停止の判定
+
+- 停止中かどうかは、**時刻を使って判定時に計算する**（`starts_at ≤ 現在 < ends_at` かつ未解除）。開始・終了のためのスケジューラは不要
+- セッションの検証時にも判定する。そのため、予約した停止が始まった時点で既存のセッションも使えなくなる
+  - ホットパスのコストを抑えるため、対象ごとの停止状態を EphemeralStore にキャッシュし、停止の追加・解除時に無効化する
+
+#### 停止の影響
+
+| 対象 | 影響 |
+|---|---|
+| ユーザー | ログイン不可。既存のセッション・リフレッシュトークンは使えなくなる。連携先には Back-Channel Logout で通知 |
+| Org | メンバーはその Org に入れない（4.4 の候補から外れる）。その Org を active にしているセッションは、個人 Org に切り替えるまで Org の操作ができない。その Org のサービスアカウントも使えない |
+| Org（管理ユーザーへの波及） | Org 管理ユーザー（11.3）も停止するかを、停止時に選べる（既定は停止する） |
+| サービスアカウント | 認証不可。発行済みのトークンも使えなくなる |
+| Membership | そのユーザーは、その Org にだけ入れない。他の Org や個人 Org には影響しない |
+
+- 個人 Org を個別に停止することはできない（ユーザーを停止する）
+- アクセストークンを JWT にすると停止を即時に反映できない（有効期限まで使える）。これも不透明トークンを推す理由の1つ（8章の未決事項）
+
+#### 誰が実行できるか
+
+- **管理者**：すべての対象
+- **Org の管理者**：その Org の Membership、管理ユーザー、サービスアカウント
+- 停止された本人は、自分の停止を解除できない
+
+### 4.8 管理 API の口（概要）
+
+```
+# 認証情報の無効化
+POST /v1/admin/users/{user_id}/sessions:revoke            # 全セッション（除外指定可）
+POST /v1/admin/users/{user_id}/credentials/{cred_id}:revoke
+POST /v1/admin/users/{user_id}/credentials:revoke-all     # 種類の絞り込み可
+POST /v1/admin/service-accounts/{sa_id}/credentials/{cred_id}:revoke
+
+# 停止
+POST   /v1/admin/{users|orgs|service-accounts|memberships}/{id}/suspensions
+       { "reason": "...", "starts_at": "...", "ends_at": "..." }   # ends_at 省略で無期限
+GET    /v1/admin/{users|orgs|service-accounts|memberships}/{id}/suspensions
+POST   /v1/admin/suspensions/{suspension_id}:lift
+
+# 本人向け（公開 API）
+POST /v1/me/sessions/{session_id}:revoke
+POST /v1/me/credentials/{cred_id}:revoke
+```
+
+- すべての操作で理由の入力を必須にし、監査ログ・SIEM に出す（6章）
+- 停止・無効化を本人に通知するかは、Notifier のイベントとしてホスト先が決める
+
+
 ## 5. トークン・セッション
 
 ### 5.1 概要
@@ -483,6 +595,7 @@ check(principal, action, resource, context) -> allow / deny
 - メール検証
 - Org 切り替え
 - Membership / Group / Role の変更
+- 認証情報の無効化、停止の追加・解除・期限切れ（4.6, 4.7）
 - 管理 API の操作（誰が、何を、どう変えたか）
 - フィーチャーの有効化・無効化（11.12）、鍵のローテーション
 - レートリミットの発動、リフレッシュトークンの再利用検知などの異常
@@ -1014,6 +1127,7 @@ DB のテスト        │ 契約テスト × 各アダプタ          │  ← 
   - 別 realm のデータは返らない（12.3）
   - セッショントークンの秘密部分はログ・イベントに出ない（5.2）
   - ログイン・権限変更時にセッション ID が入れ替わる（5.2）
+  - 無効化した認証情報・停止中の対象では認証できず、関連するセッションも使えない（4.6, 4.7）
   - Org の上書きでサーバーの警告アクションを緩められない（10.2）
 - 不変条件のテストが消えたり弱められたりした変更は、CI で検出してレビュー必須にする
 
