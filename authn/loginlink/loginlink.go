@@ -141,6 +141,9 @@ func (s *Service) redeem(ctx context.Context, realmID, token string, c Client, r
 		})
 		return err
 	})
+	if err == nil {
+		s.Sessions.Committed(ctx, realmID, out)
+	}
 	return out, p.UserID, err
 }
 

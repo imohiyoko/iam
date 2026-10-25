@@ -33,6 +33,12 @@ func (r *recorder) Notify(_ context.Context, n port.Notification) error {
 	return nil
 }
 
+func (r *recorder) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.got)
+}
+
 func (r *recorder) last(t *testing.T) port.Notification {
 	t.Helper()
 	r.mu.Lock()
@@ -50,6 +56,7 @@ type loginEnv struct {
 	notes  *recorder
 	apiKey string
 	out    bytes.Buffer
+	codes  []string // claim で受け取ったコード（秘密が漏れないことの確認用）
 }
 
 func newLoginEnv(t *testing.T) *loginEnv {
@@ -134,6 +141,7 @@ func (l *loginEnv) login(t *testing.T, email string) (map[string]any, string) {
 	if err := json.Unmarshal(w.Body.Bytes(), &sec); err != nil || sec.Code == "" {
 		t.Fatalf("claim body: %s %v", w.Body, err)
 	}
+	l.codes = append(l.codes, sec.Code)
 	w = l.do(t, l.a.PublicHandler(), "POST", "/v1/login/email:verify", map[string]string{"flow_id": st.FlowID, "code": sec.Code})
 	if w.Code != 200 {
 		t.Fatalf("verify: %d %s", w.Code, w.Body)

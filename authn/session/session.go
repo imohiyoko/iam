@@ -92,6 +92,16 @@ type Issued struct {
 	Token   string
 	// Warnings は本人に返す警告（ignore のものは含まない）。
 	Warnings []warning.Warning
+	// Replaced は入れ替えで失効させた古いセッションの ID（無ければ空）。
+	Replaced string
+}
+
+// Committed は Issue を呼んだトランザクションが確定した後に呼ぶ。入れ替えた古いセッションの
+// 有効性のキャッシュを消し、失効をすぐに反映する（確定の前に消すと、間に古い状態が載り直しうる）。
+func (m *Manager) Committed(ctx context.Context, realmID string, is Issued) {
+	if is.Replaced != "" {
+		m.forget(ctx, realmID, is.Replaced)
+	}
 }
 
 // Issue はセッションを発行する。呼び出し側のトランザクション（ユーザーの作成などと同じ）で呼ぶ。
@@ -135,6 +145,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	details := map[string]any{"amr": in.AuthMethods}
+	var replaced string
 	if len(warnings) > 0 {
 		details["warnings"] = warnings
 	}
@@ -149,6 +160,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 				return Issued{}, err
 			}
 			details["replaced"] = old.ID
+			replaced = old.ID
 		}
 	}
 	_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
@@ -156,7 +168,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		Actor: actor, SessionID: s.ID, IP: in.IP, UserAgent: in.UserAgent,
 		RequestID: in.RequestID, Details: details,
 	})
-	return Issued{Session: s, Token: token, Warnings: warnings}, err
+	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced}, err
 }
 
 func nonNilWarnings(w []warning.Warning) []warning.Warning {
