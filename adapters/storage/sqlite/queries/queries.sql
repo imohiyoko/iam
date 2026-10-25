@@ -46,7 +46,7 @@ INSERT INTO shared_outbox (id, topic, payload, created_at) VALUES (?, ?, ?, ?);
 
 -- name: PendingOutbox :many
 SELECT id, topic, payload, created_at, delivered_at FROM shared_outbox
-WHERE topic = ? AND delivered_at IS NULL ORDER BY created_at, id LIMIT ?;
+WHERE topic = ? AND delivered_at IS NULL ORDER BY created_at, rowid LIMIT ?;
 
 -- name: MarkOutboxDelivered :exec
 UPDATE shared_outbox SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL;

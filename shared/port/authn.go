@@ -20,8 +20,11 @@ const (
 )
 
 // User は users の1行。個人情報（メールなど）は別の表に暗号化して持つ。
+//
+// ID は内部 ID で、Storage の外に出さない。外に出すのは PublicID だけ（ADR 0045）。
 type User struct {
 	ID         string
+	PublicID   string // 外部 ID。realm 内で一意。作成後は変えない
 	RealmID    string
 	Status     UserStatus
 	ValidFrom  *time.Time // 有効期間（design.md 4.8）。nil は制限なし
@@ -32,8 +35,9 @@ type User struct {
 
 // UserRepo は users の Repository。
 type UserRepo interface {
-	Create(ctx context.Context, u User) error // ID が重複すれば errs.Conflict
+	Create(ctx context.Context, u User) error // ID か (realm, PublicID) が重複すれば errs.Conflict
 	Get(ctx context.Context, realmID, id string) (User, error)
+	GetByPublicID(ctx context.Context, realmID, publicID string) (User, error)
 }
 
 // VerifiedVia はメールを確認済みとみなした経路（design.md 4.1）。
@@ -156,6 +160,7 @@ type SessionRepo interface {
 
 // ServiceAccount は service_accounts の1行（design.md 11.2）。
 // M1 では通知の配信用（権限は notifications:claim に固定）だけを作る。
+// 行の数が少なく外に出る ID なので、内部 ID を別に持たず、ID に外部 ID を使う（ADR 0045）。
 type ServiceAccount struct {
 	ID        string
 	RealmID   string

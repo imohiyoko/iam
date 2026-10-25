@@ -66,6 +66,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	id.SetGenerators(id.Generators[cfg.IDs.Internal], id.Generators[cfg.IDs.External])
 	if err := checkKeys(ctx, d.KeyStore); err != nil {
 		return nil, err
 	}
@@ -151,7 +152,7 @@ func (a *App) ensureRealm(ctx context.Context) (port.Realm, error) {
 			return err
 		}
 		settings, _ := json.Marshal(map[string]any{"timezone": a.cfg.Realm.Timezone})
-		r = port.Realm{ID: id.New(id.Realm), Slug: a.cfg.Realm.Slug, Settings: settings, CreatedAt: a.deps.Clock.Now()}
+		r = port.Realm{ID: id.NewExternal(id.Realm), Slug: a.cfg.Realm.Slug, Settings: settings, CreatedAt: a.deps.Clock.Now()}
 		if err := tx.Realms().Create(ctx, r); err != nil {
 			return err
 		}

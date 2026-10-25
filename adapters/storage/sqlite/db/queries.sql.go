@@ -298,7 +298,7 @@ func (q *Queries) MarkOutboxDelivered(ctx context.Context, arg MarkOutboxDeliver
 
 const pendingOutbox = `-- name: PendingOutbox :many
 SELECT id, topic, payload, created_at, delivered_at FROM shared_outbox
-WHERE topic = ? AND delivered_at IS NULL ORDER BY created_at, id LIMIT ?
+WHERE topic = ? AND delivered_at IS NULL ORDER BY created_at, rowid LIMIT ?
 `
 
 type PendingOutboxParams struct {

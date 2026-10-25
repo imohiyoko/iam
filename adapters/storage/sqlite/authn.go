@@ -85,18 +85,23 @@ type users struct{ q *db.Queries }
 
 func toUser(r db.AuthnUser) (port.User, error) {
 	var p times
-	u := port.User{ID: r.ID, RealmID: r.RealmID, Status: port.UserStatus(r.Status),
+	u := port.User{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Status: port.UserStatus(r.Status),
 		ValidFrom: p.null(r.ValidFrom), ValidUntil: p.null(r.ValidUntil), CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	return u, p.err
 }
 
 func (r users) Create(ctx context.Context, u port.User) error {
-	return mapErr(r.q.CreateUser(ctx, db.CreateUserParams{ID: u.ID, RealmID: u.RealmID, Status: string(u.Status),
+	return mapErr(r.q.CreateUser(ctx, db.CreateUserParams{ID: u.ID, PublicID: u.PublicID, RealmID: u.RealmID, Status: string(u.Status),
 		ValidFrom: nullTime(u.ValidFrom), ValidUntil: nullTime(u.ValidUntil), CreatedAt: formatTime(u.CreatedAt), UpdatedAt: formatTime(u.UpdatedAt)}))
 }
 
 func (r users) Get(ctx context.Context, realmID, id string) (port.User, error) {
 	row, err := r.q.GetUser(ctx, db.GetUserParams{RealmID: realmID, ID: id})
+	return one(row, err, toUser)
+}
+
+func (r users) GetByPublicID(ctx context.Context, realmID, publicID string) (port.User, error) {
+	row, err := r.q.GetUserByPublicID(ctx, db.GetUserByPublicIDParams{RealmID: realmID, PublicID: publicID})
 	return one(row, err, toUser)
 }
 

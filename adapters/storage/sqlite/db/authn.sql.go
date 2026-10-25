@@ -226,11 +226,12 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 }
 
 const createUser = `-- name: CreateUser :exec
-INSERT INTO authn_users (id, realm_id, status, valid_from, valid_until, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_users (id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateUserParams struct {
 	ID         string
+	PublicID   string
 	RealmID    string
 	Status     string
 	ValidFrom  sql.NullString
@@ -242,6 +243,7 @@ type CreateUserParams struct {
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 	_, err := q.db.ExecContext(ctx, createUser,
 		arg.ID,
+		arg.PublicID,
 		arg.RealmID,
 		arg.Status,
 		arg.ValidFrom,
@@ -432,7 +434,7 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (AuthnSe
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, realm_id, status, valid_from, valid_until, created_at, updated_at FROM authn_users WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at FROM authn_users WHERE realm_id = ? AND id = ?
 `
 
 type GetUserParams struct {
@@ -445,6 +447,32 @@ func (q *Queries) GetUser(ctx context.Context, arg GetUserParams) (AuthnUser, er
 	var i AuthnUser
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.Status,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserByPublicID = `-- name: GetUserByPublicID :one
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at FROM authn_users WHERE realm_id = ? AND public_id = ?
+`
+
+type GetUserByPublicIDParams struct {
+	RealmID  string
+	PublicID string
+}
+
+func (q *Queries) GetUserByPublicID(ctx context.Context, arg GetUserByPublicIDParams) (AuthnUser, error) {
+	row := q.db.QueryRowContext(ctx, getUserByPublicID, arg.RealmID, arg.PublicID)
+	var i AuthnUser
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
 		&i.RealmID,
 		&i.Status,
 		&i.ValidFrom,

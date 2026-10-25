@@ -64,6 +64,7 @@ type AuthnSession struct {
 
 type AuthnUser struct {
 	ID         string
+	PublicID   string
 	RealmID    string
 	Status     string
 	ValidFrom  sql.NullString

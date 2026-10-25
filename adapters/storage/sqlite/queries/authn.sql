@@ -1,8 +1,11 @@
 -- name: CreateUser :exec
-INSERT INTO authn_users (id, realm_id, status, valid_from, valid_until, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_users (id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetUser :one
 SELECT * FROM authn_users WHERE realm_id = ? AND id = ?;
+
+-- name: GetUserByPublicID :one
+SELECT * FROM authn_users WHERE realm_id = ? AND public_id = ?;
 
 -- name: CreateEmail :exec
 INSERT INTO authn_user_emails (id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at)

@@ -42,6 +42,11 @@ func (r users) Create(_ context.Context, u port.User) error {
 	if _, ok := r.t.s.users[u.ID]; ok {
 		return errs.New(errs.KindConflict, "user %s exists", u.ID)
 	}
+	for _, x := range r.t.s.users {
+		if x.RealmID == u.RealmID && x.PublicID == u.PublicID {
+			return errs.New(errs.KindConflict, "user public id exists in realm")
+		}
+	}
 	setKey(r.t, r.t.s.users, u.ID, cloneUser(u))
 	return nil
 }
@@ -49,6 +54,15 @@ func (r users) Create(_ context.Context, u port.User) error {
 func (r users) Get(_ context.Context, realmID, id string) (port.User, error) {
 	u, err := get(r.t.s.users, realmID, id, func(u port.User) string { return u.RealmID }, "user")
 	return cloneUser(u), err
+}
+
+func (r users) GetByPublicID(_ context.Context, realmID, publicID string) (port.User, error) {
+	for _, u := range r.t.s.users {
+		if u.RealmID == realmID && u.PublicID == publicID {
+			return cloneUser(u), nil
+		}
+	}
+	return port.User{}, errs.New(errs.KindNotFound, "user")
 }
 
 // ---------------------------------------------------------------------------

@@ -43,3 +43,8 @@ security:
 outbox:
   interval: 1s
   batch: 100
+
+# 採番の方式（ADR 0045）。内部 ID は DB の外に出さない。外部 ID に uuidv7 は使えない。
+ids:
+  internal: uuidv7
+  external: random

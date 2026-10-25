@@ -49,7 +49,7 @@ func conflict(what string, err error) error {
 func ptr(t time.Time) *time.Time { return &t }
 
 func newUser(realmID string) port.User {
-	return port.User{ID: id.New(id.User), RealmID: realmID, Status: port.UserActive, CreatedAt: T0, UpdatedAt: T0}
+	return port.User{ID: id.New(id.User), PublicID: id.NewExternal(id.User), RealmID: realmID, Status: port.UserActive, CreatedAt: T0, UpdatedAt: T0}
 }
 
 func newEmail(realmID, userID string, index string) port.UserEmail {
@@ -81,6 +81,25 @@ func testUsers(t *testing.T, h Harness) {
 		}
 		if !reflect.DeepEqual(got, u) {
 			return fmt.Errorf("users.Get = %+v, want %+v", got, u)
+		}
+		got, err = tx.Users().GetByPublicID(ctx, u.RealmID, u.PublicID)
+		if err != nil || got.ID != u.ID {
+			return fmt.Errorf("users.GetByPublicID = %+v, %v", got, err)
+		}
+		// 外部 ID は realm 内で一意。内部 ID では引けない。
+		dup := newUser(u.RealmID)
+		dup.PublicID = u.PublicID
+		if err := conflict("duplicate public id", tx.Users().Create(ctx, dup)); err != nil {
+			return err
+		}
+		_, err = tx.Users().GetByPublicID(ctx, u.RealmID, u.ID)
+		if err := notFound("public lookup by internal id", err); err != nil {
+			return err
+		}
+		other := newUser(id.New(id.Realm))
+		other.PublicID = u.PublicID
+		if err := tx.Users().Create(ctx, other); err != nil {
+			return err
 		}
 		_, err = tx.Users().Get(ctx, id.New(id.Realm), u.ID)
 		return notFound("user from another realm", err)
@@ -415,6 +434,7 @@ func testRoleBindings(t *testing.T, h Harness) {
 // 分離の検査で引く値は固定にして、別の realm からも同じ引数で問い合わせる。
 const (
 	isoUser    = "usr_00000000000000000000000000"
+	isoPublic  = "usr_00000000000000000000000009"
 	isoConn    = "con_00000000000000000000000000"
 	isoSubject = "iso-subject"
 	isoEmail   = "iso-email-index"
@@ -437,14 +457,19 @@ func countOne[V any](_ V, err error) (int, error) {
 
 var authnIsolationCases = []IsolationCase{
 	{
-		Name: "Users.Get",
+		Name: "Users.Get+GetByPublicID",
 		Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
 			u := newUser(r)
-			u.ID = isoUser
+			u.ID, u.PublicID = isoUser, isoPublic
 			return tx.Users().Create(ctx, u)
 		},
 		Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {
-			return countOne(tx.Users().Get(ctx, r, isoUser))
+			n, err := countOne(tx.Users().Get(ctx, r, isoUser))
+			if err != nil {
+				return 0, err
+			}
+			m, err := countOne(tx.Users().GetByPublicID(ctx, r, isoPublic))
+			return n + m, err
 		},
 	},
 	{

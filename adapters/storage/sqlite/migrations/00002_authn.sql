@@ -1,15 +1,18 @@
 -- M1：個人識別（design.md 3.1）。
 -- realm に属する表は realm_id を持ち、一意制約は realm 内で効かせる。
+-- users の id は内部 ID（外に出さない）、public_id は外部 ID（ADR 0045）。
 
 -- +goose Up
 CREATE TABLE authn_users (
     id          TEXT PRIMARY KEY,
+    public_id   TEXT NOT NULL,
     realm_id    TEXT NOT NULL,
     status      TEXT NOT NULL,
     valid_from  TEXT,
     valid_until TEXT,
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    UNIQUE (realm_id, public_id)
 ) STRICT;
 
 CREATE TABLE authn_user_emails (
