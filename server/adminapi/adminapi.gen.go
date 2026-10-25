@@ -11,6 +11,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
+
+	"github.com/oapi-codegen/runtime"
 )
 
 // Defines values for HealthStatus.
@@ -31,6 +34,24 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// ClaimedNotification defines model for ClaimedNotification.
+type ClaimedNotification struct {
+	// Code 確認コード
+	Code      *string   `json:"code,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// To 宛先のメールアドレス
+	To string `json:"to"`
+
+	// Token マジックリンクのトークン（リンク先のアプリが verify に渡す）
+	Token *string `json:"token,omitempty"`
+}
+
+// Error defines model for Error.
+type Error struct {
+	Error string `json:"error"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -44,6 +65,9 @@ type ServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
+	// (POST /v1/admin/notifications/{id}:claim)
+	ClaimNotification(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -60,6 +84,32 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClaimNotification operation middleware
+func (siw *ServerInterfaceWrapper) ClaimNotification(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClaimNotification(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -190,9 +240,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/healthz", wrapper.GetHealth)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/notifications/{id}:claim", wrapper.ClaimNotification)
 
 	return m
 }
+
+type ErrorJSONResponse Error
 
 type GetHealthRequestObject struct {
 }
@@ -229,11 +282,78 @@ func (response GetHealth503JSONResponse) VisitGetHealthResponse(w http.ResponseW
 	return err
 }
 
+type ClaimNotificationRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ClaimNotificationResponseObject interface {
+	VisitClaimNotificationResponse(w http.ResponseWriter) error
+}
+
+type ClaimNotification200JSONResponse ClaimedNotification
+
+func (response ClaimNotification200JSONResponse) VisitClaimNotificationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ClaimNotification401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ClaimNotification401JSONResponse) VisitClaimNotificationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ClaimNotification403JSONResponse Error
+
+func (response ClaimNotification403JSONResponse) VisitClaimNotificationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ClaimNotification404JSONResponse Error
+
+func (response ClaimNotification404JSONResponse) VisitClaimNotificationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
+	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
+	// (POST /v1/admin/notifications/{id}:claim)
+	ClaimNotification(ctx context.Context, request ClaimNotificationRequestObject) (ClaimNotificationResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -292,6 +412,32 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
 		if err := validResponse.VisitGetHealthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ClaimNotification operation middleware
+func (sh *strictHandler) ClaimNotification(w http.ResponseWriter, r *http.Request, id string) {
+	var request ClaimNotificationRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ClaimNotification(ctx, request.(ClaimNotificationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ClaimNotification")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ClaimNotificationResponseObject); ok {
+		if err := validResponse.VisitClaimNotificationResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

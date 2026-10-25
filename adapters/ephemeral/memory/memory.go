@@ -88,6 +88,17 @@ func (s *Store) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+func (s *Store) Take(_ context.Context, key string) ([]byte, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.live(key, s.clock.Now())
+	if !ok {
+		return nil, false, nil
+	}
+	delete(s.m, key)
+	return e.value, true, nil
+}
+
 func (s *Store) Incr(_ context.Context, key string, ttl time.Duration) (int64, error) {
 	if ttl <= 0 {
 		return 0, errs.New(errs.KindInvalid, "ephemeral: ttl is required")

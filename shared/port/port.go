@@ -144,6 +144,8 @@ type EphemeralStore interface {
 	Get(ctx context.Context, key string) ([]byte, bool, error)
 	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
 	Delete(ctx context.Context, key string) error
+	// Take は値を返して同時に消す（原子的。1回限りの取り出しに使う）。
+	Take(ctx context.Context, key string) ([]byte, bool, error)
 	// Incr はカウンタを1増やして新しい値を返す。キーが無ければ ttl 付きで 1 から始める。
 	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
 	// Shared は複数インスタンスで共有できるかを返す（起動時の構成の検査に使う）。
@@ -158,7 +160,7 @@ type Notification struct {
 	ID        string     `json:"notification_id"`
 	Type      string     `json:"type"`
 	RealmID   string     `json:"realm_id"`
-	UserID    string     `json:"user_id,omitempty"`
+	UserID    string     `json:"user_id,omitempty"` // 公開 ID（ADR 0045）
 	OrgID     string     `json:"org_id,omitempty"`
 	Locale    string     `json:"locale,omitempty"`
 	Category  string     `json:"category,omitempty"` // suspended の種別

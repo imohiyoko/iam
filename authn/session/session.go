@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -299,16 +300,10 @@ func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now tim
 	if err != nil {
 		return time.Time{}, port.User{}, err
 	}
-	if u.Status != port.UserActive {
-		return time.Time{}, port.User{}, errors.New("user not active")
-	}
-	if u.ValidFrom != nil && now.Before(*u.ValidFrom) {
-		return time.Time{}, port.User{}, errors.New("user not yet valid")
+	if !account.CanLogin(u, now) {
+		return time.Time{}, port.User{}, errors.New("user cannot log in")
 	}
 	if u.ValidUntil != nil {
-		if !now.Before(*u.ValidUntil) {
-			return time.Time{}, port.User{}, errors.New("user validity ended")
-		}
 		next = earliest(next, *u.ValidUntil)
 	}
 	// 認証に使った外部 ID が無効化されていれば、そのセッションも使えない（4.6）。

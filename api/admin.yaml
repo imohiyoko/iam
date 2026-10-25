@@ -4,7 +4,8 @@ info:
   version: v1
   description: |
     管理 API。公開 API とはポートを分ける（design.md 2.5）。
-    M0 ではヘルスチェックのみ。
+
+    認証：`Authorization: Bearer <API キー>`（サービスアカウント）。運営者のセッションによる認証は M1 の後半で足す。
 paths:
   /healthz:
     get:
@@ -21,7 +22,32 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
+
+  /v1/admin/notifications/{id}:claim:
+    post:
+      operationId: claimNotification
+      summary: 通知の秘密と宛先を1回だけ取り出す
+      description: |
+        配信用のサービスアカウント（`notifications:claim`）だけが呼べる（design.md 2.4）。
+        無い・期限切れ・取り出し済みは区別せず 404。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 取り出した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClaimedNotification" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
+  responses:
+    Error:
+      description: エラー
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
   schemas:
     Health:
       type: object
@@ -30,3 +56,16 @@ components:
         status:
           type: string
           enum: [ok, unavailable]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    ClaimedNotification:
+      type: object
+      required: [to, expires_at]
+      properties:
+        to: { type: string, description: 宛先のメールアドレス }
+        code: { type: string, description: 確認コード }
+        token: { type: string, description: マジックリンクのトークン（リンク先のアプリが verify に渡す） }
+        expires_at: { type: string, format: date-time }

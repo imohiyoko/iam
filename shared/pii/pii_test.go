@@ -191,3 +191,32 @@ func BenchmarkEmailIndex(b *testing.B) {
 		}
 	}
 }
+
+func TestSealOpen(t *testing.T) {
+	c := New(newKeys())
+	ctx := context.Background()
+	ct, err := c.Seal(ctx, "flow", []byte("secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(ct, []byte("secret")) {
+		t.Fatal("plaintext visible")
+	}
+	pt, err := c.Open(ctx, "flow", ct)
+	if err != nil || string(pt) != "secret" {
+		t.Fatalf("Open = %q, %v", pt, err)
+	}
+	// 用途が違えば開けない。
+	if _, err := c.Open(ctx, "claim", ct); !errors.Is(err, ErrDecrypt) {
+		t.Fatalf("other purpose: %v", err)
+	}
+	ct[len(ct)-1] ^= 1
+	if _, err := c.Open(ctx, "flow", ct); !errors.Is(err, ErrDecrypt) {
+		t.Fatalf("tampered: %v", err)
+	}
+	for _, bad := range [][]byte{nil, {5}, {1, 'x'}} {
+		if _, err := c.Open(ctx, "flow", bad); err == nil {
+			t.Fatalf("Open(%v) must fail", bad)
+		}
+	}
+}

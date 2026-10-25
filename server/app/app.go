@@ -14,8 +14,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/emailflow"
+	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -49,6 +53,10 @@ type App struct {
 	pii   *pii.Crypter
 	// sessions はセッションの発行・検証（authn/session）。
 	sessions *session.Manager
+	accounts *account.Service
+	notify   *notify.Service
+	email    *emailflow.Service
+	notifier *eventlog.Relay
 	public   http.Handler
 	admin    http.Handler
 }
@@ -108,6 +116,24 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 			AbsoluteLifetime: ss.AbsoluteLifetime.Default.D(), IdleTimeout: ss.IdleTimeout.Default.D(),
 			ValidityMaxDelay: ss.ValidityMaxDelay.D(), RotationInterval: ss.RotationInterval.D(), RotationGrace: ss.RotationGrace.D(),
 		},
+	}
+	via := make([]port.VerifiedVia, 0, len(cfg.Realm.VerifiedVia))
+	for _, v := range cfg.Realm.VerifiedVia {
+		via = append(via, port.VerifiedVia(v))
+	}
+	if !slices.Contains(via, port.VerifiedViaCode) {
+		d.Logger.Warn("realm.verified_via does not include code: email codes and links are disabled, and email recovery is unavailable")
+	}
+	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via}
+	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
+	a.email = &emailflow.Service{
+		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
+		Notify: a.notify, Log: d.Logger,
+		Config: emailflow.Config{TTL: cfg.Security.EmailFlow.TTL.D(), MaxAttempts: cfg.Security.EmailFlow.MaxAttempts},
+	}
+	a.notifier = &eventlog.Relay{
+		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Logger), Clock: d.Clock,
+		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
 	}
 	a.public = withCommon(newPublicHandler(a))
 	a.admin = withCommon(newAdminHandler(a))
@@ -224,8 +250,9 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	for i, l := range []net.Listener{pubL, admL} {
 		go func() { errc <- servers[i].Serve(l) }()
 	}
-	relayDone := make(chan struct{})
+	relayDone, notifyDone := make(chan struct{}), make(chan struct{})
 	go func() { a.relay.Run(ctx); close(relayDone) }()
+	go func() { a.notifier.Run(ctx); close(notifyDone) }()
 
 	a.deps.Logger.Info("iam started", "public", pubL.Addr().String(), "admin", admL.Addr().String(),
 		"realm", a.realm.Slug, "features", a.plan.Active)
@@ -245,9 +272,12 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 		_ = s.Shutdown(shutdownCtx)
 	}
 	<-relayDone
+	<-notifyDone
 	// 止める前に残りを送る（届かなければ次の起動で送る）。
-	if _, err := a.relay.Flush(shutdownCtx); err != nil {
-		a.deps.Logger.Warn("final outbox flush failed", "error", err)
+	for _, r := range []*eventlog.Relay{a.relay, a.notifier} {
+		if _, err := r.Flush(shutdownCtx); err != nil {
+			a.deps.Logger.Warn("final outbox flush failed", "topic", r.Topic, "error", err)
+		}
 	}
 	return runErr
 }
