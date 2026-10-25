@@ -28,7 +28,7 @@ func TestHostedLoginPage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w := l.do(t, l.a.PublicHandler(), "GET", "/login?return_to=%22%3E%3Cscript%3Ealert(1)%3C/script%3E", nil, "Accept-Language", "ja-JP,ja;q=0.9,en;q=0.8")
+	w := l.do(t, l.a.PublicHandler(), "GET", "/login?return_to=/x%22%3E%3Cscript%3Ealert(1)%3C/script%3E", nil, "Accept-Language", "ja-JP,ja;q=0.9,en;q=0.8")
 	body := w.Body.String()
 	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
 		t.Fatalf("GET /login: %d %s", w.Code, w.Header())
@@ -107,5 +107,22 @@ func TestDevNotifierShowsSecret(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), `"code":"`) || !strings.Contains(buf.String(), "http://localhost:8080/login/email#token=") {
 		t.Fatalf("log = %s", buf.String())
+	}
+}
+
+// 戻り先は同じオリジンのパスだけ。ブラウザが外部の URL と解釈しうる形は捨てる。
+func TestSafeReturnTo(t *testing.T) {
+	for _, ok := range []string{"/", "/app", "/app/x?y=1#z", "/a.b/c..d"} {
+		if got := safeReturnTo(ok); got != ok {
+			t.Errorf("%q: got %q", ok, got)
+		}
+	}
+	for _, bad := range []string{
+		"", "app", "https://evil.example", "//evil.example", "/\\evil.example", "/\t/evil.example", "/\n/evil",
+		"/a/..//evil.example", "/%2e//evil.example", "/%2E%2E//evil.example", "/./evil", "/%2f/evil.example", "/%5cevil.example",
+	} {
+		if got := safeReturnTo(bad); got != "" {
+			t.Errorf("%q: got %q, want empty", bad, got)
+		}
 	}
 }

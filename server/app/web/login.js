@@ -39,13 +39,14 @@
 
   // 戻り先は同じオリジンのパスだけを許す（オープンリダイレクトを防ぐ）。URL の解析はタブや改行を
   // 取り除くため（"/\t/evil.example" は "//evil.example" になる）、制御文字とバックスラッシュを拒み、
-  // 解決した結果のオリジンも確かめる。
+  // 解決した結果のオリジンも確かめる。返すのは絶対 URL にする。パスだけを返すと、ドット区間の正規化で
+  // "/a/..//evil.example" の pathname が "//evil.example" になり、遷移のときに外部の URL と解釈される。
   function safeReturnTo() {
     const r = app.dataset.returnTo || "";
     if (!r.startsWith("/") || /[\u0000-\u001f\u007f\\]/.test(r)) return "";
     try {
       const u = new URL(r, window.location.origin);
-      return u.origin === window.location.origin ? u.pathname + u.search + u.hash : "";
+      return u.origin === window.location.origin ? u.href : "";
     } catch (_) {
       return "";
     }

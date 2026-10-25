@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,7 +145,7 @@ func (h *hosted) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l := lang(r)
-	d := pageData{Lang: l, Page: page, T: catalog[l], Messages: catalog[l].Messages, ReturnTo: r.URL.Query().Get("return_to")}
+	d := pageData{Lang: l, Page: page, T: catalog[l], Messages: catalog[l].Messages, ReturnTo: safeReturnTo(r.URL.Query().Get("return_to"))}
 	if page == "login" {
 		var err error
 		if d.Connections, err = h.connections(r.Context()); err != nil {
@@ -175,3 +176,27 @@ func (h *hosted) connections(ctx context.Context) ([]string, error) {
 
 // isHosted は画面のパスかを返す。
 func isHosted(path string) bool { return path == "/login" || strings.HasPrefix(path, "/login/") }
+
+// safeReturnTo はログイン後の戻り先を、同じオリジンのパスに限る（オープンリダイレクトを防ぐ）。
+// 画面の JS も解決後のオリジンを確かめるが、ここで先に絞る。ブラウザの URL の解析は制御文字を取り除き、
+// バックスラッシュを "/" とみなし、ドット区間を畳むため（"/a/..//evil.example" は "//evil.example" になる）、
+// それらを含む値と、"//" を含む値は受け付けない。
+func safeReturnTo(s string) string {
+	if !strings.HasPrefix(s, "/") || strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f || r == '\\' }) {
+		return ""
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.Opaque != "" || u.User != nil {
+		return ""
+	}
+	// 復号したパスで見る（"%2e" は "."、"%2f" は "/"、"%5c" は "\\" になる）。
+	if strings.Contains(u.Path, "//") || strings.Contains(u.Path, "\\") {
+		return ""
+	}
+	for seg := range strings.SplitSeq(u.Path, "/") {
+		if seg == "." || seg == ".." {
+			return ""
+		}
+	}
+	return s
+}
