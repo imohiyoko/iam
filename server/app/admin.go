@@ -59,6 +59,10 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 				sa, err = serviceaccount.Authenticate(ctx, tx, a.realm.ID, key, a.deps.Clock.Now())
 				return err
 			})
+			if err != nil && !errors.Is(err, serviceaccount.ErrInvalid) {
+				a.unavailable(w, r, err)
+				return
+			}
 			if err != nil {
 				next.ServeHTTP(w, r)
 				return

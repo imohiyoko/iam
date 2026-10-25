@@ -68,3 +68,13 @@ func TestRequestBodyLimit(t *testing.T) {
 		t.Fatalf("status: %d %s", w.Code, w.Body)
 	}
 }
+
+// サービスアカウントの API キーでも、ストレージの障害は 503（未認証の 401 にしない）。
+func TestAdminStorageErrorIsUnavailable(t *testing.T) {
+	l := newLoginEnv(t)
+	l.a.deps.Storage = downStorage{l.a.deps.Storage}
+	w := l.do(t, l.a.AdminHandler(), "POST", "/v1/admin/notifications/x:claim", nil, "Authorization", "Bearer "+l.apiKey)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: %d %s", w.Code, w.Body)
+	}
+}
