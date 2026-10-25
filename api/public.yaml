@@ -7,6 +7,8 @@ info:
 
     認証：ブラウザは Cookie（`__Host-iam_session`）、別ドメインのアプリは `Authorization: Bearer <token>`（5.2）。
     本人確認の前の失敗は理由を問わず `authentication_failed` を返す（4.9）。
+    ログインの要求（`/v1/login/...`）は応答時間に下限を設け、本人確認の前の応答時間から理由を読めないようにする。
+    回数の上限を超えると `429 rate_limited` を返す（接続元ごと。メールのフローの開始はアドレスごとにも数える）。
 
     パスの `{id}:revoke` のような動詞は、資源に対する操作を表す（design.md 4.13）。
 paths:
@@ -54,6 +56,7 @@ paths:
                   flow_id: { type: string }
                   expires_at: { type: string, format: date-time }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/login/email:verify:
     post:
@@ -80,6 +83,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/LoginResult" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/login/oauth/{connection}:start:
     post:
@@ -112,6 +117,7 @@ paths:
                   expires_at: { type: string, format: date-time }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/login/oauth:complete:
     post:
@@ -142,11 +148,13 @@ paths:
               schema: { $ref: "#/components/schemas/LoginResult" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
         "409":
           description: メールが別のユーザーで登録済み（自動リンクしない）
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/logout:
     post:
@@ -205,6 +213,21 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    Denied:
+      description: 本人確認の後の拒否。`reasons` に拒否理由のコード（`warning_denied.<code>` など。4.9）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: 回数の上限を超えた（`rate_limited`）
+      headers:
+        Retry-After:
+          description: 次に試せるまでの秒数
+          required: true
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
   schemas:
     Health:
       type: object
@@ -220,15 +243,31 @@ components:
         error:
           type: string
           description: 公開の契約のコード（design.md 4.9、11.10）
+        reasons:
+          type: array
+          items: { type: string }
+          description: 拒否理由のコードの一覧（複数該当すればすべて。4.9）
     LoginResult:
       type: object
-      required: [session_id, expires_at, user_id, created]
+      required: [session_id, expires_at, user_id, created, warnings]
       properties:
         session_id: { type: string }
         expires_at: { type: string, format: date-time }
         user_id: { type: string, description: 公開のユーザー ID（内部 ID は返さない。ADR 0045） }
         created: { type: boolean, description: 新規登録だったか }
         token: { type: string, description: "`return_token: true` のときだけ。Bearer で使う" }
+        warnings:
+          type: array
+          description: 認証の警告（design.md 10章）。コードで返し、表示の文言はクライアントで決める
+          items: { $ref: "#/components/schemas/Warning" }
+    Warning:
+      type: object
+      required: [code, severity, action]
+      properties:
+        code: { type: string, description: "`single_factor`、`oauth_email_unverified` など（公開の契約）" }
+        severity: { type: string, enum: [low, medium, high] }
+        action: { type: string, enum: [warn, deny] }
+        params: { type: object, additionalProperties: true }
     Session:
       type: object
       required: [id, authenticated_at, last_seen_at, expires_at, auth_methods, current]

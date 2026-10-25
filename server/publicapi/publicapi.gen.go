@@ -36,10 +36,52 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for WarningAction.
+const (
+	Deny WarningAction = "deny"
+	Warn WarningAction = "warn"
+)
+
+// Valid indicates whether the value is a known member of the WarningAction enum.
+func (e WarningAction) Valid() bool {
+	switch e {
+	case Deny:
+		return true
+	case Warn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WarningSeverity.
+const (
+	High   WarningSeverity = "high"
+	Low    WarningSeverity = "low"
+	Medium WarningSeverity = "medium"
+)
+
+// Valid indicates whether the value is a known member of the WarningSeverity enum.
+func (e WarningSeverity) Valid() bool {
+	switch e {
+	case High:
+		return true
+	case Low:
+		return true
+	case Medium:
+		return true
+	default:
+		return false
+	}
+}
+
 // Error defines model for Error.
 type Error struct {
 	// Error 公開の契約のコード（design.md 4.9、11.10）
 	Error string `json:"error"`
+
+	// Reasons 拒否理由のコードの一覧（複数該当すればすべて。4.9）
+	Reasons *[]string `json:"reasons,omitempty"`
 }
 
 // Health defines model for Health.
@@ -62,6 +104,9 @@ type LoginResult struct {
 
 	// UserId 公開のユーザー ID（内部 ID は返さない。ADR 0045）
 	UserId string `json:"user_id"`
+
+	// Warnings 認証の警告（design.md 10章）。コードで返し、表示の文言はクライアントで決める
+	Warnings []Warning `json:"warnings"`
 }
 
 // Session defines model for Session.
@@ -78,11 +123,33 @@ type Session struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
+// Warning defines model for Warning.
+type Warning struct {
+	Action WarningAction `json:"action"`
+
+	// Code `single_factor`、`oauth_email_unverified` など（公開の契約）
+	Code     string                  `json:"code"`
+	Params   *map[string]interface{} `json:"params,omitempty"`
+	Severity WarningSeverity         `json:"severity"`
+}
+
+// WarningAction defines model for Warning.Action.
+type WarningAction string
+
+// WarningSeverity defines model for Warning.Severity.
+type WarningSeverity string
+
 // BadRequest defines model for BadRequest.
 type BadRequest = Error
 
+// Denied defines model for Denied.
+type Denied = Error
+
 // NotFound defines model for NotFound.
 type NotFound = Error
+
+// RateLimited defines model for RateLimited.
+type RateLimited = Error
 
 // Unauthenticated defines model for Unauthenticated.
 type Unauthenticated = Error
@@ -432,7 +499,18 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 type BadRequestJSONResponse Error
 
+type DeniedJSONResponse Error
+
 type NotFoundJSONResponse Error
+
+type RateLimitedResponseHeaders struct {
+	RetryAfter int
+}
+type RateLimitedJSONResponse struct {
+	Body Error
+
+	Headers RateLimitedResponseHeaders
+}
 
 type UnauthenticatedJSONResponse Error
 
@@ -510,6 +588,21 @@ func (response StartEmailLogin400JSONResponse) VisitStartEmailLoginResponse(w ht
 	return err
 }
 
+type StartEmailLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response StartEmailLogin429JSONResponse) VisitStartEmailLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type VerifyEmailLoginRequestObject struct {
 	Body *VerifyEmailLoginJSONRequestBody
 }
@@ -542,6 +635,35 @@ func (response VerifyEmailLogin401JSONResponse) VisitVerifyEmailLoginResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyEmailLogin403JSONResponse struct{ DeniedJSONResponse }
+
+func (response VerifyEmailLogin403JSONResponse) VisitVerifyEmailLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyEmailLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response VerifyEmailLogin429JSONResponse) VisitVerifyEmailLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -601,6 +723,21 @@ func (response StartOAuthLogin404JSONResponse) VisitStartOAuthLoginResponse(w ht
 	return err
 }
 
+type StartOAuthLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response StartOAuthLogin429JSONResponse) VisitStartOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CompleteOAuthLoginRequestObject struct {
 	Body *CompleteOAuthLoginJSONRequestBody
 }
@@ -651,6 +788,20 @@ func (response CompleteOAuthLogin401JSONResponse) VisitCompleteOAuthLoginRespons
 	return err
 }
 
+type CompleteOAuthLogin403JSONResponse struct{ DeniedJSONResponse }
+
+func (response CompleteOAuthLogin403JSONResponse) VisitCompleteOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CompleteOAuthLogin409JSONResponse Error
 
 func (response CompleteOAuthLogin409JSONResponse) VisitCompleteOAuthLoginResponse(w http.ResponseWriter) error {
@@ -661,6 +812,21 @@ func (response CompleteOAuthLogin409JSONResponse) VisitCompleteOAuthLoginRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteOAuthLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response CompleteOAuthLogin429JSONResponse) VisitCompleteOAuthLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }

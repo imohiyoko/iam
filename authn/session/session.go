@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -65,6 +66,8 @@ type Manager struct {
 	Clock   clock.Clock
 	Config  Config
 	Log     *slog.Logger
+	// Warnings は認証の警告の評価器（10章）。nil ならフィーチャー warnings が動いておらず、評価しない。
+	Warnings *warning.Evaluator
 }
 
 // Issue は新しいセッションの発行の内容。
@@ -73,10 +76,11 @@ type Issue struct {
 	UserID      string
 	AuthMethods []string // amr
 	Credentials []string // 認証に使った認証情報の ID
-	Warnings    []byte   // JSON
-	IP          string
-	UserAgent   string
-	RequestID   string
+	// Evidence は警告の評価に渡す事実。AMR は AuthMethods から埋める。
+	Evidence  warning.Evidence
+	IP        string
+	UserAgent string
+	RequestID string
 	// ReplaceToken は同じブラウザが持っていた古いセッションのトークン。ログイン時に ID を入れ替える（5.2）。
 	// トークン（秘密を含む）で指定させ、ID だけで他人のセッションを失効させられないようにする。
 	ReplaceToken string
@@ -86,11 +90,25 @@ type Issue struct {
 type Issued struct {
 	Session port.Session
 	Token   string
+	// Warnings は本人に返す警告（ignore のものは含まない）。
+	Warnings []warning.Warning
 }
 
 // Issue はセッションを発行する。呼び出し側のトランザクション（ユーザーの作成などと同じ）で呼ぶ。
+// 警告が deny になれば *warning.DeniedError を返す（セッションは作らない）。呼び出し側はトランザクションを戻す。
 func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, error) {
 	now := m.Clock.Now()
+	// 認証の後・セッションの作成の前に警告を評価する（10章、11.8 の post_authentication）。
+	ev := in.Evidence
+	ev.AMR = in.AuthMethods
+	warnings, err := m.Warnings.Evaluate(ev)
+	if err != nil {
+		return Issued{}, err
+	}
+	warningsJSON, err := json.Marshal(nonNilWarnings(warnings))
+	if err != nil {
+		return Issued{}, err
+	}
 	ip, err := m.encrypt(ctx, tx, in.UserID, in.IP, "session.ip")
 	if err != nil {
 		return Issued{}, err
@@ -101,11 +119,8 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	}
 	s := port.Session{
 		ID: id.NewExternal(id.Session), RealmID: in.RealmID, PrincipalType: port.PrincipalUser, PrincipalID: in.UserID,
-		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: in.Warnings, IP: ip, UserAgent: ua,
+		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: warningsJSON, IP: ip, UserAgent: ua,
 		AuthenticatedAt: now, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime),
-	}
-	if s.Warnings == nil {
-		s.Warnings = []byte("[]")
 	}
 	token, hash, err := newToken(s.ID)
 	if err != nil {
@@ -120,6 +135,9 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	details := map[string]any{"amr": in.AuthMethods}
+	if len(warnings) > 0 {
+		details["warnings"] = warnings
+	}
 	if sid, secret, ok := SplitToken(in.ReplaceToken); ok {
 		old, err := tx.Sessions().Get(ctx, in.RealmID, sid)
 		if err == nil && (old.RevokedAt == nil || now.Before(*old.RevokedAt)) && subtle.ConstantTimeCompare(old.TokenHash, hashSecret(secret)) == 1 {
@@ -138,7 +156,14 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		Actor: actor, SessionID: s.ID, IP: in.IP, UserAgent: in.UserAgent,
 		RequestID: in.RequestID, Details: details,
 	})
-	return Issued{Session: s, Token: token}, err
+	return Issued{Session: s, Token: token, Warnings: warnings}, err
+}
+
+func nonNilWarnings(w []warning.Warning) []warning.Warning {
+	if w == nil {
+		return []warning.Warning{}
+	}
+	return w
 }
 
 // userActor は監査ログの行為者。内部 ID は外に出さず、公開 ID を使う（ADR 0045）。

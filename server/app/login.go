@@ -8,8 +8,10 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/emailflow"
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/ratelimit"
 )
 
 // flowCookie はメールのフロー ID を要求したブラウザにだけ渡す Cookie（design.md 4.1）。
@@ -27,6 +29,9 @@ func (s publicServer) StartEmailLogin(ctx context.Context, req publicapi.StartEm
 	st, err := s.a.email.Start(ctx, s.a.realm.ID, req.Body.Email, s.a.clientOf(ctx))
 	if errors.Is(err, account.ErrEmailInvalid) {
 		return publicapi.StartEmailLogin400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_email"}}, nil
+	}
+	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
+		return publicapi.StartEmailLogin429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -53,12 +58,15 @@ func (s publicServer) VerifyEmailLogin(ctx context.Context, req publicapi.Verify
 	if errors.Is(err, errs.AuthenticationFailed) {
 		return fail, nil
 	}
+	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+		return publicapi.VerifyEmailLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
 	setCookie(ctx, &http.Cookie{Name: flowCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	out := publicapi.VerifyEmailLogin200JSONResponse{SessionId: v.Session.Session.ID, ExpiresAt: v.Session.Session.ExpiresAt,
-		UserId: v.UserID, Created: v.Created}
+		UserId: v.UserID, Created: v.Created, Warnings: warningsOut(v.Session.Warnings)}
 	if req.Body.ReturnToken != nil && *req.Body.ReturnToken {
 		out.Token = &v.Session.Token
 	} else {

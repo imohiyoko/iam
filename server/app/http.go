@@ -38,7 +38,7 @@ func newPublicHandler(a *App) http.Handler {
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.responseError,
 	}), publicapi.StdHTTPServerOptions{BaseRouter: newColonMux(), ErrorHandlerFunc: a.requestError})
-	return http.NewCrossOriginProtection().Handler(a.withSession(h))
+	return http.NewCrossOriginProtection().Handler(a.withLoginGuard(a.withSession(h)))
 }
 
 func (s publicServer) Logout(ctx context.Context, _ publicapi.LogoutRequestObject) (publicapi.LogoutResponseObject, error) {

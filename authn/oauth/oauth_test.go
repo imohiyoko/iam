@@ -17,6 +17,7 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/internal/testkit"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -331,5 +332,33 @@ func TestTokenEndpointRedirectNotFollowed(t *testing.T) {
 	}
 	if srv.Client().CheckRedirect != nil {
 		t.Fatal("the injected client must not be modified")
+	}
+}
+
+// ログイン時にプロバイダがメールを確認済みとしなくなっていれば警告 oauth_email_unverified（既定 warn。10章）。
+func TestUnverifiedEmailAtLoginWarns(t *testing.T) {
+	e := setup(t)
+	ev, err := warning.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.svc.Sessions.Warnings = ev
+	first, err := e.complete(t, e.authorize(t, "sub-1", "alice@example.com", true))
+	if err != nil || len(first.Session.Warnings) != 0 {
+		t.Fatalf("signup = %+v, %v", first.Session.Warnings, err)
+	}
+	res, err := e.complete(t, e.authorize(t, "sub-1", "alice@example.com", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws := res.Session.Warnings; len(ws) != 1 || ws[0].Code != warning.CodeOAuthEmailUnverified || ws[0].Action != warning.Warn {
+		t.Fatalf("warnings = %+v", ws)
+	}
+
+	// deny にすれば、本人確認の後なので理由つきで拒否する。
+	e.svc.Sessions.Warnings, _ = warning.New(map[string]warning.Action{warning.CodeOAuthEmailUnverified: warning.Deny})
+	_, err = e.complete(t, e.authorize(t, "sub-1", "alice@example.com", false))
+	if d, ok := errors.AsType[*warning.DeniedError](err); !ok || d.Reasons()[0] != "warning_denied.oauth_email_unverified" {
+		t.Fatalf("want DeniedError, got %v", err)
 	}
 }
