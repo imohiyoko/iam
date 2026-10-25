@@ -164,7 +164,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		})
 	}
 	a.notifier = &eventlog.Relay{
-		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Logger), Clock: d.Clock,
+		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Clock, d.Logger), Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
 	}
 	login, err := newHosted(a, cfg.Server.LoginTemplates)

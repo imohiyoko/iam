@@ -132,15 +132,26 @@ func (a *App) responseError(w http.ResponseWriter, r *http.Request, err error) {
 	writeError(w, http.StatusInternalServerError, code)
 }
 
+// unavailable は依存先の障害を 503 で返す。認証の判定ができないときに使う（未ログインとして扱わない）。
+func (a *App) unavailable(w http.ResponseWriter, r *http.Request, err error) {
+	a.deps.Logger.ErrorContext(r.Context(), "dependency unavailable", "path", r.URL.Path, "error", err)
+	writeError(w, http.StatusServiceUnavailable, "unavailable")
+}
+
 func writeError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
 
+// maxBodyBytes はリクエスト本文の上限。超えると本文の読み取りが失敗し、400 invalid_request になる。
+const maxBodyBytes = 1 << 20
+
 // withCommon はすべての応答に共通のヘッダーを付ける。リクエスト ID はログの相関に使う（design.md 6.4）。
+// 本文の大きさもここで制限する（未認証で呼べる操作があるため）。
 func withCommon(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		hdr := w.Header()
 		rid := id.NewExternal(id.Request)
 		ctx := context.WithValue(r.Context(), requestIDKey{}, rid)

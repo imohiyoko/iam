@@ -69,8 +69,8 @@ func (s publicServer) CompleteOAuthLogin(ctx context.Context, req publicapi.Comp
 		UserId: res.UserID, Created: res.Created, Warnings: warningsOut(res.Session.Warnings)}
 	if req.Body.ReturnToken != nil && *req.Body.ReturnToken {
 		out.Token = &res.Session.Token
-	} else {
-		setCookie(ctx, sessionCookieFor(res.Session.Token, res.Session.Session.ExpiresAt, s.a.deps.Clock.Now()))
 	}
+	// return_token でも Cookie は差し替える。送られてきた Cookie のセッションは入れ替えで失効しているため。
+	setCookie(ctx, sessionCookieFor(res.Session.Token, res.Session.Session.ExpiresAt, s.a.deps.Clock.Now()))
 	return out, nil
 }

@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"time"
 
@@ -55,7 +56,8 @@ func AddKey(ctx context.Context, tx port.Tx, realmID, accountID string, now time
 // ErrInvalid は認証の失敗。理由は返さない。
 var ErrInvalid = errs.WithCode(errs.KindUnauthenticated, errs.CodeAuthenticationFailed, "service account key invalid")
 
-// Authenticate は API キーを確かめ、サービスアカウントを返す。
+// Authenticate は API キーを確かめ、サービスアカウントを返す。使えないキーは ErrInvalid、
+// ストレージの障害はそれ以外のエラー（呼び出し側は認証の失敗として扱わない）。
 func Authenticate(ctx context.Context, tx port.Tx, realmID, key string, now time.Time) (port.ServiceAccount, error) {
 	cid, secret, ok := strings.Cut(key, ".")
 	if !ok || !id.Valid(id.SACredential, cid) || len(secret) != 43 {
@@ -63,7 +65,7 @@ func Authenticate(ctx context.Context, tx port.Tx, realmID, key string, now time
 	}
 	c, err := tx.ServiceAccounts().GetCredential(ctx, realmID, cid)
 	if err != nil {
-		return port.ServiceAccount{}, ErrInvalid
+		return port.ServiceAccount{}, invalidOr(err)
 	}
 	h := sha256.Sum256([]byte(secret))
 	if subtle.ConstantTimeCompare(c.SecretHash, h[:]) != 1 || c.Type != "api_key" {
@@ -74,7 +76,15 @@ func Authenticate(ctx context.Context, tx port.Tx, realmID, key string, now time
 	}
 	a, err := tx.ServiceAccounts().Get(ctx, realmID, c.ServiceAccountID)
 	if err != nil {
-		return port.ServiceAccount{}, ErrInvalid
+		return port.ServiceAccount{}, invalidOr(err)
 	}
 	return a, nil
+}
+
+// invalidOr は見つからなければ ErrInvalid、それ以外はストレージの障害として返す。
+func invalidOr(err error) error {
+	if errors.Is(err, errs.NotFound) {
+		return ErrInvalid
+	}
+	return errs.Wrap(errs.KindUnavailable, err, "service account: authenticate")
 }
