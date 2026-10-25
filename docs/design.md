@@ -156,6 +156,7 @@ sessions
   user_id (FK users)
   active_org_id (FK orgs, NULL 可)  -- 個人コンテキストなら NULL
   auth_methods      -- どの手段で認証したか (amr)
+  warnings          -- 認証時に出た警告コードの一覧（10章）
   ip, user_agent
   created_at, last_seen_at, expires_at, revoked_at
 
@@ -223,7 +224,7 @@ role_bindings       -- 誰にどのロールを与えるか
 ログイン（ユーザー確定）と Org 選択は分ける。
 
 1. ユーザーを認証する
-2. 入れる Org の候補を求める：active な Membership を持つ Org のうち、`org_login_policies` を満たすもの
+2. 入れる Org の候補を求める：active な Membership を持つ Org のうち、`org_login_policies` を満たし、かつ認証の警告が `deny` にならないもの（10章）
 3. 候補が1つなら自動選択、複数なら選択させる（前回の Org を記憶しておく）
 4. `sessions.active_org_id` を更新する
 
@@ -257,13 +258,14 @@ check(user_id, org_id, permission) -> allow / deny
 
 - ログイン成功 / 失敗
 - 認証手段の追加・削除
+- 認証時・認証手段登録時に出た警告（10章）
 - メール検証
 - Org 切り替え
 - Membership / Group / Role の変更
 
 ## 7. マイルストーン
 
-1. **M1 個人識別**：users, user_emails, user_identities, sessions。メールログイン + OAuth 1種
+1. **M1 個人識別**：users, user_emails, user_identities, sessions。メールログイン + OAuth 1種。警告の共通枠組み（10章。ルールは最小限）
 2. **M2 複数認証手段**：OAuth 複数対応、連携・解除、passkey
 3. **M3 Org**：orgs, memberships, active_org の切り替え、招待
 4. **M4 認可**：groups, roles, check API
@@ -322,9 +324,61 @@ check(user_id, org_id, permission) -> allow / deny
   - **ES256 / EdDSA / RS256 を受け入れる**。ただし RS256 は「互換性のために許容している方式」として扱い、警告を出せるようにする
     - これは外部の公開鍵の検証であり、自前で RSA 鍵を持つわけではないので 9.1 の原則には反しない
   - 登録時の WebAuthn `pubKeyCredParams` の優先順は ES256 → EdDSA → RS256 とし、RSA は他に選択肢がない認証器でだけ選ばれるようにする
-  - `passkeys.alg` に方式を保存し、RS256 の passkey に対して以下を行えるようにする
-    - 登録時と passkey 一覧画面で警告を表示し、別の認証器の追加を促す
-    - 監査ログに方式を記録する
-  - 受け入れ可否はサーバー設定（`passkey.allow_rs256`、既定は true）で切り替えられるようにする
-  - 将来、Org のログインポリシーに `disallow_rsa_passkey` を追加し、Org 単位で RS256 の passkey による入場を拒否できるようにする
-  - 優先度は低い。M2 では ES256 / EdDSA のみで実装し、RS256 と警告は後から追加してもよい
+  - `passkeys.alg` に方式を保存する。RS256 の passkey への警告は 10章の共通の仕組みで出す（警告コード `passkey_alg_rsa`）
+    - 拒否したい場合も 10章のアクション設定（サーバー全体 / Org 単位で `deny`）で行う。passkey 専用の設定は作らない
+  - 優先度は低い。M2 では ES256 / EdDSA のみで実装し、RS256 と警告ルールは後から追加してもよい
+
+## 10. 認証の警告
+
+### 10.1 目的
+
+**どの認証経路でも、同じ仕組みで警告を出せる**ようにする。passkey、OAuth、メールなど経路ごとに個別の警告処理を作らない。
+
+- 認証は成功させつつ、弱い点や注意点をユーザー・管理者・連携先に伝える
+- 同じ警告を、設定次第で「無視」「警告」「拒否」に切り替えられる
+
+### 10.2 仕組み
+
+```
+各認証経路 ──(認証結果 + Evidence)──▶ 警告評価器 ──▶ []Warning ──▶ アクション判定 ──▶ 結果
+ password / magic link /             （経路共通の          （サーバー設定 +     許可 / 警告付き許可 / 拒否
+ oauth / passkey / 将来の SSO         ルール群）            Org ポリシー）
+```
+
+1. **Evidence**：各認証経路は、認証の成否に加えて「どう認証されたか」を表す Evidence を共通の形で返す
+   - 共通項目：認証方式（`amr`）、要素数、IP、User-Agent、TLS の鍵交換方式
+   - 経路固有の項目：passkey の `alg`、OAuth のプロバイダとメール検証状況、など
+2. **警告評価器**：登録されたルールを Evidence に適用し、`Warning{code, severity, params}` の一覧を返す
+   - ルールは経路を知らなくても書ける（Evidence の項目だけを見る）。新しい経路を足しても既存ルールがそのまま効く
+   - ルールの追加は評価器に登録するだけで、各経路のコードは変えない
+3. **アクション判定**：警告コードごとに `ignore` / `warn` / `deny` を決める
+   - サーバー全体の既定値を設定で持つ
+   - Org ポリシー（`org_login_policies`）で Org ごとに上書きできる。ただし**緩める方向の上書きは不可**（サーバーで `deny` のものを Org で `warn` にはできない）
+   - Org で `deny` になった場合、ログイン自体は成功し、その Org に入れないだけになる（4.4 の Org 候補から外れる）
+
+### 10.3 適用するタイミング
+
+- **ログイン時**：結果を `sessions.warnings` に保存する
+- **認証手段の登録時**：その認証手段に恒常的に付く警告（例：RS256 の passkey）を登録画面で出す
+- **認証手段の一覧表示時**：各認証手段に付いている警告を表示し、改善を促す
+- **step-up 認証や Org 切り替え時**：再評価する
+
+### 10.4 警告の届け先
+
+- **ユーザー**：ログイン後の画面、認証手段の管理画面。メッセージは警告コードから多言語化して表示する（サーバーは文言ではなくコードを返す）
+- **監査ログ**：すべての警告を記録する
+- **連携先（RP）**：既定では ID トークンに載せない。必要な RP はセッション情報 API で警告コードを取得する
+
+### 10.5 警告ルールの例
+
+| コード | 内容 | 既定 |
+|---|---|---|
+| `passkey_alg_rsa` | passkey が RS256（9.4） | warn |
+| `tls_no_pq_kex` | TLS の鍵交換が耐量子ハイブリッドでない（古いクライアント） | warn |
+| `single_factor` | パスワードのみなど、1要素で認証した | ignore（MFA 導入後に warn） |
+| `oauth_email_unverified` | OAuth プロバイダ側でメールが未検証 | warn |
+| `password_breached` | 漏洩済みパスワード（HIBP の k-匿名 API 等で照合） | warn |
+| `new_device` | 初めての端末・IP からのログイン | ignore（将来 warn） |
+
+- `tls_no_pq_kex` は Go が TLS を終端する場合のみ判定できる。リバースプロキシで終端する構成では、プロキシから情報を受け取る必要がある
+- 最初は枠組みと 1〜2 個のルールだけ実装し、ルールは必要になったら足す
