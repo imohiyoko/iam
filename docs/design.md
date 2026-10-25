@@ -1,1907 +1,833 @@
 # IAM Design Doc
 
-- Status: Draft
-- Last updated: 2026-10-25
-- 設計判断の理由は [ADR](adr/README.md) に記録している（このドキュメントは「今どうなっているか」を書く）
+- Status: Draft / Last updated: 2026-10-25
+- このドキュメントは「今どうなっているか」だけを書く。判断の理由は [ADR](adr/README.md)、フェーズごとのゴールは [roadmap.md](roadmap.md)
 
 ## 1. 目的
 
-個人開発のサービス群で共通利用する認証・認可基盤を作る。
+セルフホストできる認証・認可基盤。
 
-### 最低限の目標（MVP）
-
-- 個人識別：1人のユーザーを一意に識別できる
-- 1ユーザーに対して複数のメールアドレスを紐付けられる
-- 1ユーザーに対して複数の OAuth プロバイダ（Google, GitHub など）を紐付けられる
-
-### ゴール
-
-- ユーザーと Group の多対多リレーション
-- ログイン時に Org を決定・切り替えできる（passkey、IP など）
-  - IP による Org 判定はエンタープライズ向け機能として将来実装。設計上は差し込めるようにしておく
-
-### 非ゴール（当面やらない）
-
-- SAML / OIDC による外部 IdP 連携（エンタープライズ SSO）
-- SCIM によるプロビジョニング
-- ReBAC（関係ベース認可）
-- 管理画面 UI の作り込み
+- **最低限**：個人識別。1ユーザーに複数のメールアドレス・複数の OAuth を紐付ける
+- **ゴール**：ユーザーと Group（Org）の多対多。ログインに使った手がかり（メール、passkey、IP など）で Org を選ぶ
+- **当面やらない**：SCIM、ReBAC、管理画面の作り込み（Org 専用 SSO は拡張フィーチャーとして後から）
 
 ## 2. 基本方針
 
-### 2.1 認証と認可の責務分離
+### 2.1 認証と認可の分離
 
 | | 認証 (authn) | 認可 (authz) |
 |---|---|---|
-| 問い | 誰か？どの Org の文脈か？ | 何ができるか？ |
-| 扱う概念 | User, 認証手段, Org, Membership(所属有無), Session | Group, Role, Permission |
-| Org | テナント境界として扱う | Org を前提に判定 |
-| Group | 扱わない | 扱う |
+| 問い | 誰か、どの Org の文脈か | 何ができるか |
+| 概念 | User、認証手段、Org、Membership（所属の有無）、Session | Group、Role、Permission |
 
-- **Org は認証側の概念**とする。Org はテナント境界であり、「どの Org としてログインしているか」はセッションの属性になる。
-- **Group は認可側の概念**とする。認証は Group を知らない。
-- Membership(user, org) は「所属しているか」という事実だけを認証側が持ち、その Membership に紐づく Group / Role は認可側が持つ。
+### 2.2 リポジトリ構成
 
-### 2.2 リポジトリ構成：モノレポ + 境界の強制
-
-個人開発なので**同一リポジトリ**で扱う。ただし将来の分離やガラパゴス化を防ぐため、以下を守る。
-
-- `authn` と `authz` は別モジュール（別パッケージ）として実装する
-- **authz は authn の内部実装に依存しない**。authz が受け取るのは `user_id` と `org_id`（と必要ならセッション情報）だけ
-- authn → authz の呼び出しも公開インターフェース経由に限る
-- DB はスキーマ（または名前空間 / テーブル接頭辞）で分け、モジュールをまたぐ JOIN をしない。参照は ID のみ
-- 外部インターフェースは標準仕様に寄せる（後述）
-
-これにより、必要になった時点でサービスとして切り出せる状態を保つ。
-
-想定ディレクトリ:
+同一リポジトリで、モジュール境界を強制する（ADR 0001）。
 
 ```
 iam/
-├── docs/
-├── authn/        # ユーザー、認証手段、Org、Membership、Session（ポートを定義）
-├── authz/        # Group、Role、Permission、ポリシー評価（ポートを定義）
-├── shared/       # ID 型、エラー型、監査ログなど最小限の共通部分
-├── adapters/     # ポートの実装（2.4）
-│   ├── storage/      # sqlite, postgres, mysql
-│   ├── ephemeral/    # memory, redis
-│   ├── notifier/     # webhook, dev
-│   └── keystore/     # file, env
-├── server/       # HTTP エンドポイント（authn/authz を組み立てるだけ）
-└── cmd/iam/      # 設定を読んでアダプタを選び、server を起動する
+├── authn/      # User、認証手段、Org、Membership、Session（ポートを定義）
+├── authz/      # Group、Role、Permission、判定（ポートを定義）
+├── shared/     # ID 型、エラー型、監査ログなど最小限
+├── adapters/   # ポートの実装：storage/{sqlite,postgres,mysql} ephemeral/{memory,redis} notifier/{webhook,dev} keystore/{file,env}
+├── server/     # HTTP（authn/authz を組み立てるだけ）
+└── cmd/iam/    # 設定を読みアダプタを選んで起動
 ```
 
-- `authn/` `authz/` は `adapters/` を import しない。依存の向きは常に adapters → コア
+- authz が authn から受け取るのは principal の ID と Org の ID だけ
+- モジュールをまたぐ JOIN・外部キーは禁止（ID でのみ参照）
+- コアは `adapters/` を import しない
 
-### 2.3 標準仕様への準拠（ガラパゴス化対策）
+### 2.3 標準への準拠
 
-- 外部サービスへの認証結果の受け渡しは **OIDC（OpenID Connect）** に準拠する。ID トークンのクレーム名も標準に従う
-- passkey は **WebAuthn** 準拠
-- 認可 API は当面独自でよいが、`check(principal, action, resource, context)` の形にし（4.5）、OpenFGA / Cedar 等へ載せ替えやすくしておく
-- 暗号方式は「9. 暗号方針」に従う
+OIDC、WebAuthn に準拠する。認可 API は `check(principal, action, resource, context)`（4.5）。暗号は 9章。
 
 ### 2.4 技術スタックと外部依存
 
-**コアは外部の具体的な製品に依存しない。** DB・キャッシュ・メール・鍵管理などはすべて「ポート（Go のインターフェース）」としてコアが定義し、具体的な実装は「アダプタ」として外に置く（ポート & アダプタ / ヘキサゴナルアーキテクチャ）。どのアダプタを使うかはホスト先が決める。
-
 | 領域 | 選定 |
 |---|---|
-| 言語 | Go 1.27 以上（標準ライブラリの `crypto/mldsa` を使うため） |
-| HTTP | 標準の `net/http`。API は OpenAPI で定義し、oapi-codegen でサーバーの型とハンドラの枠を生成する |
-| SQL | sqlc（SQL から型付きの Go コードを生成）。Storage アダプタごとに SQL を書く |
-| マイグレーション | goose。Storage アダプタごとに持つ |
-| ID | UUIDv7 + 型付きの接頭辞（`usr_`、`org_`、`ses_` など） |
+| 言語 | Go 1.27 以上（`crypto/mldsa`） |
+| HTTP | `net/http`。OpenAPI で定義し oapi-codegen で生成 |
+| SQL / マイグレーション | sqlc / goose（Storage アダプタごと） |
+| ID | UUIDv7 + 型付き接頭辞（`usr_`、`org_`、`ses_` …） |
 | ライブラリ | zitadel/oidc、lestrrat-go/jwx、go-webauthn（13.2） |
-| それ以外 | 必須の製品はなし。下表のポートごとにアダプタを選ぶ |
 
-#### ポートとアダプタ
+コアは具体的な製品に依存しない。外部とはポート（Go のインターフェース）でつなぎ、アダプタはホスト先が選ぶ。
 
-| ポート | 役割 | 同梱アダプタ（候補） | 備考 |
-|---|---|---|---|
-| Storage | 永続データ（3章のテーブル） | SQLite / PostgreSQL / MySQL | 唯一の必須ポート。SQLite なら外部サーバー不要で起動できる |
-| EphemeralStore | 短命データ・キャッシュ・カウンタ | インメモリ / Redis | 正にしない（後述） |
-| Notifier | 通知すべき出来事を外部に渡す | Webhook / 開発用 | **文面の作成・配送は外部が行う**（後述） |
-| KeyStore | 署名鍵・暗号鍵の保管 | ファイル / 環境変数 | KMS 等はホスト先がアダプタを追加 |
-| Clock | 現在時刻の取得 | システム時計 / テスト用の偽の時計 | 時刻で判定する処理はすべてこれを使う（2.7） |
-| EventSink | 監査ログ・セキュリティイベント・ドメインイベントの外部送出 | 標準出力 (JSON Lines) / syslog / OTLP / Webhook | SIEM 等への送出先はホスト先が選ぶ（6.3） |
+| ポート | 役割 | 同梱アダプタ |
+|---|---|---|
+| Storage（唯一の必須） | 永続データ | SQLite / PostgreSQL / MySQL |
+| EphemeralStore | 短命データ・キャッシュ・カウンタ | インメモリ / Redis |
+| Notifier | 通知すべき出来事を外部に渡す | Webhook / 開発用 |
+| KeyStore | 鍵の保管 | ファイル / 環境変数 |
+| Clock | 現在時刻 | システム時計 / テスト用の偽の時計 |
+| EventSink | 監査ログ等の外部出力（6.3） | 標準出力 / syslog / OTLP / Webhook |
 
-#### Storage（DB）
+アダプタは設定で選ぶほか、IAM を Go ライブラリとして import して自作のアダプタを渡せる。Webhook 系は他言語でも実装できる。
 
-- 特定の DB を必須にしない。**単一インスタンスなら SQLite だけで動く**ことを最低ラインにする
-  - SQLite は cgo 不要のドライバを使い、単一バイナリで配布できるようにする
-  - SQLite は小規模・単一インスタンス向け。書き込みが直列になるため、規模が大きくなったら PostgreSQL / MySQL に移行してもらう前提とする
-  - **アダプタ間のデータ移行ツール**（`iam storage export` / `iam storage import`）を用意する。Repository インターフェース越しに全データを書き出し・読み込むので、どのアダプタ間でも移せる。暗号化済みのデータは暗号化されたまま移す（KeyStore はそのまま使う）
-- 各モジュール（authn / authz）は自分の永続化を Repository インターフェースとして定義し、ドメイン層は SQL を知らない
-- **Repository はドメインの言葉で定義し、DB の機能では定義しない**
-  - 例：`FindMembershipsByUser(userID)`、`SaveLoginPolicy(orgID, policy)` のように「何をしたいか」だけを表す
-  - 「どう実現するか」は**使う DB に応じてアダプタ内部で切り替える**。各アダプタはその DB の得意な機能を遠慮なく使ってよい
-    - 例：ポリシーの設定値を PostgreSQL では `JSONB`、MySQL では `JSON`、SQLite では JSON1 関数付きの `TEXT` で持つ
-    - 例：作成と取得を PostgreSQL / SQLite では `RETURNING` で1往復にし、MySQL では2回に分ける
-    - 例：ID の採番、upsert、ロックの方式も DB ごとに最適なものを選ぶ
-  - つまり「最小公倍数に合わせて全 DB で同じ SQL を書く」のではなく、**インターフェースだけを揃え、中身は DB ごとに最適化する**
-- コアが前提にしてよいのは、どの DB でも実現できる性質だけ：トランザクション、一意性の保証、ID による取得・範囲検索
-- **DB 固有の追加機能はオプションのポートにする**
-  - 例：PostgreSQL の `LISTEN/NOTIFY` による他インスタンスへのキャッシュ無効化通知
-  - アダプタがそのインターフェースを実装していればコアが使い、無ければ代替手段（EphemeralStore 経由、ポーリング等）に切り替える（Go の型アサーションで判定）
-- トランザクションは Unit of Work のインターフェースとしてコアに渡す
-- スキーマとマイグレーションはアダプタごとに持つ（テーブル構造や型が DB ごとに違ってよい）
-- **全アダプタ共通の適合テストスイート**を用意し、外から見た振る舞いが同じであることを保証する。新しいアダプタはこれを通れば使えることにする
+#### Storage
 
-#### EphemeralStore（キャッシュ・短命データ）
+- 単一インスタンスなら SQLite（cgo 不要のドライバ）だけで動く。規模が大きくなったら PostgreSQL / MySQL へ移行する前提
+- `iam storage export / import` でアダプタ間を移行できる（暗号化済みデータはそのまま移す）
+- Repository はドメインの言葉で定義し、**中身は DB ごとに最適化してよい**（JSONB、RETURNING、ltree など。ADR 0004）
+- コアが前提にするのは、トランザクション（Unit of Work）、一意性、ID・範囲での取得だけ
+- DB 固有の追加機能（LISTEN/NOTIFY など）はオプションのポート。無ければ代替手段に切り替える
+- スキーマ・マイグレーションはアダプタごと。振る舞いの一致は契約テスト（12章）で保証する
 
-**正（source of truth）にしない。** 消えても再ログインや再試行で回復できるものだけを置く。
+#### EphemeralStore
 
-- セッションのキャッシュ（正は Storage の `sessions`。失効は Storage に書いてから消す）
-- OAuth の `state` / PKCE `code_verifier`、WebAuthn の challenge（短命・TTL 付き）
-- レートリミット、ログイン失敗回数のカウンタ
-- 認可判定結果の短期キャッシュ（Membership / Group 変更時に無効化）
+正（source of truth）にしない。置くのは、セッション・認可判定のキャッシュ、OAuth の state / PKCE、WebAuthn の challenge、レートリミットのカウンタ。複数インスタンスでは共有できるアダプタが必要（起動時に構成を検査する）。
 
-既定はインメモリ。**複数インスタンスで動かす場合は共有できるアダプタ（Redis 等）が必要**になる点を明記する。
+#### Notifier
 
-#### Notifier（メール等）
-
-IAM は**メールの文面も URL も作らない**。「どの出来事が、誰に対して起きたか」を ID で外部に渡すところまでが IAM の責任で、文面の作成・リンクの組み立て・配送はすべて外部のメール配信の仕組み（ホスト先のアプリ、メール配信の OSS・サービスなど）が行う。
-
-理由：
-
-- 文面・デザイン・多言語化はホスト先のブランドに属するもので、IAM が持つと二重管理になる
-- **リンクのドメインを IAM が決めない**ことで、ホスト先がドメインを変えたり、アプリごとに別のドメインを使ったりしても、IAM 側の変更が要らない
-- 配送の手段（メール、SMS、アプリ内通知）を IAM が知らずに済む
-
-##### 渡す内容
-
-通知のペイロードは**ID と最小限のメタデータだけ**にする。
+IAM は**メールの文面も URL も作らない**。出来事を ID で外部に渡し、文面・リンク・配送は外部が行う（ADR 0031）。
 
 ```json
-{
-  "notification_id": "ntf_01J...",
-  "type": "magic_link",
-  "realm_id": "rlm_...",
-  "user_id": "usr_...",          // 未登録のアドレスへの通知では無い
-  "org_id": "org_...",           // 関係する場合のみ
-  "locale": "ja",                // リクエスト時の言語の手がかり（任意）
-  "expires_at": "2026-10-25T12:15:00Z",
-  "has_secret": true             // 取得すべき秘密（トークン・宛先）があるか
-}
+{ "notification_id": "ntf_…", "type": "magic_link", "realm_id": "rlm_…", "user_id": "usr_…",
+  "org_id": "org_…", "locale": "ja", "expires_at": "…", "has_secret": true }
 ```
 
-- 通知の種類の例：`email_verification`、`magic_link`、`account_exists`（登録済みアドレスへの新規登録。4.9）、`recovery`（4.12）、`new_device_login`、`credential_added`、`credential_revoked`、`suspended`（種別を添える。4.7）、`membership_invited`、`deletion_scheduled`
-- **秘密の値（マジックリンクのトークン、検証コード）と宛先のメールアドレスはペイロードに入れない**。Webhook の受け手のログや中継のシステムに秘密が残らないようにするため
-
-##### 秘密の取得（1回だけ取り出せる API）
-
-マジックリンクなど、秘密の値が必要な通知では、外部の配信の仕組みが通知 ID を使って取りに来る。
-
-```
-POST /v1/admin/notifications/{notification_id}:claim
-→ { "to": "user@example.com", "token": "...", "expires_at": "..." }
-```
-
-- **1回だけ取り出せる**。2回目以降は拒否する（取り出した後は IAM 側に平文が残らない）
-- 呼び出しには、通知の配信用の権限（`notifications:claim`）を持つサービスアカウントの認証が必要
-- 宛先の `to` は、9.6 の最小化モードでも返せる。マジックリンクのように利用者がアドレスを入力した通知では、その値を EphemeralStore に有効期限つきで一時的に保持して返すため
-- トークンは IAM には**ハッシュだけ**を保存する。リンクを踏んだ後は、ホスト先のアプリ（任意のドメイン）が `POST /v1/magic-links:verify` などの公開 API にトークンを渡して検証する
-- 期限内に取り出されなかった通知は、配送の失敗として監査ログに残す
-
-##### 同梱アダプタ
-
-| アダプタ | 渡し先 | 用途 |
-|---|---|---|
-| Webhook | ホスト先が指定した HTTP エンドポイント | 本番。外部の配信の仕組みが受け取り、必要なら秘密を取得して配送する |
-| 開発用 | 標準出力 / 開発用の受信箱画面 | ローカル開発。開発ビルドにだけ含める（11.11） |
-
-- Webhook のペイロードには署名を付け、受け手が IAM からの通知であることを検証できるようにする
-- 確実に渡すため、通知はいったん Storage の送信キュー（outbox）に書き、そこから渡す。失敗時は再試行する（少なくとも1回。重複は `notification_id` で排除してもらう）
-- **開発用アダプタ**：通知の内容に加え、設定した開発用の URL の形式（例：`http://localhost:3000/login?token={token}`）でリンクを組み立てて表示する。文面は作らない。外部の配信の仕組みが無くても、ローカルでマジックリンクのログインを試せる
-- IAM の外に、Webhook を受けてメールを送る**参考実装**を別リポジトリとして用意してもよい（コアには含めない）
-
-#### アダプタの追加方法
-
-- **設定で選ぶ**：同梱アダプタは設定ファイルで切り替える
-- **Go から組み込む**：IAM をライブラリとして import し、自前のアダプタを渡して独自のバイナリをビルドできるようにする（Caddy のモジュール方式に近い）
-- **プロセス外で拡張する**：Webhook 系のポートは、Go 以外の言語でもホスト先が実装できる
+- 種類：`email_verification` `magic_link` `account_exists` `recovery` `new_device_login` `credential_added` `credential_revoked` `suspended` `membership_invited` `deletion_scheduled` など
+- **秘密（トークン・コード）と宛先はペイロードに入れない**。外部の配信側が `POST /v1/admin/notifications/{id}:claim` で**1回だけ**取り出す（`notifications:claim` 権限のサービスアカウントが必要）
+  - 返すのは `to`・`token`・`expires_at`。利用者が入力した宛先は EphemeralStore に一時保持して返す（9.6 の最小化モードでも可）
+  - IAM はトークンのハッシュだけを持つ。リンク先のアプリが公開 API（`/v1/magic-links:verify` など）で検証する
+- 送出は outbox 経由（少なくとも1回。`notification_id` で重複排除）。Webhook には署名を付ける。期限内に取り出されなければ監査ログに残す
+- 開発用アダプタ（開発ビルドのみ）：設定した URL の形式でリンクを組み立てて表示する
 
 ### 2.5 提供形態
 
-**各利用者が自前でホストして使う**ことを前提にする（セルフホスト型）。ライセンスは Apache-2.0（コントリビューターからの特許許諾条項により、利用者を特許の主張から守るため）。
+セルフホスト型。ライセンスは Apache-2.0。単一バイナリ + コンテナイメージ + Go ライブラリ。
 
-#### ログインの提供方法：2本立て
-
-1. **ホスト型ログイン画面**：IAM が提供するログイン画面にリダイレクトし、OIDC で結果を受け取る。手軽に使いたいアプリ向け
-2. **公開 API（ヘッドレス）**：ログイン・登録・認証手段の管理などのフローを API として公開し、アプリが自前の UI を作る
-
-- 正は公開 API とし、**ホスト型ログイン画面も公開 API の上に作る**（画面専用の内部処理を持たない）。これで両者の挙動がずれない
-- ホスト型ログイン画面は作り込まない。最低限の機能と、テンプレート差し替え・多言語化ができれば十分
-- 参考になる設計：Ory Kratos のセルフサービスフロー（ブラウザ用フローと API 用フローを分けている）
-
-#### 公開 API の要件
-
-- **バージョニング**：`/v1/...` のように付け、互換性を壊す変更はメジャーバージョンを上げる
-- **仕様の公開**：OpenAPI で定義し、仕様から Go のサーバーコードとクライアント SDK を生成する
-- **API の分離**
-  - 公開 API：エンドユーザーのログイン・登録・自分の認証手段やセッションの管理
-  - 管理 API：ユーザー・Org・Group・Role の管理。クライアント認証（client credentials）で保護し、公開 API とはパスやポートを分ける
-- **ブラウザから直接呼ばれる前提の対策**：CSRF 対策、CORS の許可オリジン設定、レートリミット
-- **passkey の制約**：passkey は RP ID（ドメイン）に結び付くため、アプリが IAM と別ドメインで自前 UI を作ると、IAM ドメインで登録した passkey が使えない
-  - RP ID を設定可能にし、複数ドメインで使う場合は WebAuthn の Related Origin Requests（`/.well-known/webauthn`）に対応する
-    - 主要ブラウザは対応済み（Chrome / Edge 128 以降、Safari 18 以降（macOS 15・iOS 18）、Firefox 152 以降。passkeys.dev の対応表による）
-    - 1つの RP ID に関連付けられるドメインは、実質**5種類まで**（`example.com` と `example.co.jp` のように、名前部分が同じものは1つと数える）
-    - サーバー側は、go-webauthn が複数の origin の検証に対応しているので、`/.well-known/webauthn` の JSON を配信するだけでよい
-- **OAuth ログインを API で行う場合**：プロバイダからの戻り先 URL を、アプリ側に向けられるようにする（許可リスト方式）
-
-#### セルフホスト前提で必要になること
-
-- **配布形態**：単一バイナリ + コンテナイメージ。加えて Go ライブラリとしても使える（2.4）
-- **必須の外部依存はなし**：SQLite + インメモリで、外部サーバーなしに起動できる。構成を大きくするときに、ホスト先がアダプタを差し替える（2.4）
-- **設定ファイルで振る舞いを変えられる**：使うアダプタ、Org を誰が作れるか、パスワード認証の有効・無効、警告のアクション（10章）など
-- **起動時の構成チェック**：複数インスタンスなのに EphemeralStore がインメモリ、など危険な組み合わせを検出して警告・起動拒否する
-- **アップグレード**：DB マイグレーションはバージョン間で前進のみ。起動時に自動適用するか、明示的なコマンドで適用するかを選べるようにする
-- **初期セットアップ**：最初の管理者を作る手段（CLI コマンドなど）
+- **ログインは2本立て**：ホスト型ログイン画面（OIDC）と公開 API（ヘッドレス）。画面も公開 API の上に作る。画面は作り込まない（テンプレート差し替えと多言語化のみ）
+- **公開 API**：`/v1` でバージョニング。OpenAPI で定義し SDK も生成。管理 API とはパス・ポートを分ける。CSRF・CORS・レートリミットに対応
+- **別ドメインでの passkey**：RP ID を設定可能にし、Related Origin Requests（`/.well-known/webauthn`）に対応。主要ブラウザは対応済み（Chrome/Edge 128+、Safari 18+、Firefox 152+）。関連付けられるドメインは実質5種類まで
+- **OAuth を API で行う場合**：プロバイダからの戻り先をアプリ側に向けられる（許可リスト）
+- **運用**：必須の外部依存なし。危険な構成は起動時に警告・拒否。マイグレーションは前進のみ（自動適用か明示コマンドかを選べる）。最初の運営者は CLI で作る
 
 ### 2.6 拡張性と機能の取捨選択
 
-**拡張性は最大限確保し、そのうえで使わない機能は捨てて最適化できる**ようにする。
+- 機能はフィーチャー単位で、ビルド時（11.11）と起動時の2段階でオン・オフする
+- オフの機能はコストゼロ。処理経路は起動時に組み立て、リクエストごとに分岐しない
+- データモデルは最初から全機能に対応した形にし、オフでも既定値が入るだけ
+- フィーチャーごとにレイテンシを計測し、遅いものは捨てられるようにする
+- ホットパス（トークン検証・認可判定）に同期の外部呼び出しを置かない
 
-- 機能は「フィーチャー」という単位でまとめ、ビルド時と起動時の2段階でオン・オフできるようにする（一覧は 11章）
-  - ビルド時に外したフィーチャーはコード自体がバイナリに含まれない（11.11）
-- **オフにした機能はコストゼロ**にする：余計なクエリ、JOIN、フック呼び出し、キャッシュ参照を一切発生させない
-  - どの処理経路を使うかは**起動時に決めて組み立てる**。リクエストごとに「この機能は有効か」を判定して分岐しない
-  - 例：Group のネストがオフなら、Group 展開は再帰なしの単純な実装を組み込む
-- データモデルは**最初から拡張可能な形**にしておく（realm、principal、リソース単位の権限など）。機能をオフにした場合も、スキーマは同じで、使わない列に既定値が入るだけにする
-  - 後から機能を足すときに全テーブルの移行が要らないようにするため
-  - 使わない列のコストは「インデックスの先頭に固定値が1つ増える」程度に抑える
-- **レイテンシが過剰になる機能は捨てられる**ことを前提にする
-  - フィーチャーごとにレイテンシのメトリクスを取り、どの機能が遅さの原因かを計測で判断できるようにする
-  - ホットパス（トークン検証、認可判定）には同期の外部呼び出しを入れない。入れる場合はフィーチャーとしてオプトインにし、タイムアウトを必須にする
+### 2.7 時刻
 
-### 2.7 時刻の扱い
+- 保存と API の値はすべて UTC（RFC 3339）。表示の変換はホスト先・クライアントが行う
+- realm の既定タイムゾーンを初期設定で決め、Org で上書きできる。使うのは**日付だけの入力**の変換時のみ（その日付時点のオフセットで変換し、使ったタイムゾーンを記録）
+- 時刻の取得は Clock ポートに統一。DB との時刻のずれを監視する（既定 1秒で警告）
 
-有効期間（4.8）、停止（4.7）、Quota（11.14）、セッションの寿命（5.4）など、多くの判定が時刻に依存するため、扱いを統一する。
+### 2.8 セキュリティ設定の階層
 
-- **保存と API の値はすべて UTC**（RFC 3339）。表示用の変換は、ホスト先・クライアント側で行う（IAM は表示に関与しない）
-- **タイムゾーンは初期設定で指定する**：realm の既定タイムゾーン（既定は UTC）を初期セットアップ時に設定する。Org ごとに上書きできる
-  - タイムゾーンが使われるのは、**日付だけで指定された入力**を時刻に変換するときだけ。例：`valid_from: "2027-04-01"` は、その Org（なければ realm）のタイムゾーンの 4月1日 0時として UTC に変換して保存する
-  - 変換に使ったタイムゾーンも記録する（後から「何時として解釈したか」を確認できるように）
-  - 夏時間のある地域では、その日付時点のオフセットで変換する
-- **時刻の取得は Clock ポートに統一する**：コードの中で直接システム時計を読まない。テストでは偽の時計に差し替え、「4月1日になったら有効になる」といった挙動を待たずに検証する
-- **インスタンス間の時計のずれ**：各インスタンスは NTP 等で時刻を同期していることを前提とする。起動時と定期的に Storage（DB）の時刻と比較し、ずれが閾値（既定1秒）を超えたら警告する
-
-### 2.8 セキュリティ設定の階層：どこまで厳しくするかはホストと Org が決める
-
-IAM は「正しい厳しさ」を1つに決めつけない。**どこまで厳しくするかは、ホスト先と Org が設定で決める**。IAM が決めるのは、設定の仕組みと安全な既定値だけ。
+どこまで厳しくするかはホスト先と Org が決める（ADR 0033）。
 
 ```
-ホスト先（設定ファイル）：既定値と、realm・Org が設定できる範囲（下限・上限）
-  └ realm：範囲内で既定値を上書き
-      └ Org：範囲内で上書き
+ホスト先（設定ファイル）：既定値と、realm・Org が設定できる範囲。項目ごとに Org が緩められるか
+  └ realm：範囲内で上書き
+      └ Org：範囲内で上書き（既定は厳しくする方向のみ）
 ```
 
-- 実際に効く値は、そのリクエストの realm と active な Org の設定で決まる（個人 Org は realm に従う）
-- ホスト先は、項目ごとに「Org が緩められるか（厳しくする方向だけか）」も決められる。既定は厳しくする方向だけ
-- ホスト先が範囲を固定すれば、Org は変更できない（全 Org に同じ基準を強制できる）
-- 設定の変更は監査ログに残す
-
-この仕組みに載せる項目の例：
-
-| 項目 | 節 |
-|---|---|
-| 警告ごとのアクション（ignore / warn / deny） | 10.2 |
-| セッションの寿命 | 5.4 |
-| 使える認証手段・登録方法（メールとパスワード、メールのコード、OAuth、passkey） | 4.1 |
-| パスワードの要件（最低長、漏洩済みパスワードの扱い） | 4.1 |
-| 登録時の bot 対策の要否 | 4.1 |
-| リカバリーコードの発行を必須にするか、使える復旧経路、復旧後の待機期間 | 4.12 |
-| 2段階認証の要否 | 4.1 |
-| ログインポリシー（passkey 必須、IP 制限、SSO 必須） | 4.4 |
-
-- ただし、**IAM の安全性の前提になっているもの**（13.5 の不変条件。例：本人確認前に理由を返さない、メールのコードをフローに結び付ける、fail-closed）は設定で外せない
+- 効く値は、そのリクエストの realm と active な Org で決まる（個人 Org は realm に従う）
+- 対象：警告のアクション（10章）、セッションの寿命（5.4）、使える認証手段と登録方法、パスワードの要件、2段階認証の要否、bot 対策、復旧の経路と待機期間（4.12）、ログインポリシー（4.4）
+- 13.5 の不変条件は設定で外せない
+- 起動時に決まるもの（アダプタ、フィーチャー、サーバーの既定値）は設定ファイル、実行中に変わるもの（realm、IdP 接続、Org のポリシー、属性定義）は Storage に置き管理 API で変更する
 
 ## 3. ドメインモデル
 
-### 3.0 全体に共通の決まり
-
-- **すべてのテーブルに `realm_id` を持たせる**（11.1）。一意制約も realm 内で効かせる
-- ID は型付きの接頭辞を付ける（`usr_`、`org_`、`grp_`、`sa_` など）。ログや API での取り違えを防ぐ
-- 認可の主体は `principal`（user / service_account / group）として扱い、ロール付与は principal に対して行う（11.2）
+- すべてのテーブルに `realm_id` を持たせ、一意制約も realm 内で効かせる
+- 認可の主体は principal（user / service_account / group）
+- 個人情報の列は暗号化して保存する（9.5）
 
 ### 3.1 認証側 (authn)
 
 ```
-realms              -- ユーザープール。既定は1つだけ作られる
-  id (PK)
-  slug (UNIQUE)
-  settings          -- realm 単位の設定（タイムゾーン、セッションの寿命、メールの保持モードなど）
+realms               id, slug UNIQUE, settings（タイムゾーン、寿命、メールの保持モードなど）
 
-users
-  id (PK)
-  realm_id
-  owner_org_id      -- NULL なら個人所有。値があればその Org が管理するユーザー（11.3）
-  display_name      -- 任意。既定では保持しない（9.6）
-  status            -- active / deleted / merged（停止は suspensions で管理する。4.7）
-  valid_from        -- この時刻から有効（NULL なら作成時から）。4.8
-  valid_until       -- この時刻まで有効（NULL なら無期限）。4.8
-  deletion_scheduled_at  -- アカウント削除の実行予定時刻（猶予期間の終わり。4.10）
-  legal_hold        -- 削除を保留する（調査中など。4.10）
+users                id, realm_id
+                     owner_org_id          NULL=個人ユーザー / 値=Org 管理ユーザー（11.3）
+                     display_name          任意。既定では持たない（9.6）
+                     status                active / deleted / merged（停止は suspensions）
+                     merged_into           統合先（11.6）
+                     valid_from, valid_until（4.8）
+                     deletion_scheduled_at, legal_hold（4.10）
+                     created_at, updated_at
 
-user_data_keys      -- ユーザーごとのデータ鍵（9.5, 4.10）。削除すると、そのユーザーの暗号化データが読めなくなる
-  user_id (PK)
-  wrapped_key       -- KeyStore のマスター鍵で包んだデータ鍵
-  key_id
-  created_at
-  merged_into       -- アカウント統合で吸収された場合の統合先（11.6）
-  created_at, updated_at
+user_data_keys       user_id PK, wrapped_key, key_id, created_at
+                     ユーザーごとのデータ鍵。削除で個人情報が復号不能になる（9.5）
 
-user_attributes     -- ホストが定義する独自項目（11.7）
-  user_id
-  key
-  value
-  PRIMARY KEY (user_id, key)
+user_emails          id, realm_id, user_id
+                     email_ciphertext, email_index（HMAC）, domain_index, key_id
+                     verified_at, verified_via（code / oauth_provider / sso / invitation / admin）
+                     is_primary, created_at
+                     UNIQUE (realm_id, email_index)
 
-user_emails         -- メールアドレスは暗号化して保存する（9.5）
-  id (PK)
-  realm_id
-  user_id (FK users)
-  email_ciphertext  -- 暗号化したメールアドレス
-  email_index       -- 検索・一意性用のブラインドインデックス（正規化後の値の HMAC）
-  domain_index      -- ドメイン部分のブラインドインデックス（11.3 のドメイン判定用）
-  key_id            -- 暗号化・インデックスに使った鍵のバージョン
-  verified_at       -- NULL なら未検証
-  verified_via      -- 確認の経路: code / oauth_provider / sso / invitation / admin（4.1）
-  is_primary
-  created_at
-  UNIQUE (realm_id, email_index)
+user_identities      id, realm_id, user_id, connection_id, provider_subject
+                     email_at_link（既定では持たない）, created_at, revoked_*
+                     UNIQUE (connection_id, provider_subject)
 
-user_identities     -- OAuth / SSO などの外部 ID
-  id (PK)
-  realm_id
-  user_id (FK users)
-  connection_id     -- どの接続経由か（google、github、Org の SSO など）
-  provider_subject  -- プロバイダ側の不変 ID (sub)
-  email_at_link     -- 連携時点のメール（参考情報。既定では保持しない。9.6）
-  created_at
-  revoked_at, revoked_by, revoke_reason   -- 無効化の記録（4.6）
-  UNIQUE (connection_id, provider_subject)
+connections          id, realm_id, owner_org_id（NULL=realm 共通 / 値=Org 専用 SSO）, type（oauth2 / oidc / saml）, config
 
-connections         -- 外部 IdP との接続設定
-  id (PK)
-  realm_id
-  owner_org_id      -- NULL なら realm 共通（Google 等）。値があればその Org 専用の SSO
-  type              -- oauth2 / oidc / saml ...
-  config
+password_credentials id, user_id, hash（argon2id）, created_at, revoked_*
+totp_credentials     id, user_id, secret_ciphertext, key_id, created_at, last_used_step, revoked_*
+recovery_codes       user_id, code_hash（argon2id）, used_at, created_at
+passkeys             id, user_id, credential_id UNIQUE, public_key, alg（ES256 / EdDSA / RS256）
+                     sign_count, transports, name, preferred_org_id（4.4）, created_at, last_used_at, revoked_*
+revoked_passkey_credentials  realm_id, credential_id, revoked_at（再登録の拒否）
 
-password_credentials  -- password フィーチャー（4.1）。メールアドレスと組み合わせて使う
-  id (PK)
-  user_id (FK users)
-  hash              -- argon2id（パラメータを含む）
-  created_at
-  revoked_at, revoked_by, revoke_reason
+service_accounts     id, realm_id, org_id, name, valid_from, valid_until, created_at
+service_account_credentials  id, service_account_id, type（client_secret / private_key_jwt / api_key）
+                     secret_hash or public_key, expires_at, revoked_*
 
-totp_credentials    -- 2要素目（4.1）
-  id (PK)
-  user_id (FK users)
-  secret_ciphertext -- 暗号化したシークレット
-  key_id
-  created_at, last_used_step
-  revoked_at, revoked_by, revoke_reason
+orgs                 id, realm_id, kind（personal / shared）, personal_owner_id, parent_org_id（11.4）
+                     slug, name, valid_from, valid_until, timezone, session_settings, created_at
+                     UNIQUE (realm_id, slug)
+memberships          id, user_id, org_id, status（invited / active / ended）
+                     org_role（owner / admin / member）, email_id（この Org で使うメール。4.4）
+                     valid_from, valid_until, ended_reason（self_leave / removed / expired / org_deleted / user_deleted）
+                     created_at, UNIQUE (user_id, org_id)
+invitations          id, realm_id, org_id, email_index, email_ciphertext, org_role
+                     valid_from, valid_until, invited_by, expires_at, status（pending / accepted / revoked / expired）
+org_domains          org_id, domain, verified_at（11.3）
+org_login_policies   org_id, type（require_passkey / ip_allowlist / membership_email_domain / require_sso …）, config
+org_quota_grants     id, realm_id, org_id, quota_key, kind（base / addon / override）, quantity
+                     starts_at, ends_at, source（manual / external）, external_ref, created_by, created_at
+                     UNIQUE (org_id, quota_key, external_ref)
 
-recovery_codes      -- アカウント復旧用（4.12）
-  user_id
-  code_hash         -- argon2id
-  used_at
-  created_at
+sessions             id, realm_id, principal_type, principal_id
+                     active_org_id         Org オンなら常に値あり / オフなら常に NULL
+                     auth_methods（amr）, auth_credential_ids, warnings
+                     ip, user_agent, created_at, last_seen_at, expires_at, revoked_at
+suspensions          id, realm_id, target_type（user / org / service_account / membership）, target_id
+                     category（tos_violation / customer_request / security_risk / billing …）
+                     reason（内部向け）, external_ref, starts_at, ends_at（NULL=無期限）
+                     created_by, created_at, lifted_at, lifted_by
+clients              id, realm_id, name, trust_level（first_party）, redirect_uris
+                     auth_method（private_key_jwt / client_secret / none）, id_token_signed_response_alg, created_at
 
-passkeys
-  id (PK)
-  user_id (FK users)
-  credential_id (UNIQUE)
-  public_key
-  alg               -- COSE アルゴリズム (ES256 / EdDSA / RS256)。RS256 は警告対象（9.4）
-  sign_count
-  transports
-  name              -- ユーザーが付ける名前
-  preferred_org_id  -- この passkey でログインしたときに選ぶ Org（任意。4.4）
-  created_at, last_used_at
-  revoked_at, revoked_by, revoke_reason   -- 無効化の記録（4.6）
-
-service_accounts    -- 人間以外の主体（11.2）
-  id (PK)
-  realm_id
-  org_id            -- 所属 Org
-  name
-  valid_from, valid_until   -- 有効期間（4.8）
-  created_at
-
-service_account_credentials
-  id (PK)
-  service_account_id
-  type              -- client_secret / private_key_jwt / api_key
-  secret_hash or public_key
-  expires_at
-  revoked_at, revoked_by, revoke_reason   -- 無効化の記録（4.6）
-
-orgs                -- Org フィーチャー（11.13）がオンのときだけ使う
-  id (PK)
-  realm_id
-  kind              -- personal / shared（11.13）
-  personal_owner_id -- kind = personal のとき、その持ち主のユーザー
-  parent_org_id     -- Org の階層（11.4）。NULL ならトップレベル
-  slug
-  name
-  valid_from, valid_until   -- 有効期間（4.8。試用期間の Org など）
-  timezone          -- 日付だけの入力を変換するときのタイムゾーン（NULL なら realm の既定。2.7）
-  session_settings  -- セッションの寿命の上書き（5.4）
-  created_at
-  UNIQUE (realm_id, slug)
-
-invitations         -- Org への招待（4.4）
-  id (PK)
-  realm_id
-  org_id
-  email_index       -- 招待したメールアドレスのブラインドインデックス（受け入れ時の照合用）
-  email_ciphertext  -- 通知の宛先（暗号化）
-  org_role
-  valid_from, valid_until   -- 招待で作る Membership の有効期間（4.8）
-  invited_by
-  expires_at        -- 招待の有効期限
-  status            -- pending / accepted / revoked / expired
-  created_at
-
-org_domains         -- Org が所有を証明したメールドメイン（11.3）
-  org_id
-  domain
-  verified_at
-
-memberships         -- User と Org の所属関係（所属の有無のみ）
-  id (PK)
-  user_id (FK users)
-  org_id (FK orgs)
-  status            -- invited / active / ended（停止は suspensions で管理する。4.7）
-  org_role          -- owner / admin / member（Org のロール。4.11）
-  email_id          -- この Org で使うメールアドレス（user_emails。NULL なら primary を使う。4.4）
-  valid_from, valid_until   -- 有効期間（4.8。入社日から、契約終了日まで、など）
-  ended_reason      -- 終了の理由: self_leave / removed / expired / org_deleted / user_deleted
-  created_at
-  UNIQUE (user_id, org_id)
-
-sessions
-  id (PK)
-  realm_id
-  principal_type    -- user / service_account
-  principal_id
-  active_org_id (FK orgs, NULL 可)  -- Org フィーチャーがオンなら常に値がある（個人 Org を含む）。オフなら常に NULL
-  auth_methods      -- どの手段で認証したか (amr)
-  auth_credential_ids -- 認証に使った認証手段の ID（認証手段の無効化時に、関連するセッションを特定するため。4.6）
-  warnings          -- 認証時に出た警告コードの一覧（10章）
-  ip, user_agent
-  created_at, last_seen_at, expires_at, revoked_at
-
-suspensions         -- 停止（4.7）
-  id (PK)
-  realm_id
-  target_type       -- user / org / service_account / membership
-  target_id
-  category          -- 停止の種別（4.7）: tos_violation / customer_request / security_risk / billing ...
-  reason            -- 内部向けの詳細（本人には見せない）
-  external_ref      -- 外部システム（課金等）が管理する停止の ID。同じ値での登録・解除は冪等
-  starts_at         -- 停止の開始時刻（未来の時刻を指定して予約もできる）
-  ends_at           -- 停止の終了時刻。NULL なら無期限
-  created_by, created_at
-  lifted_at, lifted_by   -- 期限前に解除した場合の記録
-
-clients             -- 連携先のアプリ（OIDC のクライアント。5.5）
-  id (PK)
-  realm_id
-  name
-  trust_level       -- first_party（当面はこれのみ）/ third_party
-  redirect_uris
-  auth_method       -- private_key_jwt / client_secret / none（PKCE のみ）
-  id_token_signed_response_alg  -- ML-DSA-65 / ES256（9.3）
-  created_at
-
-org_quota_grants    -- Org の上限（人数など）の付与。Quota フィーチャー（11.14）
-  id (PK)
-  realm_id
-  org_id
-  quota_key         -- members / service_accounts / groups ...
-  kind              -- base / addon / override（11.14）
-  quantity
-  starts_at         -- この時刻から効く（未来の予約も可）
-  ends_at           -- この時刻まで効く。NULL なら無期限
-  source            -- manual / external
-  external_ref      -- 外部の課金システム等の ID（同じ値での登録は上書き＝冪等）
-  created_by, created_at
-  UNIQUE (org_id, quota_key, external_ref)
-
-scheduled_events    -- 時刻境界で出すイベントの予約（4.8）
-  id (PK)
-  fire_at
-  event_type
-  payload
-  fired_at
-
-revoked_passkey_credentials  -- 無効化した passkey の credential_id（再登録を防ぐ）
-  realm_id
-  credential_id
-  revoked_at
-  PRIMARY KEY (realm_id, credential_id)
-
-org_login_policies  -- Org への入り方の制約
-  org_id (FK orgs)
-  type              -- ip_allowlist / require_passkey / email_domain / require_sso ...
-  config
+scheduled_events     id, fire_at, event_type, payload, fired_at（4.8）
+installed_features   feature, state（enabling / active / disabling）, data_version, updated_at（11.12）
 ```
+
+`revoked_*` は `revoked_at, revoked_by, revoke_reason`。
 
 ### 3.2 認可側 (authz)
 
 ```
-groups
-  id (PK)
-  realm_id
-  org_id            -- 属する Org（Org をまたぐ Group は作らない）。Org フィーチャーがオフなら NULL（realm 全体の Group）
-  name
-  UNIQUE (org_id, name)
-
-group_members       -- principal と Group の多対多
-  group_id (FK groups)
-  member_type       -- user / service_account / group（group はネスト。11.5）
-  member_id
-  PRIMARY KEY (group_id, member_type, member_id)
-
-roles
-  id (PK)
-  realm_id
-  org_id            -- NULL なら realm 共通ロール
-  name
-
-role_permissions
-  role_id (FK roles)
-  permission        -- "project:read" のような文字列
-
-role_bindings       -- 誰に、どの範囲で、どのロールを与えるか
-  role_id (FK roles)
-  principal_type    -- user / service_account / group
-  principal_id
-  org_id            -- NULL なら realm 全体に効く（Org フィーチャーがオフの場合はこちらのみ）
-  resource_type     -- NULL なら Org 全体に効く。値があればそのリソースだけ（11.5）
-  resource_id
+groups         id, realm_id, org_id（NULL=realm 全体）, name, UNIQUE (org_id, name)
+group_members  group_id, member_type（user / service_account / group）, member_id
+roles          id, realm_id, org_id（NULL=realm 共通）, name
+role_permissions  role_id, permission（"project:read" など）
+role_bindings  role_id, principal_type, principal_id
+               org_id（NULL=realm 全体）, resource_type, resource_id（NULL=Org 全体）
 ```
 
-- authz は principal を ID として参照するだけ。DB の外部キーはモジュール境界をまたいで張らない（アプリ側で整合性を保つ）
-- Group に所属できるのは、その Org の Membership が active なユーザー、またはその Org のサービスアカウントのみ（authz は authn の公開 API で確認する）
+Group に入れるのは、その Org の active な Membership を持つユーザーか、その Org のサービスアカウントのみ。
 
 ## 4. 主要フロー
 
-### 4.1 サインアップ / ログイン
+### 4.1 登録とログイン
 
-- 手段：メール（マジックリンク / コード）、メールとパスワード（フィーチャー）、OAuth、passkey
-- OAuth のユーザー識別は `(provider, provider_subject)` で行う。メールアドレスでは識別しない
-
-#### 認証要素と外部への送信
-
-IAM はコードを自分では届けない（2.4 の Notifier）。そのため、**外部への送信が要らない要素を中心に**組み立て、送信が必要なのはメールアドレスの所有確認だけに絞る。
+ログインの識別子はメールアドレス、passkey、OAuth / SSO の外部 ID。**ユーザー名は持たない**（ADR 0037）。
 
 | 要素 | 外部への送信 | 位置づけ |
 |---|---|---|
-| passkey | 不要 | 1要素目・2要素目の両方に使える。最も推奨 |
-| TOTP（認証アプリ） | 不要 | 2要素目の標準。シークレットは暗号化して保存する（9.5） |
-| OAuth / SSO | 不要 | プロバイダ側で認証が完結する。プロバイダが検証済みとしたメールは、realm の設定で所有確認済みとして扱える |
-| メールのコード・マジックリンク | 必要（Notifier 経由） | メールアドレスの所有確認、パスワードなしのログイン、アカウント復旧（4.12） |
-| SMS のコード | 必要 | SIM スワップ等に弱いため、当面は対応しない。対応する場合も警告（10章）の対象にする |
+| passkey | 不要 | 1要素目・2要素目。最も推奨 |
+| TOTP | 不要 | 2要素目 |
+| OAuth / SSO | 不要 | 識別は `(connection, provider_subject)` |
+| メールのコード・マジックリンク | 必要（Notifier） | 所有確認、パスワードなしのログイン、復旧 |
+| メール + パスワード | 不要 | フィーチャー（`password`） |
+| SMS | ― | 対応しない |
 
-- **アカウント作成**：すべてのアカウントは**確認済みのメールアドレスを1つ以上**持つ（下記）。そのため、登録時のメールの所有確認は、OAuth でプロバイダが確認済みとしたメールを受け入れる場合を除き、どの登録方法でも行う
-- **2段階認証**：passkey または TOTP を使う。必須にするかどうかはホスト先・Org の設定で決める（2.8）。メールのコードは、1要素目がメールである場合に2要素目として認めない（同じ経路の重ね掛けになるため。設定で外せない）
+- 2段階認証は passkey / TOTP。要否は設定（2.8）。1要素目がメールなら、メールのコードは2要素目にしない
 
 #### メールアドレスは1つ以上必須
 
-**すべてのユーザーは、確認済みのメールアドレスを1つ以上持つ**。ログインに使う手段（passkey、パスワード、OAuth）とは独立した、アカウントの必須項目とする。
+- 全ユーザーが確認済みのメールを1つ以上持つ。アカウントは所有確認の完了時に作る（それまでの登録内容はフローの期限内だけ保持）
+- 最後の確認済みメールは削除できない。最小化モード（9.6）でも満たす。サービスアカウントは対象外
+- 「確認済み」とみなす経路を realm で選ぶ。メールを送れない環境では `code` を無効にして OAuth と運営者による登録で運用する（この場合メールによる復旧は使えず、起動時に警告）
 
-- 理由：アカウント復旧（4.12）と、本人への重要な通知（停止、新しい端末からのログイン、削除の予定など）の届け先を、すべてのアカウントで確保するため
-- **アカウントはメールの所有確認が完了した時点で作成する**。確認前の登録内容は、フローの有効期限（既定10分）の間だけ保持する
-- OAuth / SSO で登録する場合、プロバイダが確認済みとしたメールを、realm の設定で確認済みとして受け入れられる（受け入れない場合は改めて確認する）
-
-##### 「確認済み」とみなす経路
-
-メールを送れない環境（配信の仕組みを用意できない、個人の小規模な運用など）でも運用できるよう、**メールを送らずに確認済みとみなす経路**を用意する。どの経路を有効にするかは realm の設定で決め、`user_emails.verified_via` に記録する。
-
-| 経路 | 内容 | メールの送信 | 既定 |
-|---|---|---|---|
-| `code` | 確認コード・リンクをメールで送る | 必要 | 有効 |
-| `oauth_provider` | OAuth プロバイダが確認済みとしたメールを受け入れる（Google、GitHub など） | 不要 | 有効 |
-| `sso` | Org 専用 SSO（11.3）の IdP が返したメールを受け入れる | 不要 | 有効 |
-| `invitation` | 管理者が発行した招待リンク（手渡し・チャット等で共有）を受け入れたことで確認済みとする | 不要 | 無効 |
-| `admin` | 運営者がアカウントを作成し、メールを確認済みとして登録する | 不要 | 有効 |
-
-- **メールを送れない環境の構成例**：`code` を無効にし、`oauth_provider`（OAuth で登録）と `admin`（運営者が作成）だけで運用する。登録後に passkey を追加してもらえば、OAuth に依存せずログインできる
-- `invitation` は、招待リンクを知っていることを「そのアドレスの持ち主である」とみなす弱い確認なので、既定は無効
-- `code` が無効な realm では、メールによる復旧（4.12）は使えない。リカバリーコードと運営者による復旧になる（起動時・設定変更時に警告を出す）
-- Org のポリシーで、受け入れる経路を絞れる（例：`code` と `sso` のみ）
-- ローカル開発では、開発用の Notifier（2.4）で `code` の動作を確かめられる
-- **最後の確認済みメールアドレスは削除できない**（4.3）。メールアドレスを変えたい場合は、新しいアドレスを追加・確認してから古いものを削除する
-- 9.6 の最小化モード（`index_only`）でもこの必須条件は満たす（ブラインドインデックスとして持つ）
-- サービスアカウント（11.2）は対象外
-
-#### ユーザー名（独自の ID）は持たない
-
-ログインの識別子として、**ユーザーが自由に決める ID（ユーザー名）は登録できないようにする**。識別子はメールアドレス（と passkey、OAuth / SSO の外部 ID）だけにする。
-
-- 理由
-  - ユーザー名は、正規化（大文字小文字、Unicode の表記ゆれ、紛らわしい文字）の扱い次第で一意性を確実に保証しにくい
-  - 登録時に「この ID は登録済みです」と返さざるを得ず、ID の存在を隠せない。メールアドレスなら、登録済みかどうかを画面で区別せず、そのアドレスへの通知で伝えられる（4.9）
-- 表示名やハンドルが必要な場合は、ホスト先のアプリが持つ（9.6）。IAM はログインの識別子としては扱わない
-
-#### メールアドレスとパスワード
-
-パスワードは、**メールアドレスと組み合わせたログイン手段**としてフィーチャー（`password`）で提供する。どこまで厳しくするかはホスト先と Org が決める（2.8）。
-
-| 設定項目 | 既定値 | 備考 |
+| 経路 | 送信 | 既定 |
 |---|---|---|
-| 最低長 | 15文字（2要素目を必須にしている場合は8文字） | NIST SP 800-63B に沿った既定値。文字種の組み合わせの強制は既定ではしない |
-| 漏洩済みパスワードの照合 | 登録・変更時に拒否、ログイン時に警告 | 外部 API（k-匿名）を使わない設定も可能 |
-| 2段階認証 | 任意 | Org で必須にできる |
-| リカバリーコードの発行 | する | メールによる復旧（4.12）も使える |
+| `code`（確認コード・リンク） | 必要 | 有効 |
+| `oauth_provider`（プロバイダが確認済み） | 不要 | 有効 |
+| `sso`（Org 専用 SSO の IdP） | 不要 | 有効 |
+| `invitation`（招待リンクの受け入れ） | 不要 | 無効 |
+| `admin`（運営者が登録） | 不要 | 有効 |
 
-- argon2id でハッシュ化する
-- パスワードだけのログインには警告 `single_factor`（10章）を出す。拒否するかどうかは、警告のアクション設定や Org のログインポリシーで決める
-- ログインの失敗の応答は 4.9 の開示のルールに従う（メールアドレスの有無を区別しない）。レートリミットはアカウント単位と IP 単位の両方で行う
+Org のポリシーで受け入れる経路を絞れる。
 
-#### メールで送るコード・リンクの安全策
+#### パスワード
 
-外部の配信の仕組み（とその経路）からはコードが見える。そのため、**コードが漏れても単体では使えない**ようにする。
+| 設定 | 既定 |
+|---|---|
+| 最低長 | 15文字（2段階認証が必須なら 8文字） |
+| 漏洩済みパスワード | 登録・変更時に拒否、ログイン時に警告（k-匿名 API。使わない設定も可） |
+| 2段階認証 | 任意（Org で必須にできる） |
+| リカバリーコード | 発行する |
 
-- **要求したフローに結び付ける**：コードやマジックリンクは、要求したブラウザ（またはアプリ）が持つフロー ID と組み合わせたときだけ有効にする。フロー ID は要求した側の Cookie（API の場合はレスポンス）にだけ渡し、通知には含めない。配信経路でコードを見た人が、別の端末から使うことはできない
-  - 例外：要求した端末とは別の端末でメールを開くケース（PC で要求し、スマホでリンクを開く）は、realm の設定で「別端末での確認」を許す場合のみ、元の端末側で承認する方式で扱う
-- 有効期限は短くする（既定10分）。1回限り。検証の試行回数に上限を設ける
-- コードは IAM にはハッシュだけを保存する（2.4 の `:claim` で取り出した後は平文が残らない）
+argon2id。パスワードのみのログインには警告 `single_factor`。レートリミットはアカウント単位と IP 単位。
 
-### 4.2 認証手段の追加・アカウント連携
+#### メールのコード・リンクの安全策
 
-- **連携はログイン済み状態からのみ**行う（「設定 → 認証手段を追加」）
-- 未ログイン状態で OAuth のメールが既存ユーザーのメールと一致しても、**自動リンクはしない**（アカウント乗っ取り対策）
-  - 既存アカウントにログインしてから連携するよう案内する
-- メールアドレス追加時は検証必須。未検証メールではログインできない
-- 1つのメールアドレスは1ユーザーにしか紐付かない
+- **要求したフローに結び付ける**：要求した側だけが持つフロー ID と組み合わせたときだけ有効。別端末での確認は、realm で許す場合のみ元の端末で承認する方式
+- 有効期限 10分（既定）、1回限り、試行回数に上限。IAM にはハッシュだけを持つ
+
+### 4.2 認証手段の追加と連携
+
+- 連携はログイン済みの状態からのみ。**未ログインでメールが一致しても自動リンクしない**
+- 1つのメールアドレスは1ユーザーにだけ紐付く
 
 ### 4.3 認証手段の削除
 
-- 最後の1つの認証手段は削除できない（締め出し防止）
-- 最後の確認済みメールアドレスは削除できない（4.1）
-- primary メールを削除する場合は、先に別の検証済みメールを primary にする
+最後の認証手段と、最後の確認済みメールは削除できない。primary を消す前に別のメールを primary にする。
 
 ### 4.4 Org の決定と切り替え
 
-Org フィーチャー（11.13）がオンのときだけ行う。オフなら Org の決定は行わず、`active_org_id` は常に NULL。
-
-ログイン（ユーザー確定）と Org 選択は分ける。
+Org フィーチャー（11.13）がオンのときだけ行う。
 
 1. ユーザーを認証する
-2. 入れる Org の候補を求める：active な Membership を持つ Org のうち、`org_login_policies` を満たし、かつ認証の警告が `deny` にならないもの（10章）
-3. 候補の中から、次の優先順で1つを選ぶ
-   1. ログイン時に明示的に指定された Org（ログイン画面での選択、連携先からの `org` パラメータ）
-   2. **ログインに使った手がかりに結び付いた Org**（下記の「ログインの手がかりによる Org の選択」）
-   3. 前回の Org
-   4. 個人 Org（全ユーザーが持つので、候補が空になることはない）
-4. `sessions.active_org_id` を更新する
+2. 候補：active な Membership を持ち、ログインポリシーを満たし、警告が `deny` にならない Org
+3. 選ぶ順：明示的な指定（画面での選択、連携先の `org` パラメータ）→ ログインの手がかりに結び付いた Org → 前回の Org → 個人 Org
+4. `sessions.active_org_id` を更新する（切り替え時はセッション ID を入れ替える。必要なら step-up 認証）
 
-- Org の切り替え = セッションの `active_org_id` の変更。再ログインは不要（ただしポリシーで passkey が必要な Org なら step-up 認証を要求する）
-- 手がかりに結び付いた Org が複数ある場合は、その中で前回の Org を選び、無ければ選択させる
-- ポリシーの例
-  - `require_passkey`：passkey で認証したセッションでないと入れない
-  - `ip_allowlist`：指定 IP レンジからのみ入れる（エンタープライズ向け、将来）
-  - `membership_email_domain`：Membership に結び付けたメールアドレスが、Org の所有するドメイン（11.3）であること
+| 手がかり | 結び付け |
+|---|---|
+| メールアドレス | Membership に結び付けたメール |
+| OAuth / SSO | プロバイダが返したメールが結び付けたメールと一致（その場で HMAC を計算）。Org 専用 SSO ならその Org |
+| passkey | `passkeys.preferred_org_id` |
+| IP | Org の `ip_allowlist`（将来） |
+
+手がかりは優先度にすぎず、入れるかはポリシーで決まる。
 
 #### Membership に結び付けるメールアドレス
 
-**Membership ごとに、その Org で使うメールアドレスを1つ結び付けられる**（`memberships.email_id`）。「仕事用のアドレスは会社の Org、個人のアドレスは個人 Org」のように、メールアドレスと Org を対応させる。
-
-- 結び付けられるのは、そのユーザーの確認済みのメールアドレスだけ。1つのアドレスを複数の Org に結び付けてもよい
-- 結び付け方
-  - **Org からの招待**：招待したメールアドレスが、そのまま Membership に結び付く。招待を受け入れるには、そのアドレスの所有確認が必要（アカウントに無いアドレスなら、追加して確認する）
-  - **本人による設定**：本人が自分の Membership に使うアドレスを選ぶ・切り替える
-  - Org のポリシー（`membership_email_domain`）で、Org の所有ドメインのアドレスに限定したり、本人による切り替えを禁止したりできる
-- **Org から見えるのは、結び付けたアドレスだけ**にする。そのユーザーがほかに持っているメールアドレスは、Org の管理者にも、その Org の文脈で動く連携先にも見せない
-  - active な Org がある場合、ID トークンの `email` クレームには、その Org に結び付けたアドレスを入れる
-  - その Org に関する通知（招待、停止など）の宛先も、結び付けたアドレスにする（Notifier の `:claim` が返す `to`）
-- 結び付けていない Membership では、ユーザーの primary のメールアドレスを使う
-- 結び付けたアドレスを削除しようとした場合は、先に別のアドレスに結び付け直す必要がある。Org のポリシーで別のアドレスに変えられない場合は、削除を拒否する（`email_bound_to_membership`）
-
-#### ログインの手がかりによる Org の選択
-
-ログインに使ったものが Org に結び付いていれば、その Org を選ぶ。これにより、**どのアドレスやどの認証手段でログインしたかで、入る Org を切り替えられる**。
-
-| 手がかり | 結び付け | 例 |
-|---|---|---|
-| メールアドレス（マジックリンク・メールコードでのログイン） | Membership に結び付けたメールアドレス | 仕事用アドレスでログイン → 会社の Org |
-| OAuth / SSO のアカウント | プロバイダが返したメールアドレスが、Membership に結び付けたアドレスと一致する場合（その場でブラインドインデックスを計算して照合する）。Org 専用 SSO（11.3）ならその Org | 会社の Google アカウントでログイン → 会社の Org |
-| passkey | 本人が passkey ごとに設定した既定の Org（`passkeys.preferred_org_id`） | 会社の PC の passkey → 会社の Org |
-| IP アドレス | Org の `ip_allowlist` に一致する場合（将来） | 社内ネットワークから → 会社の Org |
-
-- 手がかりはあくまで**選択の優先度**であり、入れるかどうかはポリシー（候補の判定）で決まる。手がかりがあっても、ポリシーを満たさない Org は選ばない
-- ログイン後に本人が切り替えることはいつでもできる
+- Membership ごとに、その Org で使う確認済みのメールを1つ結び付けられる（未設定なら primary）
+- 招待では招待したアドレスが結び付く（受け入れに所有確認が必要）。本人も切り替えられる。Org のポリシーで所有ドメインに限定・切り替え禁止にできる
+- **Org とその文脈の連携先に見えるのは結び付けたメールだけ**（ID トークンの `email`、通知の宛先）
+- 結び付いたメールを消すには結び付け直しが必要。できなければ `email_bound_to_membership` で拒否
 
 ### 4.5 認可の判定
 
 ```
 check(principal, action, resource, context) -> allow / deny
-  principal : user / service_account
-  action    : "project:read" などの permission
-  resource  : (type, id)。Org 全体への操作なら (org, org_id)
-  context   : active_org_id、IP、時刻など
+  resource: (type, id)。Org 全体なら (org, org_id) / context: active_org_id、IP、時刻
 ```
 
-- Org フィーチャーがオフの場合は、realm 全体を範囲とする RBAC として判定する（`org_id` が NULL のロール付与だけを使う）
-
-- `active_org_id` はセッションから取る
-- principal に直接付いたロール + 所属 Group（ネスト有効時は祖先 Group も）に付いたロールのうち、範囲（Org 全体 / そのリソース / Org 階層有効時は親 Org）が一致するものを合算して判定する
-- 有効なフィーチャーに応じて判定の実装を起動時に組み立てる（11章）。最小構成なら「Org 単位の RBAC」だけの単純な判定になる
-- 将来 OpenFGA / Cedar 等に載せ替える場合も、このシグネチャのまま実装を差し替える
+- 直接のロール + 所属 Group（ネスト有効時は祖先も）のロールのうち、範囲（Org 全体 / リソース / Org 階層有効時は親 Org）が合うものを合算する
+- Org オフなら realm 全体の RBAC。実装は有効なフィーチャーに応じて起動時に組み立てる
+- 将来 OpenFGA / Cedar 等に同じシグネチャで差し替えられる
 
 ### 4.6 認証情報の無効化
 
-漏洩・紛失・退職などに備え、認証情報を個別にも一括でも無効化できる口を用意する。
-
-#### 対象と操作
-
 | 対象 | 個別 | 一括 |
 |---|---|---|
-| セッション | 指定したセッションを失効 | ユーザーの全セッション / 指定したセッション以外を失効 |
-| リフレッシュトークン | 指定したファミリーを失効 | ユーザー・クライアント単位で失効 |
-| passkey | 指定した passkey を無効化 | ユーザーの全 passkey を無効化 |
-| 外部 ID（OAuth / SSO の連携） | 指定した連携を無効化 | ユーザーの全連携を無効化 |
-| パスワード（有効な場合） | 無効化して再設定を必須にする | ― |
-| サービスアカウントの認証情報 | 指定したシークレット・鍵・API キーを無効化 | サービスアカウントの全認証情報を無効化 |
+| セッション | 指定を失効 | 全部 / 指定以外 |
+| リフレッシュトークン | ファミリー単位 | ユーザー・クライアント単位 |
+| passkey / 外部 ID 連携 | 指定 | 全部 |
+| パスワード | 無効化し再設定を必須に | ― |
+| サービスアカウントの認証情報 | 指定 | 全部 |
 
-- **全部まとめて**：「このユーザーの全認証情報と全セッションを無効化する」操作も用意する（侵害が疑われるときの初動用）
+- 侵害時の初動用に「全認証情報と全セッションを一括で無効化」も用意する
+- 削除ではなく無効化（`revoked_*` を記録）。取り消し不可。passkey は credential_id の再登録も拒否する
+- その認証情報で認証したセッションも失効させ、Back-Channel Logout で通知する
+- 本人は最後の1つを無効化できない。管理者はできる（以後は復旧手順で戻る）。Org 管理者は管理ユーザーとサービスアカウントのみ
 
-#### 無効化の扱い
+### 4.7 停止
 
-- **削除ではなく無効化**：行は残し、`revoked_at`・実行者・理由を記録する。監査とインシデント調査のため
-- **無効化は取り消せない**：同じ認証情報を再び有効にはしない。必要なら新しく登録し直す
-  - passkey は `revoked_passkey_credentials` に credential_id を記録し、同じ認証器の鍵の再登録も拒否する
-- **関連するセッションも失効させる**：無効化した認証情報で認証したセッション（`sessions.auth_credential_ids` で特定）を同時に失効させる
-- OIDC の Back-Channel Logout で連携先にも通知する（5.2）
+ユーザー・Org・サービスアカウント・Membership を、無期限または期間指定で止める。
 
-#### 誰が実行できるか
+- `starts_at`（省略で即時、未来なら予約）、`ends_at`（省略で無期限）。複数を重ねられ、1つでも有効なら停止中
+- 停止中かは**判定時に時刻から計算**する（スケジューラ不要）。セッション検証でも判定する（5.3）
 
-- **本人**：自分の認証情報・セッション（公開 API）。ただし 4.3 の通り、最後の1つの認証手段は無効化できない
-- **管理者**：管理 API から実行する。管理者は最後の1つも無効化できる（その場合、ユーザーはアカウント復旧の手順でしか戻れない）
-- **Org の管理者**：その Org の管理ユーザー（11.3）とサービスアカウントについてのみ
+| 種別 | 解除できる人 | 本人への表示 |
+|---|---|---|
+| `tos_violation` | 運営者 | 規約違反による停止と問い合わせ先 |
+| `customer_request` | Org の管理者と運営者 | 管理者による停止 |
+| `security_risk` | セキュリティ担当（自動停止は期限付き） | 一時停止と復旧手順。**根拠は見せない** |
+| `billing` | 課金システム（`external_ref` で冪等）と運営者 | 契約・支払いの確認 |
 
-### 4.7 停止（ユーザー・Org）
+- 種別は realm で追加できる。別種別が重なれば全部解除されるまで止まる。本人にはコードだけを返し `reason` は見せない
+- 影響：ユーザー＝ログイン不可・既存セッション無効。Org＝メンバーが入れない・その Org のサービスアカウントも無効（管理ユーザーも止めるかは停止時に選ぶ）。Membership＝その Org にだけ入れない
+- 個人 Org は個別に停止できない。本人は自分の停止を解除できない
 
-ユーザー・Org・サービスアカウント・Membership を、**無期限または期間を指定して**停止できるようにする。削除とは違い、解除すれば元に戻る。
+### 4.8 有効期間
 
-#### 停止の指定
+ユーザー・Membership・サービスアカウント・Org に `valid_from` / `valid_until` を持たせる（入社日から、契約終了日まで、など）。
 
-- `starts_at`（省略時は即時）と `ends_at`（省略時は無期限）を指定する
-- 未来の開始時刻を指定して予約できる（「来月1日から停止」など）
-- 期限が来れば自動的に解除される。期限前に手動で解除することもできる
-- 1つの対象に複数の停止が重なってもよい。どれか1つでも有効なら停止中とみなす（別々の理由・担当者による停止を独立に管理できる）
+- 使えるのは「有効期間内」かつ「停止中でない」とき。判定は停止と同じく時刻から計算する
+- 停止との違い：有効期間は本来使える期間で対象ごとに1つ。停止は措置で重ねられる
+- 時刻の境界でのイベント（有効化、期限切れ、停止の開始など）は `scheduled_events` に予約し、outbox 経由で出す。**アクセスの可否はこの処理の遅れに左右されない**
 
-#### 停止の種別
+### 4.9 Org の制約と拒否理由
 
-なぜ止まっているのかによって、**誰が解除できるか、本人に何を見せるか**が変わる。そのため停止には必ず種別（`category`）を付ける。
-
-| 種別 | 例 | 解除できる人 | 本人への表示 |
+| 段階 | 問い | 制約 | 判定のタイミング |
 |---|---|---|---|
-| `tos_violation` | 利用規約違反 | 運営者（realm の管理者）のみ | 規約違反による停止である旨と問い合わせ先 |
-| `customer_request` | 顧客（Org 管理者）の依頼、退職手続き中 | 依頼した側（Org の管理者）と運営者 | 管理者により停止されている旨 |
-| `security_risk` | 不正アクセスの疑い、認証情報の漏洩 | セキュリティ担当（運営者）。リスク判定による自動停止は期限付きにする | 安全のため一時停止している旨と復旧手順。**検知の根拠は見せない** |
-| `billing` | 支払い遅延、プランの期限切れ | 外部の課金システム（`external_ref` で冪等に登録・解除）と運営者 | 契約・支払いの確認を促す旨 |
+| 所属の前提条件 | この人をこの期間所属させてよいか | Quota（11.14）、ドメイン（11.3）、管理ユーザーの制約、有効期間 | Membership の作成・変更時 |
+| 入場の条件 | 今この方法で入ってよいか | ログインポリシー、停止、警告 | ログイン・切り替え時 |
 
-- 種別は realm ごとに追加できる（独自の種別にも解除権限と表示を定義する）
-- 1つの対象に別種別の停止が重なっている場合、**全部が解除されるまで停止は続く**。例えば顧客が自分の依頼による停止を解除しても、同時に規約違反の停止があれば止まったまま
-- 本人への表示は種別ごとのコードで返し、文面はクライアント側で多言語化する（10.4 と同じ）。`reason`（内部向けの詳細）は返さない
-- 監査ログ・SIEM には種別と理由の両方を出す
+どちらの前にも、操作する人の権限判定（例：`org:invite`）がある。
 
-#### 停止の判定
-
-- 停止中かどうかは、**時刻を使って判定時に計算する**（`starts_at ≤ 現在 < ends_at` かつ未解除）。開始・終了のためのスケジューラは不要
-- セッションの検証時にも判定する。そのため、予約した停止が始まった時点で既存のセッションも使えなくなる
-  - ホットパスのコストを抑えるため、対象ごとの停止状態を EphemeralStore にキャッシュし、停止の追加・解除時に無効化する
-
-#### 停止の影響
-
-| 対象 | 影響 |
+| 拒否理由コード | 意味 |
 |---|---|
-| ユーザー | ログイン不可。既存のセッション・リフレッシュトークンは使えなくなる。連携先には Back-Channel Logout で通知 |
-| Org | メンバーはその Org に入れない（4.4 の候補から外れる）。その Org を active にしているセッションは、個人 Org に切り替えるまで Org の操作ができない。その Org のサービスアカウントも使えない |
-| Org（管理ユーザーへの波及） | Org 管理ユーザー（11.3）も停止するかを、停止時に選べる（既定は停止する） |
-| サービスアカウント | 認証不可。発行済みのトークンも使えなくなる |
-| Membership | そのユーザーは、その Org にだけ入れない。他の Org や個人 Org には影響しない |
+| `suspended.<category>` | 停止中 |
+| `outside_validity` | 有効期間外 |
+| `quota_exceeded` | 上限超過（不足する期間と人数を添える） |
+| `policy.<type>` | ログインポリシーを満たさない |
+| `warning_denied.<code>` | 警告が deny |
+| `permission_denied` | 権限なし |
+| `last_owner` / `managed_user` / `email_bound_to_membership` / `leave_blocked_by_hook` | 4.10、4.4 |
 
-- 個人 Org を個別に停止することはできない（ユーザーを停止する）
-- アクセストークンを JWT にすると停止を即時に反映できない（有効期限まで使える）。これも不透明トークンを採用した理由の1つ（5.1）
+複数該当すればすべて返す。コードは公開の契約（11.10）。
 
-#### 誰が実行できるか
-
-- **管理者**：すべての対象
-- **Org の管理者**：その Org の Membership、管理ユーザー、サービスアカウント
-- 停止された本人は、自分の停止を解除できない
-
-### 4.8 有効期間（時刻を指定した有効化）
-
-停止（4.7）とは逆に、**指定した時刻から有効になる**、**指定した時刻で無効になる**という口を用意する。
-
-- 対象：ユーザー、Membership、サービスアカウント、Org
-- `valid_from`（省略時は作成時から）と `valid_until`（省略時は無期限）を持つ
-- 用途の例
-  - 入社日の前にアカウントや Org への所属を準備しておき、入社日から使えるようにする
-  - 業務委託の契約終了日に自動で使えなくする
-  - 試用期間つきの Org
-
-#### 停止との違い
-
-| | 有効期間（4.8） | 停止（4.7） |
-|---|---|---|
-| 意味 | その対象が本来使える期間 | 一時的に使えなくする措置 |
-| 数 | 対象ごとに1つ（上書きで変更） | 複数を重ねられる |
-| 主な使い手 | プロビジョニング（人事・契約） | 運用・セキュリティ対応 |
-
-- 実際に使えるかどうかは「有効期間内」かつ「停止中でない」で判定する
-- 判定方法は停止と同じく、**判定時に時刻から計算する**（スケジューラ不要、セッション検証時にも判定）
-- 有効期間外のユーザーはログインできない。有効期間外の Membership の Org には入れない
-
-#### 時刻境界でのイベント
-
-判定はスケジューラなしで行えるが、「有効になった」「期限切れになった」「停止が始まった」などのイベントを、その時刻に Notifier・EventSink へ出したい場合がある（本人へのお知らせ、SIEM への記録、連携先の Back-Channel Logout など）。
-
-- 有効期間・停止・Quota（11.14）の登録時に、境界の時刻を `scheduled_events` に予約する
-- バックグラウンドの処理が、時刻の来た予約を outbox に移して配送する
-- これは通知のための仕組みであり、**アクセスの可否はこの処理の遅れに左右されない**（判定は常に時刻から計算する）
-
-### 4.9 Org ポリシーの整理と拒否理由
-
-Org に関する制約は、**Org の認証・認可の問題**として次の2段で整理する。
-
-| 段階 | 問い | 主な制約 |
-|---|---|---|
-| 所属の前提条件（Membership ポリシー） | この人をこの Org に、この期間所属させてよいか | 人数の上限（11.14）、ドメイン所有（11.3）、Org 管理ユーザーの制約、有効期間（4.8） |
-| 入場の条件（ログインポリシー） | この人は今、この方法でこの Org に入ってよいか | passkey 必須、IP 制限、SSO 必須（`org_login_policies`）、停止（4.7）、認証の警告（10章） |
-
-- どちらの前にも、**操作する人の権限**の判定（authz の `check`。例：`org:invite`）がある
-  - 招待なら：① 招待する人に `org:invite` の権限があるか（authz）→ ② 招待される人が所属の前提条件を満たすか（Org）
-- 所属の前提条件は Membership を作る・変える操作のときに判定し、ログインのたびには判定しない（ホットパスに載せない）
-
-#### 拒否理由のコード
-
-ログイン・Org への入場・招待・認可判定で拒否したときは、**拒否理由をコードで返す**。種類ごとに体系立て、呼び出し側が「なぜ止まっているか」を区別できるようにする。
-
-| コード | 意味 |
-|---|---|
-| `suspended.<category>` | 停止中（`suspended.tos_violation`、`suspended.billing` など。4.7） |
-| `outside_validity` | 有効期間外（4.8） |
-| `quota_exceeded` | 人数などの上限超過（11.14。不足する期間と人数を添える） |
-| `policy.<type>` | Org のログインポリシーを満たさない（`policy.require_passkey` など） |
-| `warning_denied.<code>` | 認証の警告が deny に設定されている（10章） |
-| `permission_denied` | 操作する人に権限がない（authz） |
-
-- 複数の理由が同時に当てはまる場合はすべて返す
-- `security_risk` の停止など、詳細を返すと攻撃者に手がかりを与えるものは、本人向けにはコードだけを返し、根拠は監査ログにのみ残す
-- コードは公開する契約として管理する（11.10）
-
-#### 開示のルール：本人確認が済むまで理由を返さない
-
-拒否理由のコードは、アカウントの存在や状態を外部に漏らしうる。例えばログイン画面で `suspended.tos_violation` を返すと、パスワードを知らない人にも「このメールアドレスのアカウントが存在し、規約違反で止まっている」と分かってしまう。そこで、**誰に対して、どの段階で返すか**を決めておく。
+#### 開示のルール（ADR 0022）
 
 | 段階 | 返すもの |
 |---|---|
-| 本人確認の前（ログインの資格情報の検証が済む前） | 理由を区別しない `authentication_failed` のみ。アカウントが存在しない・資格情報が違う・停止中・有効期間外のいずれでも、**同じ応答・同じ応答時間**にする |
-| 本人確認の後（資格情報の検証が成功した後） | 拒否理由のコード（`suspended.<category>` など）を本人に返す |
-| 管理 API（認証済みの管理者が呼び出す） | 拒否理由のコードと詳細を返す（権限の範囲内で） |
+| 本人確認の前 | `authentication_failed` のみ。存在しない・違う・停止中などで**応答も応答時間も変えない** |
+| 本人確認の後 | 本人に拒否理由のコード |
+| 管理 API | 権限の範囲で詳細 |
 
-- マジックリンクの要求：アカウントの有無にかかわらず常に「送信しました」と返す。停止中などの事情は、メールアドレスの持ち主に届く通知（`suspended` 等の種類。2.4 の Notifier）で伝える
-- 新規登録：既に登録済みのメールアドレスでも、画面上は登録済みかどうかを区別しない。そのアドレスへの `account_exists` 通知を出す
-- 招待・Membership の操作は、呼び出す側が認証済みで権限を持つため、`quota_exceeded` などの理由をそのまま返してよい
-- これらはセキュリティ不変条件として、テストで担保する（13.5）
+マジックリンクの要求は常に「送信しました」。登録済みアドレスでの新規登録は画面で区別せず `account_exists` 通知を出す。事情（停止など）は通知で伝える。
 
 ### 4.10 退会と削除
 
-「退会」には性質の違う3つの操作がある。
-
-| 操作 | 何が終わるか | 主に誰が行うか |
-|---|---|---|
-| Org からの退会 | 1つの Membership | 本人、または Org の管理者による除名 |
-| アカウントの削除 | ユーザーそのもの（全 Org からの退会を含む） | 本人、または運営者 |
-| Org の削除 | Org と、その全 Membership | Org のオーナー、または運営者 |
-
 #### Org からの退会
 
-**本人が退会してよいかは、ユーザーの種類で変える。**
+| ユーザー | 本人による退会 |
+|---|---|
+| 個人ユーザー（共有 Org から） | **常に許可**（Org は恒久的には止められない） |
+| Org 管理ユーザー（所有元から） | 不可 |
+| Org 管理ユーザー（ゲスト参加先から） | 許可（所有元が制限できる） |
+| 個人 Org | 不可 |
 
-| ユーザーの種類 | 本人による退会 | 理由 |
-|---|---|---|
-| 個人ユーザー（11.3）の、共有 Org からの退会 | **常に許可**（Org のポリシーで禁止できない） | アカウントは本人のもの。Org が本人を引き留められると、本人の意思で関係を断てなくなる |
-| Org 管理ユーザーの、所有元の Org からの退会 | 不可 | アカウント自体がその Org のもの。所有元から抜けるのは、Org がアカウントを削除・解放するとき |
-| Org 管理ユーザーの、ほかの Org（ゲスト参加）からの退会 | 許可（所有元の Org のポリシーで制限できる） | 所有元の Org の管理下にあるため |
-| 個人 Org | 不可 | 個人 Org はユーザーと一体（11.13） |
-
-退会できない場合と、退会の扱い：
-
-- **最後のオーナーは退会できない**：Org には常に1人以上の `owner` が必要。別の人にオーナーを譲るか、Org を削除してから退会する（`last_owner` で拒否）
-- **ホスト側のアプリの事情**：「担当中の案件がある」など、IAM が知らない理由で退会を止めたい・引き継ぎを促したい場合は、フロー フック（11.8）の `pre_membership_end` で判定する。ただし個人ユーザーの退会を**恒久的に**止めることはできない（引き継ぎの完了待ちなど、一時的な保留に限る）
-- **退会は Membership の有効期間の終了として表す**：`valid_until` を現在時刻（または指定した日時）にし、`ended_reason` を記録する。「月末で退会」のような予約もそのまま表せる（4.8）
-- 退会したときの処理
-  - その Org の Group の所属とロール付与を外す（監査ログには残す）
-  - その Org を active にしているセッションは個人 Org に切り替える
-  - Quota の枠は退会の時刻から空く（11.14）
-- 再び参加するには、新しい招待が必要
-- Org の管理者による除名も同じ処理で、`ended_reason = removed` とする
+- Org には常に1人以上の `owner`。最後のオーナーは譲るか Org を削除するまで抜けられない
+- ホスト側の事情による一時的な保留はフック `pre_membership_end` で行う
+- 退会は `valid_until` の設定（予約可）と `ended_reason` の記録で表す。その Org の Group 所属とロール付与を外し、active にしているセッションは個人 Org に切り替える。再参加は新しい招待で
 
 #### アカウントの削除
 
-- **本人による削除**：個人ユーザーは常に可能。Org 管理ユーザーは不可（所有元の Org が行う）
-- **前提条件**：共有 Org の最後のオーナーである間は削除できない（オーナーを譲るか Org を削除する）
-- **猶予期間**：削除を申請すると、まず `deletion_scheduled_at`（既定は30日後）を設定し、ログインできない状態にする。猶予期間中に本人確認をすれば取り消せる
-- **猶予期間の終了時**（判定は時刻で行い、実際の消去はバックグラウンドで行う）
-  - 全 Membership を終了し、個人 Org を削除する
-  - 認証情報・セッションを削除する
-  - **ユーザーのデータ鍵（`user_data_keys`）を削除する（crypto-shredding）**。これで、監査ログなどに残っている暗号化済みの個人情報が読めなくなる。監査ログの行やハッシュチェーン（6.3）は壊さずに、中身だけを消せる
-  - メールのブラインドインデックスを削除し、同じメールアドレスで新規登録できるようにする
-  - ユーザー ID だけを `status = deleted` の墓標として残す（同じ ID が再利用されないように）
-  - `user.deleted` イベントを出し、連携先にも Back-Channel Logout で通知する
-- **削除の保留（legal hold）**：規約違反の調査中など、運営者が `legal_hold` を設定した場合は、猶予期間が過ぎても消去しない。保留中であることは監査ログに残す
-- 運営者による削除（`tos_violation` の結果など）も同じ流れで、猶予期間の有無は運営者が選ぶ
+- 本人による削除は個人ユーザーのみ。共有 Org の最後のオーナーの間は不可
+- 猶予期間（既定30日）の間はログイン不可、本人確認で取り消せる
+- 猶予後：Membership 終了、個人 Org 削除、認証情報・セッション削除、**データ鍵の削除（crypto-shredding）**、メールのインデックス削除（再登録可能に）、ID は墓標として残す、`user.deleted` と Back-Channel Logout
+- 運営者は `legal_hold` で消去を保留できる
 
 #### Org の削除
 
-- オーナーまたは運営者が行う。アカウントと同じく猶予期間を設ける
-- 全 Membership を `ended_reason = org_deleted` で終了する
-- **Org 管理ユーザーの扱い**：削除するか、個人ユーザーとして解放するかを削除時に選ぶ（既定は削除）。解放する場合は、本人に通知してから個人ユーザーに切り替える
-- その Org のサービスアカウント、Group、ロール、Quota の付与、ポリシーを削除する
+オーナーか運営者が行う（猶予期間あり）。全 Membership を `org_deleted` で終了し、サービスアカウント・Group・ロール・Quota・ポリシーを削除する。管理ユーザーは削除するか個人ユーザーとして解放するかを選ぶ（既定は削除）。
 
-#### 拒否理由のコード（4.9 に追加）
+### 4.11 管理権限
 
-| コード | 意味 |
+管理権限も authz のロールで表す（専用の判定は作らない）。
+
+| realm の運営者ロール | できること |
 |---|---|
-| `last_owner` | 最後のオーナーなので退会・削除できない |
-| `managed_user` | Org 管理ユーザーなので本人による退会・削除はできない |
-| `email_bound_to_membership` | Membership に結び付いたメールアドレスなので削除できない（4.4） |
-| `leave_blocked_by_hook` | ホスト側のフックが一時的に退会を保留している（理由を添える） |
+| `realm:owner` | すべて。運営者ロールの付与 |
+| `realm:admin` | ユーザー・Org の管理、`tos_violation` の停止・解除 |
+| `realm:security` | `security_risk` の停止・解除、無効化、監査ログ閲覧 |
+| `realm:support` | 状態の閲覧、復旧手続き（個人情報の復号は不可） |
+| `realm:billing` | Quota の付与、`billing` の停止・解除（課金連携用のサービスアカウント向け） |
 
-### 4.11 管理権限のモデル
-
-管理の権限は**2層**に分け、どちらも authz の仕組み（4.5）で表現する。管理のためだけの別の権限判定は作らない。
-
-#### realm の運営者ロール（ホスト先の運営者向け）
-
-realm 全体を範囲とするロール付与（`org_id` が NULL）で表す。既定で次のロールを用意し、ホスト先が独自のロールを追加できる。
-
-| ロール | できること |
-|---|---|
-| `realm:owner` | すべて。運営者ロールの付与・剥奪 |
-| `realm:admin` | ユーザー・Org の管理、`tos_violation` 等の停止と解除 |
-| `realm:security` | `security_risk` の停止と解除、認証情報の無効化、監査ログの閲覧 |
-| `realm:support` | ユーザーの状態の閲覧、アカウント復旧の手続き（4.12）。個人情報の復号は不可 |
-| `realm:billing` | Quota の付与（11.14）、`billing` の停止と解除。外部の課金システムと連携するサービスアカウントに付ける想定 |
-
-- **個人情報の復号は独立した権限**（`pii:read`）にする。運営者でも、この権限がなければ暗号化された個人情報（9.5）を見られない
-- 停止の種別ごとの解除権限（4.7）は、これらのロールの permission として定義する
-
-#### Org のロール（Org の管理者向け）
-
-- Membership の `org_role`（`owner` / `admin` / `member`）は、Org を範囲とする既定のロールに対応させる
-  - `owner`：Org の削除、オーナーの譲渡、Org の設定すべて
-  - `admin`：メンバーの招待・除名、Group・ロールの管理、`customer_request` の停止と解除
-  - `member`：一般のメンバー
-- 細かい権限が必要な場合は、Org 独自のロールを authz で追加する
-
-#### 管理操作の安全策
-
-- **強い認証を必須にする**：管理 API の操作には、passkey などの強い認証と、直近の認証（例：15分以内）を求める（5.4 の `max_auth_age`）
-- 管理者のセッションは寿命を短くする（5.4）
-- すべての管理操作を監査ログ・SIEM に出す（6章）
-- 将来の検討：破壊的な操作（Org の削除、運営者ロールの付与など）に、2人目の承認を必須にするフィーチャー
-
-#### 最初の運営者と緊急時の手段（break-glass）
-
-- 最初の `realm:owner` は CLI で作る（2.5 の初期セットアップ）
-- 運営者が全員ロックアウトされた場合などに備え、**CLI から緊急用の手順**を用意する
-  - CLI は Storage と KeyStore に直接アクセスできる環境でのみ動くため、それ自体が最後の手段になる
-  - 緊急用の操作（運営者ロールの付与、停止の解除など）を実行すると、重要度の高いイベントとして SIEM に出し、全運営者に通知する
-- 常設の「緊急用アカウント」は作らない（使われない強い権限のアカウントは、それ自体が攻撃対象になるため）
-
-#### Org を作れる人
-
-- realm の設定で決める：`anyone`（ログインしたユーザーなら誰でも。既定）/ `operators_only`（運営者のみ）/ `invite_only`（運営者が発行した作成用の招待を持つ人のみ）
+- Org のロール：`owner`（削除・譲渡・全設定）、`admin`（招待・除名・Group とロール、`customer_request` の停止）、`member`
+- 個人情報の復号は独立した権限 `pii:read`
+- 管理操作には強い認証と直近の認証（`max_auth_age`）を求める。管理者のセッションは短くする
+- 緊急時は Storage と KeyStore に直接触れる CLI を使う（実行は重要イベントとして全運営者に通知）。常設の緊急用アカウントは作らない
+- Org を作れる人：`anyone`（既定）/ `operators_only` / `invite_only`
 
 ### 4.12 アカウント復旧
 
-認証手段をすべて失った（または管理者に無効化された。4.6）ユーザーが、アカウントを取り戻す手順。
+| 経路 | 対象 |
+|---|---|
+| リカバリーコード（10個、表示は1回、argon2id） | 全員 |
+| 確認済みメール | 個人ユーザー |
+| Org 管理者が発行する復旧リンク | Org 管理ユーザー |
+| 運営者が IAM の外で本人確認して発行する復旧リンク | 上記で戻れない人 |
 
-#### 復旧の経路
+- realm で有効な経路を選び、Org は弱い経路を禁止できる
+- メールによる復旧には待機期間（既定なし、Org で設定）・全連絡先への通知・警告 `recovered_via_email` を組み合わせる
+- 本人確認後は**新しい認証手段の登録しかできない復旧専用のセッション**を出す。登録後は全セッションを失効、古い手段の無効化を勧め、新しいリカバリーコードを出す
+- 復旧の要求への応答も開示のルール（4.9）に従う
 
-強い順に次の経路を用意する。どれを有効にするかは realm の設定で決め、Org のポリシーで弱い経路を禁止できる。
+### 4.13 管理 API（概要）
 
-| 経路 | 内容 | 主な対象 |
+```
+POST   /v1/admin/users/{id}/sessions:revoke
+POST   /v1/admin/users/{id}/credentials/{cred_id}:revoke | credentials:revoke-all
+POST   /v1/admin/service-accounts/{id}/credentials/{cred_id}:revoke
+POST   /v1/admin/{users|orgs|service-accounts|memberships}/{id}/suspensions   {category, reason, starts_at, ends_at}
+POST   /v1/admin/suspensions/{id}:lift
+PATCH  /v1/admin/{users|orgs|service-accounts|memberships}/{id}               {valid_from, valid_until}
+GET    /v1/admin/orgs/{id}/quotas
+POST   /v1/admin/orgs/{id}/quota-grants | PUT …/quota-grants/external/{ref} | DELETE …/quota-grants/{grant_id}
+POST   /v1/admin/notifications/{id}:claim
+POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
+```
+
+管理操作は理由の入力を必須にし、すべて監査ログに出す。
+
+## 5. トークンとセッション
+
+### 5.1 トークン
+
+- ブラウザ：サーバーサイドセッション（Cookie）
+- 連携先：**ID トークンは JWT**（9.3）。**アクセストークンは不透明**で、イントロスペクション（RFC 7662）で確認する（ADR 0021）
+- ID トークンのクレーム：`sub`、`org_id`（Org オンのみ）、`amr`、`sid`、`email`（4.4）。Group / Role は載せない
+- リフレッシュトークンはローテーションし、再利用を検知したらファミリーごと失効
+
+### 5.2 セッション ID
+
+| 値 | 形 | 用途 |
 |---|---|---|
-| リカバリーコード | 最初の強い認証手段（passkey 等）を登録したときに、使い捨てのコードを10個発行する。表示は1回だけ | すべてのユーザー |
-| 検証済みメール | 検証済みのメールアドレスに復旧用のリンクを送る | 個人ユーザー |
-| Org 管理者による復旧 | Org の管理者が、復旧用の使い捨てリンクを発行する | Org 管理ユーザー |
-| 運営者による復旧 | 運営者（`realm:support` 以上）が、IAM の外で本人確認をしたうえで復旧用リンクを発行する | 上記で戻れないユーザー |
+| セッション ID（公開） | `ses_…` | 一覧・失効の指定、ログの相関、`sid` |
+| トークン（秘密） | `<ID>.<256bit 乱数>` | Cookie / Bearer。DB には秘密部分の SHA-256 のみ。定数時間で照合 |
 
-- リカバリーコードは argon2id でハッシュ化して保存する
-- メールによる復旧はほかより弱い（メールアカウントが乗っ取られていれば突破される）。そのため次の対策を入れる
-  - 復旧の後、新しい認証手段が使えるまでに**待機期間**を設けられるようにする（realm・Org で設定。既定は無し、passkey 必須の Org では24時間など）
-  - 待機期間中は、登録済みのすべての連絡先に通知し、本人が取り消せるようにする
-  - 認証の警告（10章）に `recovered_via_email` を出す
+- ログには公開 ID だけを出す。秘密部分はどこにも出さない
+- Cookie：`__Host-`、`Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/`。別ドメインのアプリには Bearer
+- ID の入れ替え：ログイン成功時、step-up 時、Org 切り替え時、一定時間ごと
+- 失効は Storage に書いてからキャッシュを消す。Back-Channel Logout で `sid` を通知
+- 将来：端末に結び付けたセッション（Device Bound Session Credentials など）
 
-#### 復旧の流れ
+### 5.3 セッション検証とキャッシュ
 
-1. いずれかの経路で本人確認をすると、**復旧専用のセッション**が発行される。このセッションでできるのは新しい認証手段の登録だけ（ほかの操作はできない）
-2. 新しい認証手段を登録する
-3. 既存のセッションをすべて失効させる。残っている古い認証手段を無効化するかは本人が選ぶ（無効化を推奨する）
-4. 新しいリカバリーコードを発行する
-5. 監査ログ・SIEM に記録し、本人に通知する
+検証では、セッションの失効・期限、主体の停止・有効期間、認証に使った認証情報の無効化、active な Org と Membership の状態をすべて確認する。
 
-- `security_risk` で停止されたユーザー（4.7）は、この流れで認証手段を入れ替えたうえで、セキュリティ担当が停止を解除する
-- 復旧の要求に対する応答も、4.9 の開示のルールに従う（アカウントの有無を区別しない）
-
-### 4.13 管理 API の口（概要）
-
-```
-# 認証情報の無効化
-POST /v1/admin/users/{user_id}/sessions:revoke            # 全セッション（除外指定可）
-POST /v1/admin/users/{user_id}/credentials/{cred_id}:revoke
-POST /v1/admin/users/{user_id}/credentials:revoke-all     # 種類の絞り込み可
-POST /v1/admin/service-accounts/{sa_id}/credentials/{cred_id}:revoke
-
-# 停止
-POST   /v1/admin/{users|orgs|service-accounts|memberships}/{id}/suspensions
-       { "reason": "...", "starts_at": "...", "ends_at": "..." }   # ends_at 省略で無期限
-GET    /v1/admin/{users|orgs|service-accounts|memberships}/{id}/suspensions
-POST   /v1/admin/suspensions/{suspension_id}:lift
-
-# 有効期間
-PATCH  /v1/admin/{users|orgs|service-accounts|memberships}/{id}
-       { "valid_from": "...", "valid_until": "..." }
-
-# Quota（11.14）
-GET    /v1/admin/orgs/{org_id}/quotas                         # 現在と将来の上限・使用量
-POST   /v1/admin/orgs/{org_id}/quota-grants                   # 付与の追加
-PUT    /v1/admin/orgs/{org_id}/quota-grants/external/{ref}    # 外部システムからの冪等な登録・更新
-DELETE /v1/admin/orgs/{org_id}/quota-grants/{grant_id}
-
-# 本人向け（公開 API）
-POST /v1/me/sessions/{session_id}:revoke
-POST /v1/me/credentials/{cred_id}:revoke
-```
-
-- すべての操作で理由の入力を必須にし、監査ログ・SIEM に出す（6章）
-- 停止・無効化を本人に通知するかは、Notifier のイベントとしてホスト先が決める
-
-
-## 5. トークン・セッション
-
-### 5.1 概要
-
-- ブラウザ向け：サーバーサイドセッション（Cookie）。失効を即時反映できるようにする
-- 他サービス向け：OIDC の ID トークンとアクセストークン
-  - **ID トークンは JWT**（OIDC の仕様上必須。署名方式は 9.3）。ログイン時に1回渡すだけなので、ML-DSA で大きくなっても問題になりにくい
-  - **アクセストークンは不透明トークン**にする。中身を持たないランダムな値で、リソースサーバーは IAM のイントロスペクション（RFC 7662）で有効性と属性を確認する
-    - 採用理由：失効・停止（4.6, 4.7）を即時に反映できる。ML-DSA の署名でトークンが大きくなる問題（約4KB 超）を避けられる
-    - イントロスペクションの結果は、リソースサーバー側で短時間キャッシュしてよい（5.3 の反映遅れの上限以内）
-  - ID トークンのクレームには `sub`（principal の ID。ユーザーまたはサービスアカウント）, `org_id`（active org。Org フィーチャーがオフなら含めない）, `amr`, `sid`（5.2）を入れる
-  - **Group / Role はトークンに載せない**（肥大化と反映遅延を避ける）。必要なら authz の API で引く
-- リフレッシュトークンはローテーションし、再利用を検知したらそのファミリーごと失効させる
-- ユーザーは自分のセッション一覧を見て個別に失効できる
-
-### 5.2 セッション ID の発行
-
-セッションには**2種類の値**を持たせ、役割を分ける。
-
-| 値 | 例 | 用途 | 秘密か |
-|---|---|---|---|
-| セッション ID（公開用） | `ses_01J...` | セッション一覧・失効の指定、ログの相関、OIDC の `sid` クレーム | 秘密ではない |
-| セッショントークン（秘密） | 256bit の乱数 | ブラウザの Cookie や API の Bearer で提示し、本人のセッションであることを証明する | 秘密 |
-
-- **トークンの形式**：`<セッション ID>.<秘密部分>` とし、ID で行を引いてから秘密部分を照合する
-  - DB には秘密部分の SHA-256 だけを保存する。照合は定数時間比較で行う
-  - 秘密部分は `crypto/rand` で生成する
-- **ログには公開用のセッション ID だけを出す**。秘密部分はどのログ・エラーメッセージ・イベントにも出さない（13.5 の不変条件に含める）
-- **Cookie の属性**：`__Host-` 接頭辞、`Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/`。`Domain` は付けない
-  - 公開 API を別ドメインのアプリから使う場合（2.5）は、Cookie ではなく Bearer トークンで受け渡す
-- **ID の入れ替え（セッション固定攻撃の対策）**：次のタイミングで新しいセッション ID・トークンを発行し、古いものは即座に無効にする
-  - ログイン成功時（ログイン前に発行していた一時的なセッションがあれば必ず入れ替える）
-  - step-up 認証の成功時、Org の切り替え時など、権限が変わるとき
-  - 一定時間ごと（長期間同じトークンを使い続けない）
-- **失効**：ログアウト、ユーザーによる個別失効、管理者による強制失効、パスワード・認証手段の変更時の他セッション一括失効
-  - 失効は Storage に書いてから EphemeralStore のキャッシュを消す（2.4）
-  - OIDC の Back-Channel Logout に対応し、失効したセッションの `sid` を連携先に通知する（M5）
-- 将来の検討：ブラウザの端末にセッションを結び付ける仕組み（Device Bound Session Credentials など）が普及したら、フィーチャーとして対応する
-
-### 5.3 セッション検証とキャッシュ（ホットパス）
-
-セッション（およびアクセストークン）の検証では、次をすべて確認する必要がある。
-
-- セッション自体が失効・期限切れでない（5.4）
-- 主体（ユーザー・サービスアカウント）が停止中（4.7）・有効期間外（4.8）でない
-- 認証に使った認証情報が無効化されていない（4.6）
-- active な Org とその Membership が停止中・有効期間外でない
-
-これを毎回 Storage に問い合わせると遅くなるため、**検証結果を「セッションの有効性」としてまとめてキャッシュする**。
-
-- キャッシュは EphemeralStore にセッション ID をキーとして置く
-- 停止・無効化・有効期間の変更などがあると、関係するセッションのキャッシュを即座に消す（ベストエフォート）
-- それに加えて、キャッシュには**有効期限（TTL）を必ず付ける**。即座の削除が届かなかった場合（複数インスタンスでインメモリのキャッシュを使っている場合など）でも、TTL が過ぎれば必ず再検証される
-- **保証値：変更が検証に反映されるまでの遅れは最大 N 秒**（N = TTL。既定30秒。ホスト先が設定する）。この値を公開仕様として明記する
-- 時刻の境界（予約した停止の開始、有効期間の終了）もこの保証値の範囲内で反映される。キャッシュには「次に状態が変わる時刻」も持たせ、その時刻を過ぎたら TTL 内でも再検証する
+- 結果を「セッションの有効性」として EphemeralStore にキャッシュする。変更時に即削除（ベストエフォート）し、**TTL を必ず付ける**
+- **保証値：変更が検証に反映されるまでの遅れは最大 N 秒**（既定30秒、ホスト先が設定）
+- 次に状態が変わる時刻もキャッシュに持たせ、過ぎたら再検証する
 
 ### 5.4 セッションの寿命
 
-寿命は**ホスト先が基本を定め、realm・Org ごとに上書きできる**ようにする。
+| 項目 | 既定 |
+|---|---|
+| `absolute_lifetime` | 30日 |
+| `idle_timeout` | 7日 |
+| `remember_me_lifetime` | 90日（無効化可） |
+| `max_auth_age` | 15分 |
+| `refresh_token_lifetime` | 30日 |
+| `access_token_lifetime` | 15分 |
 
-#### 設定項目
+- 2.8 の階層で設定する。管理者とサービスアカウントは短い既定値
+- 切り替え先の Org の寿命を超えていれば再認証を求める。設定の変更は既存セッションにも 5.3 の上限内で反映する
 
-| 項目 | 意味 | 既定値の例 |
-|---|---|---|
-| `absolute_lifetime` | ログインからの絶対的な寿命 | 30日 |
-| `idle_timeout` | 操作がない状態が続いたら失効する時間 | 7日 |
-| `remember_me_lifetime` | 「ログイン状態を保持」を選んだ場合の寿命（無効にもできる） | 90日 |
-| `max_auth_age` | 重要な操作の前に再認証を求めるまでの時間 | 15分 |
-| `refresh_token_lifetime` | リフレッシュトークンの寿命 | 30日 |
-| `access_token_lifetime` | アクセストークンの寿命 | 15分 |
+### 5.5 連携先
 
-管理者のセッション（4.11）とサービスアカウントのトークンには、別の既定値（より短い値）を設ける。
+- 当面はホスト先が管理 API で登録したファーストパーティのみ。同意画面なし、動的クライアント登録なし
+- 将来のサードパーティ開放に備え `clients.trust_level` を持つ
 
-#### 設定の階層
-
-```
-ホスト先の設定（設定ファイル）：既定値と、上書きできる上限
-  └ realm の設定：既定値を上書き（上限の範囲内）
-      └ Org の設定：さらに上書き（上限の範囲内）
-```
-
-- ホスト先が決める**上限**を超える値は、realm・Org では設定できない
-- 実際に使う値は、そのセッションの realm と **active な Org の設定**で決まる。個人 Org は realm の設定に従う
-- **Org を切り替えたとき**：切り替え先の Org の寿命が短く、現在のセッションがそれを超えている場合は、再認証を求める（step-up）
-- 設定の変更は既存のセッションにも適用する（短くした場合は、5.3 の保証値の範囲内で反映される）
-
-### 5.5 連携先（クライアント）の範囲
-
-- **当面は、ホスト先が自分で登録したアプリ（ファーストパーティ）だけ**を連携先として扱う
-  - クライアントの登録は管理 API からのみ行う。外部の開発者が自由に登録する仕組み（OIDC の動的クライアント登録）は持たない
-  - ファーストパーティなので、ログイン時の同意画面（「このアプリにメールアドレスの提供を許可しますか」）は出さない
-- 将来、ホスト先が「自分のサービスのアカウントでログイン」を外部の開発者に提供したくなった場合（サードパーティへの開放）に備え、クライアントには `trust_level`（`first_party` / `third_party`）を持たせておく
-  - サードパーティを有効にする場合は、同意画面、スコープの審査、クライアントの検証、悪用の監視などが必要になる。これはフィーチャーとして後から追加する
-
-## 6. 監査ログとセキュリティイベントの外部出力
+## 6. 監査ログとイベント出力
 
 ### 6.1 記録するもの
 
-最初から記録する（後付けすると過去分が残らないため）。
+ログイン成否、セッションの発行・入れ替え・失効、認証手段の追加・削除・無効化、警告、メールの確認、Org の切り替え、Membership・Group・Role の変更、停止・有効期間、管理操作、フィーチャーの変更、鍵のローテーション、レートリミットの発動、リフレッシュトークンの再利用。
 
-- ログイン成功 / 失敗（失敗理由の種別を含む）
-- セッションの発行・ID の入れ替え・失効（公開用のセッション ID で記録）
-- 認証手段の追加・削除
-- 認証時・認証手段登録時に出た警告（10章）
-- メール検証
-- Org 切り替え
-- Membership / Group / Role の変更
-- 認証情報の無効化、停止の追加・解除・期限切れ（4.6, 4.7）
-- 管理 API の操作（誰が、何を、どう変えたか）
-- フィーチャーの有効化・無効化（11.12）、鍵のローテーション
-- レートリミットの発動、リフレッシュトークンの再利用検知などの異常
+### 6.2 形式
 
-### 6.2 イベントの共通形式
+イベント ID、時刻、種類、結果、主体、realm、Org、公開セッション ID、IP、User-Agent、リクエスト ID、詳細。バージョン付きの契約（11.10）。
 
-- 各イベントは次の項目を持つ
-  - イベント ID（重複排除用）、発生時刻、種類、結果（成功 / 失敗）
-  - 主体（principal の種類と ID）、realm、Org、公開用のセッション ID
-  - 送信元 IP、User-Agent、リクエスト ID（ログの相関用）
-  - 種類ごとの詳細
-- 形式はバージョン付きの契約として管理する（11.10）
+### 6.3 外部出力
 
-### 6.3 SIEM などへの出力
+- EventSink で出す（標準出力 JSON Lines / syslog RFC 5424 / OTLP / Webhook）。独自 JSON か OCSF を選べる
+- outbox 経由（少なくとも1回。イベント ID で重複排除）
+- 個人情報の出し方を出力先ごとに選ぶ：そのまま / 仮名化（既定）/ 出さない
+- Storage の監査ログはハッシュチェーンにする
 
-監査ログは Storage に保存したうえで、EventSink ポート（2.4）から外部に出す。**どの SIEM に送るかはホスト先が選ぶ**。
+### 6.4 アプリケーションログ
 
-| アダプタ | 用途 |
-|---|---|
-| 標準出力（JSON Lines） | コンテナ環境の標準的な方法。Fluent Bit・Vector などのログ収集基盤が拾って SIEM に送る |
-| syslog（RFC 5424） | 既存の syslog 基盤に送る |
-| OpenTelemetry（OTLP の logs） | OpenTelemetry Collector 経由で各種基盤に送る |
-| Webhook | 任意の HTTP エンドポイントに送る |
+監査ログとは別に出す。個人情報と秘密は出さず、相関にはリクエスト ID と公開セッション ID を使う。
 
-- **出力形式の選択**：独自の JSON 形式に加え、セキュリティイベントの共通スキーマである OCSF（Open Cybersecurity Schema Framework）への変換を用意する。SIEM 側での取り込みを楽にするため
-- **確実に届ける**：Notifier と同じく outbox 経由で送り、失敗時は再試行する（少なくとも1回届ける。重複はイベント ID で排除してもらう）
-- **個人情報の扱い**：9.5 で暗号化している個人情報（メールアドレス、IP 等）を外部にどう出すかを、出力先ごとに設定できるようにする
-  - そのまま出す / 仮名化して出す（ブラインドインデックスの値など、同一人物の追跡はできるが中身は分からない形）/ 出さない
-  - 既定は「仮名化」
-- **改ざん検知**：Storage に保存する監査ログは、各イベントに直前のイベントのハッシュを含めるハッシュチェーンにする。後から削除・改ざんされたことを検出できる
-- **保持期間**：6.5 を参照
+### 6.5 保持期間
 
-### 6.4 アプリケーションログとの区別
+- 監査ログはホスト先の保持期間（既定90日）を過ぎたら削除する。長期保管は SIEM に任せる
+- チェーンは先頭から切り詰め、最後に消したハッシュをチェックポイントとして残し SIEM にも送る
+- その他のデータの保持期間は 9.6
 
-- 監査ログ（6.1〜6.3）と、デバッグ用のアプリケーションログ・メトリクスは**別の出力**として扱う
-- アプリケーションログには個人情報と秘密情報を出さない。相関が必要な場合はリクエスト ID と公開用のセッション ID を使う
+## 7. ロードマップ
 
-### 6.5 保持期間とハッシュチェーンの切り詰め
-
-監査ログは、**ホスト先が指定した保持期間を過ぎたら削除する**。長期の保管が必要なら SIEM 側に任せる。
-
-- 保持期間はホスト先が設定する（既定90日）。法令や契約で必要な期間はホスト先ごとに違うため
-- ハッシュチェーンは、保持期間を過ぎた部分を**先頭から切り詰める**
-  - 切り詰めるときに、最後に削除したイベントのハッシュを**チェックポイント**として残す。残ったチェーンはこのチェックポイントから検証できる
-  - チェックポイントは SIEM にも送る（6.3）。IAM 内のチェックポイント自体が書き換えられても、外部の記録と突き合わせて検出できる
-- 監査ログ以外のデータの保持期間は 9.6 を参照
-
-## 7. マイルストーン
-
-0. **M0 土台**：ポートとアダプタの枠組み、フィーチャーの登録と台帳（11.11, 11.12）、参照実装（インメモリ）と契約テストの骨組み（12章）、KeyStore と暗号化・ブラインドインデックス（9.5）、開発用 Notifier
-1. **M1 個人識別（Org なし構成）**：users, user_emails, user_identities, sessions。マジックリンク / メールコード + OAuth 1種（メールを送れない環境では OAuth と開発用 Notifier で確認する）。警告の共通枠組み（10章。ルールは最小限）。最初の Storage アダプタは SQLite
-2. **M2 複数認証手段**：OAuth 複数対応、連携・解除、passkey、TOTP、メールとパスワード、リカバリーコード
-3. **M3 Org**：Org フィーチャー（個人 Org の自動作成、共有 Org、memberships、active_org の切り替え、招待）
-4. **M4 認可**：groups, roles, check API（realm 範囲と Org 範囲の両方）
-5. **M5 OIDC Provider**：他サービスへの ID トークン発行
-6. **M6 ポリシー**：require_passkey、ip_allowlist、email_domain
-7. 以降：MFA 強制、SSO、SCIM
+[roadmap.md](roadmap.md) を参照。
 
 ## 8. 未決事項
 
-- 後回しでよいもの：ログ・メトリクス基盤
+- 後回し：ログ・メトリクス基盤
 
-決定済みの事項は `docs/adr/` に記録する。
-
-## 9. 暗号方針
+## 9. 暗号
 
 ### 9.1 原則
 
-- **RSA は自前の鍵では一切使わない**
-- 現行の署名・鍵交換は**楕円曲線暗号（ECC）を最低ライン**とする
-- **耐量子暗号（PQC）に対応する**。ただし ECC も RSA と同じく量子計算機（Shor のアルゴリズム）で破られるため、**ECC だけでは耐量子にならない**。ECC は互換性のための現行ラインであり、耐量子性は ML-KEM / ML-DSA で確保する
-- **暗号アジリティ**：アルゴリズムと鍵は ID（`kid`）付きで管理し、ローテーションや方式の切り替えをコード変更なしで行えるようにする
+- 自前の鍵で RSA を使わない。現行の最低ラインは ECC
+- ECC も量子計算機で破られるため、耐量子性は ML-KEM / ML-DSA で確保する
+- 鍵とアルゴリズムは `kid` で管理し、コード変更なしで切り替えられる
 
-### 9.2 用途別の方式
+### 9.2 用途別
 
-| 用途 | 方式 | 耐量子性 |
-|---|---|---|
-| 通信 (TLS) | TLS 1.3 のみ。鍵交換は X25519MLKEM768 ハイブリッド、証明書は ECDSA P-256 | 鍵交換は耐量子（Go の既定）。証明書署名は ECC |
-| トークン署名 (JWT / ID トークン) | ML-DSA-65 と ES256 を併用（9.3） | ML-DSA で耐量子 |
-| 保存データの暗号化 | AES-256-GCM（エンベロープ暗号化。鍵は KeyStore で管理） | 256bit 共通鍵は耐量子とみなせる |
-| 個人情報の検索用インデックス | HMAC-SHA-256（ブラインドインデックス。9.5） | 同上 |
-| パスワードハッシュ | argon2id | ハッシュ系は影響が小さい |
-| 不透明トークン（セッション ID、リフレッシュトークン等） | 256bit 乱数。DB には SHA-256 のハッシュのみ保存 | 同上 |
-| メール検証・マジックリンク等の署名 | HMAC-SHA-256 | 同上 |
-
-- 「今のうちに暗号文を集めて将来解読する」攻撃（harvest now, decrypt later）が現実的に効くのは**機密性**。これは TLS のハイブリッド鍵交換と AES-256 で防ぐ
-- **署名**は将来の偽造が問題になるので、量子計算機が実用化する前に ML-DSA へ移行できていればよい。そのための併用とアジリティ
+| 用途 | 方式 |
+|---|---|
+| TLS | 1.3 のみ。鍵交換 X25519MLKEM768、証明書 ECDSA P-256 |
+| トークン署名 | ML-DSA-65 と ES256（9.3） |
+| 保存データ | AES-256-GCM のエンベロープ暗号化 |
+| 検索用インデックス | HMAC-SHA-256 |
+| パスワード・リカバリーコード | argon2id |
+| 不透明トークン類 | 256bit 乱数。DB には SHA-256 |
 
 ### 9.3 トークン署名
 
-- JWKS には **ML-DSA-65（`kty: AKP`、RFC 9964）と ES256 の鍵を両方公開**する
-- 実装：ML-DSA の署名・JWK（`AKP`）は lestrrat-go/jwx（v4、Go 1.27 以上で ML-DSA に対応済み）を使う。OIDC の土台にする zitadel/oidc が使う go-jose は ML-DSA に未対応のため、go-jose の `OpaqueSigner`（任意のアルゴリズム名で署名処理を差し込める仕組み）で ML-DSA の署名を差し込み、JWKS の出力は自前で jwx の形式にする（13.2）
-- クライアント（RP）ごとに署名アルゴリズムを選ぶ（OIDC の `id_token_signed_response_alg`）
-  - ML-DSA に対応した RP には ML-DSA-65 で署名
-  - 未対応の RP には ES256 で署名
-- 将来、主要な RP が ML-DSA に対応したら ES256 を廃止する
-- **トレードオフ**：OIDC Discovery は `id_token_signing_alg_values_supported` に RS256 を含めることを必須としている。RS256 を出さないため**厳密には仕様に適合しない**。RS256 しか扱えない RP とは連携できないことを受け入れる
+- JWKS に ML-DSA-65（`kty: AKP`、RFC 9964）と ES256 を公開し、クライアントごとに選ぶ（`id_token_signed_response_alg`）。主要な RP が対応したら ES256 を廃止する
+- 実装：zitadel/oidc の go-jose に `OpaqueSigner` で `crypto/mldsa` を差し込む。JWKS の AKP 出力は jwx で組み立てる（ADR 0038）
+- RS256 を出さないため、OIDC Discovery には厳密には適合しない（既知の差異）
 
-### 9.4 外部が使う RSA の扱い
+### 9.4 外部の RSA
 
-自前の鍵では RSA を使わないが、外部のシステムが RSA を使うケースがある。
+- OAuth プロバイダの ID トークン：トークンエンドポイントから TLS で直接受け取り、署名検証は TLS で代替する（OIDC Core 3.1.3.7）
+- passkey：ES256 / EdDSA / RS256 を受け入れる（優先順もこの順）。RS256 は警告 `passkey_alg_rsa`。拒否は警告のアクション設定で行う。ML-DSA の passkey は将来の候補
 
-- **OAuth プロバイダの ID トークン**（Google 等は RS256 で署名）
-  - 認可コードフローで、トークンエンドポイントから TLS 経由で直接受け取る場合、ID トークンの署名検証の代わりに TLS のサーバー検証で代替できる（OIDC Core 3.1.3.7）。この方式を採り、RSA の検証処理を持たない
-- **passkey（WebAuthn）**
-  - 認証器側が鍵方式を決める。多くは ES256 / EdDSA だが、一部の Windows Hello などは RS256 しか使えない
-  - **ES256 / EdDSA / RS256 を受け入れる**。ただし RS256 は「互換性のために許容している方式」として扱い、警告を出せるようにする
-    - これは外部の公開鍵の検証であり、自前で RSA 鍵を持つわけではないので 9.1 の原則には反しない
-  - 登録時の WebAuthn `pubKeyCredParams` の優先順は ES256 → EdDSA → RS256 とし、RSA は他に選択肢がない認証器でだけ選ばれるようにする
-  - `passkeys.alg` に方式を保存する。RS256 の passkey への警告は 10章の共通の仕組みで出す（警告コード `passkey_alg_rsa`）
-    - 拒否したい場合も 10章のアクション設定（サーバー全体 / Org 単位で `deny`）で行う。passkey 専用の設定は作らない
-  - 優先度は低い。M2 では ES256 / EdDSA のみで実装し、RS256 と警告ルールは後から追加してもよい
+### 9.5 個人情報の暗号化
 
-### 9.5 個人情報の暗号化とブラインドインデックス
-
-DB が漏洩しても個人情報が読めないよう、個人情報は**アプリ側で暗号化してから Storage に渡す**。これは常に有効にする（フィーチャーにしない）。安全側の挙動を1つに揃え、暗号化の有無で処理経路が分かれないようにするため。
-
-#### 対象
+常に有効（フィーチャーにしない）。
 
 | データ | 扱い |
 |---|---|
-| メールアドレス（`user_emails`） | 暗号化 + ブラインドインデックス（9.6 の最小化モードではブラインドインデックスのみ） |
-| 表示名（保持する設定の場合） | 暗号化 |
-| セッション・監査ログの IP アドレス | 暗号化。保持期間を過ぎたら末尾を切り詰めた値に置き換える（9.6） |
-| カスタム属性（11.7） | 属性の定義ごとに「暗号化する / しない」を指定 |
-| 外部 IdP の `provider_subject` | 暗号化しない（それ自体は個人を直接示さない識別子で、ログイン時の検索に使うため） |
+| メールアドレス | 暗号化 + ブラインドインデックス（最小化モードではインデックスのみ） |
+| 表示名（持つ場合）、TOTP シークレット | 暗号化 |
+| IP アドレス | 暗号化。保持期間後は切り詰め |
+| カスタム属性 | 定義ごとに指定 |
+| `provider_subject` | 暗号化しない |
 
-#### 仕組み
-
-- **暗号化**：AES-256-GCM のエンベロープ暗号化。データ鍵を KeyStore のマスター鍵で包んで管理する
-  - 個人情報の暗号化には**ユーザーごとのデータ鍵**（`user_data_keys`）を使う。アカウント削除時にこの鍵を消すことで、そのユーザーの個人情報を、監査ログを含むあらゆる場所から一度に読めなくする（crypto-shredding。4.10）
-- **ブラインドインデックス**：正規化した値（メールなら小文字化のみ）に対する HMAC-SHA-256。暗号化とは**別の鍵**を使う
-  - 「このメールアドレスのユーザーは誰か」という完全一致の検索と、一意制約に使う
-  - メールのドメイン部分にも別のインデックスを持つ（11.3 のドメイン所有に基づく判定に使う）
-- **鍵のバージョン**：`key_id` を保存し、鍵のローテーションに対応する
-  - 暗号化の鍵は、データを順次再暗号化すれば入れ替えられる
-  - インデックスの鍵を入れ替える場合は、全件の再計算が必要になる。再計算が終わるまでは新旧両方の鍵で検索する
-
-#### トレードオフ
-
-- **部分一致の検索ができない**：管理画面で「メールアドレスの一部」で検索することはできない。完全一致、またはユーザー ID での検索になる
-- **DB 上で直接中身を見られない**：運用時の調査は CLI（KeyStore にアクセスできる環境で復号する）で行う
-- **KeyStore の鍵を失うとデータを復元できない**：鍵のバックアップ手順を運用ドキュメントに必ず含める
+- 個人情報は**ユーザーごとのデータ鍵**で暗号化し、鍵を KeyStore のマスター鍵で包む。削除時は鍵を消す（crypto-shredding）
+- ブラインドインデックスは暗号化と別の鍵。メールは小文字化のみで正規化。ドメイン部分にも別のインデックス
+- 鍵のローテーションは `key_id` で管理する（インデックスの鍵は全件再計算、その間は新旧両方で検索）
+- 部分一致検索はできない。調査は復号できる CLI で行う。鍵を失うと復元できないため、バックアップ手順を運用文書に含める
 
 ### 9.6 個人情報の最小化
 
-**持たなくてよい個人情報は持たない**。暗号化（9.5）は漏洩時の被害を減らすが、そもそも持っていなければ漏洩もしない。
+- 既定で持たない：表示名・プロフィール（ホスト先が持つ）、`email_at_link`、OAuth の名前や写真
+- メールの保持モード（realm で選ぶ）
 
-#### 既定で持たないもの
+| モード | 保存 | できないこと |
+|---|---|---|
+| `encrypted`（既定） | 暗号文 + インデックス | ― |
+| `index_only` | インデックス（+ 任意で伏せ字） | 操作起点でない通知の宛先解決（外部が user_id から解決する）、アドレスの表示 |
 
-- **表示名・プロフィール**：IAM は持たない。プロフィールはホスト先のアプリが持つ（必要ならカスタム属性（11.7）として、ホスト先の判断で持たせる）
-- **OAuth 連携時のメール（`email_at_link`）**：持たない（識別は `provider_subject` で行う）
-- **OAuth プロバイダから受け取るその他の情報**（名前、写真など）：持たない
-
-#### メールアドレスの最小化モード
-
-realm の設定で、メールアドレスの持ち方を選べるようにする。
-
-| モード | 保存するもの | できること | できないこと |
-|---|---|---|---|
-| `encrypted`（既定） | 暗号文 + ブラインドインデックス | 非同期の通知（新しい端末からのログイン、停止のお知らせ等）、本人へのメールアドレス一覧の表示 | ― |
-| `index_only` | ブラインドインデックスのみ（加えて、任意で `t***@example.com` のような伏せ字） | ログイン（入力されたメールと照合）、マジックリンク（リクエストに含まれるアドレスに送る）、一意性の確認 | ユーザー操作を起点としない非同期の通知の宛先（`new_device_login` など。外部の配信の仕組みが user_id から宛先を解決する必要がある）、メールアドレスの表示 |
-
-- `index_only` では、IAM の DB が漏洩しても、ブラインドインデックスの鍵がなければメールアドレスは分からない
-- この場合、「誰のメールアドレスか」を知っているのはホスト先のアプリだけになる。ホスト先がすでにメールアドレスを持っているなら、二重に持たずに済む
-
-#### データの種類ごとの保持期間
-
-ホスト先が設定する。既定値の例：
-
-| データ | 保持期間 | 期間を過ぎたら |
+| データ | 保持期間（既定） | 期間後 |
 |---|---|---|
 | 監査ログ | 90日 | 削除（6.5） |
-| IP アドレス（セッション・監査ログ） | 30日 | 末尾を切り詰めた値（IPv4 は /24、IPv6 は /48）に置き換える |
-| User-Agent | 30日 | ブラウザの種類と OS の大分類だけに置き換える |
-| 失効・期限切れのセッション | 7日 | 削除 |
-| 配送済みの outbox・発火済みの予約イベント | 7日 | 削除 |
-| 無効化した認証情報 | 監査ログと同じ | 削除（passkey の credential_id の拒否リストは残す） |
-| 削除したユーザー | ― | ユーザー ID の墓標のみ残す（4.10） |
-
-#### 結果として残る最小限のデータ
-
-最小化モードで運用した場合、IAM が持つユーザーの情報は次だけになる。
-
-- ユーザー ID と状態（有効期間・停止）
-- メールアドレスのブラインドインデックス
-- 認証情報（passkey の公開鍵、外部 IdP の `provider_subject`、パスワードのハッシュ）
-- 所属（Membership）とロール
-
-いずれも、それ単体では個人を直接特定しにくい値になる。
+| IP アドレス | 30日 | IPv4 /24、IPv6 /48 に切り詰め |
+| User-Agent | 30日 | ブラウザと OS の大分類のみ |
+| 失効・期限切れセッション | 7日 | 削除 |
+| 配送済みの outbox・予約イベント | 7日 | 削除 |
+| 無効化した認証情報 | 監査ログと同じ | 削除（passkey の拒否リストは残す） |
 
 ## 10. 認証の警告
 
-### 10.1 目的
-
-**どの認証経路でも、同じ仕組みで警告を出せる**ようにする。passkey、OAuth、メールなど経路ごとに個別の警告処理を作らない。
-
-- 認証は成功させつつ、弱い点や注意点をユーザー・管理者・連携先に伝える
-- 同じ警告を、設定次第で「無視」「警告」「拒否」に切り替えられる
-
-### 10.2 仕組み
+全認証経路で共通の仕組みで警告を出す（ADR 0007）。
 
 ```
-各認証経路 ──(認証結果 + Evidence)──▶ 警告評価器 ──▶ []Warning ──▶ アクション判定 ──▶ 結果
- password / magic link /             （経路共通の          （サーバー設定 +     許可 / 警告付き許可 / 拒否
- oauth / passkey / 将来の SSO         ルール群）            Org ポリシー）
+認証経路 ──Evidence──▶ 警告評価器（経路を知らないルール群）──▶ []Warning ──▶ アクション判定（ignore / warn / deny）
 ```
 
-1. **Evidence**：各認証経路は、認証の成否に加えて「どう認証されたか」を表す Evidence を共通の形で返す
-   - 共通項目：認証方式（`amr`）、要素数、IP、User-Agent、TLS の鍵交換方式
-   - 経路固有の項目：passkey の `alg`、OAuth のプロバイダとメール検証状況、など
-2. **警告評価器**：登録されたルールを Evidence に適用し、`Warning{code, severity, params}` の一覧を返す
-   - ルールは経路を知らなくても書ける（Evidence の項目だけを見る）。新しい経路を足しても既存ルールがそのまま効く
-   - ルールの追加は評価器に登録するだけで、各経路のコードは変えない
-3. **アクション判定**：警告コードごとに `ignore` / `warn` / `deny` を決める
-   - サーバー全体の既定値を設定で持つ
-   - Org ポリシー（`org_login_policies`）で Org ごとに上書きできる。ただし**緩める方向の上書きは不可**（サーバーで `deny` のものを Org で `warn` にはできない）
-   - Org で `deny` になった場合、ログイン自体は成功し、その Org に入れないだけになる（4.4 の Org 候補から外れる）
-
-### 10.3 適用するタイミング
-
-- **ログイン時**：結果を `sessions.warnings` に保存する
-- **認証手段の登録時**：その認証手段に恒常的に付く警告（例：RS256 の passkey）を登録画面で出す
-- **認証手段の一覧表示時**：各認証手段に付いている警告を表示し、改善を促す
-- **step-up 認証や Org 切り替え時**：再評価する
-
-### 10.4 警告の届け先
-
-- **ユーザー**：ログイン後の画面、認証手段の管理画面。メッセージは警告コードから多言語化して表示する（サーバーは文言ではなくコードを返す）
-- **監査ログ**：すべての警告を記録する
-- **連携先（RP）**：既定では ID トークンに載せない。必要な RP はセッション情報 API で警告コードを取得する
-
-### 10.5 警告ルールの例
+- Evidence：`amr`、要素数、IP、User-Agent、TLS の鍵交換方式、passkey の `alg`、OAuth のメール確認状況など
+- アクションは 2.8 の階層で決める。Org で `deny` ならログインは成功し、その Org に入れないだけ
+- 評価のタイミング：ログイン（`sessions.warnings` に保存）、認証手段の登録・一覧表示、step-up、Org 切り替え
+- 届け先：本人（コードで返しクライアントで多言語化）、監査ログ、RP（API で取得。トークンには載せない）
 
 | コード | 内容 | 既定 |
 |---|---|---|
-| `passkey_alg_rsa` | passkey が RS256（9.4） | warn |
-| `tls_no_pq_kex` | TLS の鍵交換が耐量子ハイブリッドでない（古いクライアント） | warn |
-| `single_factor` | パスワードのみなど、1要素で認証した | ignore（MFA 導入後に warn） |
-| `oauth_email_unverified` | OAuth プロバイダ側でメールが未検証 | warn |
-| `password_breached` | 漏洩済みパスワード（HIBP の k-匿名 API 等で照合） | warn |
-| `new_device` | 初めての端末・IP からのログイン | ignore（将来 warn） |
+| `passkey_alg_rsa` | RS256 の passkey | warn |
+| `tls_no_pq_kex` | 耐量子でない TLS 鍵交換（Go が TLS を終端する場合のみ判定） | warn |
+| `single_factor` | 1要素での認証 | ignore |
+| `oauth_email_unverified` | プロバイダ側でメール未確認 | warn |
+| `password_breached` | 漏洩済みパスワード | warn |
+| `recovered_via_email` | メールによる復旧の直後 | warn |
+| `new_device` | 初めての端末・IP | ignore |
 
-- `tls_no_pq_kex` は Go が TLS を終端する場合のみ判定できる。リバースプロキシで終端する構成では、プロキシから情報を受け取る必要がある
-- 最初は枠組みと 1〜2 個のルールだけ実装し、ルールは必要になったら足す
-
-## 11. フィーチャーと拡張ポイント
-
-2.6 の方針に従い、機能をフィーチャー単位で切り替えられるようにする。切り替えは2段階で行う。
-
-1. **ビルド時**：ビルド設定ファイルに載せたフィーチャーのコードだけをバイナリ・イメージに含める（11.11）
-2. **起動時**：バイナリに含まれているフィーチャーのうち、どれを有効にするかを設定ファイルで決める。実行中には変えない（処理経路を起動時に組み立てるため）
-
+## 11. フィーチャー
 
 ### 11.0 一覧
 
-| フィーチャー | 既定 | オフにしたときの動き |
+| フィーチャー | 既定 | 依存 |
 |---|---|---|
-| Org（11.13） | オン | Org の概念自体を使わない。認証だけ、認可は realm 全体の範囲で行う |
-| Quota（11.14） | オフ | 上限の判定をしない（無制限） |
-| 複数 realm（11.1） | オフ | realm は1つ固定。realm の解決処理をしない |
-| サービスアカウント（11.2） | オフ | client credentials などの機械向け認証を無効化 |
-| Org 管理ユーザー・Org 専用 SSO（11.3） | オフ | `owner_org_id` は常に NULL。ドメイン検証も無効 |
-| Org 階層（11.4） | オフ | 親 Org をたどらない |
-| リソース単位の権限（11.5） | オン | Org 単位の RBAC のみで判定 |
-| Group のネスト（11.5） | オフ | Group 展開は1段のみ |
-| パスワード（4.1） | オフ | メールとパスワードによるログインを無効化 |
-| アカウント統合（11.6） | オフ | 統合 API を無効化 |
-| カスタム属性（11.7） | オフ | 属性の読み書きをしない |
-| フロー フック（11.8） | オフ | フック呼び出しを一切しない |
-| 認証の警告（10章） | オン（ルールは最小限） | 評価器を通さない |
+| Org（11.13） | オン | ― |
+| 認証の警告（10章） | オン | ― |
+| リソース単位の権限（11.5） | オン | ― |
+| パスワード（4.1） | オフ | ― |
+| Quota（11.14） | オフ | Org |
+| 複数 realm（11.1） | オフ | ― |
+| サービスアカウント（11.2） | オフ | ― |
+| Org 管理ユーザー・Org 専用 SSO（11.3） | オフ | Org |
+| Org 階層（11.4） | オフ | Org |
+| Group のネスト（11.5） | オフ | ― |
+| アカウント統合（11.6） | オフ | ― |
+| カスタム属性（11.7） | オフ | ― |
+| フロー フック（11.8） | オフ | ― |
 
-### 11.1 複数 realm（ユーザープール）
+### 11.1 複数 realm
 
-- 1つの IAM インスタンスで、互いに独立したユーザー集合を複数持てるようにする（アプリ A と B のユーザーを完全に分けたい、など）
-- メールの一意性、Org の slug、外部 IdP の接続設定はすべて realm 単位
-- realm はリクエストのホスト名やパス（`/realms/{slug}/...`）から決める。オフのときはこの解決処理を行わない
+互いに独立したユーザー集合を1インスタンスで持つ。realm はホスト名かパス（`/realms/{slug}/…`）で決める。
 
-### 11.2 サービスアカウント（人間以外の主体）
+### 11.2 サービスアカウント
 
-- Org に所属する機械用の主体。ロール付与・Group 所属はユーザーと同じ principal として扱う
-- 認証は OAuth の client credentials（`client_secret` または `private_key_jwt`）と API キー
-- `private_key_jwt` の鍵も 9章の方針に従い、RSA は受け付けない（ES256 / EdDSA / ML-DSA）
+Org に属する機械の主体。認証は client credentials（`client_secret` / `private_key_jwt`。鍵は ES256 / EdDSA / ML-DSA）と API キー。
 
 ### 11.3 Org 管理ユーザーと Org 専用 SSO
 
-ユーザーの所有者を2種類に分ける。
-
-- **個人ユーザー**（`owner_org_id` が NULL）：本人が所有する。複数の Org に所属できる。Org ができるのは所属から外すことだけで、アカウントの停止・削除はできない
-- **Org 管理ユーザー**（`owner_org_id` に値がある）：その Org が所有する（エンプラの社員アカウント）。Org の管理者が停止・削除でき、ログイン方法も Org のポリシー（`require_sso` など）に従わせられる
-
-関連する仕組み：
-
-- **ドメインの所有証明**（`org_domains`）：DNS の TXT レコードなどで、Org がメールドメインを所有していることを証明する
-- 証明済みドメインのメールで新規登録したユーザーは、その Org の管理ユーザーにできる
-- 既存の個人ユーザーを管理ユーザーに切り替える場合は、本人に通知して同意を得る
-- **Org 専用 SSO**：`connections.owner_org_id` に Org を指定し、その Org の IdP（SAML / OIDC）でログインさせる
+- 個人ユーザーは本人が所有し、Org は所属から外すことしかできない。Org 管理ユーザーは Org が所有し、停止・削除・ログイン方法の強制ができる
+- Org は DNS の TXT 等でドメインの所有を証明する（`org_domains`）。証明済みドメインで登録した人を管理ユーザーにできる。既存の個人ユーザーの切り替えには本人の同意が要る
+- Org 専用 SSO は `connections.owner_org_id` で表す
 
 ### 11.4 Org 階層
 
-- Org に親子関係を持たせる（会社 → 部署 など）。親 Org で付与したロールを子 Org にも効かせられる
-- 祖先をたどるコストを抑えるため、祖先の一覧（closure table など）を**書き込み時に計算しておく**。どう持つかは Storage アダプタが DB に応じて決める（PostgreSQL なら再帰 CTE や ltree も選択肢）
-- 階層の深さには上限を設ける
+親 Org のロールを子に効かせる。祖先一覧は書き込み時に計算する（持ち方はアダプタが決める）。深さに上限。
 
 ### 11.5 認可の粒度
 
-- **リソース単位の権限**：`role_bindings` に `resource_type` / `resource_id` を指定すると、そのリソースだけに効くロールになる
-- **Group のネスト**：Group を Group のメンバーにできる
-  - 展開のコストを抑えるため、所属の推移閉包を書き込み時に計算しておく。深さの上限と循環の禁止を設ける
-- 認可判定の結果は EphemeralStore に短期キャッシュする。関係する所属・ロールの変更時に無効化する
-- これで足りなくなったら、4.5 のシグネチャのまま OpenFGA 等の ReBAC エンジンに差し替える
+- `role_bindings` の `resource_type / resource_id` でリソース単位のロールにする
+- Group のネストは推移閉包を書き込み時に計算する。深さの上限と循環の禁止
+- 判定結果は短期キャッシュし、関係する変更で無効化する
 
 ### 11.6 アカウント統合
 
-複数の OAuth に対応すると、同じ人が別のアカウントを作ってしまうことは避けられない。そのため統合の手順を用意する。
-
-1. アカウント A にログインした状態で、アカウント B にもログインして所有を証明する
-2. B のメール・外部 ID・passkey・Membership・ロール付与を A に移す（Org 管理ユーザーが絡む場合は、その Org の許可が必要）
-3. B は `status = merged`、`merged_into = A` にし、B のセッションとトークンはすべて失効させる
-4. `user.merged` イベントを出す
-
-- **連携先から見るとユーザー ID（`sub`）が変わる**ため、連携先はこのイベントを処理する必要がある。これがオプトインにしている理由
-- 統合は取り消せない操作として扱い、監査ログに残す
+A にログインした状態で B の所有を証明すると、B のメール・外部 ID・passkey・Membership・ロール・個人 Org のデータを A に移す。B は `merged` になりセッションを失効する。`sub` が変わるため `user.merged` イベントを出す。取り消し不可。
 
 ### 11.7 カスタム属性
 
-- ホストが realm ごとにユーザーの独自項目を定義できる（型、検証ルール、本人が編集できるか、トークンのクレームに載せるか）
-- 保存方法は Storage アダプタが決める（汎用的には `user_attributes` のキー・値形式、PostgreSQL なら JSONB 列でもよい）
-- トークンに載せる属性は最小限にする（トークンの肥大化を避ける）
+realm ごとに型・検証・本人による編集可否・トークンへの掲載・暗号化の有無を定義する。保存方法はアダプタが決める。
 
 ### 11.8 フロー フック
 
-ホスト独自のロジックを認証フローの途中に差し込む仕組み。
+| フック | タイミング |
+|---|---|
+| `pre_registration` | ユーザー作成の直前（許可リスト、招待制、bot 対策） |
+| `post_authentication` | 認証後・セッション作成前 |
+| `pre_membership_end` | 退会の直前（一時的な保留のみ） |
+| `pre_token` | トークン発行の直前（クレーム追加） |
 
-| フック | タイミング | 用途の例 |
-|---|---|---|
-| `pre_registration` | ユーザー作成の直前 | 登録の許可リスト、招待制にする |
-| `post_authentication` | 認証成功後、セッション作成前 | 独自の拒否判定、追加の認証要求。10章の警告評価もここで動く |
-| `pre_token` | トークン発行の直前 | クレームの追加 |
-| 非同期イベント | 各操作の後 | 外部システムへの同期（EventSink 経由） |
+Go インターフェースか Webhook で実装する。タイムアウト必須、失敗時の fail-closed / fail-open はフックごとに設定する。ホットパスには置かない。
 
-- 同期フックの実装方法は、Go のインターフェース（ライブラリとして組み込む場合）と Webhook の2通り
-- **同期フックはタイムアウト必須**。失敗時に拒否するか（fail-closed）、無視して続けるか（fail-open）はフックごとに設定する
-- トークン検証と認可判定（ホットパス）にはフックを置かない
+### 11.9 （2.8 に統合）
 
-### 11.9 設定の置き場所
+### 11.10 公開する契約
 
-- **起動時に決まるもの**は設定ファイル：使うアダプタ、フィーチャーのオン・オフ、警告のサーバー既定アクション
-- **実行中に変わるもの**は Storage：realm、外部 IdP の接続設定、Org のポリシー、カスタム属性の定義。管理 API で変更し、複数インスタンスで共有される
+公開 API、Webhook のペイロード（Notifier・フック・イベント）、トークンのクレーム、Go ライブラリのポートにバージョンを付ける。
 
-### 11.10 公開する契約のバージョン管理
-
-公開 API に加えて、以下も外部との契約としてバージョンを付けて管理する。
-
-- Webhook（Notifier、フロー フック、イベント）のペイロード
-- トークンのクレーム構成
-- Go ライブラリとして公開するポートのインターフェース
-
-### 11.11 ビルド時のフィーチャー選択
-
-使うフィーチャーとアダプタをビルド設定ファイルに列挙し、**載っていないもののコードを含めずにバイナリ・イメージを作る**。
+### 11.11 ビルド時の選択
 
 ```yaml
 # build.yaml
-features:
-  - resource_scoped_authz
-  - warnings
-adapters:
-  storage: [postgres]
-  ephemeral: [redis]
-  notifier: [webhook]
-  keystore: [file]
+features: [resource_scoped_authz, warnings]
+adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keystore: [file] }
 ```
 
-#### 狙い
+- フィーチャーとアダプタは自己登録するパッケージ。`iam build` が選んだものだけを import してビルドする（build tag は使わない）
+- 公式イメージは「全部入り」と「最小構成」。依存関係はビルド時に検査する
+- **扱えないデータが DB にあれば起動を拒否し、判定中に未知のデータに出会えば拒否する（fail-closed）**
+- スキーマはフィーチャーの有無で変えない
+- 効果は攻撃面・依存・サイズの削減（レイテンシは起動時の組み立てで既にゼロ）
 
-- **攻撃面を減らす**：使わない認証経路（SAML など）のコードが存在しなければ、その脆弱性の影響も受けない
-- **依存を減らす**：SAML ライブラリ、各 DB ドライバなど、重い依存をフィーチャーごとに切り離せる
-- **バイナリ・イメージを小さくする**
-- なお、**レイテンシへの効果は小さい**。オフにした機能のリクエスト時のコストは、起動時の組み立て（2.6）の時点ですでにゼロになっている。ビルド時の除外で得られるのは主に上の3点
+### 11.12 構成変更の保証
 
-#### 実現方法
+- 追加：バイナリを全台に配ってから有効化。削除：無効化してデータを片付けてからバイナリを配る
+- 台帳（`installed_features`）とバイナリに埋め込んだ構成を起動時に突き合わせる
 
-- 各フィーチャー・各アダプタを**独立した Go パッケージ**にし、import されたときに自分を登録する（`database/sql` のドライバと同じ方式）
-- ビルドツール（`iam build`）が `build.yaml` を読み、選ばれたパッケージだけを import するファイルを生成してからビルドする
-  - import されなかったパッケージは Go のリンカがバイナリから完全に除外する
-  - build tag 方式は、タグが多数のファイルに散らばり管理しにくいため採らない
-- コンテナイメージは、このビルドツールを使うマルチステージビルドで作る
-- 公式には「全部入り」と「最小構成」の2種類のイメージを配布し、それ以外は利用者が `build.yaml` から作る（Caddy の xcaddy と同じ考え方）
-
-#### 依存関係の検証
-
-- フィーチャー間の依存（例：Org 専用 SSO には Org 管理ユーザーとドメイン証明が必要）をビルドツールが検査し、足りなければビルドを失敗させる
-
-#### 安全性：外したフィーチャーのデータが残っている場合
-
-ビルド時に外したフィーチャーのデータが DB に残っていると、**本来効くべき制約が黙って無視される**おそれがある。例えば Org のポリシーに `require_sso` があるのに SSO を外したバイナリで起動すると、SSO を強制しているつもりの Org にパスワードで入れてしまう。これを防ぐため、必ず安全側に倒す。
-
-- **起動時チェック**：DB 内に、このバイナリが扱えないフィーチャーのデータ（未知のポリシー種別、ネストした Group、リソース単位のロール付与など）があれば、起動を拒否する
-- **実行時も拒否側に倒す**：判定中に未知のポリシー種別や未対応のデータに出会ったら、無視せず拒否する（fail-closed）
-- データを消してから外すための移行手順（`iam features disable <name>` で該当データを確認・削除）を用意する
-
-#### スキーマ
-
-- スキーマ（テーブル・列）はフィーチャーの有無にかかわらず同じにする（2.6）。フィーチャーを後から足したときに移行を不要にするため
-- 外せるのはコードだけで、データモデルは常に全機能に対応した形を保つ
-
-#### テスト
-
-組み合わせが爆発しないよう、CI では次の構成だけをビルド・テストする。
-
-- 全部入り
-- 最小構成
-- 最小構成 + 各フィーチャーを1つずつ
-
-### 11.12 ビルド構成を変更するときの保証
-
-フィーチャーの追加・削除は、バイナリの入れ替えとデータの状態変化が絡むため、次の仕組みで安全を保証する。
-
-#### 基本の考え方：コードの有無とデータの有効化を同時に変えない
-
-DB のスキーマ変更でよく使う expand / contract の考え方を、フィーチャー単位に当てはめる。
-
-- **追加するとき**：まずフィーチャーを含むバイナリを全インスタンスに配布する（この時点では無効）。全台に行き渡ってから有効化する
-- **削除するとき**：まずフィーチャーを無効化してデータを片付ける。片付いてから、フィーチャーを含まないバイナリを配布する
-
-これで、ローリングデプロイ中に新旧のバイナリが混在しても、どちらかが扱えないデータが生まれない。
-
-#### フィーチャー台帳
-
-DB に、フィーチャーごとの状態を記録する台帳を持つ。
-
-```
-installed_features
-  feature           -- フィーチャー名
-  state             -- enabling / active / disabling
-  data_version      -- そのフィーチャーのデータ形式のバージョン
-  updated_at
-```
-
-- **バイナリは自分のビルド構成（含むフィーチャーとそのバージョン）を埋め込んで持つ**（`iam version --manifest` で確認できる）
-- 起動時に、埋め込みの構成と台帳を突き合わせる
-
-| 台帳 | バイナリ | 起動時の動き |
+| 台帳 | バイナリ | 起動 |
 |---|---|---|
-| active / enabling / disabling | 含まない | **起動を拒否**（11.11 の fail-closed） |
-| 記録なし | 含む | 起動する。フィーチャーは無効のまま（有効化は明示的に行う） |
-| active | 含む・データ形式が古い | 起動を拒否し、移行コマンドの実行を促す |
-| active | 含む・データ形式が新しすぎる（ダウングレード） | 起動を拒否 |
+| 記録あり | 含まない | 拒否 |
+| 記録なし | 含む | 起動（無効のまま） |
+| active | データ形式が古い / 新しすぎる | 拒否 |
 
-- フィーチャーが実際に動くのは「バイナリに含まれている」「設定で有効」「台帳で active」の**3つがすべて揃ったとき**だけ
+- 動くのは「含まれる」「設定で有効」「台帳で active」が揃ったときだけ
+- 状態は CLI で明示的に進める：enable → enabling（冪等な準備処理）→ active → disable → disabling（書き込み停止、データ 0 件で完了）
+- `iam features plan --build build.yaml` で事前に差分と影響を表示する
+- 本体の更新と構成の変更は別のデプロイで行う。互換性は1つ前のバージョンまで
 
-#### 状態の遷移
+### 11.13 Org と個人 Org
 
-状態は CLI（または管理 API）で明示的に進める。自動では進めない。
+- オフ：Org の決定をせず、トークンに `org_id` を含めず、認可は realm 範囲
+- オン：ユーザー作成と同じトランザクションで個人 Org（`kind = personal`）と Membership を作る
+- 個人 Org はメンバーが本人のみ、招待不可、ユーザーと一緒に削除。Org 管理ユーザーにも作る（ポリシーで利用を禁止できる）
+- 後からオンにする場合は、準備処理で既存ユーザーに個人 Org を作る
 
-```
-（記録なし）──enable──▶ enabling ──完了──▶ active ──disable──▶ disabling ──完了──▶（記録なし）
-```
+### 11.14 Quota
 
-- **enabling**：既存データからの準備処理（バックフィル）を行う
-  - 例：Group のネストや Org 階層なら、既存の所属から推移閉包・祖先一覧を計算する
-  - 準備処理は再実行しても結果が変わらないように作る（途中で落ちてもやり直せる）
-- **disabling**：そのフィーチャーの新しいデータの書き込みを止め、既存データを確認・削除する
-  - 削除すると挙動が変わるデータ（ポリシーなど）は、削除前に影響を表示して確認を取る
-  - 残っているデータが 0 件になって初めて記録を消せる
-- 状態の変化は監査ログに残す
+上限は期間つきの付与の合算で求める（`quota_key`：まず `members`）。
 
-#### 変更前の差分確認
-
-`iam features plan --build build.yaml` で、新しいビルド構成を現在の台帳・データと突き合わせ、適用前に差分を表示する（Terraform の plan に相当）。
-
-- 追加されるフィーチャーと、必要な準備処理
-- 削除されるフィーチャーと、残っているデータの件数・影響（このポリシーが効かなくなる、など）
-- 依存関係の違反
-- この構成のバイナリで起動できるかどうか
-
-#### バージョンアップとの関係
-
-- IAM 本体のバージョンアップとフィーチャー構成の変更は、**別々のデプロイで行う**ことを推奨する（問題が起きたときに原因を切り分けられるように）
-- 各フィーチャーのデータ形式は前進のみで移行する。互換性は「1つ前のバージョンのバイナリが同じデータで動く」ことを保証範囲とする
-
-#### テスト
-
-- CI で、各フィーチャーについて「データがある状態での有効化・無効化」と「含まないバイナリでの起動拒否」をテストする
-
-## 12. テスト戦略
-
-### 12.1 方針：フィーチャーと DB を掛け算にしない
-
-「フィーチャーの組み合わせ × DB アダプタ」をすべてテストすると組み合わせが爆発する。そこで、**フィーチャー（ロジック）のテストと DB（Storage アダプタ）のテストを切り離し、掛け算を足し算にする**。
+| 種類 | 意味 |
+|---|---|
+| `base` | 基本の上限。同時に有効なのは1つ（新しい方が優先） |
+| `addon` | 足し算 |
+| `override` | 有効な間は base と addon を無視 |
 
 ```
-                 ┌─────────────────────────────┐
-フィーチャーのテスト │ コア + 各フィーチャー × 参照実装 │  ← DB を使わない。速い
-                 └─────────────────────────────┘
-                         Repository インターフェース（契約）
-                 ┌─────────────────────────────┐
-DB のテスト        │ 契約テスト × 各アダプタ          │  ← 実 DB を使う。別ジョブ
-                 └─────────────────────────────┘
+時刻 t の上限 = override があればその値、なければ base + Σ addon。付与が無ければ無制限
 ```
 
-- 両者をつなぐのは Repository インターフェースと、その**契約テスト**だけ
-- 「参照実装でフィーチャーのテストが通る」かつ「アダプタが契約テストを通る」なら、組み合わせても動く、とみなす
+- 外部の課金システムとは直接連携しない。ホスト先が管理 API で登録し、`external_ref` で冪等に上書きする。`source` で手動の付与を守る
+- 数えるもの（realm で設定）：active（必ず）、招待中・将来有効・停止中（既定は数える）。個人 Org には適用しない
+- **判定**：追加・招待・有効期間の変更・付与の削除のときに行い、足りなければエラーで拒否する（待機列は持たない）
+  - 新しいメンバーの有効期間の**すべての時点**で「その時点の人数 + 1 ≤ 上限」を満たすこと（区切りの時刻だけを調べる）。期間が重ならない人同士は枠を共有できる
+  - 件数の確認と追加は同じトランザクションで行う。エラーには不足する期間と人数を含める
+- IAM が拒否できない経路で上限を下回った場合：既存メンバーは外さず、新規を止めて `org.quota.exceeded` を出す
+- ホットパスでは判定しない
 
-### 12.2 フィーチャー側のテスト
+## 12. テスト
 
-- **インメモリの参照実装**（Storage と EphemeralStore）に対してテストする
-  - 参照実装も契約テストを通すことで、本物の DB と同じ振る舞いであることを保証する
-- 11.11 の構成（全部入り、最小構成、最小構成 + 各フィーチャー1つずつ）はこちらで回す
-- DB を立ち上げないので、通常の `go test` で数秒〜数十秒で終わる規模を保つ
+- **フィーチャーのテスト**：インメモリの参照実装に対して行う。CI の構成は全部入り・最小構成・最小構成 + 各フィーチャー1つ
+- **DB のテスト**：Repository の契約テスト（公開パッケージ `storagetest`）を各アダプタに対して実 DB（コンテナ）で回す。各アダプタは別の Go モジュール。参照実装も同じ契約テストを通す
+- 契約テストに必須：CRUD と検索、**一意性と並行性**（同時登録、リフレッシュトークンの同時使用、`sign_count`、Quota）、トランザクション、**realm の分離**（全メソッドで自動検査）、フィーチャーごとの契約
+- そのほか：マイグレーション（1つ前から）、フィーチャーの有効化・無効化、アダプタごとのベンチマーク
+- E2E：SQLite + インメモリ、PostgreSQL + Redis の2構成
 
-### 12.3 DB 側のテスト（別ジョブ・別モジュール）
+## 13. セキュリティの保証
 
-- 契約テストスイートは**独立したパッケージ**（`storage/storagetest` など）として公開する
-  - 利用者が自前のアダプタを作った場合も、同じスイートで検証できる
-- 各アダプタは**別の Go モジュール**にする（`adapters/storage/postgres/go.mod` など）
-  - DB ドライバの依存がコアやほかのアダプタに入り込まない（11.11 のビルド選択とも相性が良い）
-  - アダプタの CI はそのモジュールが変更されたときと、定期実行（nightly）で回す
-- 実 DB はコンテナで立てる（testcontainers 等）。対応バージョンごとにジョブを分ける
+第三者のレビュー不足を、機械による検証・外部の基準・報告窓口で補う（ADR 0030）。
 
-#### 契約テストに含めるもの
-
-- **基本の CRUD と検索**：各 Repository のメソッドごとの期待動作
-- **一意性と並行性**：同じメールの同時登録、リフレッシュトークンの同時使用（再利用検知）、passkey の `sign_count` 更新の競合など。認証基盤では競合時の挙動がそのまま安全性に直結するため、並行実行のテストを必須にする
-- **トランザクション**：途中で失敗したときに巻き戻ること、分離レベルの前提が満たされていること
-- **realm の分離**：別 realm のデータが絶対に返らないこと（全メソッドで自動的に検査する）
-- **フィーチャーごとの契約**：各フィーチャーが自分の Repository の契約テストを持ち、アダプタはそのフィーチャーに対応する場合にだけ通す
-
-#### 契約テスト以外
-
-- **マイグレーションのテスト**：1つ前のバージョンのスキーマとデータから移行できること、11.12 の有効化・無効化がデータ入りの状態で動くこと
-- **性能のベンチマーク**：主要な操作（セッション取得、認可判定に使うクエリ）のレイテンシを アダプタごとに計測し、基準を超えたら知らせる。2.6 の「遅い機能を捨てる判断」の材料にする
-
-### 12.4 結合テスト（E2E）
-
-- 「代表的な構成」だけに絞る：SQLite + インメモリ（最小構成）、PostgreSQL + Redis（全部入り）
-- ログイン、Org 切り替え、トークン発行、認可判定の一連の流れを HTTP 越しに確認する
-
-## 13. セキュリティの保証体制
-
-### 13.1 課題
-
-- 大枠を個人（と AI）で作るため、設計・実装の段階で第三者のレビューが入りにくい
-- OSS であっても、利用者が少ないうちは「誰かが見ているはず」は期待できない
-- AI が書いたコードは、もっともらしいが仕様の細部を外している、ということが起こりうる
-
-そこで「第三者の目」を、**機械による検証・標準の適合試験・外部からの報告窓口**で補い、人のレビューは重要な部分に集中させる。
+### 13.1 （13 章の冒頭に統合）
 
 ### 13.2 自前で書く範囲を減らす
 
-脆弱性が入りやすいのは、暗号やプロトコルを自前で実装した部分。ここを広く使われているライブラリに任せ、自前のコードを「ライブラリの組み合わせ方」に限定する。
+- 暗号は Go 標準ライブラリのみ
+- OIDC：zitadel/oidc（v3 で開始し v4 を追う）。自前で補うのは ML-DSA の署名と JWKS、Back-Channel Logout の送信
+- JWT / JWK：lestrrat-go/jwx v4。WebAuthn：go-webauthn
+- SAML は Org 専用 SSO の実装時に最も慎重に選ぶ
+- セキュリティ上重要なコード（トークン、セッション、連携・統合、認可判定、fail-closed 判定）はディレクトリを分けて明示する
 
-- 暗号：Go 標準ライブラリ（`crypto/*`、`crypto/mldsa`）のみを使う。暗号アルゴリズムは自前で実装しない
-- WebAuthn：go-webauthn を使う。複数 origin の検証（Related Origin Requests）、RS256、ML-DSA（`AKP`）の passkey にも対応している（ML-DSA の passkey は将来の受け入れ候補）
-- OAuth / OIDC：**zitadel/oidc（`op` パッケージ）を土台にする**（2026年10月時点の調査。ADR 0038）
-  - 対応済み：認可コード + PKCE、クライアントクレデンシャル、リフレッシュトークン、Discovery、イントロスペクション、トークン失効、クライアントごとの不透明（Bearer）/ JWT アクセストークンの切り替え、ログアウト（end_session）
-  - 自前で補うもの：ML-DSA での ID トークン署名と JWKS の出力（9.3）、Back-Channel Logout のログアウトトークンの送信（ライブラリは型と Discovery の項目のみ提供）
-  - v3 が安定版、v4 は開発中（プレリリース）。v3 で始め、v4 の正式版を追う
-  - ory/fosite は、最後の更新が 2025年7月で、以降は止まっているため採らない
-- JWT / JWK：lestrrat-go/jwx（v4）。ML-DSA と `AKP` 鍵に対応済み
-- SAML：XML 署名まわりは脆弱性の温床なので、Org 専用 SSO（11.3）を実装する時点で最も慎重に選定する
-- **セキュリティ上重要なコード**（トークン発行・検証、セッション、アカウント連携・統合、認可判定、フィーチャー台帳の fail-closed 判定）は、ディレクトリを分けて範囲を明示する。レビューと監査の対象をここに集中させる
+### 13.3 適合試験
 
-### 13.3 標準への適合試験
+OpenID Foundation の OIDC 適合試験と FIDO の WebAuthn 適合試験を回す。意図的な差異（RS256 なし）は明記する。
 
-自己判断ではなく、外部の基準で正しさを確認する。
+### 13.4 継続的な検査
 
-- **OIDC**：OpenID Foundation の適合試験スイート（OSS として公開されている）を CI で回す。将来は公式認定の取得も検討する
-- **WebAuthn**：FIDO Alliance の適合試験ツールで確認する
-- 9章の方針で RS256 を出さないなど、意図的に外している項目は、試験結果の中で「既知の差異」として明記する
+govulncheck、OSV-Scanner、Dependabot / Renovate、staticcheck、gosec、CodeQL、ファジング（JWT、WebAuthn の応答、OAuth のパラメータ、SAML、設定ファイル）、OpenSSF Scorecard。
 
-### 13.4 機械による継続的な検査
+### 13.5 脅威モデルと不変条件
 
-- **依存の脆弱性**：govulncheck、OSV-Scanner、Dependabot（または Renovate）
-- **静的解析**：staticcheck、gosec、CodeQL
-- **ファジング**：外部から入力を受け取る解析処理（JWT、WebAuthn の応答、OAuth のパラメータ、SAML の XML、設定ファイル）に Go 標準のファジングを当てる。継続実行には OSS-Fuzz への参加も検討する
-- **OpenSSF Scorecard**：リポジトリ運用の安全性を数値化し、README に掲示する
+`docs/threat-model.md` を設計変更のたびに更新する。次の不変条件はそれぞれテストを持ち、テストを消す・弱める変更は CI で検出してレビュー必須にする。設定でも外せない。
 
-### 13.5 脅威モデルとセキュリティ不変条件
+- 未ログインでメールが一致しても自動リンクしない（4.2）
+- 最後の認証手段・最後の確認済みメールは本人が削除できない（4.3）
+- 全ユーザーが確認済みのメールを1つ以上持つ（4.1）
+- メールのコード・リンクは要求したフローの外で通らない（4.1）
+- 本人確認の前は、アカウントの有無や状態で応答・応答時間が変わらない（4.9）
+- セッショントークンの秘密部分はログ・イベントに出ない（5.2）
+- ログイン・権限変更時にセッション ID が入れ替わる（5.2）
+- 無効化した認証情報・停止中・有効期間外の対象では認証できず、関連セッションも使えない（4.6〜4.8）
+- 変更がセッション検証に反映される遅れは上限を超えない（5.3）
+- 復旧専用のセッションでは認証手段の登録しかできない（4.12）
+- 共有 Org には常にオーナーがいる。個人ユーザーの退会は恒久的には妨げられない（4.10）
+- 削除したユーザーの個人情報はデータ鍵の削除後に復号できない（4.10）
+- 別 realm のデータは返らない（12章）
+- 扱えないフィーチャーのデータがあれば起動せず、判定は拒否に倒れる（11.11）
+- Org の設定はホスト先が許した範囲を超えて緩められない（2.8）
 
-- 脅威モデル（STRIDE 等）を `docs/threat-model.md` として持ち、設計変更のたびに更新する
-- 設計上の安全性の約束を**不変条件として列挙し、それぞれに対応するテストを持つ**。例：
-  - 未検証メールの一致でアカウントを自動リンクしない（4.2）
-  - 最後の認証手段は削除できない（4.3）
-  - 扱えないフィーチャーのデータがあれば起動しない・判定は拒否側に倒す（11.11）
-  - 別 realm のデータは返らない（12.3）
-  - セッショントークンの秘密部分はログ・イベントに出ない（5.2）
-  - ログイン・権限変更時にセッション ID が入れ替わる（5.2）
-  - 無効化した認証情報・停止中の対象では認証できず、関連するセッションも使えない（4.6, 4.7）
-  - 共有 Org には常に1人以上のオーナーがいる（4.10）
-  - 個人ユーザーの共有 Org からの退会は、恒久的には妨げられない（4.10）
-  - 削除したユーザーの個人情報は、データ鍵の削除後は復号できない（4.10）
-  - 本人確認の前は、アカウントの有無や状態によって応答・応答時間が変わらない（4.9）
-  - メールのコード・リンクは、要求したフローの外では検証が通らない（4.1）
-  - すべてのユーザーが確認済みのメールアドレスを1つ以上持つ（4.1）
-  - 変更がセッション検証に反映されるまでの遅れは、設定した上限を超えない（5.3）
-  - 復旧専用のセッションでは、新しい認証手段の登録以外の操作ができない（4.12）
-  - Org の上書きでサーバーの警告アクションを緩められない（10.2）
-- 不変条件のテストが消えたり弱められたりした変更は、CI で検出してレビュー必須にする
+### 13.6 AI が書いたコード
 
-### 13.6 AI が書いたコードの扱い
+別のエージェントにセキュリティ観点だけでレビューさせる。重要なコードは CODEOWNERS で人のレビューを必須にする。仕様に関わる実装には RFC の節番号を残す。
 
-- 書いた AI とは**別のセッション・別のエージェントに、セキュリティ観点だけのレビュー**をさせる（同じ文脈で自己採点させない）
-- 13.2 の「セキュリティ上重要なコード」への変更は、人（メンテナ）のレビューを必須にする（CODEOWNERS で強制）
-- 仕様に関わる実装には、根拠となる RFC の節番号をコメントで残す。レビューする側が仕様と突き合わせられるようにする
+### 13.7 報告窓口と監査
 
-### 13.7 外部からの報告窓口と監査
+`SECURITY.md` と GitHub の非公開脆弱性報告。対応期限と公開方針（Advisory、CVE）を明記する。成熟したら第三者監査（OSTIF 等への申請も検討）。
 
-- `SECURITY.md` を置き、GitHub の非公開脆弱性報告（Private Vulnerability Reporting）を有効にする
-- 報告への対応期限と公開方針（修正後に GitHub Security Advisory と CVE を発行する、など）を明記する
-- 一定の成熟度に達したら、第三者のセキュリティ監査を受ける。OSS 向けに監査を支援している団体（OSTIF など）への申請も検討する
+### 13.8 配布物
 
-### 13.8 配布物の信頼性
+署名（Sigstore / cosign）、SBOM、SLSA provenance。再現可能ビルドを目指す。
 
-- リリースバイナリとコンテナイメージに署名（Sigstore / cosign）し、SBOM とビルドの来歴証明（SLSA provenance）を付ける
-- 再現可能ビルドを目指し、利用者が `build.yaml` から自分でビルドしたものと公式の手順の差を検証できるようにする（11.11）
+### 13.9 成熟度
 
-### 13.9 成熟度の明示
-
-- 第三者監査を受けるまでは、README で**「本番利用は自己責任の実験段階」**と明記する
-- バージョン 1.0 の条件に「適合試験の合格」と「第三者監査の完了」を含める
-
-### 11.13 Org フィーチャーと個人 Org
-
-#### Org なしでも動かせる
-
-Org そのものをフィーチャーにし、**Org を使わない構成（認証だけ）でもセルフホストできる**ようにする。
-
-- オフのとき
-  - Org の決定・切り替え（4.4）を行わない。`active_org_id` は常に NULL、トークンにも `org_id` を含めない
-  - 認可は realm 全体を範囲として行う（Group・ロール付与の `org_id` が NULL のもの）
-  - 個人向けアプリや、単一組織の社内ツールなど、Org が不要な用途を想定
-- Org に依存するフィーチャー（Org 階層、Org 管理ユーザー、Org 専用 SSO、Org のログインポリシー）は、Org がオンでないと有効にできない（11.11 の依存検査）
-
-#### 個人 Org
-
-Org がオンのときは、**全ユーザーに個人 Org を最初から作る**。
-
-- ユーザー作成時に、`kind = personal` の Org と、そのユーザーの Membership を同じトランザクションで作る
-- これにより「どの Org にも属さない状態」が無くなり、Org がオンのときは常に何らかの Org の文脈でログインする（4.4 の判定と、4.5 の認可が単純になる）
-- 個人 Org の制約
-  - メンバーは持ち主1人だけ。招待はできない（チームで使う場合は共有 Org を作る）
-  - 持ち主のユーザーが存在する限り削除できない。ユーザーを削除すると一緒に削除される
-  - アカウント統合（11.6）では、吸収される側の個人 Org のデータを統合先の個人 Org に移す
-- Org 管理ユーザー（11.3）にも個人 Org は作る。ただし Org のポリシーで個人 Org の利用を禁止できるようにする
-
-#### 後から Org をオンにする場合
-
-- 11.12 の有効化（enabling）の準備処理で、既存の全ユーザーに個人 Org を作る
-- 既存の realm 全体のロール付与・Group はそのまま realm 全体の範囲として残る
-
-### 11.14 Quota（Org の人数などの上限）
-
-Org に所属できる人数などに上限を設ける。上限の決め方は利用者ごとにさまざまなので、**「付与（grant）の積み上げ」**として一般化する。
-
-#### 上限の対象（quota_key）
-
-- `members`：Org のメンバー数（まずはこれ）
-- `service_accounts`、`groups` など、数えられるものなら同じ仕組みで追加できる
-
-#### 付与の種類
-
-上限は、期間つきの付与をその時刻で合算して求める。
-
-| 種類 | 意味 | 例 |
-|---|---|---|
-| `base` | 基本の上限。同時に有効なのは1つだけ（新しい方が優先） | プランの基本人数：Pro プランは 10 人 |
-| `addon` | 足し算。同時にいくつでも有効 | 追加購入した 5 人分、キャンペーンの 3 人分 |
-| `override` | 上書き。有効な間は base と addon を無視してこの値を使う | 大口契約の個別上限、障害対応で一時的に緩める |
-
-```
-時刻 t の上限 = override があればその値
-             なければ base + Σ addon（t の時点で有効なもの）
-付与が1つも無ければ無制限
-```
-
-- すべての付与に `starts_at` / `ends_at` があるので、**「何日から何人増える」「何日まで何人追加」**をそのまま表せる
-  - 例：4月1日から addon +5（期限なし）、キャンペーンで 6月末まで addon +3
-  - プラン変更の予約：4月1日から base 20 を登録すれば、その時刻から旧プランの base より優先される
-- 将来の上限の推移を API で確認できる（「4月1日から 15 人」など）
-
-#### 外部システムとの連携
-
-- IAM は課金システム（Stripe 等）と直接連携しない（2.4 の疎結合の方針）。ホスト先が課金システムの Webhook を受け、管理 API で付与を登録する
-- 外部からの登録は `external_ref`（課金システムのサブスクリプション ID 等）で**冪等**にする。同じ参照で登録し直すと上書きになるので、再送やプラン変更をそのまま反映できる
-- `source` で手動の付与と外部からの付与を区別し、外部の同期で手動の付与を消さないようにする
-
-#### 何を1人と数えるか
-
-realm の設定で決める。
-
-- active な Membership は数える
-- 招待中（invited）の Membership：既定は数える（枠を予約する）。招待の出しすぎで上限を超えないようにするため
-- 有効期間（4.8）が未来の Membership：既定は数える（入社予定者の枠を確保する）
-- 停止中の Membership：既定は数える（停止は一時的な措置のため）
-- 個人 Org（11.13）には Quota を適用しない
-
-#### 上限の判定
-
-人数の上限は、Org の Membership に対する**前提条件**として扱う（4.9）。上限を超える追加は、その時点で**エラーとして拒否する**。
-
-- 判定のタイミング：メンバーの追加・招待、有効期間（4.8）の変更、付与の削除・短縮
-- **時刻を指定した招待も、招待した時点で判定する**。余りがなければ招待自体をエラーで拒否する
-  - 「枠が空いたら有効にする」待機列のような挙動は持たない。結果が予測しにくく、知らないうちに人が増減するのを避けるため
-- 判定内容：新しいメンバーの有効期間（`valid_from` 〜 `valid_until`）の**すべての時点で**、「その時点で有効な（または予約済みの）メンバー数 + 1 ≤ その時点の上限」を満たすこと
-  - 有効期間が重ならない人同士は枠を共有できる。例えば3月末で契約が終わる人の枠を、4月1日入社の人に割り当てられる
-  - 将来の上限の減少（addon の期限切れ等）も考慮されるので、後から上限超過になることを防げる
-  - 上限もメンバー数も、時刻ごとに区切られた一定値の並びなので、区切りの時刻だけを調べれば済む
-- **件数の確認と追加を同じトランザクションで行い**、同時に追加されても上限を超えないようにする（12.3 の並行性の契約テストに含める）
-- エラーには、どの時点で何人足りないかを含める（「4月1日〜6月30日の期間で 1 人分不足」など）。呼び出し側が原因を説明できるように
-- 付与の削除・短縮によって既存の予約が成り立たなくなる場合は、その操作を拒否する（既に有効なメンバーについては下の「上限を下回った場合」に従う）
-- ホットパス（ログイン、認可判定）では判定しない。Quota を有効にしても、ログインのレイテンシは変わらない
-
-#### 上限を下回った場合
-
-外部の課金システムからのプラン格下げなど、IAM が拒否できない経路で、上限が現在の人数より小さくなることがある。
-
-- **既存のメンバーを自動で外したり停止したりはしない**（誰を外すかは IAM が決めることではない）
-- 上限を超えている間は、新しいメンバーの追加・招待を拒否する
-- `org.quota.exceeded` イベントを出し、ホスト先・Org の管理者が対応を決める
-- 必要なら、超過が一定期間続いた場合の措置（Org の停止など）をホスト先がイベントを受けて実行する
-
-#### フィーチャー
-
-- Quota はフィーチャー（既定オフ）。Org フィーチャーに依存する
-- オフのときは件数を数えず、上限の判定もしない
+第三者監査までは README で「実験段階」と明記する。v1.0 の条件は roadmap.md。
