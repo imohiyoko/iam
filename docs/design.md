@@ -247,15 +247,18 @@ user_attributes     -- ホストが定義する独自項目（11.7）
   value
   PRIMARY KEY (user_id, key)
 
-user_emails
+user_emails         -- メールアドレスは暗号化して保存する（9.5）
   id (PK)
   realm_id
   user_id (FK users)
-  email             -- 正規化して保存（小文字化のみ。Gmail のドット除去などはしない）
+  email_ciphertext  -- 暗号化したメールアドレス
+  email_index       -- 検索・一意性用のブラインドインデックス（正規化後の値の HMAC）
+  domain_index      -- ドメイン部分のブラインドインデックス（11.3 のドメイン判定用）
+  key_id            -- 暗号化・インデックスに使った鍵のバージョン
   verified_at       -- NULL なら未検証
   is_primary
   created_at
-  UNIQUE (realm_id, email)
+  UNIQUE (realm_id, email_index)
 
 user_identities     -- OAuth / SSO などの外部 ID
   id (PK)
@@ -263,7 +266,7 @@ user_identities     -- OAuth / SSO などの外部 ID
   user_id (FK users)
   connection_id     -- どの接続経由か（google、github、Org の SSO など）
   provider_subject  -- プロバイダ側の不変 ID (sub)
-  email_at_link     -- 連携時点のメール（参考情報。識別には使わない）
+  email_at_link     -- 連携時点のメール（参考情報。識別には使わない。暗号化して保存）
   created_at
   UNIQUE (connection_id, provider_subject)
 
@@ -299,9 +302,11 @@ service_account_credentials
   secret_hash or public_key
   expires_at, revoked_at
 
-orgs
+orgs                -- Org フィーチャー（11.13）がオンのときだけ使う
   id (PK)
   realm_id
+  kind              -- personal / shared（11.13）
+  personal_owner_id -- kind = personal のとき、その持ち主のユーザー
   parent_org_id     -- Org の階層（11.4）。NULL ならトップレベル
   slug
   name
@@ -326,7 +331,7 @@ sessions
   realm_id
   principal_type    -- user / service_account
   principal_id
-  active_org_id (FK orgs, NULL 可)  -- 個人コンテキストなら NULL
+  active_org_id (FK orgs, NULL 可)  -- Org フィーチャーがオンなら常に値がある（個人 Org を含む）。オフなら常に NULL
   auth_methods      -- どの手段で認証したか (amr)
   warnings          -- 認証時に出た警告コードの一覧（10章）
   ip, user_agent
@@ -343,7 +348,8 @@ org_login_policies  -- Org への入り方の制約
 ```
 groups
   id (PK)
-  org_id            -- 必ず Org に属する（Org をまたぐ Group は作らない）
+  realm_id
+  org_id            -- 属する Org（Org をまたぐ Group は作らない）。Org フィーチャーがオフなら NULL（realm 全体の Group）
   name
   UNIQUE (org_id, name)
 
@@ -367,7 +373,7 @@ role_bindings       -- 誰に、どの範囲で、どのロールを与えるか
   role_id (FK roles)
   principal_type    -- user / service_account / group
   principal_id
-  org_id
+  org_id            -- NULL なら realm 全体に効く（Org フィーチャーがオフの場合はこちらのみ）
   resource_type     -- NULL なら Org 全体に効く。値があればそのリソースだけ（11.5）
   resource_id
 ```
@@ -397,11 +403,13 @@ role_bindings       -- 誰に、どの範囲で、どのロールを与えるか
 
 ### 4.4 Org の決定と切り替え
 
+Org フィーチャー（11.13）がオンのときだけ行う。オフなら Org の決定は行わず、`active_org_id` は常に NULL。
+
 ログイン（ユーザー確定）と Org 選択は分ける。
 
 1. ユーザーを認証する
 2. 入れる Org の候補を求める：active な Membership を持つ Org のうち、`org_login_policies` を満たし、かつ認証の警告が `deny` にならないもの（10章）
-3. 候補が1つなら自動選択、複数なら選択させる（前回の Org を記憶しておく）
+3. 前回の Org があればそれを、無ければ個人 Org を選ぶ（全ユーザーが個人 Org を持つので、候補が空になることはない）
 4. `sessions.active_org_id` を更新する
 
 - Org の切り替え = セッションの `active_org_id` の変更。再ログインは不要（ただしポリシーで passkey が必要な Org なら step-up 認証を要求する）
@@ -420,6 +428,8 @@ check(principal, action, resource, context) -> allow / deny
   context   : active_org_id、IP、時刻など
 ```
 
+- Org フィーチャーがオフの場合は、realm 全体を範囲とする RBAC として判定する（`org_id` が NULL のロール付与だけを使う）
+
 - `active_org_id` はセッションから取る
 - principal に直接付いたロール + 所属 Group（ネスト有効時は祖先 Group も）に付いたロールのうち、範囲（Org 全体 / そのリソース / Org 階層有効時は親 Org）が一致するものを合算して判定する
 - 有効なフィーチャーに応じて判定の実装を起動時に組み立てる（11章）。最小構成なら「Org 単位の RBAC」だけの単純な判定になる
@@ -429,7 +439,7 @@ check(principal, action, resource, context) -> allow / deny
 
 - ブラウザ向け：サーバーサイドセッション（Cookie）。失効を即時反映できるようにする
 - 他サービス向け：OIDC の ID トークン / アクセストークン（署名方式は 9.3）
-  - クレームには `sub`（principal の ID。ユーザーまたはサービスアカウント）, `org_id`（active org）, `amr` を入れる
+  - クレームには `sub`（principal の ID。ユーザーまたはサービスアカウント）, `org_id`（active org。Org フィーチャーがオフなら含めない）, `amr` を入れる
   - **Group / Role はトークンに載せない**（肥大化と反映遅延を避ける）。必要なら authz の API で引く
 - リフレッシュトークンはローテーションし、再利用を検知したらそのファミリーごと失効させる
 - ユーザーは自分のセッション一覧を見て個別に失効できる
@@ -447,10 +457,11 @@ check(principal, action, resource, context) -> allow / deny
 
 ## 7. マイルストーン
 
-1. **M1 個人識別**：users, user_emails, user_identities, sessions。メールログイン + OAuth 1種。警告の共通枠組み（10章。ルールは最小限）
+0. **M0 土台**：ポートとアダプタの枠組み、フィーチャーの登録と台帳（11.11, 11.12）、参照実装（インメモリ）と契約テストの骨組み（12章）、KeyStore と暗号化・ブラインドインデックス（9.5）、開発用 Notifier
+1. **M1 個人識別（Org なし構成）**：users, user_emails, user_identities, sessions。マジックリンク + OAuth 1種。警告の共通枠組み（10章。ルールは最小限）。最初の Storage アダプタは SQLite
 2. **M2 複数認証手段**：OAuth 複数対応、連携・解除、passkey
-3. **M3 Org**：orgs, memberships, active_org の切り替え、招待
-4. **M4 認可**：groups, roles, check API
+3. **M3 Org**：Org フィーチャー（個人 Org の自動作成、共有 Org、memberships、active_org の切り替え、招待）
+4. **M4 認可**：groups, roles, check API（realm 範囲と Org 範囲の両方）
 5. **M5 OIDC Provider**：他サービスへの ID トークン発行
 6. **M6 ポリシー**：require_passkey、ip_allowlist、email_domain
 7. 以降：MFA 強制、SSO、SCIM
@@ -460,7 +471,6 @@ check(principal, action, resource, context) -> allow / deny
 - HTTP フレームワーク（標準 `net/http` で足りるか）
 - SQL 生成方式（sqlc / 素の `database/sql` など）とマイグレーションツール
 - パスワード認証を提供するか（マジックリンク + OAuth + passkey だけで済ませる選択肢もある）
-- 個人コンテキスト（Org に属さない状態）を許すか、全ユーザーに個人 Org を自動作成するか
 - ID 形式（UUIDv7 / ULID など）
 - 連携先の範囲：利用者自身のアプリだけか、第三者アプリにも開放するか（動的クライアント登録・同意画面の要否）
 - アクセストークンの形式：JWT か、不透明トークン + イントロスペクションか
@@ -486,6 +496,7 @@ check(principal, action, resource, context) -> allow / deny
 | 通信 (TLS) | TLS 1.3 のみ。鍵交換は X25519MLKEM768 ハイブリッド、証明書は ECDSA P-256 | 鍵交換は耐量子（Go の既定）。証明書署名は ECC |
 | トークン署名 (JWT / ID トークン) | ML-DSA-65 と ES256 を併用（9.3） | ML-DSA で耐量子 |
 | 保存データの暗号化 | AES-256-GCM（エンベロープ暗号化。鍵は KeyStore で管理） | 256bit 共通鍵は耐量子とみなせる |
+| 個人情報の検索用インデックス | HMAC-SHA-256（ブラインドインデックス。9.5） | 同上 |
 | パスワードハッシュ | argon2id | ハッシュ系は影響が小さい |
 | 不透明トークン（セッション ID、リフレッシュトークン等） | 256bit 乱数。DB には SHA-256 のハッシュのみ保存 | 同上 |
 | メール検証・マジックリンク等の署名 | HMAC-SHA-256 | 同上 |
@@ -516,6 +527,36 @@ check(principal, action, resource, context) -> allow / deny
   - `passkeys.alg` に方式を保存する。RS256 の passkey への警告は 10章の共通の仕組みで出す（警告コード `passkey_alg_rsa`）
     - 拒否したい場合も 10章のアクション設定（サーバー全体 / Org 単位で `deny`）で行う。passkey 専用の設定は作らない
   - 優先度は低い。M2 では ES256 / EdDSA のみで実装し、RS256 と警告ルールは後から追加してもよい
+
+### 9.5 個人情報の暗号化とブラインドインデックス
+
+DB が漏洩しても個人情報が読めないよう、個人情報は**アプリ側で暗号化してから Storage に渡す**。これは常に有効にする（フィーチャーにしない）。安全側の挙動を1つに揃え、暗号化の有無で処理経路が分かれないようにするため。
+
+#### 対象
+
+| データ | 扱い |
+|---|---|
+| メールアドレス（`user_emails`、`email_at_link`） | 暗号化 + ブラインドインデックス |
+| 表示名 | 暗号化 |
+| セッション・監査ログの IP アドレス | 暗号化（統計用に、末尾を切り詰めた値を別に持ってもよい） |
+| カスタム属性（11.7） | 属性の定義ごとに「暗号化する / しない」を指定 |
+| 外部 IdP の `provider_subject` | 暗号化しない（それ自体は個人を直接示さない識別子で、ログイン時の検索に使うため） |
+
+#### 仕組み
+
+- **暗号化**：AES-256-GCM のエンベロープ暗号化。データ鍵を KeyStore のマスター鍵で包んで管理する
+- **ブラインドインデックス**：正規化した値（メールなら小文字化のみ）に対する HMAC-SHA-256。暗号化とは**別の鍵**を使う
+  - 「このメールアドレスのユーザーは誰か」という完全一致の検索と、一意制約に使う
+  - メールのドメイン部分にも別のインデックスを持つ（11.3 のドメイン所有に基づく判定に使う）
+- **鍵のバージョン**：`key_id` を保存し、鍵のローテーションに対応する
+  - 暗号化の鍵は、データを順次再暗号化すれば入れ替えられる
+  - インデックスの鍵を入れ替える場合は、全件の再計算が必要になる。再計算が終わるまでは新旧両方の鍵で検索する
+
+#### トレードオフ
+
+- **部分一致の検索ができない**：管理画面で「メールアドレスの一部」で検索することはできない。完全一致、またはユーザー ID での検索になる
+- **DB 上で直接中身を見られない**：運用時の調査は CLI（KeyStore にアクセスできる環境で復号する）で行う
+- **KeyStore の鍵を失うとデータを復元できない**：鍵のバックアップ手順を運用ドキュメントに必ず含める
 
 ## 10. 認証の警告
 
@@ -584,6 +625,7 @@ check(principal, action, resource, context) -> allow / deny
 
 | フィーチャー | 既定 | オフにしたときの動き |
 |---|---|---|
+| Org（11.13） | オン | Org の概念自体を使わない。認証だけ、認可は realm 全体の範囲で行う |
 | 複数 realm（11.1） | オフ | realm は1つ固定。realm の解決処理をしない |
 | サービスアカウント（11.2） | オフ | client credentials などの機械向け認証を無効化 |
 | Org 管理ユーザー・Org 専用 SSO（11.3） | オフ | `owner_org_id` は常に NULL。ドメイン検証も無効 |
@@ -929,3 +971,32 @@ DB のテスト        │ 契約テスト × 各アダプタ          │  ← 
 
 - 第三者監査を受けるまでは、README で**「本番利用は自己責任の実験段階」**と明記する
 - バージョン 1.0 の条件に「適合試験の合格」と「第三者監査の完了」を含める
+
+### 11.13 Org フィーチャーと個人 Org
+
+#### Org なしでも動かせる
+
+Org そのものをフィーチャーにし、**Org を使わない構成（認証だけ）でもセルフホストできる**ようにする。
+
+- オフのとき
+  - Org の決定・切り替え（4.4）を行わない。`active_org_id` は常に NULL、トークンにも `org_id` を含めない
+  - 認可は realm 全体を範囲として行う（Group・ロール付与の `org_id` が NULL のもの）
+  - 個人向けアプリや、単一組織の社内ツールなど、Org が不要な用途を想定
+- Org に依存するフィーチャー（Org 階層、Org 管理ユーザー、Org 専用 SSO、Org のログインポリシー）は、Org がオンでないと有効にできない（11.11 の依存検査）
+
+#### 個人 Org
+
+Org がオンのときは、**全ユーザーに個人 Org を最初から作る**。
+
+- ユーザー作成時に、`kind = personal` の Org と、そのユーザーの Membership を同じトランザクションで作る
+- これにより「どの Org にも属さない状態」が無くなり、Org がオンのときは常に何らかの Org の文脈でログインする（4.4 の判定と、4.5 の認可が単純になる）
+- 個人 Org の制約
+  - メンバーは持ち主1人だけ。招待はできない（チームで使う場合は共有 Org を作る）
+  - 持ち主のユーザーが存在する限り削除できない。ユーザーを削除すると一緒に削除される
+  - アカウント統合（11.6）では、吸収される側の個人 Org のデータを統合先の個人 Org に移す
+- Org 管理ユーザー（11.3）にも個人 Org は作る。ただし Org のポリシーで個人 Org の利用を禁止できるようにする
+
+#### 後から Org をオンにする場合
+
+- 11.12 の有効化（enabling）の準備処理で、既存の全ユーザーに個人 Org を作る
+- 既存の realm 全体のロール付与・Group はそのまま realm 全体の範囲として残る
