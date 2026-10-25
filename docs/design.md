@@ -87,6 +87,11 @@ iam/
 | 領域 | 選定 |
 |---|---|
 | 言語 | Go 1.27 以上（標準ライブラリの `crypto/mldsa` を使うため） |
+| HTTP | 標準の `net/http`。API は OpenAPI で定義し、oapi-codegen でサーバーの型とハンドラの枠を生成する |
+| SQL | sqlc（SQL から型付きの Go コードを生成）。Storage アダプタごとに SQL を書く |
+| マイグレーション | goose。Storage アダプタごとに持つ |
+| ID | UUIDv7 + 型付きの接頭辞（`usr_`、`org_`、`ses_` など） |
+| ライブラリ | zitadel/oidc、lestrrat-go/jwx、go-webauthn（13.2） |
 | それ以外 | 必須の製品はなし。下表のポートごとにアダプタを選ぶ |
 
 #### ポートとアダプタ
@@ -1223,7 +1228,7 @@ POST /v1/me/credentials/{cred_id}:revoke
 ## 7. マイルストーン
 
 0. **M0 土台**：ポートとアダプタの枠組み、フィーチャーの登録と台帳（11.11, 11.12）、参照実装（インメモリ）と契約テストの骨組み（12章）、KeyStore と暗号化・ブラインドインデックス（9.5）、開発用 Notifier
-1. **M1 個人識別（Org なし構成）**：users, user_emails, user_identities, sessions。マジックリンク + OAuth 1種。警告の共通枠組み（10章。ルールは最小限）。最初の Storage アダプタは SQLite
+1. **M1 個人識別（Org なし構成）**：users, user_emails, user_identities, sessions。マジックリンク / メールコード + OAuth 1種（メールを送れない環境では OAuth と開発用 Notifier で確認する）。警告の共通枠組み（10章。ルールは最小限）。最初の Storage アダプタは SQLite
 2. **M2 複数認証手段**：OAuth 複数対応、連携・解除、passkey、TOTP、メールとパスワード、リカバリーコード
 3. **M3 Org**：Org フィーチャー（個人 Org の自動作成、共有 Org、memberships、active_org の切り替え、招待）
 4. **M4 認可**：groups, roles, check API（realm 範囲と Org 範囲の両方）
@@ -1233,10 +1238,6 @@ POST /v1/me/credentials/{cred_id}:revoke
 
 ## 8. 未決事項
 
-- HTTP フレームワーク（標準 `net/http` + oapi-codegen を推奨）
-- SQL 生成方式とマイグレーションツール（sqlc + goose を推奨）
-- M1 のログイン方法（マジックリンク / メールコード + OAuth で始める案を推奨。パスワード、passkey、TOTP は M2）
-- ID 形式（UUIDv7 + 型付き接頭辞を推奨）
 - 後回しでよいもの：ログ・メトリクス基盤
 
 決定済みの事項は `docs/adr/` に記録する。

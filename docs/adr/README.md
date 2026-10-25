@@ -50,3 +50,4 @@
 | [0036](0036-membership-email-and-login-hints.md) | Membership ごとにメールアドレスを結び付け、ログインの手がかりで Org を選ぶ | 承認 |
 | [0037](0037-no-usernames.md) | ユーザー名（独自の ID）は持たず、パスワードはメールアドレスと組み合わせる | 承認 |
 | [0038](0038-library-selection.md) | OIDC は zitadel/oidc、JOSE は jwx、WebAuthn は go-webauthn を使う | 承認 |
+| [0039](0039-implementation-basics.md) | 実装の基本（HTTP、SQL、マイグレーション、ID、M1 のログイン方法） | 承認 |
