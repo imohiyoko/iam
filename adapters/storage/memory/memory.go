@@ -44,6 +44,15 @@ type state struct {
 	audit    []auditRow
 	outbox   []port.OutboxMessage
 	outboxIx map[string]int
+
+	users        map[string]port.User
+	emails       map[string]port.UserEmail
+	identities   map[string]port.Identity
+	connections  map[string]port.Connection
+	sessions     map[string]port.Session
+	accounts     map[string]port.ServiceAccount
+	credentials  map[string]port.ServiceAccountCredential
+	roleBindings map[string]port.RoleBinding
 }
 
 // Storage はインメモリの Storage。
@@ -61,6 +70,10 @@ func New(clk clock.Clock) *Storage {
 	return &Storage{clock: clk, s: state{
 		realms: map[string]port.Realm{}, features: map[string]port.FeatureRecord{},
 		dataKeys: map[string]port.DataKey{}, outboxIx: map[string]int{},
+		users: map[string]port.User{}, emails: map[string]port.UserEmail{}, identities: map[string]port.Identity{},
+		connections: map[string]port.Connection{}, sessions: map[string]port.Session{},
+		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
+		roleBindings: map[string]port.RoleBinding{},
 	}}
 }
 
@@ -104,6 +117,14 @@ func (t *tx) Features() port.FeatureLedger { return features{t} }
 func (t *tx) DataKeys() port.DataKeyRepo   { return dataKeys{t} }
 func (t *tx) Audit() port.AuditRepo        { return auditRepo{t} }
 func (t *tx) Outbox() port.OutboxRepo      { return outbox{t} }
+
+func (t *tx) Users() port.UserRepo                     { return users{t} }
+func (t *tx) Emails() port.EmailRepo                   { return emails{t} }
+func (t *tx) Identities() port.IdentityRepo            { return identities{t} }
+func (t *tx) Connections() port.ConnectionRepo         { return connections{t} }
+func (t *tx) Sessions() port.SessionRepo               { return sessions{t} }
+func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t} }
+func (t *tx) RoleBindings() port.RoleBindingRepo       { return roleBindings{t} }
 
 // setKey は map の値を設定し、取り消し方を記録する。
 func setKey[K comparable, V any](t *tx, m map[K]V, k K, v V) {

@@ -22,7 +22,7 @@ const TopicAudit = "audit"
 // 呼び出し側の操作と同じトランザクションで呼ぶ（操作とログが必ず揃う）。
 func Record(ctx context.Context, tx port.Tx, clk clock.Clock, e audit.Event) (audit.Event, error) {
 	if e.ID == "" {
-		e.ID = id.New(id.Event)
+		e.ID = id.NewExternal(id.Event)
 	}
 	if e.Time.IsZero() {
 		e.Time = clk.Now()

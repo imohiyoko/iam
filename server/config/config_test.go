@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,5 +79,17 @@ func TestParseDuration(t *testing.T) {
 		if _, err := ParseDuration(in); err == nil {
 			t.Errorf("%s: want error", in)
 		}
+	}
+}
+
+func TestExternalIDsMustBeRandom(t *testing.T) {
+	if _, err := Parse([]byte("dev: true\nids: {external: uuidv7}\n")); err == nil || !strings.Contains(err.Error(), "ids.external") {
+		t.Fatalf("want ids.external error, got %v", err)
+	}
+	if _, err := Parse([]byte("dev: true\nids: {internal: sequential}\n")); err == nil || !strings.Contains(err.Error(), "ids.internal") {
+		t.Fatalf("want ids.internal error, got %v", err)
+	}
+	if _, err := Parse([]byte("dev: true\nids: {internal: random}\n")); err != nil {
+		t.Fatal(err)
 	}
 }

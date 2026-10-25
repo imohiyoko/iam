@@ -8,6 +8,15 @@ import (
 	"database/sql"
 )
 
+type AuthnConnection struct {
+	ID        string
+	RealmID   string
+	Slug      string
+	Type      string
+	Config    []byte
+	CreatedAt string
+}
+
 type AuthnRealm struct {
 	ID        string
 	Slug      string
@@ -15,11 +24,94 @@ type AuthnRealm struct {
 	CreatedAt string
 }
 
+type AuthnServiceAccount struct {
+	ID        string
+	RealmID   string
+	Name      string
+	CreatedAt string
+}
+
+type AuthnServiceAccountCredential struct {
+	ID               string
+	RealmID          string
+	ServiceAccountID string
+	Type             string
+	SecretHash       []byte
+	CreatedAt        string
+	ExpiresAt        sql.NullString
+	RevokedAt        sql.NullString
+}
+
+type AuthnSession struct {
+	ID                string
+	RealmID           string
+	PrincipalType     string
+	PrincipalID       string
+	ActiveOrgID       string
+	TokenHash         []byte
+	AuthMethods       string
+	AuthCredentialIds string
+	Warnings          []byte
+	Ip                []byte
+	UserAgent         []byte
+	AuthenticatedAt   string
+	CreatedAt         string
+	LastSeenAt        string
+	ExpiresAt         string
+	RevokedAt         sql.NullString
+	RevokeReason      string
+}
+
+type AuthnUser struct {
+	ID         string
+	PublicID   string
+	RealmID    string
+	Status     string
+	ValidFrom  sql.NullString
+	ValidUntil sql.NullString
+	CreatedAt  string
+	UpdatedAt  string
+}
+
 type AuthnUserDataKey struct {
 	UserID     string
 	WrappedKey []byte
 	KeyID      string
 	CreatedAt  string
+}
+
+type AuthnUserEmail struct {
+	ID          string
+	RealmID     string
+	UserID      string
+	Ciphertext  []byte
+	EmailIndex  []byte
+	DomainIndex []byte
+	IndexKeyID  string
+	VerifiedAt  sql.NullString
+	VerifiedVia string
+	IsPrimary   int64
+	CreatedAt   string
+}
+
+type AuthnUserIdentity struct {
+	ID              string
+	RealmID         string
+	UserID          string
+	ConnectionID    string
+	ProviderSubject string
+	CreatedAt       string
+	RevokedAt       sql.NullString
+}
+
+type AuthzRoleBinding struct {
+	ID            string
+	RealmID       string
+	Role          string
+	PrincipalType string
+	PrincipalID   string
+	OrgID         string
+	CreatedAt     string
 }
 
 type SharedAuditEvent struct {

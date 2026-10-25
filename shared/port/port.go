@@ -37,6 +37,14 @@ type Tx interface {
 	DataKeys() DataKeyRepo
 	Audit() AuditRepo
 	Outbox() OutboxRepo
+
+	Users() UserRepo
+	Emails() EmailRepo
+	Identities() IdentityRepo
+	Connections() ConnectionRepo
+	Sessions() SessionRepo
+	ServiceAccounts() ServiceAccountRepo
+	RoleBindings() RoleBindingRepo
 }
 
 // Realm はユーザー集合の単位（design.md 3.1）。
@@ -121,7 +129,8 @@ type OutboxMessage struct {
 // OutboxRepo は outbox の Repository。
 type OutboxRepo interface {
 	Add(ctx context.Context, m OutboxMessage) error
-	// Pending は未配送のメッセージを作成順に最大 limit 件返す。
+	// Pending は未配送のメッセージを作成順（同じ時刻なら追加した順）に最大 limit 件返す。
+	// ID は乱数（外部 ID）なので、ID の順には頼らない。
 	Pending(ctx context.Context, topic string, limit int) ([]OutboxMessage, error)
 	MarkDelivered(ctx context.Context, ids []string, at time.Time) error
 }

@@ -51,6 +51,7 @@ func Run(t *testing.T, h Harness) {
 		{"OutboxRelay", testOutboxRelay},
 		{"RealmIsolation", testRealmIsolation},
 	}
+	tests = append(tests, authnTests...)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
 	}
@@ -446,7 +447,7 @@ type IsolationCase struct {
 }
 
 // IsolationCases は realm に属するデータを返すメソッドごとの検査。Repository を足したらここに足す。
-var IsolationCases = []IsolationCase{
+var IsolationCases = append([]IsolationCase{
 	{
 		Name: "Audit.ListByRealm",
 		Seed: func(ctx context.Context, tx port.Tx, clk clock.Clock, realmID string) error {
@@ -458,7 +459,7 @@ var IsolationCases = []IsolationCase{
 			return len(rs), err
 		},
 	},
-}
+}, authnIsolationCases...)
 
 // CheckRealmIsolation は cases を2つの realm で実行し、自分の realm では見え、別の realm では見えないことを確かめる。
 func CheckRealmIsolation(t *testing.T, s port.Storage, clk clock.Clock, cases []IsolationCase) {

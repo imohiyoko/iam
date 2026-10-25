@@ -56,3 +56,4 @@
 | [0042](0042-spike-sqlite-count-then-insert.md) | SQLite の書き込みトランザクションは BEGIN IMMEDIATE で直列化する | 承認 |
 | [0043](0043-spike-fake-clock-ttl.md) | 有効期限は Clock ポートで判定し、偽の時計で時刻の境界をテストする | 承認 |
 | [0044](0044-latency-baseline.md) | 主要操作のレイテンシの基準値と、CI での計測 | 承認 |
+| [0045](0045-internal-and-external-ids.md) | 内部 ID と外部 ID を分け、採番の方式を差し替えられるようにする | 承認 |

@@ -151,7 +151,7 @@ func Generate() (Keys, error) {
 	if _, err := rand.Read(ik); err != nil {
 		return Keys{}, err
 	}
-	mid, iid := id.New(id.MasterKey), id.New(id.IndexKey)
+	mid, iid := id.NewExternal(id.MasterKey), id.NewExternal(id.IndexKey)
 	return Keys{
 		CurrentMasterKey: mid, MasterKeys: map[string]string{mid: base64.StdEncoding.EncodeToString(mk)},
 		CurrentIndexKey: iid, IndexKeys: map[string]string{iid: base64.StdEncoding.EncodeToString(ik)},

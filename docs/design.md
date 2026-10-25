@@ -57,7 +57,7 @@ OIDC、WebAuthn に準拠する。認可 API は `check(principal, action, resou
 | 言語 | Go 1.27 以上（`crypto/mldsa`） |
 | HTTP | `net/http`。OpenAPI で定義し oapi-codegen で生成 |
 | SQL / マイグレーション | sqlc / goose（Storage アダプタごと） |
-| ID | UUIDv7 + 型付き接頭辞（`usr_`、`org_`、`ses_` …） |
+| ID | 型付き接頭辞 + 128bit（`usr_`、`org_`、`ses_` …）。内部 ID（既定 UUIDv7）は DB の外に出さず、外に出すのは乱数の外部 ID だけ。採番の方式は設定で差し替える（ADR 0045） |
 | ライブラリ | zitadel/oidc、lestrrat-go/jwx、go-webauthn（13.2） |
 
 コアは具体的な製品に依存しない。外部とはポート（Go のインターフェース）でつなぎ、アダプタはホスト先が選ぶ。
@@ -847,6 +847,7 @@ govulncheck、OSV-Scanner、Dependabot / Renovate、staticcheck、gosec、CodeQL
 - 共有 Org には常にオーナーがいる。個人ユーザーの退会は恒久的には妨げられない（4.10）
 - 削除したユーザーの個人情報はデータ鍵の削除後に復号できない（4.10）
 - 別 realm のデータは返らない（12章）
+- 内部 ID は Storage の外（API の応答、Cookie、トークン、通知、監査ログの外部出力）に出ない（ADR 0045）
 - 扱えないフィーチャーのデータがあれば起動せず、判定は拒否に倒れる（11.11）
 - Org の設定はホスト先が許した範囲を超えて緩められない（2.8）
 

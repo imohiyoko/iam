@@ -82,7 +82,7 @@ func writeError(w http.ResponseWriter, status int, code string) {
 func withCommon(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hdr := w.Header()
-		hdr.Set("X-Request-Id", id.New(id.Request))
+		hdr.Set("X-Request-Id", id.NewExternal(id.Request))
 		hdr.Set("X-Content-Type-Options", "nosniff")
 		hdr.Set("Cache-Control", "no-store")
 		hdr.Set("Referrer-Policy", "no-referrer")

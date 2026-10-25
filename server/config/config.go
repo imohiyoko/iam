@@ -15,6 +15,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/settings"
 )
 
@@ -40,6 +41,15 @@ type Config struct {
 	Security Security `yaml:"security"`
 
 	Outbox Outbox `yaml:"outbox"`
+
+	// IDs は採番の方式（ADR 0045）。
+	IDs IDs `yaml:"ids"`
+}
+
+// IDs は内部 ID と外部 ID の採番の方式（id.Generators の名前）。
+type IDs struct {
+	Internal string `yaml:"internal"`
+	External string `yaml:"external"`
 }
 
 // Server は待ち受けの設定。公開 API と管理 API はポートを分ける（design.md 2.5）。
@@ -153,6 +163,7 @@ func Default() Config {
 			ValidityMaxDelay: Duration(30 * time.Second),
 		}},
 		Outbox: Outbox{Interval: Duration(time.Second), Batch: 100},
+		IDs:    IDs{Internal: "uuidv7", External: "random"},
 	}
 }
 
@@ -227,6 +238,13 @@ func (c Config) Validate() error {
 	}
 	if c.Security.Session.ValidityMaxDelay.D() <= 0 {
 		problems = append(problems, "security.session.validity_max_delay must be positive")
+	}
+	if _, ok := id.Generators[c.IDs.Internal]; !ok {
+		problems = append(problems, fmt.Sprintf("ids.internal: unknown generator %q", c.IDs.Internal))
+	}
+	// 外部 ID に時刻の読める方式は使わない。
+	if _, ok := id.Generators[c.IDs.External]; !ok || c.IDs.External == "uuidv7" {
+		problems = append(problems, fmt.Sprintf("ids.external: %q is not allowed (use random)", c.IDs.External))
 	}
 	if c.Outbox.Interval.D() <= 0 {
 		problems = append(problems, "outbox.interval must be positive")
