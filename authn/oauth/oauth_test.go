@@ -294,3 +294,42 @@ func TestSessionRecordsIdentity(t *testing.T) {
 		return nil
 	})
 }
+
+// 注入したクライアントでも、トークンエンドポイントのリダイレクトを追わない（client_secret を別の URL に送り直さない）。
+func TestTokenEndpointRedirectNotFollowed(t *testing.T) {
+	e := setup(t)
+	var leaked bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/elsewhere", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/elsewhere", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		leaked = r.PostForm.Get("client_secret") != ""
+		http.Error(w, "no", 400)
+	})
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+	e.svc.HTTP = srv.Client()
+	cfg := oauth.Presets["test"]
+	cfg.TokenURL = srv.URL + "/token"
+	oauth.Presets["redirecting"] = cfg
+	defer delete(oauth.Presets, "redirecting")
+	c, err := e.svc.NewConnection(context.Background(), e.k.RealmID, "redirecting", "redirecting", clientID, clientSecret, []string{redirect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.k.Tx(t, func(ctx context.Context, tx port.Tx) error { return tx.Connections().Create(ctx, c) })
+	st, err := e.svc.Start(context.Background(), e.k.RealmID, "redirecting", redirect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(st.AuthorizationURL)
+	_, err = e.svc.Complete(context.Background(), e.k.RealmID, oauth.Complete{FlowID: st.FlowID, State: u.Query().Get("state"), Code: "x"})
+	if err == nil || leaked {
+		t.Fatalf("redirect followed: err=%v leaked=%v", err, leaked)
+	}
+	if srv.Client().CheckRedirect != nil {
+		t.Fatal("the injected client must not be modified")
+	}
+}

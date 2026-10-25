@@ -398,14 +398,19 @@ const maxSkew = 5 * time.Minute
 const maxResponse = 1 << 20
 
 func (s *Service) httpClient() *http.Client {
+	c := &http.Client{Timeout: exchangeTimeout}
 	if s.HTTP != nil {
-		return s.HTTP
+		// 注入されたクライアント（テストの TLS など）の設定は保ちつつ、リダイレクトは必ず追わない
+		// （client_secret を含むフォームを 307/308 で別の URL に送り直さないため）。
+		cp := *s.HTTP
+		c = &cp
 	}
-	return &http.Client{
-		Timeout:       10 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return c
 }
+
+// exchangeTimeout はトークンエンドポイントへの問い合わせの上限。
+const exchangeTimeout = 10 * time.Second
 
 // exchange は認可コードをトークンエンドポイントで ID トークンに替え、クレームを確かめる。
 func (s *Service) exchange(ctx context.Context, cfg Config, st state, code string, now time.Time) (claims, error) {
@@ -421,6 +426,9 @@ func (s *Service) exchange(ctx context.Context, cfg Config, st state, code strin
 		"client_secret": {string(secret)},
 		"code_verifier": {st.Verifier},
 	}
+	// 注入されたクライアントにタイムアウトが無くても、プロバイダが応答しないまま待ち続けないようにする。
+	ctx, cancel := context.WithTimeout(ctx, exchangeTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return claims{}, err
