@@ -32,9 +32,15 @@ iam/
 ├── authz/      # Group、Role、Permission、判定（ポートを定義）
 ├── shared/     # ID 型、エラー型、監査ログなど最小限
 ├── adapters/   # ポートの実装：storage/{sqlite,postgres,mysql} ephemeral/{memory,redis} notifier/{webhook,dev} keystore/{file,env}
-├── server/     # HTTP（authn/authz を組み立てるだけ）
-└── cmd/iam/    # 設定を読みアダプタを選んで起動
+├── server/     # HTTP（authn/authz を組み立てるだけ）、設定ファイル
+├── cmd/iam/    # 設定を読みアダプタを選んで起動
+├── api/        # OpenAPI の定義（公開 API・管理 API の契約の正）
+├── internal/archtest/  # モジュール境界の違反の検出
+└── spikes/     # 前提の検証（ADR 0040〜0043）
 ```
+
+- Go モジュールは、本体（ルート）、DB の Storage アダプタごと（`adapters/storage/sqlite` など）、`cmd/iam`、`spikes` に分ける（ADR 0015）。開発時は `go.work` で束ねる
+- テーブル名は `authn_`・`authz_`・`shared_` の接頭辞でモジュールを分ける（スキーマを持つ DB ではスキーマで分けてもよい）
 
 - authz が authn から受け取るのは principal の ID と Org の ID だけ。モジュール間の呼び出しは公開インターフェース経由のみ
 - DB はスキーマ（または名前空間・テーブル接頭辞）で分け、モジュールをまたぐ JOIN・外部キーは禁止（ID でのみ参照）

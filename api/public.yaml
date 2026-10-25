@@ -1,0 +1,32 @@
+openapi: 3.0.3
+info:
+  title: IAM public API
+  version: v1
+  description: |
+    公開 API（ヘッドレス）。`/v1` でバージョニングする（design.md 2.5）。
+    M0 ではヘルスチェックのみ。
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      summary: ヘルスチェック
+      responses:
+        "200":
+          description: 稼働中
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: 依存先（Storage など）に問題がある
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
