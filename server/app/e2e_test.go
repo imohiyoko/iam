@@ -220,6 +220,9 @@ func TestLoginReplacesSessionOverHTTP(t *testing.T) {
 	_, owner := l.operator(t, "owner@example.com", role.RealmOwner)
 	idp := newFakeIdP(t, l, owner)
 	_, first, oldCookie := idp.login(t, l, "sub-g", "gina@example.com", true, "")
+	if code, _ := l.me(t, oldCookie); code != 200 { // 有効性をキャッシュに載せる（入れ替えでキャッシュも消えることを確かめる）
+		t.Fatalf("old session before replacement: %d", code)
+	}
 	_, second, newCookie := idp.login(t, l, "sub-g", "gina@example.com", true, oldCookie)
 	if newCookie == "" || newCookie == oldCookie || first["session_id"] == second["session_id"] {
 		t.Fatalf("session not replaced: %v %v", first, second)
@@ -274,14 +277,17 @@ func TestInternalIDsNeverLeaveOAuthAndAdmin(t *testing.T) {
 	ownerID, owner := l.operator(t, "owner@example.com", role.RealmOwner)
 	idp := newFakeIdP(t, l, owner)
 	_, res, _ := idp.login(t, l, "sub-i", "ivy@example.com", true, "")
-	l.admin(t, "/v1/admin/users", owner, map[string]string{"email": "jack@example.com"})
+	code, jack := l.admin(t, "/v1/admin/users", owner, map[string]string{"email": "jack@example.com"})
+	if code != 201 && code != 200 {
+		t.Fatalf("create user: %d %v", code, jack)
+	}
 	ctx := context.Background()
 	if _, err := l.a.relay.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
 	var internal []string
 	err := l.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		for _, pub := range []string{res["user_id"].(string), ownerID} {
+		for _, pub := range []string{res["user_id"].(string), jack["user_id"].(string), ownerID} {
 			u, err := tx.Users().GetByPublicID(ctx, l.a.realm.ID, pub)
 			if err != nil {
 				return err
