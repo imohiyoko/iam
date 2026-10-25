@@ -131,3 +131,14 @@ func (s *syncBuffer) String() string {
 	defer s.mu.Unlock()
 	return s.b.String()
 }
+
+func TestServeRejectsUnknownAdapterOption(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "iam.yaml")
+	os.WriteFile(cfgPath, []byte(fmt.Sprintf("dev: true\nstorage: {driver: sqlite, paht: %q}\n", filepath.Join(dir, "x.db"))), 0o600)
+	var out bytes.Buffer
+	err := run(context.Background(), []string{"serve", "-config", cfgPath}, &out, &out)
+	if err == nil || !strings.Contains(err.Error(), "paht") {
+		t.Fatalf("want unknown option error, got %v", err)
+	}
+}

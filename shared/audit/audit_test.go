@@ -40,6 +40,7 @@ func TestTamperDetected(t *testing.T) {
 		},
 		"delete": func(rs []Record) { copy(rs[2:], rs[3:]) },
 		"hash":   func(rs []Record) { rs[2].Hash[0] ^= 1 },
+		"realm":  func(rs []Record) { rs[2].RealmID = "rlm_other" },
 	}
 	for name, tamper := range cases {
 		t.Run(name, func(t *testing.T) {

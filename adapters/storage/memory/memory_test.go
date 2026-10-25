@@ -12,7 +12,7 @@ func TestContract(t *testing.T) {
 	storagetest.Run(t, storagetest.Harness{
 		New: func(_ *testing.T, clk clock.Clock) port.Storage { return New(clk) },
 		TamperAudit: func(_ *testing.T, s port.Storage, seq int64, payload []byte) {
-			s.(*Storage).TamperAudit(seq, payload)
+			s.(*Storage).tamperAudit(seq, payload)
 		},
 	})
 }

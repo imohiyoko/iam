@@ -7,6 +7,7 @@ package memory
 import (
 	"bytes"
 	"context"
+	"errors"
 	"slices"
 	"sort"
 	"sync"
@@ -21,13 +22,19 @@ import (
 
 func init() {
 	plugin.RegisterStorage("memory", func(_ context.Context, cfg plugin.Config) (port.Storage, error) {
+		// 永続化しないため、監査ログもデータ鍵も再起動で消える。本番では使わない。
+		if !cfg.Dev {
+			return nil, errors.New("storage memory: only available in development mode")
+		}
+		if err := cfg.CheckOptions(); err != nil {
+			return nil, err
+		}
 		return New(cfg.Clock), nil
 	})
 }
 
 type auditRow struct {
-	realmID string
-	rec     audit.Record
+	rec audit.Record
 }
 
 type state struct {
@@ -80,13 +87,6 @@ func (m *Storage) Tx(ctx context.Context, fn func(context.Context, port.Tx) erro
 func (m *Storage) Ping(ctx context.Context) error         { return ctx.Err() }
 func (m *Storage) Now(context.Context) (time.Time, error) { return m.clock.Now(), nil }
 func (m *Storage) Close() error                           { return nil }
-
-// TamperAudit はテスト用に監査ログの1件のペイロードを書き換える（storagetest から使う）。
-func (m *Storage) TamperAudit(seq int64, payload []byte) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.s.audit[seq-1].rec.Payload = payload
-}
 
 type tx struct {
 	s    *state
@@ -235,12 +235,12 @@ func (a auditRepo) Last(context.Context) (*audit.Record, error) {
 	return &r, nil
 }
 
-func (a auditRepo) Append(_ context.Context, realmID string, r audit.Record) error {
+func (a auditRepo) Append(_ context.Context, r audit.Record) error {
 	s := a.t.s
 	if r.Seq != int64(len(s.audit))+1 {
 		return errs.New(errs.KindConflict, "audit seq %d: want %d", r.Seq, len(s.audit)+1)
 	}
-	s.audit = append(s.audit, auditRow{realmID: realmID, rec: cloneRecord(r)})
+	s.audit = append(s.audit, auditRow{rec: cloneRecord(r)})
 	a.t.undo = append(a.t.undo, func() { s.audit = s.audit[:len(s.audit)-1] })
 	return nil
 }
@@ -256,7 +256,7 @@ func (a auditRepo) Scan(_ context.Context, fromSeq int64, limit int) ([]audit.Re
 func (a auditRepo) ListByRealm(_ context.Context, realmID string, fromSeq int64, limit int) ([]audit.Record, error) {
 	var out []audit.Record
 	for i := max(fromSeq-1, 0); i < int64(len(a.t.s.audit)) && len(out) < limit; i++ {
-		if row := a.t.s.audit[i]; row.realmID == realmID {
+		if row := a.t.s.audit[i]; row.rec.RealmID == realmID {
 			out = append(out, cloneRecord(row.rec))
 		}
 	}

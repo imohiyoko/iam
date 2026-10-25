@@ -15,6 +15,9 @@ import (
 
 func init() {
 	plugin.RegisterEventSink("stdout", func(_ context.Context, cfg plugin.Config) (port.EventSink, error) {
+		if err := cfg.CheckOptions(); err != nil {
+			return nil, err
+		}
 		w := cfg.Stdout
 		if w == nil {
 			w = os.Stdout

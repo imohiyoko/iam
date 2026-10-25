@@ -101,8 +101,9 @@ type DataKeyRepo interface {
 // Tx の直列化によってチェーンが分岐しないことを保証する。
 type AuditRepo interface {
 	Last(ctx context.Context) (*audit.Record, error) // 空なら nil
-	Append(ctx context.Context, realmID string, r audit.Record) error
+	Append(ctx context.Context, r audit.Record) error
 	// Scan は seq の昇順に fromSeq 以降を最大 limit 件返す（全 realm。検証用）。
+	// 返すレコードには RealmID の列の値も入れる。
 	Scan(ctx context.Context, fromSeq int64, limit int) ([]audit.Record, error)
 	// ListByRealm は realm のイベントを seq の昇順に返す。
 	ListByRealm(ctx context.Context, realmID string, fromSeq int64, limit int) ([]audit.Record, error)

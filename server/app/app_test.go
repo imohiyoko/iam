@@ -154,3 +154,16 @@ func TestServe(t *testing.T) {
 		t.Fatalf("event sink output: %s", e.out)
 	}
 }
+
+func TestResponseErrorHidesInternalMessage(t *testing.T) {
+	e := newEnv(t)
+	a, err := New(context.Background(), e.cfg, e.deps, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.responseError(rec, httptest.NewRequest("GET", "/x", nil), errors.New("data key for usr_secret: sql: no rows"))
+	if rec.Code != 500 || bytes.Contains(rec.Body.Bytes(), []byte("usr_secret")) || !bytes.Contains(rec.Body.Bytes(), []byte(`"internal"`)) {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}

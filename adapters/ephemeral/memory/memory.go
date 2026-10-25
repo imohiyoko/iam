@@ -19,6 +19,9 @@ import (
 
 func init() {
 	plugin.RegisterEphemeral("memory", func(_ context.Context, cfg plugin.Config) (port.EphemeralStore, error) {
+		if err := cfg.CheckOptions(); err != nil {
+			return nil, err
+		}
 		return New(cfg.Clock), nil
 	})
 }

@@ -49,11 +49,21 @@ type Event struct {
 	UserAgent string         `json:"user_agent,omitempty"`
 	RequestID string         `json:"request_id,omitempty"`
 	Details   map[string]any `json:"details,omitempty"`
+	// Chain は外部出力にだけ付ける、チェーン上の位置（ハッシュの対象外）。
+	// 受け取る側（SIEM）は seq の欠けと hash の一致で、末尾の削除や書き換えを検出できる。
+	Chain *ChainRef `json:"chain,omitempty"`
+}
+
+// ChainRef はチェーン上の位置。
+type ChainRef struct {
+	Seq  int64  `json:"seq"`
+	Hash string `json:"hash"` // 16進
 }
 
 // Record はチェーンに載ったイベント。
 type Record struct {
 	Seq      int64  // 1 から始まる通し番号
+	RealmID  string // 検索用の列。ペイロードの realm_id と一致することを Verify で確かめる
 	PrevHash []byte // 先頭は Genesis
 	Hash     []byte
 	Payload  []byte // 正規化した JSON。検証はこれから行う
@@ -71,6 +81,7 @@ func Marshal(e Event) ([]byte, error) {
 		e.Version = SchemaVersion
 	}
 	e.Time = e.Time.UTC()
+	e.Chain = nil
 	// encoding/json は構造体のフィールドを定義順に、map のキーを昇順に出力するため、
 	// 同じイベントは常に同じバイト列になる。
 	return json.Marshal(e)
@@ -105,7 +116,7 @@ func Next(last *Record, e Event) (Record, error) {
 	if last != nil {
 		prev, seq = last.Hash, last.Seq+1
 	}
-	return Record{Seq: seq, PrevHash: prev, Hash: Hash(prev, payload), Payload: payload}, nil
+	return Record{Seq: seq, RealmID: e.RealmID, PrevHash: prev, Hash: Hash(prev, payload), Payload: payload}, nil
 }
 
 // Verify は records が prev から連続した正しいチェーンかを確かめる。
@@ -121,6 +132,14 @@ func Verify(prev []byte, firstSeq int64, records []Record) ([]byte, error) {
 		}
 		if !bytes.Equal(r.Hash, Hash(prev, r.Payload)) {
 			return nil, fmt.Errorf("%w: seq %d: hash mismatch", ErrChainBroken, r.Seq)
+		}
+		// 検索用の realm_id の列はハッシュの対象外なので、ペイロードと突き合わせる。
+		e, err := Unmarshal(r.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("%w: seq %d: %v", ErrChainBroken, r.Seq, err)
+		}
+		if e.RealmID != r.RealmID {
+			return nil, fmt.Errorf("%w: seq %d: realm_id column does not match payload", ErrChainBroken, r.Seq)
 		}
 		prev = r.Hash
 	}

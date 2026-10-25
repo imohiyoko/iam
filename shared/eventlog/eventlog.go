@@ -3,6 +3,8 @@ package eventlog
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"time"
@@ -36,10 +38,12 @@ func Record(ctx context.Context, tx port.Tx, clk clock.Clock, e audit.Event) (au
 	if err != nil {
 		return e, err
 	}
-	if err := tx.Audit().Append(ctx, e.RealmID, rec); err != nil {
+	if err := tx.Audit().Append(ctx, rec); err != nil {
 		return e, err
 	}
-	ext, err := audit.Marshal(audit.External(e))
+	x := audit.External(e)
+	x.Chain = &audit.ChainRef{Seq: rec.Seq, Hash: hex.EncodeToString(rec.Hash)}
+	ext, err := json.Marshal(x)
 	if err != nil {
 		return e, err
 	}
@@ -89,7 +93,7 @@ func (r *Relay) Run(ctx context.Context) {
 	defer t.Stop()
 	for {
 		if _, err := r.Flush(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			r.Log.Warn("outbox relay failed", "error", err)
+			r.logger().Warn("outbox relay failed", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -113,12 +117,15 @@ func (r *Relay) Flush(ctx context.Context) (int, error) {
 	events := make([]audit.Event, 0, len(pending))
 	ids := make([]string, 0, len(pending))
 	for _, m := range pending {
+		ids = append(ids, m.ID)
 		e, err := audit.Unmarshal(m.Payload)
 		if err != nil {
-			return 0, err
+			// 読めないメッセージで送出全体を止めない。監査ログ本体（チェーン）には残っており、
+			// 外部側は chain.seq の欠けで検出できる。
+			r.logger().Error("skipping unreadable outbox message", "id", m.ID, "error", err)
+			continue
 		}
 		events = append(events, e)
-		ids = append(ids, m.ID)
 	}
 	// 送ってから配送済みにする。途中で落ちれば次回また送る（少なくとも1回）。
 	if err := r.Sink.Emit(ctx, events); err != nil {
@@ -128,6 +135,13 @@ func (r *Relay) Flush(ctx context.Context) (int, error) {
 		return tx.Outbox().MarkDelivered(ctx, ids, r.Clock.Now())
 	})
 	return len(ids), err
+}
+
+func (r *Relay) logger() *slog.Logger {
+	if r.Log == nil {
+		return slog.Default()
+	}
+	return r.Log
 }
 
 func (r *Relay) batch() int {

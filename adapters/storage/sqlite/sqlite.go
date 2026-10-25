@@ -30,6 +30,9 @@ var migrations embed.FS
 
 func init() {
 	plugin.RegisterStorage("sqlite", func(ctx context.Context, cfg plugin.Config) (port.Storage, error) {
+		if err := cfg.CheckOptions("path", "auto_migrate"); err != nil {
+			return nil, err
+		}
 		path := cfg.Option("path", "")
 		if path == "" {
 			return nil, errors.New("storage sqlite: path is required")
@@ -66,6 +69,8 @@ func DSN(path string) string {
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "synchronous(NORMAL)")
 	q.Add("_pragma", "foreign_keys(1)")
+	// 削除したデータ（データ鍵など）の内容を空き領域に残さない（crypto-shredding。design.md 9.5）。
+	q.Add("_pragma", "secure_delete(ON)")
 	q.Set("_time_format", "sqlite")
 	return "file:" + path + "?" + q.Encode()
 }
@@ -142,6 +147,13 @@ func (s *Storage) Now(ctx context.Context) (time.Time, error) {
 }
 
 func (s *Storage) Close() error { return s.db.Close() }
+
+// Checkpoint は WAL の内容を本体に書き戻して WAL を空にする。
+// 削除したデータが WAL のフレームに残る期間を縮めるため、データ鍵の削除などの後に呼ぶ。
+func (s *Storage) Checkpoint(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
+}
 
 // mapErr は SQLite のエラーを errs の分類に変える。
 func mapErr(err error) error {
@@ -277,11 +289,11 @@ func (a auditRepo) Last(ctx context.Context) (*audit.Record, error) {
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	return &audit.Record{Seq: row.Seq, PrevHash: row.PrevHash, Hash: row.Hash, Payload: row.Payload}, nil
+	return &audit.Record{Seq: row.Seq, RealmID: row.RealmID, PrevHash: row.PrevHash, Hash: row.Hash, Payload: row.Payload}, nil
 }
 
-func (a auditRepo) Append(ctx context.Context, realmID string, r audit.Record) error {
-	return mapErr(a.q.AppendAuditEvent(ctx, db.AppendAuditEventParams{Seq: r.Seq, RealmID: realmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload}))
+func (a auditRepo) Append(ctx context.Context, r audit.Record) error {
+	return mapErr(a.q.AppendAuditEvent(ctx, db.AppendAuditEventParams{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload}))
 }
 
 func (a auditRepo) Scan(ctx context.Context, fromSeq int64, limit int) ([]audit.Record, error) {
@@ -291,7 +303,7 @@ func (a auditRepo) Scan(ctx context.Context, fromSeq int64, limit int) ([]audit.
 	}
 	out := make([]audit.Record, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, audit.Record{Seq: r.Seq, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload})
+		out = append(out, audit.Record{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload})
 	}
 	return out, nil
 }
@@ -303,7 +315,7 @@ func (a auditRepo) ListByRealm(ctx context.Context, realmID string, fromSeq int6
 	}
 	out := make([]audit.Record, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, audit.Record{Seq: r.Seq, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload})
+		out = append(out, audit.Record{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload})
 	}
 	return out, nil
 }

@@ -163,21 +163,15 @@ func (q *Queries) GetRealmBySlug(ctx context.Context, slug string) (AuthnRealm, 
 }
 
 const lastAuditEvent = `-- name: LastAuditEvent :one
-SELECT seq, prev_hash, hash, payload FROM shared_audit_events ORDER BY seq DESC LIMIT 1
+SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events ORDER BY seq DESC LIMIT 1
 `
 
-type LastAuditEventRow struct {
-	Seq      int64
-	PrevHash []byte
-	Hash     []byte
-	Payload  []byte
-}
-
-func (q *Queries) LastAuditEvent(ctx context.Context) (LastAuditEventRow, error) {
+func (q *Queries) LastAuditEvent(ctx context.Context) (SharedAuditEvent, error) {
 	row := q.db.QueryRowContext(ctx, lastAuditEvent)
-	var i LastAuditEventRow
+	var i SharedAuditEvent
 	err := row.Scan(
 		&i.Seq,
+		&i.RealmID,
 		&i.PrevHash,
 		&i.Hash,
 		&i.Payload,
@@ -186,7 +180,7 @@ func (q *Queries) LastAuditEvent(ctx context.Context) (LastAuditEventRow, error)
 }
 
 const listAuditEventsByRealm = `-- name: ListAuditEventsByRealm :many
-SELECT seq, prev_hash, hash, payload FROM shared_audit_events WHERE realm_id = ? AND seq >= ? ORDER BY seq LIMIT ?
+SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE realm_id = ? AND seq >= ? ORDER BY seq LIMIT ?
 `
 
 type ListAuditEventsByRealmParams struct {
@@ -195,24 +189,18 @@ type ListAuditEventsByRealmParams struct {
 	Limit   int64
 }
 
-type ListAuditEventsByRealmRow struct {
-	Seq      int64
-	PrevHash []byte
-	Hash     []byte
-	Payload  []byte
-}
-
-func (q *Queries) ListAuditEventsByRealm(ctx context.Context, arg ListAuditEventsByRealmParams) ([]ListAuditEventsByRealmRow, error) {
+func (q *Queries) ListAuditEventsByRealm(ctx context.Context, arg ListAuditEventsByRealmParams) ([]SharedAuditEvent, error) {
 	rows, err := q.db.QueryContext(ctx, listAuditEventsByRealm, arg.RealmID, arg.Seq, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListAuditEventsByRealmRow
+	var items []SharedAuditEvent
 	for rows.Next() {
-		var i ListAuditEventsByRealmRow
+		var i SharedAuditEvent
 		if err := rows.Scan(
 			&i.Seq,
+			&i.RealmID,
 			&i.PrevHash,
 			&i.Hash,
 			&i.Payload,
@@ -370,7 +358,7 @@ func (q *Queries) PutFeature(ctx context.Context, arg PutFeatureParams) error {
 }
 
 const scanAuditEvents = `-- name: ScanAuditEvents :many
-SELECT seq, prev_hash, hash, payload FROM shared_audit_events WHERE seq >= ? ORDER BY seq LIMIT ?
+SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE seq >= ? ORDER BY seq LIMIT ?
 `
 
 type ScanAuditEventsParams struct {
@@ -378,24 +366,18 @@ type ScanAuditEventsParams struct {
 	Limit int64
 }
 
-type ScanAuditEventsRow struct {
-	Seq      int64
-	PrevHash []byte
-	Hash     []byte
-	Payload  []byte
-}
-
-func (q *Queries) ScanAuditEvents(ctx context.Context, arg ScanAuditEventsParams) ([]ScanAuditEventsRow, error) {
+func (q *Queries) ScanAuditEvents(ctx context.Context, arg ScanAuditEventsParams) ([]SharedAuditEvent, error) {
 	rows, err := q.db.QueryContext(ctx, scanAuditEvents, arg.Seq, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ScanAuditEventsRow
+	var items []SharedAuditEvent
 	for rows.Next() {
-		var i ScanAuditEventsRow
+		var i SharedAuditEvent
 		if err := rows.Scan(
 			&i.Seq,
+			&i.RealmID,
 			&i.PrevHash,
 			&i.Hash,
 			&i.Payload,

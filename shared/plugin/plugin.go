@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 
@@ -24,6 +25,16 @@ type Config struct {
 	Options map[string]string // 設定ファイルのアダプタごとの項目
 	// Dev は開発ビルドかどうか。開発専用のアダプタはこれが false なら作成を拒否する。
 	Dev bool
+}
+
+// CheckOptions は allowed 以外の項目があればエラーにする（設定の書き間違いを黙って無視しない）。
+func (c Config) CheckOptions(allowed ...string) error {
+	for k := range c.Options {
+		if !slices.Contains(allowed, k) {
+			return fmt.Errorf("plugin: unknown option %q (allowed: %v)", k, allowed)
+		}
+	}
+	return nil
 }
 
 // Option は Options の値を返す。無ければ def。

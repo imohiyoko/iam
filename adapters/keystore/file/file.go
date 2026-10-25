@@ -17,6 +17,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 
@@ -28,6 +29,9 @@ import (
 
 func init() {
 	plugin.RegisterKeyStore("file", func(_ context.Context, cfg plugin.Config) (port.KeyStore, error) {
+		if err := cfg.CheckOptions("path"); err != nil {
+			return nil, err
+		}
 		path := cfg.Option("path", "")
 		if path == "" {
 			return nil, fmt.Errorf("keystore file: path is required")
@@ -57,14 +61,23 @@ var _ port.KeyStore = (*Store)(nil)
 
 // Load は path から鍵を読み込む。
 func Load(path string) (*Store, error) {
-	fi, err := os.Stat(path)
+	f, err := os.Open(path) // #nosec G304 -- パスはホスト先の設定ファイルで指定する
 	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	// 開いたファイルそのものの権限を見る（確認と読み込みの間に差し替えられないように）。
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("keystore file: %s is not a regular file", path)
 	}
 	if runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("keystore file: %s must not be readable by group or others (mode %v)", path, fi.Mode().Perm())
 	}
-	b, err := os.ReadFile(path) // #nosec G304 -- パスはホスト先の設定ファイルで指定する
+	b, err := io.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}

@@ -50,12 +50,15 @@ func TestParseEmptyUsesDefaults(t *testing.T) {
 
 func TestParseRejects(t *testing.T) {
 	cases := map[string]string{
-		"unknown field": "dev: true\nbogus: 1\n",
-		"dev notifier":  "notifier: {driver: dev}\n",
-		"same addr":     "dev: true\nserver: {public_addr: ':1', admin_addr: ':1'}\n",
-		"bad range":     "dev: true\nsecurity: {session: {absolute_lifetime: {default: 100d, min: 1h, max: 90d}}}\n",
-		"bad timezone":  "dev: true\nrealm: {slug: x, timezone: Mars/Base}\n",
-		"bad duration":  "dev: true\noutbox: {interval: 1x}\n",
+		"unknown field":          "dev: true\nbogus: 1\n",
+		"dev notifier":           "notifier: {driver: dev}\n",
+		"same addr":              "dev: true\nserver: {public_addr: ':1', admin_addr: ':1'}\n",
+		"bad range":              "dev: true\nsecurity: {session: {absolute_lifetime: {default: 100d, min: 1h, max: 90d}}}\n",
+		"bad timezone":           "dev: true\nrealm: {slug: x, timezone: Mars/Base}\n",
+		"bad duration":           "dev: true\noutbox: {interval: 1x}\n",
+		"overflow days":          "dev: true\noutbox: {interval: 106752d}\n",
+		"negative min":           "dev: true\nsecurity: {session: {max_auth_age: {default: 15m, min: -1h, max: 1d}}}\n",
+		"options without driver": "dev: true\nstorage: {path: /var/lib/iam/iam.db}\n",
 	}
 	for name, y := range cases {
 		if _, err := Parse([]byte(y)); err == nil {

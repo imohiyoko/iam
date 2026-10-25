@@ -120,11 +120,14 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
+// maxDays は日数で書ける上限（約100年。time.Duration のあふれを防ぐ）。
+const maxDays = 36500
+
 // ParseDuration は time.ParseDuration に日（d）を足したもの。
 func ParseDuration(s string) (time.Duration, error) {
 	if days, ok := strings.CutSuffix(s, "d"); ok {
 		var n int
-		if _, err := fmt.Sscanf(days, "%d", &n); err != nil || fmt.Sprint(n) != days {
+		if _, err := fmt.Sscanf(days, "%d", &n); err != nil || fmt.Sprint(n) != days || n < 0 || n > maxDays {
 			return 0, fmt.Errorf("invalid duration %q", s)
 		}
 		return time.Duration(n) * 24 * time.Hour, nil
@@ -173,12 +176,21 @@ func Parse(b []byte) (Config, error) {
 		return Config{}, fmt.Errorf("config: %w", err)
 	}
 	d := Default()
-	for _, p := range []struct{ got, def *Adapter }{
-		{&c.Storage, &d.Storage}, {&c.Ephemeral, &d.Ephemeral}, {&c.KeyStore, &d.KeyStore},
-		{&c.EventSink, &d.EventSink}, {&c.Notifier, &d.Notifier},
+	for _, p := range []struct {
+		name     string
+		got, def *Adapter
+	}{
+		{"storage", &c.Storage, &d.Storage}, {"ephemeral", &c.Ephemeral, &d.Ephemeral}, {"keystore", &c.KeyStore, &d.KeyStore},
+		{"event_sink", &c.EventSink, &d.EventSink}, {"notifier", &c.Notifier, &d.Notifier},
 	} {
-		if p.got.Driver == "" {
+		switch {
+		case p.got.Driver != "":
+		case len(p.got.Options) == 0:
+			// 項目ごと省略したときだけ既定値を使う。
 			*p.got = *p.def
+		default:
+			// driver を書き忘れたまま既定のアダプタで別の場所を使い始めないように拒否する。
+			return Config{}, fmt.Errorf("config: %s.driver is required when %s has options", p.name, p.name)
 		}
 	}
 	return c, c.Validate()
@@ -208,6 +220,9 @@ func (c Config) Validate() error {
 	} {
 		if err := r.Rule(key).Validate(); err != nil {
 			problems = append(problems, err.Error())
+		}
+		if r.Min.D() <= 0 {
+			problems = append(problems, fmt.Sprintf("security.%s.min must be positive", key))
 		}
 	}
 	if c.Security.Session.ValidityMaxDelay.D() <= 0 {

@@ -17,6 +17,9 @@ func init() {
 		if !cfg.Dev {
 			return nil, errors.New("notifier dev: only available in development mode")
 		}
+		if err := cfg.CheckOptions(); err != nil {
+			return nil, err
+		}
 		l := cfg.Logger
 		if l == nil {
 			l = slog.Default()

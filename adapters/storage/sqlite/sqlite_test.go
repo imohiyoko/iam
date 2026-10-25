@@ -1,9 +1,12 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/imohiyoko/iam/adapters/storage/storagetest"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -45,4 +48,51 @@ func TestPendingMigrationsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
+}
+
+// データ鍵を消した後、DB ファイルに鍵のバイト列が残らない（secure_delete。design.md 9.5、13.5）。
+func TestDataKeyBytesNotLeftOnDisk(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "iam.db")
+	s, err := Open(ctx, path, Options{AutoMigrate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	marker := bytes.Repeat([]byte("SHRED-ME-"), 8)
+	tx := func(fn func(context.Context, port.Tx) error) {
+		if err := s.Tx(ctx, fn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx(func(ctx context.Context, tx port.Tx) error {
+		return tx.DataKeys().Create(ctx, port.DataKey{UserID: "usr_x", WrappedKey: marker, KeyID: "k", CreatedAt: time.Now()})
+	})
+	if err := s.Checkpoint(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !fileContains(t, path, marker) {
+		t.Fatal("test bug: marker not written")
+	}
+	tx(func(ctx context.Context, tx port.Tx) error { return tx.DataKeys().Delete(ctx, "usr_x") })
+	if err := s.Checkpoint(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{path, path + "-wal"} {
+		if fileContains(t, p, marker) {
+			t.Fatalf("deleted data key bytes remain in %s", filepath.Base(p))
+		}
+	}
+}
+
+func fileContains(t *testing.T, path string, b []byte) bool {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.Contains(data, b)
 }

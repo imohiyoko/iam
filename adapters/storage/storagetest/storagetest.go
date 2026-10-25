@@ -423,9 +423,13 @@ func testOutboxRelay(t *testing.T, h Harness) {
 	if total != 5 || len(sink.events) != 5 {
 		t.Fatalf("delivered %d, sink has %d", total, len(sink.events))
 	}
-	for _, e := range sink.events {
+	for i, e := range sink.events {
 		if e.IP != "" || e.UserAgent != "" {
 			t.Fatalf("PII in external output: %+v", e)
+		}
+		// 外部側が末尾の削除を検出できるよう、チェーン上の位置を付けて出す。
+		if e.Chain == nil || e.Chain.Seq != int64(i+1) || len(e.Chain.Hash) != 64 {
+			t.Fatalf("chain ref missing or wrong: %+v", e.Chain)
 		}
 	}
 }

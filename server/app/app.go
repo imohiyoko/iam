@@ -205,10 +205,7 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 		return err
 	}
 
-	servers := []*http.Server{
-		{Handler: a.public, ReadHeaderTimeout: 10 * time.Second},
-		{Handler: a.admin, ReadHeaderTimeout: 10 * time.Second},
-	}
+	servers := []*http.Server{newHTTPServer(a.public), newHTTPServer(a.admin)}
 	errc := make(chan error, 3)
 	for i, l := range []net.Listener{pubL, admL} {
 		go func() { errc <- servers[i].Serve(l) }()
@@ -239,4 +236,16 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 		a.deps.Logger.Warn("final outbox flush failed", "error", err)
 	}
 	return runErr
+}
+
+// newHTTPServer は遅いクライアントで接続を占有されないよう、各段階に時間の上限を付ける。
+func newHTTPServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+	}
 }

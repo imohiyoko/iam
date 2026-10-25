@@ -30,16 +30,16 @@ SELECT user_id, wrapped_key, key_id, created_at FROM authn_user_data_keys WHERE 
 DELETE FROM authn_user_data_keys WHERE user_id = ?;
 
 -- name: LastAuditEvent :one
-SELECT seq, prev_hash, hash, payload FROM shared_audit_events ORDER BY seq DESC LIMIT 1;
+SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events ORDER BY seq DESC LIMIT 1;
 
 -- name: AppendAuditEvent :exec
 INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload) VALUES (?, ?, ?, ?, ?);
 
 -- name: ScanAuditEvents :many
-SELECT seq, prev_hash, hash, payload FROM shared_audit_events WHERE seq >= ? ORDER BY seq LIMIT ?;
+SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE seq >= ? ORDER BY seq LIMIT ?;
 
 -- name: ListAuditEventsByRealm :many
-SELECT seq, prev_hash, hash, payload FROM shared_audit_events WHERE realm_id = ? AND seq >= ? ORDER BY seq LIMIT ?;
+SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE realm_id = ? AND seq >= ? ORDER BY seq LIMIT ?;
 
 -- name: AddOutbox :exec
 INSERT INTO shared_outbox (id, topic, payload, created_at) VALUES (?, ?, ?, ?);
