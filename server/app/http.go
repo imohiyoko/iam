@@ -10,7 +10,6 @@ import (
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/server/publicapi"
-	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/id"
 )
@@ -45,7 +44,7 @@ func newPublicHandler(a *App) http.Handler {
 func (s publicServer) Logout(ctx context.Context, _ publicapi.LogoutRequestObject) (publicapi.LogoutResponseObject, error) {
 	if au, ok := authFrom(ctx); ok {
 		err := s.a.sessions.Revoke(ctx, s.a.realm.ID, au.SessionID, au.PrincipalID, session.ReasonLogout,
-			audit.Actor{Type: "user", ID: au.PrincipalID}, requestID(ctx))
+			au.Actor(), requestID(ctx))
 		if err != nil {
 			return nil, err
 		}
@@ -81,7 +80,7 @@ func (s publicServer) RevokeMySession(ctx context.Context, req publicapi.RevokeM
 		return publicapi.RevokeMySession401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
 	err := s.a.sessions.Revoke(ctx, s.a.realm.ID, req.Id, au.PrincipalID, session.ReasonUser,
-		audit.Actor{Type: "user", ID: au.PrincipalID}, requestID(ctx))
+		au.Actor(), requestID(ctx))
 	if errors.Is(err, errs.NotFound) {
 		return publicapi.RevokeMySession404JSONResponse{NotFoundJSONResponse: publicapi.NotFoundJSONResponse{Error: "not_found"}}, nil
 	}

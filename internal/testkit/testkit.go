@@ -60,7 +60,7 @@ func (k *Kit) Tx(t testing.TB, fn func(context.Context, port.Tx) error) {
 // SeedUser は有効なユーザー（とデータ鍵）を直接作る。登録の流れを通さないテスト用。
 func (k *Kit) SeedUser(t testing.TB) port.User {
 	t.Helper()
-	u := port.User{ID: id.New(id.User), RealmID: k.RealmID, Status: port.UserActive, CreatedAt: k.Clock.Now(), UpdatedAt: k.Clock.Now()}
+	u := port.User{ID: id.New(id.User), PublicID: id.NewExternal(id.User), RealmID: k.RealmID, Status: port.UserActive, CreatedAt: k.Clock.Now(), UpdatedAt: k.Clock.Now()}
 	k.Tx(t, func(ctx context.Context, tx port.Tx) error {
 		if err := tx.Users().Create(ctx, u); err != nil {
 			return err

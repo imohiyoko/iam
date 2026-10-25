@@ -99,7 +99,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	s := port.Session{
-		ID: id.New(id.Session), RealmID: in.RealmID, PrincipalType: port.PrincipalUser, PrincipalID: in.UserID,
+		ID: id.NewExternal(id.Session), RealmID: in.RealmID, PrincipalType: port.PrincipalUser, PrincipalID: in.UserID,
 		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: in.Warnings, IP: ip, UserAgent: ua,
 		AuthenticatedAt: now, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime),
 	}
@@ -111,6 +111,10 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	s.TokenHash = hash
+	actor, err := userActor(ctx, tx, in.RealmID, in.UserID)
+	if err != nil {
+		return Issued{}, err
+	}
 	if err := tx.Sessions().Create(ctx, s); err != nil {
 		return Issued{}, err
 	}
@@ -118,7 +122,11 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	if sid, secret, ok := SplitToken(in.ReplaceToken); ok {
 		old, err := tx.Sessions().Get(ctx, in.RealmID, sid)
 		if err == nil && (old.RevokedAt == nil || now.Before(*old.RevokedAt)) && subtle.ConstantTimeCompare(old.TokenHash, hashSecret(secret)) == 1 {
-			if err := m.revokeInTx(ctx, tx, old, ReasonReplacedByLogin, audit.Actor{Type: "user", ID: old.PrincipalID}, in.RequestID); err != nil {
+			oldActor, err := userActor(ctx, tx, in.RealmID, old.PrincipalID)
+			if err != nil {
+				return Issued{}, err
+			}
+			if err := m.revokeInTx(ctx, tx, old, ReasonReplacedByLogin, oldActor, in.RequestID); err != nil {
 				return Issued{}, err
 			}
 			details["replaced"] = old.ID
@@ -126,10 +134,19 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	}
 	_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
 		Type: "session.created", Result: audit.ResultSuccess, RealmID: in.RealmID,
-		Actor: audit.Actor{Type: "user", ID: in.UserID}, SessionID: s.ID, IP: in.IP, UserAgent: in.UserAgent,
+		Actor: actor, SessionID: s.ID, IP: in.IP, UserAgent: in.UserAgent,
 		RequestID: in.RequestID, Details: details,
 	})
 	return Issued{Session: s, Token: token}, err
+}
+
+// userActor は監査ログの行為者。内部 ID は外に出さず、公開 ID を使う（ADR 0045）。
+func userActor(ctx context.Context, tx port.Tx, realmID, userID string) (audit.Actor, error) {
+	u, err := tx.Users().Get(ctx, realmID, userID)
+	if err != nil {
+		return audit.Actor{}, err
+	}
+	return audit.Actor{Type: "user", ID: u.PublicID}, nil
 }
 
 func (m *Manager) encrypt(ctx context.Context, tx port.Tx, userID, v, purpose string) ([]byte, error) {
@@ -167,10 +184,12 @@ func SplitToken(token string) (sessionID, secret string, ok bool) {
 
 // Validated は検証済みのセッション。
 type Validated struct {
-	SessionID       string
-	RealmID         string
-	PrincipalType   port.PrincipalType
-	PrincipalID     string
+	SessionID     string
+	RealmID       string
+	PrincipalType port.PrincipalType
+	PrincipalID   string // 内部 ID。外に出さない（ADR 0045）
+	// PublicID は主体の公開 ID。API の応答や監査ログにはこちらを使う。
+	PublicID        string
 	AuthMethods     []string
 	AuthenticatedAt time.Time
 	// RotateDue は ID の入れ替えの時期を過ぎていることを表す（Cookie のセッションで入れ替える）。
@@ -182,6 +201,7 @@ type cached struct {
 	Hash            []byte             `json:"h"`
 	PrincipalType   port.PrincipalType `json:"pt"`
 	PrincipalID     string             `json:"p"`
+	PublicID        string             `json:"u"`
 	AuthMethods     []string           `json:"amr"`
 	AuthenticatedAt time.Time          `json:"at"`
 	CreatedAt       time.Time          `json:"c"`
@@ -219,7 +239,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 		if subtle.ConstantTimeCompare(s.TokenHash, hash) != 1 {
 			return errors.New("token mismatch")
 		}
-		next, err := m.check(ctx, tx, s, now)
+		next, u, err := m.check(ctx, tx, s, now)
 		if err != nil {
 			return err
 		}
@@ -230,8 +250,8 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 		if m.Config.IdleTimeout > 0 {
 			next = earliest(next, now.Add(m.Config.IdleTimeout))
 		}
-		c = cached{Hash: s.TokenHash, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, AuthMethods: s.AuthMethods,
-			AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next}
+		c = cached{Hash: s.TokenHash, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
+			AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next}
 		return nil
 	})
 	if err != nil {
@@ -250,52 +270,52 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 
 func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Validated {
 	v := Validated{SessionID: sid, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
-		AuthMethods: c.AuthMethods, AuthenticatedAt: c.AuthenticatedAt}
+		PublicID: c.PublicID, AuthMethods: c.AuthMethods, AuthenticatedAt: c.AuthenticatedAt}
 	if m.Config.RotationInterval > 0 && !now.Before(c.CreatedAt.Add(m.Config.RotationInterval)) {
 		v.RotateDue = true
 	}
 	return v
 }
 
-// check はセッションが今有効かを確かめ、次に状態が変わる時刻（再検証の期限）を返す。
-func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now time.Time) (time.Time, error) {
+// check はセッションが今有効かを確かめ、次に状態が変わる時刻（再検証の期限）と主体を返す。
+func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now time.Time) (time.Time, port.User, error) {
 	if s.RevokedAt != nil && !now.Before(*s.RevokedAt) {
-		return time.Time{}, errors.New("revoked")
+		return time.Time{}, port.User{}, errors.New("revoked")
 	}
 	if !now.Before(s.ExpiresAt) {
-		return time.Time{}, errors.New("expired")
+		return time.Time{}, port.User{}, errors.New("expired")
 	}
 	if m.Config.IdleTimeout > 0 && !now.Before(s.LastSeenAt.Add(m.Config.IdleTimeout)) {
-		return time.Time{}, errors.New("idle timeout")
+		return time.Time{}, port.User{}, errors.New("idle timeout")
 	}
 	next := earliest(s.ExpiresAt, now.Add(m.Config.ValidityMaxDelay))
 	if s.RevokedAt != nil {
 		next = earliest(next, *s.RevokedAt) // 入れ替え後の猶予の終わり
 	}
 	if s.PrincipalType != port.PrincipalUser {
-		return time.Time{}, errors.New("unsupported principal")
+		return time.Time{}, port.User{}, errors.New("unsupported principal")
 	}
 	u, err := tx.Users().Get(ctx, s.RealmID, s.PrincipalID)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, port.User{}, err
 	}
 	if u.Status != port.UserActive {
-		return time.Time{}, errors.New("user not active")
+		return time.Time{}, port.User{}, errors.New("user not active")
 	}
 	if u.ValidFrom != nil && now.Before(*u.ValidFrom) {
-		return time.Time{}, errors.New("user not yet valid")
+		return time.Time{}, port.User{}, errors.New("user not yet valid")
 	}
 	if u.ValidUntil != nil {
 		if !now.Before(*u.ValidUntil) {
-			return time.Time{}, errors.New("user validity ended")
+			return time.Time{}, port.User{}, errors.New("user validity ended")
 		}
 		next = earliest(next, *u.ValidUntil)
 	}
 	// 認証に使った外部 ID が無効化されていれば、そのセッションも使えない（4.6）。
 	if err := checkCredentials(ctx, tx, s); err != nil {
-		return time.Time{}, err
+		return time.Time{}, port.User{}, err
 	}
-	return next, nil
+	return next, u, nil
 }
 
 func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
@@ -350,7 +370,7 @@ func (m *Manager) Rotate(ctx context.Context, realmID, sessionID, requestID stri
 			return ErrNotRotated
 		}
 		s := old
-		s.ID, s.CreatedAt, s.LastSeenAt = id.New(id.Session), now, now
+		s.ID, s.CreatedAt, s.LastSeenAt = id.NewExternal(id.Session), now, now
 		token, hash, err := newToken(s.ID)
 		if err != nil {
 			return err
@@ -362,9 +382,13 @@ func (m *Manager) Rotate(ctx context.Context, realmID, sessionID, requestID stri
 		if err := tx.Sessions().Revoke(ctx, realmID, old.ID, now.Add(m.Config.RotationGrace), ReasonRotated); err != nil {
 			return err
 		}
+		actor, err := userActor(ctx, tx, realmID, s.PrincipalID)
+		if err != nil {
+			return err
+		}
 		if _, err := eventlog.Record(ctx, tx, m.Clock, audit.Event{
 			Type: "session.rotated", Result: audit.ResultSuccess, RealmID: realmID,
-			Actor: audit.Actor{Type: "user", ID: s.PrincipalID}, SessionID: s.ID, RequestID: requestID,
+			Actor: actor, SessionID: s.ID, RequestID: requestID,
 			Details: map[string]any{"previous": old.ID},
 		}); err != nil {
 			return err
@@ -412,9 +436,13 @@ func (m *Manager) RevokeAll(ctx context.Context, realmID, userID, except, reason
 		if err != nil || len(ids) == 0 {
 			return err
 		}
+		subject, err := userActor(ctx, tx, realmID, userID)
+		if err != nil {
+			return err
+		}
 		_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
 			Type: "session.revoked", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
-			Details: map[string]any{"sessions": ids, "reason": reason, "user_id": userID},
+			Details: map[string]any{"sessions": ids, "reason": reason, "user_id": subject.ID},
 		})
 		return err
 	})
@@ -428,12 +456,16 @@ func (m *Manager) RevokeAll(ctx context.Context, realmID, userID, except, reason
 }
 
 func (m *Manager) revokeInTx(ctx context.Context, tx port.Tx, s port.Session, reason string, actor audit.Actor, requestID string) error {
+	subject, err := userActor(ctx, tx, s.RealmID, s.PrincipalID)
+	if err != nil {
+		return err
+	}
 	if err := tx.Sessions().Revoke(ctx, s.RealmID, s.ID, m.Clock.Now(), reason); err != nil {
 		return err
 	}
-	_, err := eventlog.Record(ctx, tx, m.Clock, audit.Event{
+	_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
 		Type: "session.revoked", Result: audit.ResultSuccess, RealmID: s.RealmID, Actor: actor, SessionID: s.ID,
-		RequestID: requestID, Details: map[string]any{"reason": reason, "user_id": s.PrincipalID},
+		RequestID: requestID, Details: map[string]any{"reason": reason, "user_id": subject.ID},
 	})
 	return err
 }
@@ -472,3 +504,6 @@ func (m *Manager) logger() *slog.Logger {
 	}
 	return m.Log
 }
+
+// Actor は監査ログの行為者（公開 ID）。
+func (v Validated) Actor() audit.Actor { return audit.Actor{Type: "user", ID: v.PublicID} }

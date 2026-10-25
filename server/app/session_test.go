@@ -28,7 +28,7 @@ func newApp(t *testing.T) (*App, *clock.Fake) {
 // login はユーザーを作り、セッションを発行してトークンを返す（ログインの流れは #16 で足す）。
 func login(t *testing.T, a *App) (userID, token string) {
 	t.Helper()
-	u := port.User{ID: id.New(id.User), RealmID: a.realm.ID, Status: port.UserActive, CreatedAt: a.deps.Clock.Now(), UpdatedAt: a.deps.Clock.Now()}
+	u := port.User{ID: id.New(id.User), PublicID: id.NewExternal(id.User), RealmID: a.realm.ID, Status: port.UserActive, CreatedAt: a.deps.Clock.Now(), UpdatedAt: a.deps.Clock.Now()}
 	err := a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
 		if err := tx.Users().Create(ctx, u); err != nil {
 			return err

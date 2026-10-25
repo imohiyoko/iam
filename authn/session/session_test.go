@@ -129,7 +129,7 @@ func TestRevokeIsImmediate(t *testing.T) {
 	k, m, u := setup(t)
 	is := issue(t, k, m, u, "")
 	mustValid(t, m, k.RealmID, is.Token)
-	if err := m.Revoke(context.Background(), k.RealmID, is.Session.ID, u.ID, session.ReasonLogout, audit.Actor{Type: "user", ID: u.ID}, ""); err != nil {
+	if err := m.Revoke(context.Background(), k.RealmID, is.Session.ID, u.ID, session.ReasonLogout, audit.Actor{Type: "user", ID: u.PublicID}, ""); err != nil {
 		t.Fatal(err)
 	}
 	mustInvalid(t, m, k.RealmID, is.Token)
@@ -139,7 +139,7 @@ func TestRevokeOthersSessionLooksMissing(t *testing.T) {
 	k, m, u := setup(t)
 	other := k.SeedUser(t)
 	is := issue(t, k, m, other, "")
-	err := m.Revoke(context.Background(), k.RealmID, is.Session.ID, u.ID, session.ReasonUser, audit.Actor{Type: "user", ID: u.ID}, "")
+	err := m.Revoke(context.Background(), k.RealmID, is.Session.ID, u.ID, session.ReasonUser, audit.Actor{Type: "user", ID: u.PublicID}, "")
 	if !errors.Is(err, errs.NotFound) {
 		t.Fatalf("want NotFound, got %v", err)
 	}
@@ -164,7 +164,7 @@ func TestRevocationReflectedWithinMaxDelay(t *testing.T) {
 func TestUserValidityEndHonoredByCache(t *testing.T) {
 	k, m, _ := setup(t)
 	end := k.Clock.Now().Add(10 * time.Second) // 反映遅れの上限より短い
-	u := port.User{ID: "usr_00000000000000000000000001", RealmID: k.RealmID, Status: port.UserActive, ValidUntil: &end,
+	u := port.User{ID: "usr_00000000000000000000000001", PublicID: "11111111-1111-4111-8111-111111111111", RealmID: k.RealmID, Status: port.UserActive, ValidUntil: &end,
 		CreatedAt: k.Clock.Now(), UpdatedAt: k.Clock.Now()}
 	k.Tx(t, func(ctx context.Context, tx port.Tx) error {
 		if err := tx.Users().Create(ctx, u); err != nil {
@@ -254,7 +254,7 @@ func TestRevokeAllAndList(t *testing.T) {
 	if err != nil || len(list) != 3 {
 		t.Fatalf("List = %d, %v", len(list), err)
 	}
-	ids, err := m.RevokeAll(context.Background(), k.RealmID, u.ID, keep.Session.ID, "credential_changed", audit.Actor{Type: "user", ID: u.ID}, "")
+	ids, err := m.RevokeAll(context.Background(), k.RealmID, u.ID, keep.Session.ID, "credential_changed", audit.Actor{Type: "user", ID: u.PublicID}, "")
 	if err != nil || len(ids) != 2 {
 		t.Fatalf("RevokeAll = %v, %v", ids, err)
 	}
@@ -277,7 +277,7 @@ func TestRevokeAllEndsRotationGrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustValid(t, m, k.RealmID, is.Token)
-	if _, err := m.RevokeAll(context.Background(), k.RealmID, u.ID, "", "credential_changed", audit.Actor{Type: "user", ID: u.ID}, ""); err != nil {
+	if _, err := m.RevokeAll(context.Background(), k.RealmID, u.ID, "", "credential_changed", audit.Actor{Type: "user", ID: u.PublicID}, ""); err != nil {
 		t.Fatal(err)
 	}
 	mustInvalid(t, m, k.RealmID, is.Token)
