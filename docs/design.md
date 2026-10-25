@@ -238,6 +238,8 @@ users
   owner_org_id      -- NULL なら個人所有。値があればその Org が管理するユーザー（11.3）
   display_name
   status            -- active / deleted / merged（停止は suspensions で管理する。4.7）
+  valid_from        -- この時刻から有効（NULL なら作成時から）。4.9
+  valid_until       -- この時刻まで有効（NULL なら無期限）。4.9
   merged_into       -- アカウント統合で吸収された場合の統合先（11.6）
   created_at, updated_at
 
@@ -295,6 +297,7 @@ service_accounts    -- 人間以外の主体（11.2）
   realm_id
   org_id            -- 所属 Org
   name
+  valid_from, valid_until   -- 有効期間（4.9）
   created_at
 
 service_account_credentials
@@ -313,6 +316,7 @@ orgs                -- Org フィーチャー（11.13）がオンのときだけ
   parent_org_id     -- Org の階層（11.4）。NULL ならトップレベル
   slug
   name
+  valid_from, valid_until   -- 有効期間（4.9。試用期間の Org など）
   created_at
   UNIQUE (realm_id, slug)
 
@@ -325,7 +329,8 @@ memberships         -- User と Org の所属関係（所属の有無のみ）
   id (PK)
   user_id (FK users)
   org_id (FK orgs)
-  status            -- invited / active / suspended
+  status            -- invited / active（停止は suspensions で管理する。4.7）
+  valid_from, valid_until   -- 有効期間（4.9。入社日から、契約終了日まで、など）
   created_at
   UNIQUE (user_id, org_id)
 
@@ -351,6 +356,27 @@ suspensions         -- 停止（4.7）
   ends_at           -- 停止の終了時刻。NULL なら無期限
   created_by, created_at
   lifted_at, lifted_by   -- 期限前に解除した場合の記録
+
+org_quota_grants    -- Org の上限（人数など）の付与。Quota フィーチャー（11.14）
+  id (PK)
+  realm_id
+  org_id
+  quota_key         -- members / service_accounts / groups ...
+  kind              -- base / addon / override（11.14）
+  quantity
+  starts_at         -- この時刻から効く（未来の予約も可）
+  ends_at           -- この時刻まで効く。NULL なら無期限
+  source            -- manual / external
+  external_ref      -- 外部の課金システム等の ID（同じ値での登録は上書き＝冪等）
+  created_by, created_at
+  UNIQUE (org_id, quota_key, external_ref)
+
+scheduled_events    -- 時刻境界で出すイベントの予約（4.9）
+  id (PK)
+  fire_at
+  event_type
+  payload
+  fired_at
 
 revoked_passkey_credentials  -- 無効化した passkey の credential_id（再登録を防ぐ）
   realm_id
@@ -523,6 +549,37 @@ check(principal, action, resource, context) -> allow / deny
 - **Org の管理者**：その Org の Membership、管理ユーザー、サービスアカウント
 - 停止された本人は、自分の停止を解除できない
 
+### 4.9 有効期間（時刻を指定した有効化）
+
+停止（4.7）とは逆に、**指定した時刻から有効になる**、**指定した時刻で無効になる**という口を用意する。
+
+- 対象：ユーザー、Membership、サービスアカウント、Org
+- `valid_from`（省略時は作成時から）と `valid_until`（省略時は無期限）を持つ
+- 用途の例
+  - 入社日の前にアカウントや Org への所属を準備しておき、入社日から使えるようにする
+  - 業務委託の契約終了日に自動で使えなくする
+  - 試用期間つきの Org
+
+#### 停止との違い
+
+| | 有効期間（4.9） | 停止（4.7） |
+|---|---|---|
+| 意味 | その対象が本来使える期間 | 一時的に使えなくする措置 |
+| 数 | 対象ごとに1つ（上書きで変更） | 複数を重ねられる |
+| 主な使い手 | プロビジョニング（人事・契約） | 運用・セキュリティ対応 |
+
+- 実際に使えるかどうかは「有効期間内」かつ「停止中でない」で判定する
+- 判定方法は停止と同じく、**判定時に時刻から計算する**（スケジューラ不要、セッション検証時にも判定）
+- 有効期間外のユーザーはログインできない。有効期間外の Membership の Org には入れない
+
+#### 時刻境界でのイベント
+
+判定はスケジューラなしで行えるが、「有効になった」「期限切れになった」「停止が始まった」などのイベントを、その時刻に Notifier・EventSink へ出したい場合がある（本人へのお知らせ、SIEM への記録、連携先の Back-Channel Logout など）。
+
+- 有効期間・停止・Quota（11.14）の登録時に、境界の時刻を `scheduled_events` に予約する
+- バックグラウンドの処理が、時刻の来た予約を outbox に移して配送する
+- これは通知のための仕組みであり、**アクセスの可否はこの処理の遅れに左右されない**（判定は常に時刻から計算する）
+
 ### 4.8 管理 API の口（概要）
 
 ```
@@ -537,6 +594,16 @@ POST   /v1/admin/{users|orgs|service-accounts|memberships}/{id}/suspensions
        { "reason": "...", "starts_at": "...", "ends_at": "..." }   # ends_at 省略で無期限
 GET    /v1/admin/{users|orgs|service-accounts|memberships}/{id}/suspensions
 POST   /v1/admin/suspensions/{suspension_id}:lift
+
+# 有効期間
+PATCH  /v1/admin/{users|orgs|service-accounts|memberships}/{id}
+       { "valid_from": "...", "valid_until": "..." }
+
+# Quota（11.14）
+GET    /v1/admin/orgs/{org_id}/quotas                         # 現在と将来の上限・使用量
+POST   /v1/admin/orgs/{org_id}/quota-grants                   # 付与の追加
+PUT    /v1/admin/orgs/{org_id}/quota-grants/external/{ref}    # 外部システムからの冪等な登録・更新
+DELETE /v1/admin/orgs/{org_id}/quota-grants/{grant_id}
 
 # 本人向け（公開 API）
 POST /v1/me/sessions/{session_id}:revoke
@@ -804,6 +871,7 @@ DB が漏洩しても個人情報が読めないよう、個人情報は**アプ
 | フィーチャー | 既定 | オフにしたときの動き |
 |---|---|---|
 | Org（11.13） | オン | Org の概念自体を使わない。認証だけ、認可は realm 全体の範囲で行う |
+| Quota（11.14） | オフ | 上限の判定をしない（無制限） |
 | 複数 realm（11.1） | オフ | realm は1つ固定。realm の解決処理をしない |
 | サービスアカウント（11.2） | オフ | client credentials などの機械向け認証を無効化 |
 | Org 管理ユーザー・Org 専用 SSO（11.3） | オフ | `owner_org_id` は常に NULL。ドメイン検証も無効 |
@@ -1181,3 +1249,69 @@ Org がオンのときは、**全ユーザーに個人 Org を最初から作る
 
 - 11.12 の有効化（enabling）の準備処理で、既存の全ユーザーに個人 Org を作る
 - 既存の realm 全体のロール付与・Group はそのまま realm 全体の範囲として残る
+
+### 11.14 Quota（Org の人数などの上限）
+
+Org に所属できる人数などに上限を設ける。上限の決め方は利用者ごとにさまざまなので、**「付与（grant）の積み上げ」**として一般化する。
+
+#### 上限の対象（quota_key）
+
+- `members`：Org のメンバー数（まずはこれ）
+- `service_accounts`、`groups` など、数えられるものなら同じ仕組みで追加できる
+
+#### 付与の種類
+
+上限は、期間つきの付与をその時刻で合算して求める。
+
+| 種類 | 意味 | 例 |
+|---|---|---|
+| `base` | 基本の上限。同時に有効なのは1つだけ（新しい方が優先） | プランの基本人数：Pro プランは 10 人 |
+| `addon` | 足し算。同時にいくつでも有効 | 追加購入した 5 人分、キャンペーンの 3 人分 |
+| `override` | 上書き。有効な間は base と addon を無視してこの値を使う | 大口契約の個別上限、障害対応で一時的に緩める |
+
+```
+時刻 t の上限 = override があればその値
+             なければ base + Σ addon（t の時点で有効なもの）
+付与が1つも無ければ無制限
+```
+
+- すべての付与に `starts_at` / `ends_at` があるので、**「何日から何人増える」「何日まで何人追加」**をそのまま表せる
+  - 例：4月1日から addon +5（期限なし）、キャンペーンで 6月末まで addon +3
+  - プラン変更の予約：4月1日から base 20 を登録すれば、その時刻から旧プランの base より優先される
+- 将来の上限の推移を API で確認できる（「4月1日から 15 人」など）
+
+#### 外部システムとの連携
+
+- IAM は課金システム（Stripe 等）と直接連携しない（2.4 の疎結合の方針）。ホスト先が課金システムの Webhook を受け、管理 API で付与を登録する
+- 外部からの登録は `external_ref`（課金システムのサブスクリプション ID 等）で**冪等**にする。同じ参照で登録し直すと上書きになるので、再送やプラン変更をそのまま反映できる
+- `source` で手動の付与と外部からの付与を区別し、外部の同期で手動の付与を消さないようにする
+
+#### 何を1人と数えるか
+
+realm の設定で決める。
+
+- active な Membership は数える
+- 招待中（invited）の Membership：既定は数える（枠を予約する）。招待の出しすぎで上限を超えないようにするため
+- 有効期間（4.9）が未来の Membership：既定は数える（入社予定者の枠を確保する）
+- 停止中の Membership：既定は数える（停止は一時的な措置のため）
+- 個人 Org（11.13）には Quota を適用しない
+
+#### 上限の判定
+
+- メンバーの追加・招待・有効期間の変更のときに判定する。**件数の確認と追加を同じトランザクションで行い**、同時に追加されても上限を超えないようにする（12.3 の並行性の契約テストに含める）
+- 将来から効く付与があっても、判定は**現時点から先で最も小さくなる上限**に対して行う。予約済みの減少（addon の期限切れ等）を見落として、後で上限超過にならないようにするため
+- ホットパス（ログイン、認可判定）では判定しない。Quota を有効にしても、ログインのレイテンシは変わらない
+
+#### 上限を下回った場合
+
+プランの格下げや addon の期限切れで、上限が現在の人数より小さくなることがある。
+
+- **既存のメンバーを自動で外したり停止したりはしない**（誰を外すかは IAM が決めることではない）
+- 上限を超えている間は、新しいメンバーの追加・招待を拒否する
+- `org.quota.exceeded` イベントを出し、ホスト先・Org の管理者が対応を決める
+- 必要なら、超過が一定期間続いた場合の措置（Org の停止など）をホスト先がイベントを受けて実行する
+
+#### フィーチャー
+
+- Quota はフィーチャー（既定オフ）。Org フィーチャーに依存する
+- オフのときは件数を数えず、上限の判定もしない
