@@ -14,7 +14,9 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/imohiyoko/iam/adapters/keystore/file"
 	"github.com/imohiyoko/iam/server/app"
@@ -42,6 +44,8 @@ commands:
   migrate   -config iam.yaml        Storage のマイグレーションを適用する
   version   [-manifest]             バージョン（とバイナリの構成）を表示する
   keys generate -out keys.json      KeyStore（file）用の鍵を作る
+  operator create -config iam.yaml -email <address> [-role realm:owner] [-ttl 15m]
+                                    運営者を作り、1回限りのログイン用リンクのトークンを表示する
 `
 
 func main() {
@@ -65,6 +69,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return printVersion(args[1:], stdout, stderr)
 	case "keys":
 		return keys(args[1:], stdout, stderr)
+	case "operator":
+		return operator(ctx, args[1:], stdout, stderr)
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return nil
@@ -175,6 +181,52 @@ func migrate(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 	fmt.Fprintln(stdout, "migrations applied")
 	return s.Close()
+}
+
+func operator(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 || args[0] != "create" {
+		return errors.New("usage: iam operator create -config iam.yaml -email <address> [-role realm:owner] [-ttl 15m]")
+	}
+	fs := flag.NewFlagSet("operator create", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	email := fs.String("email", "", "運営者のメールアドレス（所有は実行する人が確かめる）")
+	roleName := fs.String("role", "realm:owner", "付与するロール")
+	ttl := fs.Duration("ttl", 15*time.Minute, "ログイン用リンクの有効期間（最大 24h）")
+	cfg, err := loadConfig(fs, args[1:])
+	if err != nil {
+		return err
+	}
+	if *email == "" {
+		return errors.New("-email is required")
+	}
+	log := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	deps, closeFn, err := build(ctx, cfg, log, stdout)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	a, err := app.New(ctx, cfg, deps, feature.Registered())
+	if err != nil {
+		return err
+	}
+	op, err := a.CreateOperator(ctx, *email, *roleName, *ttl)
+	if err != nil {
+		return err
+	}
+	// 監査ログの外部出力は outbox に残り、次に `iam serve` が送る。
+	what := "added role to existing user"
+	if op.Created {
+		what = "created operator"
+	}
+	fmt.Fprintf(stdout, "%s %s (%s)\n", what, op.UserID, *roleName)
+	fmt.Fprintf(stdout, "one-time login token (expires %s). Give it only to the operator:\n%s\n",
+		op.ExpiresAt.Format(time.RFC3339), op.LinkToken)
+	if u := strings.TrimSuffix(cfg.Server.PublicURL, "/"); u != "" {
+		fmt.Fprintf(stdout, "open in a browser: %s/login/link#token=%s\n", u, op.LinkToken)
+	} else {
+		fmt.Fprintln(stdout, "open <public_url>/login/link#token=<token> in a browser, or POST /v1/login/link:redeem {\"token\": \"...\"}")
+	}
+	return nil
 }
 
 func printVersion(args []string, stdout, stderr io.Writer) error {

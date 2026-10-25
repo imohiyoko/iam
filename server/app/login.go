@@ -8,6 +8,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/emailflow"
+	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -81,4 +82,34 @@ func deref[T any](p *T) T {
 		return zero
 	}
 	return *p
+}
+
+func (s publicServer) RedeemLoginLink(ctx context.Context, req publicapi.RedeemLoginLinkRequestObject) (publicapi.RedeemLoginLinkResponseObject, error) {
+	fail := publicapi.RedeemLoginLink401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}
+	if req.Body == nil {
+		return fail, nil
+	}
+	c := s.a.clientOf(ctx)
+	var replace string
+	if tok, viaCookie := sessionToken(httpFrom(ctx).r); viaCookie {
+		replace = tok
+	}
+	is, uid, err := s.a.links.Redeem(ctx, s.a.realm.ID, req.Body.Token, loginlink.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}, replace)
+	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+		return publicapi.RedeemLoginLink403JSONResponse{DeniedJSONResponse: denied(d)}, nil
+	}
+	if errors.Is(err, errs.AuthenticationFailed) {
+		return fail, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := publicapi.RedeemLoginLink200JSONResponse{SessionId: is.Session.ID, ExpiresAt: is.Session.ExpiresAt,
+		UserId: uid, Created: false, Warnings: warningsOut(is.Warnings)}
+	if req.Body.ReturnToken != nil && *req.Body.ReturnToken {
+		out.Token = &is.Token
+	} else {
+		setCookie(ctx, sessionCookieFor(is.Token, is.Session.ExpiresAt, s.a.deps.Clock.Now()))
+	}
+	return out, nil
 }

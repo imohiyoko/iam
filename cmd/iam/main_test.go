@@ -142,3 +142,110 @@ func TestServeRejectsUnknownAdapterOption(t *testing.T) {
 		t.Fatalf("want unknown option error, got %v", err)
 	}
 }
+
+// setupDir は鍵と設定を作り、マイグレーションを適用する。
+func setupDir(t *testing.T) (cfgPath, pub, adm string) {
+	t.Helper()
+	dir := t.TempDir()
+	keys := filepath.Join(dir, "keys.json")
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"keys", "generate", "-out", keys}, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+	pub, adm = freeAddr(t), freeAddr(t)
+	cfgPath = filepath.Join(dir, "iam.yaml")
+	cfg := fmt.Sprintf(`dev: true
+server: {public_addr: %q, admin_addr: %q}
+storage: {driver: sqlite, path: %q}
+keystore: {driver: file, path: %q}
+notifier: {driver: dev}
+`, pub, adm, filepath.Join(dir, "iam.db"), keys)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(context.Background(), []string{"migrate", "-config", cfgPath}, &out, &out); err != nil {
+		t.Fatal(err)
+	}
+	return cfgPath, pub, adm
+}
+
+func postJSON(t *testing.T, url, bearer string, body any) (int, map[string]any) {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequest("POST", url, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+// 最初の運営者を CLI で作り、ログイン用リンクでログインし、そのセッションで管理 API を使う（design.md 2.5、4.11）。
+func TestOperatorCreateThenAdminAPI(t *testing.T) {
+	cfgPath, pub, adm := setupDir(t)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"operator", "create", "-config", cfgPath, "-email", "Ops@Example.com"}, &out, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	var token string
+	for i, l := range lines {
+		if strings.HasPrefix(l, "one-time login token") && i+1 < len(lines) {
+			token = lines[i+1]
+		}
+	}
+	if !strings.HasPrefix(out.String(), "created operator usr_") || token == "" {
+		t.Fatalf("output:\n%s", out.String())
+	}
+	// 2回目は既存のユーザー（ロールは重ねない）。
+	var out2 bytes.Buffer
+	if err := run(context.Background(), []string{"operator", "create", "-config", cfgPath, "-email", "ops@example.com"}, &out2, &out2); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out2.String(), "added role to existing user") {
+		t.Fatalf("second run:\n%s", out2.String())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var stdout, stderr syncBuffer
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, []string{"serve", "-config", cfgPath}, &stdout, &stderr) }()
+	for range 100 {
+		if resp, err := http.Get("http://" + pub + "/healthz"); err == nil {
+			resp.Body.Close()
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	status, res := postJSON(t, "http://"+pub+"/v1/login/link:redeem", "", map[string]any{"token": token, "return_token": true})
+	if status != 200 || res["token"] == nil {
+		t.Fatalf("redeem: %d %v\n%s", status, res, stderr.String())
+	}
+	session := res["token"].(string)
+	// 1回限り。
+	if status, _ := postJSON(t, "http://"+pub+"/v1/login/link:redeem", "", map[string]any{"token": token}); status != 401 {
+		t.Fatalf("reuse: %d", status)
+	}
+	if status, res := postJSON(t, "http://"+adm+"/v1/admin/users", session, map[string]any{"email": "new@example.com"}); status != 201 || res["user_id"] == nil {
+		t.Fatalf("create user: %d %v", status, res)
+	}
+	if status, _ := postJSON(t, "http://"+adm+"/v1/admin/users", "", map[string]any{"email": "x@example.com"}); status != 401 {
+		t.Fatalf("unauthenticated: %d", status)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), token) || strings.Contains(stderr.String(), token) {
+		t.Fatal("login link token leaked to logs")
+	}
+}

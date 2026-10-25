@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{{.T.Title}}</title>
+<link rel="stylesheet" href="/login/assets/login.css">
+<script src="/login/assets/login.js" defer></script>
+</head>
+<body>
+<main id="app" data-page="{{.Page}}" data-return-to="{{.ReturnTo}}">
+  <h1>{{.T.Title}}</h1>
+  <p id="message" role="status" aria-live="polite"></p>
+
+  <section data-step="email">
+    <form id="email-form">
+      <label for="email">{{.T.Email}}</label>
+      <input id="email" name="email" type="email" autocomplete="username" required maxlength="254">
+      <button type="submit">{{.T.SendCode}}</button>
+    </form>
+    {{if .Connections}}
+    <p class="or">{{.T.Or}}</p>
+    <ul class="providers">
+      {{range .Connections}}<li><button type="button" class="provider" data-connection="{{.}}">{{$.T.ContinueWith}} {{.}}</button></li>
+      {{end}}
+    </ul>
+    {{end}}
+  </section>
+
+  <section data-step="code" hidden>
+    <p>{{.T.CodeSent}}</p>
+    <form id="code-form">
+      <label for="code">{{.T.Code}}</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+      <button type="submit">{{.T.Verify}}</button>
+    </form>
+    <p><button type="button" id="restart" class="link">{{.T.UseAnother}}</button></p>
+  </section>
+
+  <section data-step="pending" hidden>
+    <p>{{.T.Working}}</p>
+  </section>
+
+  <section data-step="done" hidden></section>
+
+  <script type="application/json" id="messages">{{.Messages}}</script>
+</main>
+</body>
+</html>

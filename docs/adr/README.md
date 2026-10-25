@@ -59,3 +59,4 @@
 | [0045](0045-internal-and-external-ids.md) | 内部 ID と外部 ID を分け、採番の方式を差し替えられるようにする | 承認 |
 | [0046](0046-m1-login-flows.md) | M1 のログインの流れ（メールのフロー、通知の claim、OAuth）の細部 | 承認 |
 | [0047](0047-m1-login-guards.md) | M1 のログインの守り（警告、応答時間の下限、レートリミット）の細部 | 承認 |
+| [0048](0048-operator-bootstrap-and-admin-auth.md) | 最初の運営者の作成と、管理 API の運営者の認証 | 承認 |

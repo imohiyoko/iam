@@ -5,7 +5,9 @@ info:
   description: |
     管理 API。公開 API とはポートを分ける（design.md 2.5）。
 
-    認証：`Authorization: Bearer <API キー>`（サービスアカウント）。運営者のセッションによる認証は M1 の後半で足す。
+    認証：`Authorization: Bearer <トークン>`。サービスアカウントの API キーか、運営者のセッションのトークン（design.md 4.11）。
+    運営者のセッションでは、直近の認証（`security.session.max_auth_age` 以内）を求める。過ぎていれば
+    `401 reauthentication_required`。権限は組み込みのロール（`realm:owner` など）で判定する。
 paths:
   /healthz:
     get:
@@ -41,6 +43,117 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users:
+    post:
+      operationId: createUser
+      summary: ユーザーを登録する（確認の経路 `admin`。4.1）
+      description: |
+        運営者が所有を確かめたメールアドレスで登録する。権限 `users:create`。
+        アドレスが使われていれば `409 email_exists`（自動リンクしない。4.2）。
+        realm の `verified_via` に `admin` が無ければ `400 verification_method_disabled`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, maxLength: 254 }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id]
+                properties:
+                  user_id: { type: string, description: 公開のユーザー ID }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}:login_link:
+    post:
+      operationId: issueLoginLink
+      summary: 1回限りのログイン用リンクのトークンを発行する
+      description: |
+        権限 `users:login_link`。トークンは `POST /v1/login/link:redeem` に渡す（ホスト型ログイン画面ではリンクにする）。
+        `id` は公開のユーザー ID。有効期間は既定 15 分、上限 24 時間。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ttl_seconds: { type: integer, minimum: 1, maximum: 86400 }
+      responses:
+        "200":
+          description: 発行した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginLink" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/sessions/{id}:revoke:
+    post:
+      operationId: revokeSession
+      summary: セッションを失効させる
+      description: 権限 `sessions:revoke`。既に失効していても 204。反映は `validity_max_delay` 以内（5.3）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 失効した }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/connections:
+    post:
+      operationId: createConnection
+      summary: IdP 接続（OAuth / OIDC）を登録する
+      description: |
+        権限 `connections:manage`。プリセット（`google`）にクライアント ID・シークレット・戻り先の許可リストを足す。
+        シークレットは封をして保存し、応答にも監査ログにも出さない。`slug` は公開 API のパスに使う。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug, preset, client_id, client_secret, redirect_uris]
+              properties:
+                slug: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$" }
+                preset: { type: string }
+                client_id: { type: string }
+                client_secret: { type: string }
+                redirect_uris:
+                  type: array
+                  items: { type: string }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, slug]
+                properties:
+                  id: { type: string }
+                  slug: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
 components:
   responses:
     Error:
@@ -61,6 +174,7 @@ components:
       required: [error]
       properties:
         error: { type: string }
+        message: { type: string, description: 運営者向けの説明（秘密や個人情報は含めない） }
     ClaimedNotification:
       type: object
       required: [to, expires_at]
@@ -68,4 +182,10 @@ components:
         to: { type: string, description: 宛先のメールアドレス }
         code: { type: string, description: 確認コード }
         token: { type: string, description: マジックリンクのトークン（リンク先のアプリが verify に渡す） }
+        expires_at: { type: string, format: date-time }
+    LoginLink:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token: { type: string, description: 1回限り。本人以外に渡さない }
         expires_at: { type: string, format: date-time }
