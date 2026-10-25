@@ -88,6 +88,7 @@ func (e *Error) Is(target error) bool {
 // 比較用の値。
 var (
 	NotFound           = &Error{Kind: KindNotFound}
+	Unauthenticated    = &Error{Kind: KindUnauthenticated}
 	Conflict           = &Error{Kind: KindConflict}
 	Invalid            = &Error{Kind: KindInvalid}
 	FailedPrecondition = &Error{Kind: KindFailedPrecondition}
@@ -97,6 +98,14 @@ var (
 func New(k Kind, format string, args ...any) error {
 	return &Error{Kind: k, Msg: fmt.Sprintf(format, args...)}
 }
+
+// WithCode は外部に返すコードつきのエラーを作る。
+func WithCode(k Kind, code, msg string) error {
+	return &Error{Kind: k, Code: code, Msg: msg}
+}
+
+// AuthenticationFailed は本人確認の前の失敗（理由を問わず同じコードを返す。4.9）。
+var AuthenticationFailed = &Error{Kind: KindUnauthenticated, Code: CodeAuthenticationFailed}
 
 // Wrap は err を分類つきで包む。
 func Wrap(k Kind, err error, format string, args ...any) error {

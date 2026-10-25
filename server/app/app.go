@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -40,13 +41,16 @@ type Deps struct {
 
 // App は組み立て済みの IAM。
 type App struct {
-	cfg    config.Config
-	deps   Deps
-	plan   feature.Plan
-	realm  port.Realm
-	relay  *eventlog.Relay
-	public http.Handler
-	admin  http.Handler
+	cfg   config.Config
+	deps  Deps
+	plan  feature.Plan
+	realm port.Realm
+	relay *eventlog.Relay
+	pii   *pii.Crypter
+	// sessions はセッションの発行・検証（authn/session）。
+	sessions *session.Manager
+	public   http.Handler
+	admin    http.Handler
 }
 
 // New は起動前の検査を行い、App を組み立てる。binary はこのバイナリに含まれるフィーチャー。
@@ -95,6 +99,15 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.relay = &eventlog.Relay{
 		Storage: d.Storage, Sink: d.EventSink, Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
+	}
+	a.pii = pii.New(d.KeyStore)
+	ss := cfg.Security.Session
+	a.sessions = &session.Manager{
+		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Log: d.Logger,
+		Config: session.Config{
+			AbsoluteLifetime: ss.AbsoluteLifetime.Default.D(), IdleTimeout: ss.IdleTimeout.Default.D(),
+			ValidityMaxDelay: ss.ValidityMaxDelay.D(), RotationInterval: ss.RotationInterval.D(), RotationGrace: ss.RotationGrace.D(),
+		},
 	}
 	a.public = withCommon(newPublicHandler(a))
 	a.admin = withCommon(newAdminHandler(a))
