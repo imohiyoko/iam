@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -62,6 +63,10 @@ type Server struct {
 	MultiInstance bool `yaml:"multi_instance"`
 	// ClockSkewWarn は DB との時刻のずれの警告のしきい値（design.md 2.7）。
 	ClockSkewWarn Duration `yaml:"clock_skew_warn"`
+	// PublicURL は公開 API の外から見た URL（https://id.example.com）。CLI がログイン画面のリンクを示すのに使う。
+	PublicURL string `yaml:"public_url"`
+	// LoginTemplates はホスト型ログイン画面のテンプレート（login.html）を置いたディレクトリ。空なら組み込みのもの。
+	LoginTemplates string `yaml:"login_templates"`
 }
 
 // Adapter はアダプタの選択とその設定。driver 以外の項目はアダプタに渡す。
@@ -267,6 +272,11 @@ func (c Config) Validate() error {
 		problems = append(problems, "server.public_addr and server.admin_addr are required")
 	} else if c.Server.PublicAddr == c.Server.AdminAddr {
 		problems = append(problems, "server.public_addr and server.admin_addr must differ")
+	}
+	if u := c.Server.PublicURL; u != "" {
+		if p, err := url.Parse(u); err != nil || p.Host == "" || (p.Scheme != "https" && !(c.Dev && p.Scheme == "http")) || p.Path != "" && p.Path != "/" {
+			problems = append(problems, "server.public_url must be an https origin (http only with dev: true)")
+		}
 	}
 	if c.Notifier.Driver == "dev" && !c.Dev {
 		problems = append(problems, "notifier.driver=dev is only allowed with dev: true")

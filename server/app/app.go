@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
@@ -155,13 +156,29 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Dev: cfg.Dev, TTL: cfg.Security.EmailFlow.TTL.D(), Log: d.Logger,
 	}
+	// 開発用の Notifier には、秘密の取り出し方を渡す（配信用のアプリ無しでメールのログインを試せるように）。
+	if dc, ok := d.Notifier.(devClaimer); ok && cfg.Dev {
+		dc.SetDevClaim(strings.TrimSuffix(cfg.Server.PublicURL, "/"), func(ctx context.Context, realmID, notificationID string) (string, string, string, error) {
+			sec, err := a.notify.Claim(ctx, realmID, notificationID)
+			return sec.To, sec.Code, sec.Token, err
+		})
+	}
 	a.notifier = &eventlog.Relay{
 		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Logger), Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
 	}
-	a.public = withCommon(newPublicHandler(a))
+	login, err := newHosted(a, cfg.Server.LoginTemplates)
+	if err != nil {
+		return nil, err
+	}
+	a.public = withCommon(newPublicHandler(a, login))
 	a.admin = withCommon(newAdminHandler(a))
 	return a, nil
+}
+
+// devClaimer は開発用の Notifier（adapters/notifier/dev）が持つ。
+type devClaimer interface {
+	SetDevClaim(baseURL string, claim func(ctx context.Context, realmID, notificationID string) (to, code, token string, err error))
 }
 
 func (a *App) limiter(limit int) *ratelimit.Limiter {

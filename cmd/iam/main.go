@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -220,7 +221,11 @@ func operator(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	fmt.Fprintf(stdout, "%s %s (%s)\n", what, op.UserID, *roleName)
 	fmt.Fprintf(stdout, "one-time login token (expires %s). Give it only to the operator:\n%s\n",
 		op.ExpiresAt.Format(time.RFC3339), op.LinkToken)
-	fmt.Fprintln(stdout, "redeem with: POST /v1/login/link:redeem {\"token\": \"...\"}")
+	if u := strings.TrimSuffix(cfg.Server.PublicURL, "/"); u != "" {
+		fmt.Fprintf(stdout, "open in a browser: %s/login/link#token=%s\n", u, op.LinkToken)
+	} else {
+		fmt.Fprintln(stdout, "open <public_url>/login/link#token=<token> in a browser, or POST /v1/login/link:redeem {\"token\": \"...\"}")
+	}
 	return nil
 }
 

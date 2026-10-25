@@ -33,12 +33,19 @@ func (s publicServer) GetHealth(ctx context.Context, _ publicapi.GetHealthReques
 }
 
 // newPublicHandler は公開 API。ブラウザからの別オリジンの書き込み（CSRF）は CrossOriginProtection で拒否する（2.5）。
-func newPublicHandler(a *App) http.Handler {
+func newPublicHandler(a *App, login http.Handler) http.Handler {
 	h := publicapi.HandlerWithOptions(publicapi.NewStrictHandlerWithOptions(publicServer{a}, nil, publicapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.responseError,
 	}), publicapi.StdHTTPServerOptions{BaseRouter: newColonMux(), ErrorHandlerFunc: a.requestError})
-	return http.NewCrossOriginProtection().Handler(a.withLoginGuard(a.withSession(h)))
+	api := a.withLoginGuard(a.withSession(h))
+	return http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isHosted(r.URL.Path) {
+			login.ServeHTTP(w, r)
+			return
+		}
+		api.ServeHTTP(w, r)
+	}))
 }
 
 func (s publicServer) Logout(ctx context.Context, _ publicapi.LogoutRequestObject) (publicapi.LogoutResponseObject, error) {
