@@ -342,6 +342,9 @@ func (s *Service) verify(ctx context.Context, realmID string, in Verify) (Verifi
 		})
 		return err
 	})
+	if err == nil {
+		s.Sessions.Committed(ctx, realmID, out.Session)
+	}
 	return out, err
 }
 

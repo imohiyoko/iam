@@ -531,6 +531,9 @@ func (s *Service) login(ctx context.Context, realmID string, conn port.Connectio
 		})
 		return err
 	})
+	if err == nil {
+		s.Sessions.Committed(ctx, realmID, out.Session)
+	}
 	return out, err
 }
 

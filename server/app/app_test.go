@@ -5,11 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +29,7 @@ type env struct {
 	cfg  config.Config
 	deps Deps
 	out  *bytes.Buffer
+	logs *syncBuffer // アプリのログ（秘密が出ないことの確認に使う）
 }
 
 func newEnv(t *testing.T) *env {
@@ -43,12 +44,13 @@ func newEnv(t *testing.T) *env {
 	}
 	clk := clock.NewFake(time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC))
 	out := &bytes.Buffer{}
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logs := &syncBuffer{}
+	log := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	cfg := config.Default()
 	cfg.Dev = true
 	// 応答時間の下限は guard_test で確かめる。ほかのテストでは待たない。
 	cfg.Security.Login.MinResponseTime = 0
-	return &env{cfg: cfg, out: out, deps: Deps{
+	return &env{cfg: cfg, out: out, logs: logs, deps: Deps{
 		Storage: memory.New(clk), Ephemeral: ephemeral.New(clk), KeyStore: ks,
 		EventSink: stdout.New(out), Notifier: &dev.Notifier{Log: log}, Clock: clk, Logger: log,
 	}}
@@ -168,4 +170,21 @@ func TestResponseErrorHidesInternalMessage(t *testing.T) {
 	if rec.Code != 500 || bytes.Contains(rec.Body.Bytes(), []byte("usr_secret")) || !bytes.Contains(rec.Body.Bytes(), []byte(`"internal"`)) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
