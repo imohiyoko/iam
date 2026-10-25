@@ -44,3 +44,4 @@
 | [0030](0030-security-assurance.md) | 第三者のレビュー不足を、機械による検証と外部の基準で補う | 承認 |
 | [0031](0031-notifier-ids-only.md) | 通知は ID だけを渡し、文面・URL・配送は外部が行う | 承認 |
 | [0032](0032-username-password-signup.md) | ID とパスワードだけでのアカウント作成を許可する | 承認 |
+| [0033](0033-security-settings-hierarchy.md) | どこまで厳しくするかは、ホスト先と Org の設定で決める | 承認 |
