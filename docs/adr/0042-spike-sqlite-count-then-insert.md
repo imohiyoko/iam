@@ -1,6 +1,6 @@
 # 0042. SQLite の書き込みトランザクションは BEGIN IMMEDIATE で直列化する
 
-- 状態: 提案
+- 状態: 承認
 - 日付: 2026-10-25
 - 関連: [design.md](../design.md) 2.4、11.14、12、roadmap M0 のスパイク
 

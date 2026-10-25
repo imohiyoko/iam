@@ -1,6 +1,6 @@
 # 0041. AKP（ML-DSA-65）の鍵を含む JWKS は jwx で出力し、主要な Go の RP がそのまま読める
 
-- 状態: 提案
+- 状態: 承認
 - 日付: 2026-10-25
 - 関連: [design.md](../design.md) 9.3、[0038](0038-library-selection.md)、roadmap M0 のスパイク
 
