@@ -106,6 +106,73 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/users/{id}/credentials:
+    get:
+      operationId: listUserCredentials
+      summary: ユーザーの有効な認証情報の一覧（無効化の対象を選ぶため）
+      description: 権限 `credentials:revoke`。メールアドレスなどの個人情報は含めない。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 作成時刻の順
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserCredentials" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/credentials/{credential_id}:revoke:
+    post:
+      operationId: revokeUserCredential
+      summary: ユーザーの passkey・外部 ID の紐付け・TOTP を無効化する（4.6）
+      description: |
+        権限 `credentials:revoke`。`credential_id` は公開 ID（`psk_…`、`idn_…`、`otp_…`）。本人と違い、最後の1つも
+        無効化できる（以後は復旧の手順で戻る）。取り消せない。その認証情報で作ったセッションは、遅くとも
+        `validity_max_delay` の後に使えなくなる。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: credential_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 無効化した }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/password:revoke:
+    post:
+      operationId: revokeUserPassword
+      summary: ユーザーのパスワードを無効化する（フィーチャー password）
+      description: |
+        権限 `credentials:revoke`。再設定は復旧の手順で行う。ユーザーの全セッションを失効させる。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 無効化した }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/credentials:revoke_all:
+    post:
+      operationId: revokeAllUserCredentials
+      summary: 侵害時の初動として、ユーザーの全認証情報と全セッションを無効化する（4.6）
+      description: |
+        権限 `credentials:revoke`。passkey・外部 ID の紐付け・TOTP・パスワードを無効化し、全セッションを失効させる。
+        メールは残す（復旧の経路。4.12）。取り消せない。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 無効化した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RevokedCredentials" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/sessions/{id}:revoke:
     post:
       operationId: revokeSession
@@ -197,3 +264,53 @@ components:
       properties:
         token: { type: string, description: 1回限り。本人以外に渡さない }
         expires_at: { type: string, format: date-time }
+    UserCredentials:
+      type: object
+      required: [passkeys, identities, totp]
+      properties:
+        passkeys:
+          type: array
+          items: { $ref: "#/components/schemas/UserPasskey" }
+        identities:
+          type: array
+          items: { $ref: "#/components/schemas/UserIdentity" }
+        totp:
+          type: array
+          items: { $ref: "#/components/schemas/UserTOTP" }
+        password: { $ref: "#/components/schemas/UserPassword" }
+    UserPasskey:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+    UserIdentity:
+      type: object
+      required: [id, connection, created_at]
+      properties:
+        id: { type: string }
+        connection: { type: string, description: connection の slug }
+        created_at: { type: string, format: date-time }
+    UserTOTP:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: { type: string }
+        created_at: { type: string, format: date-time }
+    UserPassword:
+      type: object
+      description: 設定したパスワード（無ければ省略）
+      required: [created_at]
+      properties:
+        created_at: { type: string, format: date-time }
+    RevokedCredentials:
+      type: object
+      required: [passkeys, identities, totp, password, sessions]
+      properties:
+        passkeys: { type: integer }
+        identities: { type: integer }
+        totp: { type: integer }
+        password: { type: boolean }
+        sessions: { type: integer, description: 失効させたセッションの数 }

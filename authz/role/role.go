@@ -32,12 +32,14 @@ const (
 	PermUsersLoginLink     = "users:login_link"
 	PermConnectionsManage  = "connections:manage"
 	PermPIIRead            = "pii:read"
+	// PermCredentialsRevoke はユーザーの認証情報の一覧と無効化（4.6）。
+	PermCredentialsRevoke = "credentials:revoke"
 )
 
 var builtin = map[string][]string{
-	RealmOwner:           {PermSessionsRevoke, PermUsersCreate, PermUsersLoginLink, PermConnectionsManage, PermPIIRead},
-	RealmAdmin:           {PermSessionsRevoke, PermUsersCreate, PermUsersLoginLink},
-	RealmSecurity:        {PermSessionsRevoke},
+	RealmOwner:           {PermSessionsRevoke, PermUsersCreate, PermUsersLoginLink, PermConnectionsManage, PermPIIRead, PermCredentialsRevoke},
+	RealmAdmin:           {PermSessionsRevoke, PermUsersCreate, PermUsersLoginLink, PermCredentialsRevoke},
+	RealmSecurity:        {PermSessionsRevoke, PermCredentialsRevoke},
 	RealmSupport:         {},
 	RealmBilling:         {},
 	NotificationDelivery: {PermNotificationsClaim},
