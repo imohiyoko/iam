@@ -24,6 +24,9 @@ var ErrLastEmail = errs.WithCode(errs.KindFailedPrecondition, "last_email", "can
 // ErrPrimaryEmail は primary のメールを消そうとしたこと。先に別のメールを primary にする。
 var ErrPrimaryEmail = errs.WithCode(errs.KindFailedPrecondition, "primary_email", "make another email primary first")
 
+// ErrEmailBound は Membership に結び付けたメールを消そうとしたこと。先に結び付け直す（4.4）。
+var ErrEmailBound = errs.WithCode(errs.KindFailedPrecondition, "email_bound_to_membership", "rebind the membership email first")
+
 // ErrLastMethod は最後の認証手段を消そうとしたこと。
 var ErrLastMethod = errs.WithCode(errs.KindFailedPrecondition, "last_method", "cannot remove the last authentication method")
 
@@ -144,6 +147,16 @@ func (s *Service) RemoveEmail(ctx context.Context, tx port.Tx, realmID, userID, 
 	}
 	if e.IsPrimary {
 		return ErrPrimaryEmail
+	}
+	// Membership に結び付けたメールは、結び付け直してからでないと消せない（4.4）。
+	ms, err := tx.Memberships().ListByUser(ctx, realmID, userID)
+	if err != nil {
+		return err
+	}
+	for _, x := range ms {
+		if x.EmailID == e.ID && x.Status != port.MembershipEnded {
+			return ErrEmailBound
+		}
 	}
 	m, err := s.ListMethods(ctx, tx, realmID, userID)
 	if err != nil {

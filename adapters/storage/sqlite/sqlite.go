@@ -197,6 +197,7 @@ func (t *tx) Connections() port.ConnectionRepo         { return connections{t.q}
 func (t *tx) Sessions() port.SessionRepo               { return sessions{t.q} }
 func (t *tx) Orgs() port.OrgRepo                       { return orgs{t.q} }
 func (t *tx) Memberships() port.MembershipRepo         { return memberships{t.q} }
+func (t *tx) Invitations() port.InvitationRepo         { return invitations{t.q} }
 func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t.q} }
 func (t *tx) RoleBindings() port.RoleBindingRepo       { return roleBindings{t.q} }
 

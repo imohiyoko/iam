@@ -8,8 +8,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/notify"
 
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -17,6 +21,7 @@ import (
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/id"
+	"github.com/imohiyoko/iam/shared/pii"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -50,8 +55,14 @@ var (
 
 // Service は Org と Membership を扱う。
 type Service struct {
-	Clock  clock.Clock
-	Policy CreationPolicy
+	Clock   clock.Clock
+	Crypter *pii.Crypter
+	// Accounts は招待からの登録とメールの追加に使う。
+	Accounts *account.Service
+	Notify   *notify.Service
+	Policy   CreationPolicy
+	// InvitationTTL は招待の有効期限。0 なら DefaultInvitationTTL。
+	InvitationTTL time.Duration
 }
 
 // NormalizeName は名前の前後の空白を除き、形式を確かめる。

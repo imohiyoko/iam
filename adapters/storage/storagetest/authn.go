@@ -48,6 +48,9 @@ var authnTests = []struct {
 	{"PersonalOrgUniqueConcurrent", testPersonalOrgUniqueConcurrent},
 	{"Memberships", testMemberships},
 	{"MembershipUniqueConcurrent", testMembershipUniqueConcurrent},
+	{"MembershipUpdate", testMembershipUpdate},
+	{"Invitations", testInvitations},
+	{"InvitationAcceptConcurrent", testInvitationAcceptConcurrent},
 }
 
 func notFound(what string, err error) error {
@@ -707,4 +710,5 @@ var authnIsolationCases = []IsolationCase{
 	suspensionIsolationCase,
 	orgIsolationCase,
 	membershipIsolationCase,
+	invitationIsolationCase,
 }

@@ -67,3 +67,4 @@
 | [0053](0053-user-suspension-and-validity.md) | ユーザーの停止と有効期間 | 承認 |
 | [0054](0054-account-recovery.md) | アカウントの復旧 | 承認 |
 | [0055](0055-org-foundation.md) | Org の土台（個人 Org、共有 Org、後からの有効化） | 承認 |
+| [0056](0056-invitations-and-membership-email.md) | 招待と Membership ごとのメール | 承認 |

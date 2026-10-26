@@ -27,3 +27,24 @@ SELECT * FROM memberships WHERE realm_id = ? AND user_id = ? ORDER BY created_at
 
 -- name: ListMembershipsByOrg :many
 SELECT * FROM memberships WHERE realm_id = ? AND org_id = ? AND public_id > sqlc.arg(after) ORDER BY public_id LIMIT sqlc.arg(lim);
+
+-- name: UpdateMembership :execrows
+UPDATE memberships SET status = ?, org_role = ?, email_id = ?, valid_from = ?, valid_until = ?, ended_reason = ?, updated_at = ?
+WHERE realm_id = ? AND id = ?;
+
+-- name: CreateInvitation :exec
+INSERT INTO invitations (id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash,
+    valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetInvitation :one
+SELECT * FROM invitations WHERE realm_id = ? AND id = ?;
+
+-- name: GetInvitationByPublicID :one
+SELECT * FROM invitations WHERE realm_id = ? AND public_id = ?;
+
+-- name: ListInvitationsByOrg :many
+SELECT * FROM invitations WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id;
+
+-- name: CloseInvitation :execrows
+UPDATE invitations SET status = ?, closed_at = ?, closed_by = ? WHERE realm_id = ? AND id = ? AND status = 'pending';

@@ -10,6 +10,81 @@ import (
 	"database/sql"
 )
 
+const closeInvitation = `-- name: CloseInvitation :execrows
+UPDATE invitations SET status = ?, closed_at = ?, closed_by = ? WHERE realm_id = ? AND id = ? AND status = 'pending'
+`
+
+type CloseInvitationParams struct {
+	Status   string
+	ClosedAt sql.NullString
+	ClosedBy string
+	RealmID  string
+	ID       string
+}
+
+func (q *Queries) CloseInvitation(ctx context.Context, arg CloseInvitationParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, closeInvitation,
+		arg.Status,
+		arg.ClosedAt,
+		arg.ClosedBy,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const createInvitation = `-- name: CreateInvitation :exec
+INSERT INTO invitations (id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash,
+    valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateInvitationParams struct {
+	ID              string
+	PublicID        string
+	RealmID         string
+	OrgID           string
+	EmailIndex      []byte
+	EmailCiphertext []byte
+	IndexKeyID      string
+	OrgRole         string
+	TokenHash       []byte
+	ValidFrom       sql.NullString
+	ValidUntil      sql.NullString
+	InvitedBy       string
+	ExpiresAt       string
+	Status          string
+	CreatedAt       string
+	ClosedAt        sql.NullString
+	ClosedBy        string
+}
+
+func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) error {
+	_, err := q.db.ExecContext(ctx, createInvitation,
+		arg.ID,
+		arg.PublicID,
+		arg.RealmID,
+		arg.OrgID,
+		arg.EmailIndex,
+		arg.EmailCiphertext,
+		arg.IndexKeyID,
+		arg.OrgRole,
+		arg.TokenHash,
+		arg.ValidFrom,
+		arg.ValidUntil,
+		arg.InvitedBy,
+		arg.ExpiresAt,
+		arg.Status,
+		arg.CreatedAt,
+		arg.ClosedAt,
+		arg.ClosedBy,
+	)
+	return err
+}
+
 const createMembership = `-- name: CreateMembership :exec
 INSERT INTO memberships (id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason,
     created_at, updated_at)
@@ -83,6 +158,74 @@ func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) error {
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const getInvitation = `-- name: GetInvitation :one
+SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by FROM invitations WHERE realm_id = ? AND id = ?
+`
+
+type GetInvitationParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetInvitation(ctx context.Context, arg GetInvitationParams) (Invitation, error) {
+	row := q.db.QueryRowContext(ctx, getInvitation, arg.RealmID, arg.ID)
+	var i Invitation
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.OrgID,
+		&i.EmailIndex,
+		&i.EmailCiphertext,
+		&i.IndexKeyID,
+		&i.OrgRole,
+		&i.TokenHash,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.InvitedBy,
+		&i.ExpiresAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.ClosedAt,
+		&i.ClosedBy,
+	)
+	return i, err
+}
+
+const getInvitationByPublicID = `-- name: GetInvitationByPublicID :one
+SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by FROM invitations WHERE realm_id = ? AND public_id = ?
+`
+
+type GetInvitationByPublicIDParams struct {
+	RealmID  string
+	PublicID string
+}
+
+func (q *Queries) GetInvitationByPublicID(ctx context.Context, arg GetInvitationByPublicIDParams) (Invitation, error) {
+	row := q.db.QueryRowContext(ctx, getInvitationByPublicID, arg.RealmID, arg.PublicID)
+	var i Invitation
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.OrgID,
+		&i.EmailIndex,
+		&i.EmailCiphertext,
+		&i.IndexKeyID,
+		&i.OrgRole,
+		&i.TokenHash,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.InvitedBy,
+		&i.ExpiresAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.ClosedAt,
+		&i.ClosedBy,
+	)
+	return i, err
 }
 
 const getMembershipByPublicID = `-- name: GetMembershipByPublicID :one
@@ -227,6 +370,56 @@ func (q *Queries) GetPersonalOrg(ctx context.Context, arg GetPersonalOrgParams) 
 	return i, err
 }
 
+const listInvitationsByOrg = `-- name: ListInvitationsByOrg :many
+SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by FROM invitations WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id
+`
+
+type ListInvitationsByOrgParams struct {
+	RealmID string
+	OrgID   string
+}
+
+func (q *Queries) ListInvitationsByOrg(ctx context.Context, arg ListInvitationsByOrgParams) ([]Invitation, error) {
+	rows, err := q.db.QueryContext(ctx, listInvitationsByOrg, arg.RealmID, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Invitation
+	for rows.Next() {
+		var i Invitation
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.OrgID,
+			&i.EmailIndex,
+			&i.EmailCiphertext,
+			&i.IndexKeyID,
+			&i.OrgRole,
+			&i.TokenHash,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.InvitedBy,
+			&i.ExpiresAt,
+			&i.Status,
+			&i.CreatedAt,
+			&i.ClosedAt,
+			&i.ClosedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMembershipsByOrg = `-- name: ListMembershipsByOrg :many
 SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND org_id = ? AND public_id > ?3 ORDER BY public_id LIMIT ?4
 `
@@ -324,4 +517,39 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, arg ListMemberships
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateMembership = `-- name: UpdateMembership :execrows
+UPDATE memberships SET status = ?, org_role = ?, email_id = ?, valid_from = ?, valid_until = ?, ended_reason = ?, updated_at = ?
+WHERE realm_id = ? AND id = ?
+`
+
+type UpdateMembershipParams struct {
+	Status      string
+	OrgRole     string
+	EmailID     string
+	ValidFrom   sql.NullString
+	ValidUntil  sql.NullString
+	EndedReason string
+	UpdatedAt   string
+	RealmID     string
+	ID          string
+}
+
+func (q *Queries) UpdateMembership(ctx context.Context, arg UpdateMembershipParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateMembership,
+		arg.Status,
+		arg.OrgRole,
+		arg.EmailID,
+		arg.ValidFrom,
+		arg.ValidUntil,
+		arg.EndedReason,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

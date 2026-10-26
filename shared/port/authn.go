@@ -495,4 +495,50 @@ type MembershipRepo interface {
 	// ListByOrg は公開 ID の順に、afterPublicID より後を最大 limit 件返す（終了したものも含む）。
 	// Org のメンバーは多くなりうるため、ページングで取る（カーソルは外に出してよい公開 ID）。
 	ListByOrg(ctx context.Context, realmID, orgID, afterPublicID string, limit int) ([]Membership, error)
+	// Update は ID の Membership の状態・役割・メール・有効期間・終了の理由・更新時刻を m の値に置き換える。
+	// ユーザー・Org・作成時刻は変えない。無ければ errs.NotFound。
+	Update(ctx context.Context, m Membership) error
+}
+
+// InvitationStatus は招待の状態。期限切れは ExpiresAt から計算し、行は pending のまま残してよい。
+type InvitationStatus string
+
+const (
+	InvitationPending  InvitationStatus = "pending"
+	InvitationAccepted InvitationStatus = "accepted"
+	InvitationRevoked  InvitationStatus = "revoked"
+)
+
+// Invitation は invitations の1行（design.md 3.1、4.4）。アドレスは招待ごとのデータ鍵（ID は招待の内部 ID）で暗号化し、
+// 終わったら鍵を消す。トークンは秘密のハッシュだけを持つ。ID は内部 ID で、API に出すのは PublicID（ADR 0045）。
+type Invitation struct {
+	ID              string
+	PublicID        string
+	RealmID         string
+	OrgID           string
+	EmailIndex      []byte
+	EmailCiphertext []byte
+	IndexKeyID      string
+	Role            OrgRole
+	TokenHash       []byte     // 秘密部分の SHA-256
+	ValidFrom       *time.Time // 受け入れて作る Membership の有効期間
+	ValidUntil      *time.Time
+	InvitedBy       string // 招待した主体の公開 ID
+	ExpiresAt       time.Time
+	Status          InvitationStatus
+	CreatedAt       time.Time
+	// ClosedAt は受け入れ・取り消しの時刻。ClosedBy は受け入れたユーザーか、取り消した主体の公開 ID。
+	ClosedAt *time.Time
+	ClosedBy string
+}
+
+// InvitationRepo は invitations の Repository。
+type InvitationRepo interface {
+	// Create は ID・(realm, PublicID) が重複すれば errs.Conflict を返す。
+	Create(ctx context.Context, i Invitation) error
+	GetByPublicID(ctx context.Context, realmID, publicID string) (Invitation, error)
+	// ListByOrg は Org の招待を作成時刻の順（同時刻は ID の順）に返す（終わったものも含む）。
+	ListByOrg(ctx context.Context, realmID, orgID string) ([]Invitation, error)
+	// Close は pending なら status にして true を返す。pending でなければ false（同時の受け入れは1つだけ通る）。無ければ errs.NotFound。
+	Close(ctx context.Context, realmID, id string, status InvitationStatus, at time.Time, by string) (bool, error)
 }

@@ -192,6 +192,26 @@ type AuthzRoleBinding struct {
 	CreatedAt     string
 }
 
+type Invitation struct {
+	ID              string
+	PublicID        string
+	RealmID         string
+	OrgID           string
+	EmailIndex      []byte
+	EmailCiphertext []byte
+	IndexKeyID      string
+	OrgRole         string
+	TokenHash       []byte
+	ValidFrom       sql.NullString
+	ValidUntil      sql.NullString
+	InvitedBy       string
+	ExpiresAt       string
+	Status          string
+	CreatedAt       string
+	ClosedAt        sql.NullString
+	ClosedBy        string
+}
+
 type Membership struct {
 	ID          string
 	PublicID    string
