@@ -26,4 +26,4 @@ SELECT * FROM memberships WHERE realm_id = ? AND user_id = ? AND org_id = ?;
 SELECT * FROM memberships WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
 
 -- name: ListMembershipsByOrg :many
-SELECT * FROM memberships WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id;
+SELECT * FROM memberships WHERE realm_id = ? AND org_id = ? AND public_id > sqlc.arg(after) ORDER BY public_id LIMIT sqlc.arg(lim);

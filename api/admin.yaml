@@ -384,7 +384,7 @@ paths:
     get:
       operationId: getOrg
       summary: Org を返す
-      description: 権限 `orgs:read`。
+      description: 権限 `orgs:read`。フィーチャー org が動いていなければ `404 org_disabled`。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -401,12 +401,14 @@ paths:
     get:
       operationId: listOrgMemberships
       summary: Org の Membership の一覧（終了したものも含む）
-      description: 権限 `orgs:read`。
+      description: 権限 `orgs:read`。Membership の公開 ID の順に、`limit` 件ずつ返す。続きは `next_cursor` を `after` に渡す。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+        - { name: after, in: query, schema: { type: string } }
       responses:
         "200":
-          description: 作成の順
+          description: Membership の公開 ID の順
           content:
             application/json:
               schema:
@@ -416,6 +418,8 @@ paths:
                   memberships:
                     type: array
                     items: { $ref: "#/components/schemas/Membership" }
+                  next_cursor: { type: string, description: 続きがあるときだけ }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }

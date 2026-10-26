@@ -156,6 +156,9 @@ func (s adminServer) GetOrg(ctx context.Context, req adminapi.GetOrgRequestObjec
 	case d != nil:
 		return adminapi.GetOrg403JSONResponse(d.Body), nil
 	}
+	if s.a.orgs == nil {
+		return adminapi.GetOrg404JSONResponse(adminError("org_disabled", "")), nil
+	}
 	var out adminapi.Org
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
@@ -177,9 +180,19 @@ func (s adminServer) ListOrgMemberships(ctx context.Context, req adminapi.ListOr
 	case err != nil:
 		return nil, err
 	case d != nil && d.Status == http.StatusUnauthorized:
-		return adminapi.ListOrgMemberships401JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(d.Body)}, nil
+		return adminapi.ListOrgMemberships401JSONResponse(d.Body), nil
 	case d != nil:
 		return adminapi.ListOrgMemberships403JSONResponse(d.Body), nil
+	}
+	if s.a.orgs == nil {
+		return adminapi.ListOrgMemberships404JSONResponse(adminError("org_disabled", "")), nil
+	}
+	limit := 100
+	if req.Params.Limit != nil {
+		limit = *req.Params.Limit
+	}
+	if limit < 1 || limit > 200 {
+		return adminapi.ListOrgMemberships400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", "limit must be within [1, 200]"))}, nil
 	}
 	out := adminapi.ListOrgMemberships200JSONResponse{Memberships: []adminapi.Membership{}}
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
@@ -187,9 +200,15 @@ func (s adminServer) ListOrgMemberships(ctx context.Context, req adminapi.ListOr
 		if err != nil {
 			return err
 		}
-		ms, err := tx.Memberships().ListByOrg(ctx, s.a.realm.ID, o.ID)
+		// 1件多く取り、続きがあるかを知る。
+		ms, err := tx.Memberships().ListByOrg(ctx, s.a.realm.ID, o.ID, deref(req.Params.After), limit+1)
 		if err != nil {
 			return err
+		}
+		if len(ms) > limit {
+			ms = ms[:limit]
+			next := ms[limit-1].PublicID
+			out.NextCursor = &next
 		}
 		for _, m := range ms {
 			u, err := tx.Users().Get(ctx, s.a.realm.ID, m.UserID)

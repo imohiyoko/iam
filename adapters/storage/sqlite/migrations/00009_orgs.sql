@@ -36,4 +36,4 @@ CREATE TABLE memberships (
     UNIQUE (realm_id, user_id, org_id)
 ) STRICT;
 
-CREATE INDEX memberships_org ON memberships (realm_id, org_id);
+CREATE INDEX memberships_org ON memberships (realm_id, org_id, public_id);

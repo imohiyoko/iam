@@ -228,16 +228,23 @@ func (q *Queries) GetPersonalOrg(ctx context.Context, arg GetPersonalOrgParams) 
 }
 
 const listMembershipsByOrg = `-- name: ListMembershipsByOrg :many
-SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND org_id = ? AND public_id > ?3 ORDER BY public_id LIMIT ?4
 `
 
 type ListMembershipsByOrgParams struct {
 	RealmID string
 	OrgID   string
+	After   string
+	Lim     int64
 }
 
 func (q *Queries) ListMembershipsByOrg(ctx context.Context, arg ListMembershipsByOrgParams) ([]Membership, error) {
-	rows, err := q.db.QueryContext(ctx, listMembershipsByOrg, arg.RealmID, arg.OrgID)
+	rows, err := q.db.QueryContext(ctx, listMembershipsByOrg,
+		arg.RealmID,
+		arg.OrgID,
+		arg.After,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

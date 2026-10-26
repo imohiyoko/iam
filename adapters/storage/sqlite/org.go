@@ -72,7 +72,7 @@ func (r memberships) ListByUser(ctx context.Context, realmID, userID string) ([]
 	return rows(rs, err, toMembership)
 }
 
-func (r memberships) ListByOrg(ctx context.Context, realmID, orgID string) ([]port.Membership, error) {
-	rs, err := r.q.ListMembershipsByOrg(ctx, db.ListMembershipsByOrgParams{RealmID: realmID, OrgID: orgID})
+func (r memberships) ListByOrg(ctx context.Context, realmID, orgID, afterPublicID string, limit int) ([]port.Membership, error) {
+	rs, err := r.q.ListMembershipsByOrg(ctx, db.ListMembershipsByOrgParams{RealmID: realmID, OrgID: orgID, After: afterPublicID, Lim: int64(limit)})
 	return rows(rs, err, toMembership)
 }

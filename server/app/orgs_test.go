@@ -163,6 +163,13 @@ func TestOrgOffHasNoOrgs(t *testing.T) {
 	if got := l.activeOrg(t, cookie); got != "" {
 		t.Fatalf("active org with org off = %q", got)
 	}
+	_, opToken := l.operator(t, "ops@example.com", role.RealmOwner)
+	for _, path := range []string{"/v1/admin/orgs/org_x", "/v1/admin/orgs/org_x/memberships"} {
+		var e struct{ Error string }
+		if code := l.adminGet(t, path, opToken, &e); code != 404 || e.Error != "org_disabled" {
+			t.Fatalf("%s with org off = %d %+v", path, code, e)
+		}
+	}
 }
 
 // 後から Org を有効にすると、既存のユーザーに個人 Org を作る（11.13）。

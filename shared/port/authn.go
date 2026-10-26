@@ -490,7 +490,9 @@ type MembershipRepo interface {
 	GetByPublicID(ctx context.Context, realmID, publicID string) (Membership, error)
 	// GetByUserOrg はユーザーと Org の Membership を返す（終了したものも含む）。無ければ errs.NotFound。
 	GetByUserOrg(ctx context.Context, realmID, userID, orgID string) (Membership, error)
-	// ListByUser と ListByOrg は作成時刻の順（同時刻は ID の順）に返す（終了したものも含む）。
+	// ListByUser は作成時刻の順（同時刻は ID の順）に返す（終了したものも含む）。
 	ListByUser(ctx context.Context, realmID, userID string) ([]Membership, error)
-	ListByOrg(ctx context.Context, realmID, orgID string) ([]Membership, error)
+	// ListByOrg は公開 ID の順に、afterPublicID より後を最大 limit 件返す（終了したものも含む）。
+	// Org のメンバーは多くなりうるため、ページングで取る（カーソルは外に出してよい公開 ID）。
+	ListByOrg(ctx context.Context, realmID, orgID, afterPublicID string, limit int) ([]Membership, error)
 }

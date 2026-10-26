@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -104,8 +105,22 @@ func testMemberships(t *testing.T, h Harness) {
 		if list, err := repo.ListByUser(ctx, r, u); err != nil || len(list) != 2 || list[0].ID != a.ID || list[1].ID != later.ID {
 			return fmt.Errorf("memberships.ListByUser = %+v, %v", list, err)
 		}
-		if list, err := repo.ListByOrg(ctx, r, o); err != nil || len(list) != 2 {
-			return fmt.Errorf("memberships.ListByOrg = %+v, %v", list, err)
+		var paged []string
+		for after := ""; ; {
+			page, err := repo.ListByOrg(ctx, r, o, after, 1)
+			if err != nil {
+				return err
+			}
+			if len(page) == 0 {
+				break
+			}
+			if len(page) > 1 {
+				return fmt.Errorf("memberships.ListByOrg returned %d > limit", len(page))
+			}
+			paged, after = append(paged, page[0].PublicID), page[0].PublicID
+		}
+		if want := []string{a.PublicID, other.PublicID}; len(paged) != 2 || !slices.Contains(paged, want[0]) || !slices.Contains(paged, want[1]) || paged[0] > paged[1] {
+			return fmt.Errorf("memberships.ListByOrg pages = %v", paged)
 		}
 		return notFound("get in another realm", second(repo.GetByUserOrg(ctx, id.New(id.Realm), u, o)))
 	})
@@ -170,7 +185,7 @@ var membershipIsolationCase = IsolationCase{
 		if err != nil {
 			return 0, err
 		}
-		d, err := count(tx.Memberships().ListByOrg(ctx, r, isoOrg))
+		d, err := count(tx.Memberships().ListByOrg(ctx, r, isoOrg, "", 10))
 		return a + b + c + d, err
 	},
 }

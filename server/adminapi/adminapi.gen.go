@@ -319,6 +319,12 @@ type CreateOrgJSONBody struct {
 	OwnerId string `json:"owner_id"`
 }
 
+// ListOrgMembershipsParams defines parameters for ListOrgMemberships.
+type ListOrgMembershipsParams struct {
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // CreateUserJSONBody defines parameters for CreateUser.
 type CreateUserJSONBody struct {
 	Email string `json:"email"`
@@ -378,7 +384,7 @@ type ServerInterface interface {
 	GetOrg(w http.ResponseWriter, r *http.Request, id string)
 	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/memberships)
-	ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string)
+	ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams)
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(w http.ResponseWriter, r *http.Request, id string)
@@ -535,8 +541,37 @@ func (siw *ServerInterfaceWrapper) ListOrgMemberships(w http.ResponseWriter, r *
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListOrgMembershipsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListOrgMemberships(w, r, id)
+		siw.Handler.ListOrgMemberships(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1322,7 +1357,8 @@ func (response GetOrg404JSONResponse) VisitGetOrgResponse(w http.ResponseWriter)
 }
 
 type ListOrgMembershipsRequestObject struct {
-	Id string `json:"id"`
+	Id     string `json:"id"`
+	Params ListOrgMembershipsParams
 }
 
 type ListOrgMembershipsResponseObject interface {
@@ -1331,6 +1367,9 @@ type ListOrgMembershipsResponseObject interface {
 
 type ListOrgMemberships200JSONResponse struct {
 	Memberships []Membership `json:"memberships"`
+
+	// NextCursor 続きがあるときだけ
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 func (response ListOrgMemberships200JSONResponse) VisitListOrgMembershipsResponse(w http.ResponseWriter) error {
@@ -1345,7 +1384,21 @@ func (response ListOrgMemberships200JSONResponse) VisitListOrgMembershipsRespons
 	return err
 }
 
-type ListOrgMemberships401JSONResponse struct{ ErrorJSONResponse }
+type ListOrgMemberships400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListOrgMemberships400JSONResponse) VisitListOrgMembershipsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgMemberships401JSONResponse Error
 
 func (response ListOrgMemberships401JSONResponse) VisitListOrgMembershipsResponse(w http.ResponseWriter) error {
 
@@ -2480,10 +2533,11 @@ func (sh *strictHandler) GetOrg(w http.ResponseWriter, r *http.Request, id strin
 }
 
 // ListOrgMemberships operation middleware
-func (sh *strictHandler) ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string) {
+func (sh *strictHandler) ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams) {
 	var request ListOrgMembershipsRequestObject
 
 	request.Id = id
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListOrgMemberships(ctx, request.(ListOrgMembershipsRequestObject))

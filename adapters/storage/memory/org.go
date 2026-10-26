@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/errs"
@@ -118,6 +119,13 @@ func (r memberships) ListByUser(_ context.Context, realmID, userID string) ([]po
 	return r.list(func(x port.Membership) bool { return x.RealmID == realmID && x.UserID == userID }), nil
 }
 
-func (r memberships) ListByOrg(_ context.Context, realmID, orgID string) ([]port.Membership, error) {
-	return r.list(func(x port.Membership) bool { return x.RealmID == realmID && x.OrgID == orgID }), nil
+func (r memberships) ListByOrg(_ context.Context, realmID, orgID, afterPublicID string, limit int) ([]port.Membership, error) {
+	out := r.list(func(x port.Membership) bool {
+		return x.RealmID == realmID && x.OrgID == orgID && x.PublicID > afterPublicID
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].PublicID < out[j].PublicID })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
