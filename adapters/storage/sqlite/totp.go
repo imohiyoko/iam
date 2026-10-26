@@ -1,0 +1,56 @@
+package sqlite
+
+import (
+	"context"
+	"time"
+
+	"github.com/imohiyoko/iam/adapters/storage/sqlite/db"
+	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/port"
+)
+
+type totps struct{ q *db.Queries }
+
+func toTOTP(r db.AuthnTotpCredential) (port.TOTPCredential, error) {
+	var p times
+	c := port.TOTPCredential{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, UserID: r.UserID, SecretCiphertext: r.SecretCiphertext,
+		LastUsedStep: r.LastUsedStep, CreatedAt: p.at(r.CreatedAt), RevokedAt: p.null(r.RevokedAt), RevokeReason: r.RevokeReason}
+	return c, p.err
+}
+
+func (r totps) Create(ctx context.Context, c port.TOTPCredential) error {
+	return mapErr(r.q.CreateTOTP(ctx, db.CreateTOTPParams{ID: c.ID, PublicID: c.PublicID, RealmID: c.RealmID, UserID: c.UserID,
+		SecretCiphertext: nonNil(c.SecretCiphertext), LastUsedStep: c.LastUsedStep, CreatedAt: formatTime(c.CreatedAt),
+		RevokedAt: nullTime(c.RevokedAt), RevokeReason: c.RevokeReason}))
+}
+
+func (r totps) GetByPublicID(ctx context.Context, realmID, publicID string) (port.TOTPCredential, error) {
+	row, err := r.q.GetTOTPByPublicID(ctx, db.GetTOTPByPublicIDParams{RealmID: realmID, PublicID: publicID})
+	return one(row, err, toTOTP)
+}
+
+func (r totps) ListByUser(ctx context.Context, realmID, userID string) ([]port.TOTPCredential, error) {
+	rs, err := r.q.ListTOTPByUser(ctx, db.ListTOTPByUserParams{RealmID: realmID, UserID: userID})
+	return rows(rs, err, toTOTP)
+}
+
+func (r totps) Use(ctx context.Context, realmID, id string, step int64) error {
+	n, err := r.q.UseTOTP(ctx, db.UseTOTPParams{Step: step, RealmID: realmID, ID: id})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n > 0 {
+		return nil
+	}
+	if _, err := r.q.GetTOTP(ctx, db.GetTOTPParams{RealmID: realmID, ID: id}); err != nil {
+		return mapErr(err)
+	}
+	return errs.New(errs.KindConflict, "totp step already used")
+}
+
+func (r totps) Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error {
+	if _, err := r.q.GetTOTP(ctx, db.GetTOTPParams{RealmID: realmID, ID: id}); err != nil {
+		return mapErr(err)
+	}
+	return mapErr(r.q.RevokeTOTP(ctx, db.RevokeTOTPParams{RevokedAt: nullTime(&at), RevokeReason: reason, RealmID: realmID, ID: id}))
+}

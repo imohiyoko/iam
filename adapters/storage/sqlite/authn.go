@@ -231,7 +231,7 @@ func toSession(r db.AuthnSession) (port.Session, error) {
 	s := port.Session{ID: r.ID, RealmID: r.RealmID, PrincipalType: port.PrincipalType(r.PrincipalType), PrincipalID: r.PrincipalID,
 		ActiveOrgID: r.ActiveOrgID, TokenHash: r.TokenHash, Warnings: r.Warnings, IP: r.Ip, UserAgent: r.UserAgent,
 		AuthenticatedAt: p.at(r.AuthenticatedAt), CreatedAt: p.at(r.CreatedAt), LastSeenAt: p.at(r.LastSeenAt), ExpiresAt: p.at(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt),
-		RevokeReason: r.RevokeReason}
+		RevokeReason: r.RevokeReason, Restriction: port.SessionRestriction(r.Restriction)}
 	if p.err != nil {
 		return s, p.err
 	}
@@ -254,7 +254,7 @@ func (r sessions) Create(ctx context.Context, s port.Session) error {
 		PrincipalID: s.PrincipalID, ActiveOrgID: s.ActiveOrgID, TokenHash: nonNil(s.TokenHash), AuthMethods: jsonList(s.AuthMethods),
 		AuthCredentialIds: jsonList(s.AuthCredentialIDs), Warnings: nonNil(s.Warnings), Ip: nonNil(s.IP), UserAgent: nonNil(s.UserAgent),
 		AuthenticatedAt: formatTime(s.AuthenticatedAt), CreatedAt: formatTime(s.CreatedAt), LastSeenAt: formatTime(s.LastSeenAt), ExpiresAt: formatTime(s.ExpiresAt),
-		RevokedAt: nullTime(s.RevokedAt), RevokeReason: s.RevokeReason}))
+		RevokedAt: nullTime(s.RevokedAt), RevokeReason: s.RevokeReason, Restriction: string(s.Restriction)}))
 }
 
 func (r sessions) Get(ctx context.Context, realmID, id string) (port.Session, error) {

@@ -38,6 +38,14 @@
     <p><button type="button" id="restart" class="link">{{.T.UseAnother}}</button></p>
   </section>
 
+  <section data-step="totp" hidden>
+    <form id="totp-form">
+      <label for="totp">{{.T.TOTP}}</label>
+      <input id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+      <button type="submit">{{.T.Verify}}</button>
+    </form>
+  </section>
+
   <section data-step="pending" hidden>
     <p>{{.T.Working}}</p>
   </section>

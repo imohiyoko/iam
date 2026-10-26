@@ -93,6 +93,7 @@ const (
 	SACredential   Prefix = "sac"
 	Client         Prefix = "cli"
 	Passkey        Prefix = "psk"
+	TOTP           Prefix = "otp"
 	Notification   Prefix = "ntf"
 	Event          Prefix = "evt"
 	Outbox         Prefix = "obx"

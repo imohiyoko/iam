@@ -153,6 +153,35 @@ type PasskeyRepo interface {
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
 }
 
+// TOTPCredential は totp_credentials の1行（design.md 3.1、4.1）。秘密はユーザーのデータ鍵で暗号化する（9.5）。
+// 無効化は削除ではなく RevokedAt を記録する（4.6）。ID は内部 ID で、API に出すのは PublicID。
+type TOTPCredential struct {
+	ID               string
+	PublicID         string
+	RealmID          string
+	UserID           string
+	SecretCiphertext []byte
+	// LastUsedStep は最後に受け入れた時間窓（Unix 時刻 / 30 秒）。同じか前の窓のコードは拒否する（再利用の防止）。
+	LastUsedStep int64
+	CreatedAt    time.Time
+	RevokedAt    *time.Time
+	RevokeReason string
+}
+
+// TOTPRepo は totp_credentials の Repository。
+type TOTPRepo interface {
+	// Create は (realm, PublicID) が重複すれば errs.Conflict を返す。
+	Create(ctx context.Context, c TOTPCredential) error
+	GetByPublicID(ctx context.Context, realmID, publicID string) (TOTPCredential, error)
+	// ListByUser はユーザーの TOTP を作成時刻の順（同時刻は ID の順）に返す（無効化したものも含む）。
+	ListByUser(ctx context.Context, realmID, userID string) ([]TOTPCredential, error)
+	// Use は step を最後に使った時間窓にする。今の値が step 以上なら errs.Conflict（再利用。原子的に判定する）。
+	// 無ければ errs.NotFound。
+	Use(ctx context.Context, realmID, id string, step int64) error
+	// Revoke は at に無効化する。既に無効化されていれば何もしない。無ければ errs.NotFound。
+	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+}
+
 // Connection は connections の1行（外部の IdP との接続）。秘密を含む設定はコアが暗号化してから渡す。
 type Connection struct {
 	ID        string
@@ -189,9 +218,11 @@ type Session struct {
 	TokenHash         []byte   // 秘密部分の SHA-256
 	AuthMethods       []string // amr
 	AuthCredentialIDs []string // 認証に使った認証情報（無効化の判定に使う）
-	Warnings          []byte   // JSON
-	IP                []byte   // ユーザーのデータ鍵で暗号化したもの
-	UserAgent         []byte   // 同上
+	// Restriction は使える操作の制限。空なら制限なし（SessionRestriction を参照）。
+	Restriction SessionRestriction
+	Warnings    []byte // JSON
+	IP          []byte // ユーザーのデータ鍵で暗号化したもの
+	UserAgent   []byte // 同上
 	// AuthenticatedAt は最後に本人確認した時刻（max_auth_age の判定に使う）。ID を入れ替えても引き継ぐ。
 	AuthenticatedAt time.Time
 	CreatedAt       time.Time // この ID を発行した時刻（ID の入れ替えの判定に使う）
@@ -201,6 +232,18 @@ type Session struct {
 	RevokedAt    *time.Time
 	RevokeReason string
 }
+
+// SessionRestriction はセッションで使える操作の制限（design.md 4.1、4.12）。
+type SessionRestriction string
+
+const (
+	// RestrictionNone は制限なし（通常のセッション）。
+	RestrictionNone SessionRestriction = ""
+	// RestrictionSecondFactor は1要素目の後で、2要素目の確認だけができる。
+	RestrictionSecondFactor SessionRestriction = "second_factor"
+	// RestrictionEnroll は2要素目が必須で未登録のユーザーが、2要素目の登録だけができる。
+	RestrictionEnroll SessionRestriction = "enroll"
+)
 
 // SessionRepo は sessions の Repository。
 type SessionRepo interface {

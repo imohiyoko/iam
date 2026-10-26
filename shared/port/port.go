@@ -42,6 +42,7 @@ type Tx interface {
 	Emails() EmailRepo
 	Identities() IdentityRepo
 	Passkeys() PasskeyRepo
+	TOTP() TOTPRepo
 	Connections() ConnectionRepo
 	Sessions() SessionRepo
 	ServiceAccounts() ServiceAccountRepo

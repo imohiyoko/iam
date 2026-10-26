@@ -27,6 +27,8 @@ var authnTests = []struct {
 	{"IdentityUniqueConcurrent", testIdentityUniqueConcurrent},
 	{"Passkeys", testPasskeys},
 	{"PasskeyUniqueConcurrent", testPasskeyUniqueConcurrent},
+	{"TOTP", testTOTP},
+	{"TOTPUseConcurrent", testTOTPUseConcurrent},
 	{"Connections", testConnections},
 	{"Sessions", testSessions},
 	{"SessionRevokeByPrincipal", testSessionRevokeByPrincipal},
@@ -315,6 +317,7 @@ func testSessions(t *testing.T, h Harness) {
 	s, _ := open(t, h)
 	r, u := id.New(id.Realm), id.New(id.User)
 	a := newSession(r, u, T0)
+	a.Restriction = port.RestrictionSecondFactor
 	b := newSession(r, u, T0.Add(time.Minute))
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Sessions()
@@ -508,6 +511,7 @@ const (
 	isoUser    = "usr_00000000000000000000000000"
 	isoPublic  = "usr_00000000000000000000000009"
 	isoPasskey = "psk_00000000000000000000000009"
+	isoTOTP    = "otp_00000000000000000000000009"
 	isoConn    = "con_00000000000000000000000000"
 	isoSubject = "iso-subject"
 	isoEmail   = "iso-email-index"
@@ -642,4 +646,5 @@ var authnIsolationCases = []IsolationCase{
 		},
 	},
 	passkeyIsolationCase,
+	totpIsolationCase,
 }

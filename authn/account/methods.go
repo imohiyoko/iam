@@ -34,6 +34,7 @@ type Methods struct {
 	Emails     []port.UserEmail
 	Identities []port.Identity
 	Passkeys   []port.Passkey
+	TOTP       []port.TOTPCredential // 2要素目だけに使う（ログインの手段には数えない）
 }
 
 // ListMethods はユーザーのメールと、無効化していない外部 ID の紐付けと passkey を返す。
@@ -50,7 +51,16 @@ func (s *Service) ListMethods(ctx context.Context, tx port.Tx, realmID, userID s
 	if err != nil {
 		return Methods{}, err
 	}
+	ts, err := tx.TOTP().ListByUser(ctx, realmID, userID)
+	if err != nil {
+		return Methods{}, err
+	}
 	m := Methods{Emails: es}
+	for _, t := range ts {
+		if t.RevokedAt == nil {
+			m.TOTP = append(m.TOTP, t)
+		}
+	}
 	for _, i := range is {
 		if i.RevokedAt == nil {
 			m.Identities = append(m.Identities, i)
@@ -257,6 +267,22 @@ func (s *Service) RevokePasskey(ctx context.Context, tx port.Tx, realmID, userID
 	}
 	return p, s.record(ctx, tx, realmID, "passkey.revoked", actor, requestID,
 		map[string]any{"passkey_id": p.PublicID, "reason": ReasonRevokedByUser})
+}
+
+// RevokeTOTP は TOTP を無効化する（削除しない。4.6）。TOTP は2要素目だけに使うので、最後の1つでも
+// 無効化できる（2段階認証が必須なら、次のログインで登録を求める）。
+func (s *Service) RevokeTOTP(ctx context.Context, tx port.Tx, realmID, userID, publicID string, actor audit.Actor, requestID string) (port.TOTPCredential, error) {
+	c, err := tx.TOTP().GetByPublicID(ctx, realmID, publicID)
+	if err == nil && (c.UserID != userID || c.RevokedAt != nil) {
+		err = errs.New(errs.KindNotFound, "totp")
+	}
+	if err != nil {
+		return port.TOTPCredential{}, err
+	}
+	if err := tx.TOTP().Revoke(ctx, realmID, c.ID, s.Clock.Now(), ReasonRevokedByUser); err != nil {
+		return port.TOTPCredential{}, err
+	}
+	return c, s.record(ctx, tx, realmID, "totp.revoked", actor, requestID, map[string]any{"totp_id": c.PublicID, "reason": ReasonRevokedByUser})
 }
 
 func (s *Service) record(ctx context.Context, tx port.Tx, realmID, typ string, actor audit.Actor, requestID string, details map[string]any) error {

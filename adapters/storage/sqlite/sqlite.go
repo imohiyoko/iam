@@ -188,6 +188,7 @@ func (t *tx) Users() port.UserRepo                     { return users{t.q} }
 func (t *tx) Emails() port.EmailRepo                   { return emails{t.q} }
 func (t *tx) Identities() port.IdentityRepo            { return identities{t.q} }
 func (t *tx) Passkeys() port.PasskeyRepo               { return passkeys{t.q} }
+func (t *tx) TOTP() port.TOTPRepo                      { return totps{t.q} }
 func (t *tx) Connections() port.ConnectionRepo         { return connections{t.q} }
 func (t *tx) Sessions() port.SessionRepo               { return sessions{t.q} }
 func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t.q} }

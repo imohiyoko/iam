@@ -248,6 +248,57 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/login/second-factor/passkey:start:
+    post:
+      operationId: startSecondFactorPasskey
+      summary: 2要素目の passkey の確認を始める
+      description: |
+        2要素目の確認待ち（`next: second_factor`）か登録だけ（`next: enroll`）のセッションで使う。本人の passkey に限り、
+        本人確認（UV）は求めない。フロー ID は `__Host-iam_passkey` Cookie と本文で返す。passkey が無ければ 404。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PasskeyCeremony" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/login/second-factor:verify:
+    post:
+      operationId: verifySecondFactor
+      summary: 2要素目を確かめ、通常のセッションに替える
+      description: |
+        `totp_code`（認証器アプリの6桁）か、`credential`（`navigator.credentials.get()` の結果）のどちらかを送る。
+        成功すると制限つきのセッションを失効させ、通常のセッションを発行する（amr に `mfa` を加える）。
+        失敗の理由は返さない（4.9）。同じ時間窓の TOTP のコードは2度使えない。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                totp_code: { type: string }
+                flow_id: { type: string }
+                credential: { type: object, additionalProperties: true }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: 確かめた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   /v1/logout:
     post:
       operationId: logout
@@ -297,7 +348,7 @@ paths:
   /v1/me/methods:
     get:
       operationId: listMyMethods
-      summary: 本人の認証手段（メール、連携した外部 ID、passkey）の一覧
+      summary: 本人の認証手段（メール、連携した外部 ID、passkey、TOTP）の一覧
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -308,7 +359,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [emails, identities, passkeys]
+                required: [emails, identities, passkeys, totp]
                 properties:
                   emails:
                     type: array
@@ -319,6 +370,9 @@ paths:
                   passkeys:
                     type: array
                     items: { $ref: "#/components/schemas/MyPasskey" }
+                  totp:
+                    type: array
+                    items: { $ref: "#/components/schemas/MyTOTP" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
 
   /v1/me/emails:start:
@@ -598,6 +652,76 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /v1/me/totp:start:
+    post:
+      operationId: startRegisterTOTP
+      summary: TOTP（認証器アプリ）の登録を始める
+      description: |
+        秘密（Base32）と `otpauth://` の URI を本人にだけ返す。QR コードは画面で作る。
+        登録はコードの確認（`/v1/me/totp:confirm`）で完了する。登録済みなら `409 totp_exists`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TOTPEnrollment" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/totp:confirm:
+    post:
+      operationId: confirmRegisterTOTP
+      summary: TOTP の登録をコードで完了する
+      description: |
+        コードが違えば 401（回数の上限まではフローを使える）。登録だけのセッション（`next: enroll`）で完了すると、
+        通常のセッションに替え、`login` で返す（Cookie も差し替える）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flow_id, code]
+              properties:
+                flow_id: { type: string }
+                code: { type: string }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: 登録した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [totp]
+                properties:
+                  totp: { $ref: "#/components/schemas/MyTOTP" }
+                  login: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/me/totp/{id}:revoke:
+    post:
+      operationId: revokeMyTOTP
+      summary: TOTP を無効化する
+      description: その TOTP を2要素目に使ったセッションは、遅くとも `validity_max_delay` の後に使えなくなる。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 無効化した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -671,6 +795,16 @@ components:
         user_id: { type: string, description: 公開のユーザー ID（内部 ID は返さない。ADR 0045） }
         created: { type: boolean, description: 新規登録だったか }
         token: { type: string, description: "`return_token: true` のときだけ。Bearer で使う" }
+        next:
+          type: string
+          enum: [second_factor, enroll]
+          description: |
+            セッションが制限つきのときの次の手順（4.1、2.8）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
+            登録だけができる。制限つきのセッションは短い期限で失効し、決まった API にしか使えない（他は未ログインの扱い）。
+        second_factor_methods:
+          type: array
+          description: "`next: second_factor` のとき使える2要素目（`passkey`、`totp`）"
+          items: { type: string }
         warnings:
           type: array
           description: 認証の警告（design.md 10章）。コードで返し、表示の文言はクライアントで決める
@@ -721,6 +855,20 @@ components:
         created_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time }
         backup_eligible: { type: boolean, description: 同期される passkey か（認証器の BE フラグ） }
+    MyTOTP:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: { type: string, description: 公開の TOTP の ID（otp_…） }
+        created_at: { type: string, format: date-time }
+    TOTPEnrollment:
+      type: object
+      required: [flow_id, secret, uri, expires_at]
+      properties:
+        flow_id: { type: string }
+        secret: { type: string, description: Base32 の秘密（手で入力する人向け） }
+        uri: { type: string, description: "`otpauth://totp/…`（QR コードにする）" }
+        expires_at: { type: string, format: date-time }
     PasskeyCeremony:
       type: object
       required: [flow_id, options, expires_at]

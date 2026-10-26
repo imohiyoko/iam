@@ -36,6 +36,24 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for LoginResultNext.
+const (
+	Enroll       LoginResultNext = "enroll"
+	SecondFactor LoginResultNext = "second_factor"
+)
+
+// Valid indicates whether the value is a known member of the LoginResultNext enum.
+func (e LoginResultNext) Valid() bool {
+	switch e {
+	case Enroll:
+		return true
+	case SecondFactor:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WarningAction.
 const (
 	Deny WarningAction = "deny"
@@ -97,7 +115,14 @@ type LoginResult struct {
 	// Created 新規登録だったか
 	Created   bool      `json:"created"`
 	ExpiresAt time.Time `json:"expires_at"`
-	SessionId string    `json:"session_id"`
+
+	// Next セッションが制限つきのときの次の手順（4.1、2.8）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
+	// 登録だけができる。制限つきのセッションは短い期限で失効し、決まった API にしか使えない（他は未ログインの扱い）。
+	Next *LoginResultNext `json:"next,omitempty"`
+
+	// SecondFactorMethods `next: second_factor` のとき使える2要素目（`passkey`、`totp`）
+	SecondFactorMethods *[]string `json:"second_factor_methods,omitempty"`
+	SessionId           string    `json:"session_id"`
 
 	// Token `return_token: true` のときだけ。Bearer で使う
 	Token *string `json:"token,omitempty"`
@@ -108,6 +133,10 @@ type LoginResult struct {
 	// Warnings 認証の警告（design.md 10章）。コードで返し、表示の文言はクライアントで決める
 	Warnings []Warning `json:"warnings"`
 }
+
+// LoginResultNext セッションが制限つきのときの次の手順（4.1、2.8）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
+// 登録だけができる。制限つきのセッションは短い期限で失効し、決まった API にしか使えない（他は未ログインの扱い）。
+type LoginResultNext string
 
 // MyEmail defines model for MyEmail.
 type MyEmail struct {
@@ -147,6 +176,14 @@ type MyPasskey struct {
 	Name       string     `json:"name"`
 }
 
+// MyTOTP defines model for MyTOTP.
+type MyTOTP struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id 公開の TOTP の ID（otp_…）
+	Id string `json:"id"`
+}
+
 // PasskeyCeremony defines model for PasskeyCeremony.
 type PasskeyCeremony struct {
 	ExpiresAt time.Time `json:"expires_at"`
@@ -168,6 +205,18 @@ type Session struct {
 	// Id 公開のセッション ID（ses_…）
 	Id         string    `json:"id"`
 	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
+// TOTPEnrollment defines model for TOTPEnrollment.
+type TOTPEnrollment struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	FlowId    string    `json:"flow_id"`
+
+	// Secret Base32 の秘密（手で入力する人向け）
+	Secret string `json:"secret"`
+
+	// Uri `otpauth://totp/…`（QR コードにする）
+	Uri string `json:"uri"`
 }
 
 // Warning defines model for Warning.
@@ -243,6 +292,14 @@ type FinishPasskeyLoginJSONBody struct {
 	ReturnToken *bool                  `json:"return_token,omitempty"`
 }
 
+// VerifySecondFactorJSONBody defines parameters for VerifySecondFactor.
+type VerifySecondFactorJSONBody struct {
+	Credential  *map[string]interface{} `json:"credential,omitempty"`
+	FlowId      *string                 `json:"flow_id,omitempty"`
+	ReturnToken *bool                   `json:"return_token,omitempty"`
+	TotpCode    *string                 `json:"totp_code,omitempty"`
+}
+
 // StartAddEmailJSONBody defines parameters for StartAddEmail.
 type StartAddEmailJSONBody struct {
 	Email string `json:"email"`
@@ -281,6 +338,13 @@ type FinishRegisterPasskeyJSONBody struct {
 	Name *string `json:"name,omitempty"`
 }
 
+// ConfirmRegisterTOTPJSONBody defines parameters for ConfirmRegisterTOTP.
+type ConfirmRegisterTOTPJSONBody struct {
+	Code        string `json:"code"`
+	FlowId      string `json:"flow_id"`
+	ReturnToken *bool  `json:"return_token,omitempty"`
+}
+
 // StartEmailLoginJSONRequestBody defines body for StartEmailLogin for application/json ContentType.
 type StartEmailLoginJSONRequestBody StartEmailLoginJSONBody
 
@@ -299,6 +363,9 @@ type CompleteOAuthLoginJSONRequestBody CompleteOAuthLoginJSONBody
 // FinishPasskeyLoginJSONRequestBody defines body for FinishPasskeyLogin for application/json ContentType.
 type FinishPasskeyLoginJSONRequestBody FinishPasskeyLoginJSONBody
 
+// VerifySecondFactorJSONRequestBody defines body for VerifySecondFactor for application/json ContentType.
+type VerifySecondFactorJSONRequestBody VerifySecondFactorJSONBody
+
 // StartAddEmailJSONRequestBody defines body for StartAddEmail for application/json ContentType.
 type StartAddEmailJSONRequestBody StartAddEmailJSONBody
 
@@ -316,6 +383,9 @@ type RenameMyPasskeyJSONRequestBody RenameMyPasskeyJSONBody
 
 // FinishRegisterPasskeyJSONRequestBody defines body for FinishRegisterPasskey for application/json ContentType.
 type FinishRegisterPasskeyJSONRequestBody FinishRegisterPasskeyJSONBody
+
+// ConfirmRegisterTOTPJSONRequestBody defines body for ConfirmRegisterTOTP for application/json ContentType.
+type ConfirmRegisterTOTPJSONRequestBody ConfirmRegisterTOTPJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -346,6 +416,12 @@ type ServerInterface interface {
 	// StartPasskeyLogin passkey でのログインを始める
 	// (POST /v1/login/passkey:start)
 	StartPasskeyLogin(w http.ResponseWriter, r *http.Request)
+	// StartSecondFactorPasskey 2要素目の passkey の確認を始める
+	// (POST /v1/login/second-factor/passkey:start)
+	StartSecondFactorPasskey(w http.ResponseWriter, r *http.Request)
+	// VerifySecondFactor 2要素目を確かめ、通常のセッションに替える
+	// (POST /v1/login/second-factor:verify)
+	VerifySecondFactor(w http.ResponseWriter, r *http.Request)
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
@@ -370,7 +446,7 @@ type ServerInterface interface {
 	// CompleteLinkIdentity プロバイダからの戻りで連携を完了する
 	// (POST /v1/me/identities:complete)
 	CompleteLinkIdentity(w http.ResponseWriter, r *http.Request)
-	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey）の一覧
+	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(w http.ResponseWriter, r *http.Request)
 	// RenameMyPasskey passkey の名前を変える
@@ -391,6 +467,15 @@ type ServerInterface interface {
 	// RevokeMySession 本人のセッションを失効させる
 	// (POST /v1/me/sessions/{id}:revoke)
 	RevokeMySession(w http.ResponseWriter, r *http.Request, id string)
+	// RevokeMyTOTP TOTP を無効化する
+	// (POST /v1/me/totp/{id}:revoke)
+	RevokeMyTOTP(w http.ResponseWriter, r *http.Request, id string)
+	// ConfirmRegisterTOTP TOTP の登録をコードで完了する
+	// (POST /v1/me/totp:confirm)
+	ConfirmRegisterTOTP(w http.ResponseWriter, r *http.Request)
+	// StartRegisterTOTP TOTP（認証器アプリ）の登録を始める
+	// (POST /v1/me/totp:start)
+	StartRegisterTOTP(w http.ResponseWriter, r *http.Request)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -531,6 +616,34 @@ func (siw *ServerInterfaceWrapper) StartPasskeyLogin(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartPasskeyLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartSecondFactorPasskey operation middleware
+func (siw *ServerInterfaceWrapper) StartSecondFactorPasskey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartSecondFactorPasskey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifySecondFactor operation middleware
+func (siw *ServerInterfaceWrapper) VerifySecondFactor(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifySecondFactor(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -834,6 +947,60 @@ func (siw *ServerInterfaceWrapper) RevokeMySession(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// RevokeMyTOTP operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMyTOTP(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeMyTOTP(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmRegisterTOTP operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmRegisterTOTP(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmRegisterTOTP(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartRegisterTOTP operation middleware
+func (siw *ServerInterfaceWrapper) StartRegisterTOTP(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartRegisterTOTP(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -963,6 +1130,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth:complete", wrapper.CompleteOAuthLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:start", wrapper.StartPasskeyLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:finish", wrapper.FinishPasskeyLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor/passkey:start", wrapper.StartSecondFactorPasskey)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor:verify", wrapper.VerifySecondFactor)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/logout", wrapper.Logout)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/sessions", wrapper.ListMySessions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/sessions/{id}:revoke", wrapper.RevokeMySession)
@@ -978,6 +1147,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys:finish", wrapper.FinishRegisterPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys/{id}:rename", wrapper.RenameMyPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys/{id}:revoke", wrapper.RevokeMyPasskey)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:start", wrapper.StartRegisterTOTP)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:confirm", wrapper.ConfirmRegisterTOTP)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp/{id}:revoke", wrapper.RevokeMyTOTP)
 
 	return m
 }
@@ -1535,6 +1707,120 @@ func (response StartPasskeyLogin429JSONResponse) VisitStartPasskeyLoginResponse(
 	return err
 }
 
+type StartSecondFactorPasskeyRequestObject struct {
+}
+
+type StartSecondFactorPasskeyResponseObject interface {
+	VisitStartSecondFactorPasskeyResponse(w http.ResponseWriter) error
+}
+
+type StartSecondFactorPasskey200JSONResponse PasskeyCeremony
+
+func (response StartSecondFactorPasskey200JSONResponse) VisitStartSecondFactorPasskeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSecondFactorPasskey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response StartSecondFactorPasskey401JSONResponse) VisitStartSecondFactorPasskeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSecondFactorPasskey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response StartSecondFactorPasskey404JSONResponse) VisitStartSecondFactorPasskeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifySecondFactorRequestObject struct {
+	Body *VerifySecondFactorJSONRequestBody
+}
+
+type VerifySecondFactorResponseObject interface {
+	VisitVerifySecondFactorResponse(w http.ResponseWriter) error
+}
+
+type VerifySecondFactor200JSONResponse LoginResult
+
+func (response VerifySecondFactor200JSONResponse) VisitVerifySecondFactorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifySecondFactor401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response VerifySecondFactor401JSONResponse) VisitVerifySecondFactorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifySecondFactor403JSONResponse struct{ DeniedJSONResponse }
+
+func (response VerifySecondFactor403JSONResponse) VisitVerifySecondFactorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifySecondFactor429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response VerifySecondFactor429JSONResponse) VisitVerifySecondFactorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type LogoutRequestObject struct {
 }
 
@@ -1994,6 +2280,7 @@ type ListMyMethods200JSONResponse struct {
 	Emails     []MyEmail    `json:"emails"`
 	Identities []MyIdentity `json:"identities"`
 	Passkeys   []MyPasskey  `json:"passkeys"`
+	Totp       []MyTOTP     `json:"totp"`
 }
 
 func (response ListMyMethods200JSONResponse) VisitListMyMethodsResponse(w http.ResponseWriter) error {
@@ -2339,6 +2626,167 @@ func (response RevokeMySession404JSONResponse) VisitRevokeMySessionResponse(w ht
 	return err
 }
 
+type RevokeMyTOTPRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RevokeMyTOTPResponseObject interface {
+	VisitRevokeMyTOTPResponse(w http.ResponseWriter) error
+}
+
+type RevokeMyTOTP204Response struct {
+}
+
+func (response RevokeMyTOTP204Response) VisitRevokeMyTOTPResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeMyTOTP401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeMyTOTP401JSONResponse) VisitRevokeMyTOTPResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyTOTP404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeMyTOTP404JSONResponse) VisitRevokeMyTOTPResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmRegisterTOTPRequestObject struct {
+	Body *ConfirmRegisterTOTPJSONRequestBody
+}
+
+type ConfirmRegisterTOTPResponseObject interface {
+	VisitConfirmRegisterTOTPResponse(w http.ResponseWriter) error
+}
+
+type ConfirmRegisterTOTP200JSONResponse struct {
+	Login *LoginResult `json:"login,omitempty"`
+	Totp  MyTOTP       `json:"totp"`
+}
+
+func (response ConfirmRegisterTOTP200JSONResponse) VisitConfirmRegisterTOTPResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmRegisterTOTP401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ConfirmRegisterTOTP401JSONResponse) VisitConfirmRegisterTOTPResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmRegisterTOTP409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ConfirmRegisterTOTP409JSONResponse) VisitConfirmRegisterTOTPResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmRegisterTOTP429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response ConfirmRegisterTOTP429JSONResponse) VisitConfirmRegisterTOTPResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartRegisterTOTPRequestObject struct {
+}
+
+type StartRegisterTOTPResponseObject interface {
+	VisitStartRegisterTOTPResponse(w http.ResponseWriter) error
+}
+
+type StartRegisterTOTP200JSONResponse TOTPEnrollment
+
+func (response StartRegisterTOTP200JSONResponse) VisitStartRegisterTOTPResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartRegisterTOTP401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response StartRegisterTOTP401JSONResponse) VisitStartRegisterTOTPResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartRegisterTOTP409JSONResponse struct{ ConflictJSONResponse }
+
+func (response StartRegisterTOTP409JSONResponse) VisitStartRegisterTOTPResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetWebAuthnRelatedOrigins passkey を使う origin の一覧（Related Origin Requests）
@@ -2368,6 +2816,12 @@ type StrictServerInterface interface {
 	// StartPasskeyLogin passkey でのログインを始める
 	// (POST /v1/login/passkey:start)
 	StartPasskeyLogin(ctx context.Context, request StartPasskeyLoginRequestObject) (StartPasskeyLoginResponseObject, error)
+	// StartSecondFactorPasskey 2要素目の passkey の確認を始める
+	// (POST /v1/login/second-factor/passkey:start)
+	StartSecondFactorPasskey(ctx context.Context, request StartSecondFactorPasskeyRequestObject) (StartSecondFactorPasskeyResponseObject, error)
+	// VerifySecondFactor 2要素目を確かめ、通常のセッションに替える
+	// (POST /v1/login/second-factor:verify)
+	VerifySecondFactor(ctx context.Context, request VerifySecondFactorRequestObject) (VerifySecondFactorResponseObject, error)
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
@@ -2392,7 +2846,7 @@ type StrictServerInterface interface {
 	// CompleteLinkIdentity プロバイダからの戻りで連携を完了する
 	// (POST /v1/me/identities:complete)
 	CompleteLinkIdentity(ctx context.Context, request CompleteLinkIdentityRequestObject) (CompleteLinkIdentityResponseObject, error)
-	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey）の一覧
+	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(ctx context.Context, request ListMyMethodsRequestObject) (ListMyMethodsResponseObject, error)
 	// RenameMyPasskey passkey の名前を変える
@@ -2413,6 +2867,15 @@ type StrictServerInterface interface {
 	// RevokeMySession 本人のセッションを失効させる
 	// (POST /v1/me/sessions/{id}:revoke)
 	RevokeMySession(ctx context.Context, request RevokeMySessionRequestObject) (RevokeMySessionResponseObject, error)
+	// RevokeMyTOTP TOTP を無効化する
+	// (POST /v1/me/totp/{id}:revoke)
+	RevokeMyTOTP(ctx context.Context, request RevokeMyTOTPRequestObject) (RevokeMyTOTPResponseObject, error)
+	// ConfirmRegisterTOTP TOTP の登録をコードで完了する
+	// (POST /v1/me/totp:confirm)
+	ConfirmRegisterTOTP(ctx context.Context, request ConfirmRegisterTOTPRequestObject) (ConfirmRegisterTOTPResponseObject, error)
+	// StartRegisterTOTP TOTP（認証器アプリ）の登録を始める
+	// (POST /v1/me/totp:start)
+	StartRegisterTOTP(ctx context.Context, request StartRegisterTOTPRequestObject) (StartRegisterTOTPResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -2710,6 +3173,61 @@ func (sh *strictHandler) StartPasskeyLogin(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StartPasskeyLoginResponseObject); ok {
 		if err := validResponse.VisitStartPasskeyLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartSecondFactorPasskey operation middleware
+func (sh *strictHandler) StartSecondFactorPasskey(w http.ResponseWriter, r *http.Request) {
+	var request StartSecondFactorPasskeyRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartSecondFactorPasskey(ctx, request.(StartSecondFactorPasskeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartSecondFactorPasskey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartSecondFactorPasskeyResponseObject); ok {
+		if err := validResponse.VisitStartSecondFactorPasskeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifySecondFactor operation middleware
+func (sh *strictHandler) VerifySecondFactor(w http.ResponseWriter, r *http.Request) {
+	var request VerifySecondFactorRequestObject
+
+	var body VerifySecondFactorJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifySecondFactor(ctx, request.(VerifySecondFactorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifySecondFactor")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifySecondFactorResponseObject); ok {
+		if err := validResponse.VisitVerifySecondFactorResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3129,6 +3647,87 @@ func (sh *strictHandler) RevokeMySession(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeMySessionResponseObject); ok {
 		if err := validResponse.VisitRevokeMySessionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeMyTOTP operation middleware
+func (sh *strictHandler) RevokeMyTOTP(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevokeMyTOTPRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeMyTOTP(ctx, request.(RevokeMyTOTPRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeMyTOTP")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeMyTOTPResponseObject); ok {
+		if err := validResponse.VisitRevokeMyTOTPResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ConfirmRegisterTOTP operation middleware
+func (sh *strictHandler) ConfirmRegisterTOTP(w http.ResponseWriter, r *http.Request) {
+	var request ConfirmRegisterTOTPRequestObject
+
+	var body ConfirmRegisterTOTPJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ConfirmRegisterTOTP(ctx, request.(ConfirmRegisterTOTPRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ConfirmRegisterTOTP")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ConfirmRegisterTOTPResponseObject); ok {
+		if err := validResponse.VisitConfirmRegisterTOTPResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartRegisterTOTP operation middleware
+func (sh *strictHandler) StartRegisterTOTP(w http.ResponseWriter, r *http.Request) {
+	var request StartRegisterTOTPRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartRegisterTOTP(ctx, request.(StartRegisterTOTPRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartRegisterTOTP")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartRegisterTOTPResponseObject); ok {
+		if err := validResponse.VisitStartRegisterTOTPResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -54,6 +54,21 @@
 
   function done(r) {
     if (!r.ok) return fail(r);
+    // 2要素目を求められたら、認証器アプリのコードを聞く（passkey の2要素目と登録は公開 API で行う。ADR 0050）。
+    if (r.data.next === "second_factor") {
+      if ((r.data.second_factor_methods || []).includes("totp") && document.getElementById("totp-form")) {
+        say("", false);
+        show("totp");
+        document.getElementById("totp").focus();
+        return;
+      }
+      show("done");
+      return say("second_factor_unsupported", true);
+    }
+    if (r.data.next === "enroll") {
+      show("done");
+      return say("enroll_required", true);
+    }
     show("done");
     say((r.data.warnings || []).length ? "warnings" : "done", false);
     const to = safeReturnTo();
@@ -83,6 +98,14 @@
     codeForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       done(await post("/v1/login/email:verify", { code: document.getElementById("code").value }));
+    });
+  }
+
+  const totpForm = document.getElementById("totp-form");
+  if (totpForm) {
+    totpForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      done(await post("/v1/login/second-factor:verify", { totp_code: document.getElementById("totp").value }));
     });
   }
 
