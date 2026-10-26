@@ -74,6 +74,8 @@ func (l *loginEnv) addEmail(t *testing.T, cookie, email string) (int, map[string
 func TestAddAndRemoveEmail(t *testing.T) {
 	l := newLoginEnv(t)
 	first, cookie := l.login(t, "dan@example.com")
+	// 一覧は作成時刻の順。同じ時刻だと ID の順になり、並びが決まらない。
+	l.e.deps.Clock.(interface{ Advance(time.Duration) }).Advance(time.Second)
 	if status, res := l.addEmail(t, cookie, "Dan@Work.example"); status != 200 || res["primary"] != false || res["email"] != "dan@work.example" {
 		t.Fatalf("add: %d %v", status, res)
 	}
