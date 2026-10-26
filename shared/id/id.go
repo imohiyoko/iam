@@ -95,6 +95,7 @@ const (
 	Passkey        Prefix = "psk"
 	TOTP           Prefix = "otp"
 	Password       Prefix = "pwd"
+	RecoveryCode   Prefix = "rcv"
 	Notification   Prefix = "ntf"
 	Event          Prefix = "evt"
 	Outbox         Prefix = "obx"

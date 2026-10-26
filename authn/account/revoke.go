@@ -25,6 +25,8 @@ const (
 type Revoked struct {
 	Passkeys, Identities, TOTP int
 	Password                   bool
+	// RecoveryCodes は消した未使用のリカバリーコードの数。
+	RecoveryCodes int
 }
 
 // AdminRevokeCredential はユーザーの passkey・外部 ID の紐付け・TOTP を公開 ID（psk_ / idn_ / otp_）で
@@ -85,7 +87,7 @@ func (s *Service) AdminRevokePassword(ctx context.Context, tx port.Tx, realmID s
 }
 
 // RevokeAllCredentials は侵害時の初動として、ユーザーの passkey・外部 ID の紐付け・TOTP・パスワードをすべて無効化する。
-// メールは残す（復旧の経路。4.12）。呼び出し側はユーザーの全セッションを失効させる。
+// リカバリーコードも消す（漏れていてもよいように）。メールは残す（復旧の経路。4.12）。呼び出し側はユーザーの全セッションを失効させる。
 func (s *Service) RevokeAllCredentials(ctx context.Context, tx port.Tx, realmID string, u port.User, actor audit.Actor, requestID string) (Revoked, error) {
 	m, err := s.ListMethods(ctx, tx, realmID, u.ID)
 	if err != nil {
@@ -117,7 +119,20 @@ func (s *Service) RevokeAllCredentials(ctx context.Context, tx port.Tx, realmID 
 		}
 		out.Password = true
 	}
+	codes, err := tx.RecoveryCodes().ListByUser(ctx, realmID, u.ID)
+	if err != nil {
+		return Revoked{}, err
+	}
+	for _, c := range codes {
+		if c.UsedAt == nil {
+			out.RecoveryCodes++
+		}
+	}
+	if err := tx.RecoveryCodes().Replace(ctx, realmID, u.ID, nil); err != nil {
+		return Revoked{}, err
+	}
 	return out, s.record(ctx, tx, realmID, "credentials.revoked_all", actor, requestID, map[string]any{
-		"user_id": u.PublicID, "passkeys": out.Passkeys, "identities": out.Identities, "totp": out.TOTP, "password": out.Password, "reason": ReasonCompromised,
+		"user_id": u.PublicID, "passkeys": out.Passkeys, "identities": out.Identities, "totp": out.TOTP, "password": out.Password,
+		"recovery_codes": out.RecoveryCodes, "reason": ReasonCompromised,
 	})
 }

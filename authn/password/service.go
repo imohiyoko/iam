@@ -276,6 +276,16 @@ func (s *Service) breached(ctx context.Context, pw string) *bool {
 // 直近の認証（recentAuth）を求める。同じトランザクションで keepSession 以外のセッションを失効させる（5.2）。
 // 長さと漏洩の確認で拒否すれば ErrTooShort・ErrTooLong・ErrBreached。
 func (s *Service) Set(ctx context.Context, realmID, userID, newPassword, current string, recentAuth bool, keepSession string, actor audit.Actor, requestID string) (port.PasswordCredential, error) {
+	return s.set(ctx, realmID, userID, newPassword, current, recentAuth, false, keepSession, actor, requestID)
+}
+
+// Reset は今のパスワードを求めずに置き換える。アカウントの復旧（復旧専用のセッション。4.12）でだけ使う。
+// セッションは失効させない（復旧の完了のときに全セッションを失効させる）。
+func (s *Service) Reset(ctx context.Context, realmID, userID, newPassword string, actor audit.Actor, requestID string) (port.PasswordCredential, error) {
+	return s.set(ctx, realmID, userID, newPassword, "", true, true, "", actor, requestID)
+}
+
+func (s *Service) set(ctx context.Context, realmID, userID, newPassword, current string, recentAuth, reset bool, keepSession string, actor audit.Actor, requestID string) (port.PasswordCredential, error) {
 	if len(newPassword) > MaxInputBytes {
 		// 正規化で縮む入力も、ログインで受け取れる大きさに揃える。
 		return port.PasswordCredential{}, ErrTooLong
@@ -301,8 +311,10 @@ func (s *Service) Set(ctx context.Context, realmID, userID, newPassword, current
 		old, err := tx.Passwords().GetActive(ctx, realmID, userID)
 		switch {
 		case err == nil:
-			if err := s.matches(old, current); err != nil {
-				return err
+			if !reset {
+				if err := s.matches(old, current); err != nil {
+					return err
+				}
 			}
 			if err := tx.Passwords().Revoke(ctx, realmID, old.ID, now, ReasonChanged); err != nil {
 				return err
@@ -317,9 +329,9 @@ func (s *Service) Set(ctx context.Context, realmID, userID, newPassword, current
 		}
 		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
 			Type: "password.set", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
-			Details: map[string]any{"replaced": old.ID != ""},
+			Details: map[string]any{"replaced": old.ID != "", "reset": reset},
 		})
-		if err != nil {
+		if err != nil || reset {
 			return err
 		}
 		revoked, err = s.Sessions.RevokeAllTx(ctx, tx, realmID, userID, keepSession, session.ReasonCredentialChanged, actor, requestID)

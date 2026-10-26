@@ -8,6 +8,7 @@ import (
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/port"
 	"github.com/imohiyoko/iam/shared/ratelimit"
 )
 
@@ -62,7 +63,13 @@ func (s publicServer) SetMyPassword(ctx context.Context, req publicapi.SetMyPass
 		return publicapi.SetMyPassword400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
 	recent := s.a.deps.Clock.Now().Sub(au.AuthenticatedAt) <= s.a.cfg.Security.Session.MaxAuthAge.Default.D()
-	_, err := s.a.password.Set(ctx, s.a.realm.ID, au.PrincipalID, req.Body.Password, deref(req.Body.CurrentPassword), recent, au.SessionID, au.Actor(), requestID(ctx))
+	var err error
+	if au.Restriction == port.RestrictionRecovery {
+		// 復旧では今のパスワードを求めない（忘れたときの再設定。4.12）。
+		_, err = s.a.password.Reset(ctx, s.a.realm.ID, au.PrincipalID, req.Body.Password, au.Actor(), requestID(ctx))
+	} else {
+		_, err = s.a.password.Set(ctx, s.a.realm.ID, au.PrincipalID, req.Body.Password, deref(req.Body.CurrentPassword), recent, au.SessionID, au.Actor(), requestID(ctx))
+	}
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.SetMyPassword429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}

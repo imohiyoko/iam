@@ -158,5 +158,5 @@ func (s adminServer) RevokeAllUserCredentials(ctx context.Context, req adminapi.
 	}
 	s.a.sessions.ForgetIDs(ctx, s.a.realm.ID, revoked)
 	return adminapi.RevokeAllUserCredentials200JSONResponse{Passkeys: r.Passkeys, Identities: r.Identities, Totp: r.TOTP,
-		Password: r.Password, Sessions: len(revoked)}, nil
+		Password: r.Password, RecoveryCodes: r.RecoveryCodes, Sessions: len(revoked)}, nil
 }

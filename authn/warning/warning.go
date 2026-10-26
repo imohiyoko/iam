@@ -23,6 +23,8 @@ const (
 	CodeSingleFactor         = "single_factor"
 	CodeOAuthEmailUnverified = "oauth_email_unverified"
 	CodePasswordBreached     = "password_breached"
+	// CodeRecoveredViaEmail はメールによるアカウントの復旧（4.12）。deny にすればメールでは復旧できない。
+	CodeRecoveredViaEmail = "recovered_via_email"
 )
 
 // Action は警告への対応。
@@ -50,6 +52,8 @@ type Evidence struct {
 	OAuthEmailVerified *bool
 	// PasswordBreached はログインに使ったパスワードが漏洩済みか。パスワード以外か、確かめられなければ nil。
 	PasswordBreached *bool
+	// RecoveredViaEmail はメールでアカウントを復旧したか（復旧専用のセッションの発行のとき）。
+	RecoveredViaEmail bool
 }
 
 // Warning は評価の結果の1件。sessions.warnings と監査ログに残し、本人に返す。
@@ -74,6 +78,7 @@ var Rules = []Rule{
 	{Code: CodeSingleFactor, Severity: Low, Default: Ignore, Check: singleFactor},
 	{Code: CodeOAuthEmailUnverified, Severity: Medium, Default: Warn, Check: oauthEmailUnverified},
 	{Code: CodePasswordBreached, Severity: High, Default: Warn, Check: passwordBreached},
+	{Code: CodeRecoveredViaEmail, Severity: Medium, Default: Warn, Check: recoveredViaEmail},
 }
 
 // factorOf は amr の値を要素の種類に分ける（RFC 8176）。分からない値は数えない。
@@ -105,6 +110,8 @@ func oauthEmailUnverified(ev Evidence) (map[string]any, bool) {
 func passwordBreached(ev Evidence) (map[string]any, bool) {
 	return nil, ev.PasswordBreached != nil && *ev.PasswordBreached
 }
+
+func recoveredViaEmail(ev Evidence) (map[string]any, bool) { return nil, ev.RecoveredViaEmail }
 
 // Evaluator はルールを評価し、アクションを決める。
 type Evaluator struct {

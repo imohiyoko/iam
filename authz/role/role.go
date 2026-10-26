@@ -38,6 +38,8 @@ const (
 	PermSuspensionsRead = "suspensions:read"
 	// PermUsersUpdate はユーザーの有効期間などの変更（4.8）。
 	PermUsersUpdate = "users:update"
+	// PermUsersRecover は運営者による復旧用リンクの発行（4.12。realm:support の「復旧手続き」）。
+	PermUsersRecover = "users:recover"
 	// PermSuspensionsAny は realm で足した種別を含む、すべての種別の停止と解除（realm:owner）。
 	PermSuspensionsAny = "suspensions:*"
 )
@@ -55,12 +57,12 @@ func suspend(categories ...string) []string {
 }
 
 var builtin = map[string][]string{
-	RealmOwner: append([]string{PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
+	RealmOwner: append([]string{PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
 		PermCredentialsRevoke, PermSuspensionsAny}, suspend("tos_violation", "customer_request", "security_risk", "billing")...),
-	RealmAdmin: append([]string{PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersLoginLink, PermCredentialsRevoke},
+	RealmAdmin: append([]string{PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke},
 		suspend("tos_violation", "customer_request")...),
 	RealmSecurity:        append([]string{PermSessionsRevoke, PermCredentialsRevoke}, suspend("security_risk")...),
-	RealmSupport:         {PermSuspensionsRead},
+	RealmSupport:         {PermSuspensionsRead, PermUsersRecover},
 	RealmBilling:         suspend("billing"),
 	NotificationDelivery: {PermNotificationsClaim},
 }

@@ -210,6 +210,33 @@ func (q *Queries) CreatePassword(ctx context.Context, arg CreatePasswordParams) 
 	return err
 }
 
+const createRecoveryCode = `-- name: CreateRecoveryCode :exec
+INSERT INTO authn_recovery_codes (id, realm_id, user_id, lookup, hash, created_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateRecoveryCodeParams struct {
+	ID        string
+	RealmID   string
+	UserID    string
+	Lookup    string
+	Hash      string
+	CreatedAt string
+	UsedAt    sql.NullString
+}
+
+func (q *Queries) CreateRecoveryCode(ctx context.Context, arg CreateRecoveryCodeParams) error {
+	_, err := q.db.ExecContext(ctx, createRecoveryCode,
+		arg.ID,
+		arg.RealmID,
+		arg.UserID,
+		arg.Lookup,
+		arg.Hash,
+		arg.CreatedAt,
+		arg.UsedAt,
+	)
+	return err
+}
+
 const createRoleBinding = `-- name: CreateRoleBinding :exec
 INSERT INTO authz_role_bindings (id, realm_id, role, principal_type, principal_id, org_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
 `
@@ -458,6 +485,20 @@ func (q *Queries) DeleteEmail(ctx context.Context, arg DeleteEmailParams) (int64
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const deleteRecoveryCodes = `-- name: DeleteRecoveryCodes :exec
+DELETE FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ?
+`
+
+type DeleteRecoveryCodesParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) DeleteRecoveryCodes(ctx context.Context, arg DeleteRecoveryCodesParams) error {
+	_, err := q.db.ExecContext(ctx, deleteRecoveryCodes, arg.RealmID, arg.UserID)
+	return err
 }
 
 const dueScheduledEvents = `-- name: DueScheduledEvents :many
@@ -1312,6 +1353,46 @@ func (q *Queries) ListPasskeysByUser(ctx context.Context, arg ListPasskeysByUser
 	return items, nil
 }
 
+const listRecoveryCodes = `-- name: ListRecoveryCodes :many
+SELECT id, realm_id, user_id, lookup, hash, created_at, used_at FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ? ORDER BY id
+`
+
+type ListRecoveryCodesParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) ListRecoveryCodes(ctx context.Context, arg ListRecoveryCodesParams) ([]AuthnRecoveryCode, error) {
+	rows, err := q.db.QueryContext(ctx, listRecoveryCodes, arg.RealmID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnRecoveryCode
+	for rows.Next() {
+		var i AuthnRecoveryCode
+		if err := rows.Scan(
+			&i.ID,
+			&i.RealmID,
+			&i.UserID,
+			&i.Lookup,
+			&i.Hash,
+			&i.CreatedAt,
+			&i.UsedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRoleBindingsByPrincipal = `-- name: ListRoleBindingsByPrincipal :many
 SELECT id, realm_id, role, principal_type, principal_id, org_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at, id
 `
@@ -1872,6 +1953,24 @@ func (q *Queries) UsePasskey(ctx context.Context, arg UsePasskeyParams) (int64, 
 		arg.RealmID,
 		arg.ID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const useRecoveryCode = `-- name: UseRecoveryCode :execrows
+UPDATE authn_recovery_codes SET used_at = ? WHERE realm_id = ? AND id = ? AND used_at IS NULL
+`
+
+type UseRecoveryCodeParams struct {
+	UsedAt  sql.NullString
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) UseRecoveryCode(ctx context.Context, arg UseRecoveryCodeParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, useRecoveryCode, arg.UsedAt, arg.RealmID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

@@ -53,6 +53,7 @@ type state struct {
 	revokedPasskeys map[string]time.Time
 	totps           map[string]port.TOTPCredential
 	passwords       map[string]port.PasswordCredential
+	recoveryCodes   map[string]port.RecoveryCode
 	suspensions     map[string]port.Suspension
 	scheduled       map[string]port.ScheduledEvent
 	connections     map[string]port.Connection
@@ -80,7 +81,7 @@ func New(clk clock.Clock) *Storage {
 		users: map[string]port.User{}, emails: map[string]port.UserEmail{}, identities: map[string]port.Identity{},
 		passkeys: map[string]port.Passkey{}, revokedPasskeys: map[string]time.Time{}, totps: map[string]port.TOTPCredential{},
 		passwords: map[string]port.PasswordCredential{}, suspensions: map[string]port.Suspension{},
-		scheduled:   map[string]port.ScheduledEvent{},
+		scheduled: map[string]port.ScheduledEvent{}, recoveryCodes: map[string]port.RecoveryCode{},
 		connections: map[string]port.Connection{}, sessions: map[string]port.Session{},
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
 		roleBindings: map[string]port.RoleBinding{},
@@ -134,6 +135,7 @@ func (t *tx) Identities() port.IdentityRepo            { return identities{t} }
 func (t *tx) Passkeys() port.PasskeyRepo               { return passkeys{t} }
 func (t *tx) TOTP() port.TOTPRepo                      { return totps{t} }
 func (t *tx) Passwords() port.PasswordRepo             { return passwords{t} }
+func (t *tx) RecoveryCodes() port.RecoveryCodeRepo     { return recoveryCodes{t} }
 func (t *tx) Suspensions() port.SuspensionRepo         { return suspensions{t} }
 func (t *tx) ScheduledEvents() port.ScheduledEventRepo { return scheduledEvents{t} }
 func (t *tx) Connections() port.ConnectionRepo         { return connections{t} }

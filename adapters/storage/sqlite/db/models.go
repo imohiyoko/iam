@@ -53,6 +53,16 @@ type AuthnRealm struct {
 	CreatedAt string
 }
 
+type AuthnRecoveryCode struct {
+	ID        string
+	RealmID   string
+	UserID    string
+	Lookup    string
+	Hash      string
+	CreatedAt string
+	UsedAt    sql.NullString
+}
+
 type AuthnRevokedPasskeyCredential struct {
 	RealmID      string
 	CredentialID []byte

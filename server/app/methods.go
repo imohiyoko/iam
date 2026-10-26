@@ -9,6 +9,7 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/emailflow"
 	"github.com/imohiyoko/iam/authn/oauth"
+	"github.com/imohiyoko/iam/authn/recovery"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
@@ -75,6 +76,9 @@ func (s publicServer) ListMyMethods(ctx context.Context, _ publicapi.ListMyMetho
 		}
 		for _, t := range m.TOTP {
 			out.Totp = append(out.Totp, myTOTP(t))
+		}
+		if out.RecoveryCodesRemaining, err = recovery.Remaining(ctx, tx, s.a.realm.ID, au.PrincipalID); err != nil {
+			return err
 		}
 		if m.Password != nil {
 			out.Password = myPassword(m.Password.CreatedAt)

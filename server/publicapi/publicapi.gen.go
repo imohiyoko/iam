@@ -39,6 +39,7 @@ func (e HealthStatus) Valid() bool {
 // Defines values for LoginResultNext.
 const (
 	Enroll       LoginResultNext = "enroll"
+	Recovery     LoginResultNext = "recovery"
 	SecondFactor LoginResultNext = "second_factor"
 )
 
@@ -46,6 +47,8 @@ const (
 func (e LoginResultNext) Valid() bool {
 	switch e {
 	case Enroll:
+		return true
+	case Recovery:
 		return true
 	case SecondFactor:
 		return true
@@ -116,8 +119,9 @@ type LoginResult struct {
 	Created   bool      `json:"created"`
 	ExpiresAt time.Time `json:"expires_at"`
 
-	// Next セッションが制限つきのときの次の手順（4.1、2.8）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-	// 登録だけができる。制限つきのセッションは短い期限で失効し、決まった API にしか使えない（他は未ログインの扱い）。
+	// Next セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
+	// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+	// 決まった API にしか使えない（他は未ログインの扱い）。
 	Next *LoginResultNext `json:"next,omitempty"`
 
 	// SecondFactorMethods `next: second_factor` のとき使える2要素目（`passkey`、`totp`）
@@ -134,8 +138,9 @@ type LoginResult struct {
 	Warnings []Warning `json:"warnings"`
 }
 
-// LoginResultNext セッションが制限つきのときの次の手順（4.1、2.8）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-// 登録だけができる。制限つきのセッションは短い期限で失効し、決まった API にしか使えない（他は未ログインの扱い）。
+// LoginResultNext セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
+// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+// 決まった API にしか使えない（他は未ログインの扱い）。
 type LoginResultNext string
 
 // MyEmail defines model for MyEmail.
@@ -191,6 +196,21 @@ type PasskeyCeremony struct {
 
 	// Options `{"publicKey": …}`。WebAuthn の options の JSON の形
 	Options map[string]interface{} `json:"options"`
+}
+
+// RegisteredPasskey defines model for RegisteredPasskey.
+type RegisteredPasskey struct {
+	// BackupEligible 同期される passkey か（認証器の BE フラグ）
+	BackupEligible bool      `json:"backup_eligible"`
+	CreatedAt      time.Time `json:"created_at"`
+
+	// Id 公開の passkey の ID（psk_…）
+	Id         string     `json:"id"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	Name       string     `json:"name"`
+
+	// RecoveryCodes 最初の強い認証手段なら、リカバリーコード（表示は1回だけ。4.12）
+	RecoveryCodes *[]string `json:"recovery_codes,omitempty"`
 }
 
 // Session defines model for Session.
@@ -363,6 +383,32 @@ type ConfirmRegisterTOTPJSONBody struct {
 	ReturnToken *bool  `json:"return_token,omitempty"`
 }
 
+// RedeemRecoveryCodeJSONBody defines parameters for RedeemRecoveryCode.
+type RedeemRecoveryCodeJSONBody struct {
+	Code        string `json:"code"`
+	Email       string `json:"email"`
+	ReturnToken *bool  `json:"return_token,omitempty"`
+}
+
+// StartEmailRecoveryJSONBody defines parameters for StartEmailRecovery.
+type StartEmailRecoveryJSONBody struct {
+	Email string `json:"email"`
+}
+
+// VerifyEmailRecoveryJSONBody defines parameters for VerifyEmailRecovery.
+type VerifyEmailRecoveryJSONBody struct {
+	Code        *string `json:"code,omitempty"`
+	FlowId      *string `json:"flow_id,omitempty"`
+	ReturnToken *bool   `json:"return_token,omitempty"`
+	Token       *string `json:"token,omitempty"`
+}
+
+// RedeemRecoveryLinkJSONBody defines parameters for RedeemRecoveryLink.
+type RedeemRecoveryLinkJSONBody struct {
+	ReturnToken *bool  `json:"return_token,omitempty"`
+	Token       string `json:"token"`
+}
+
 // StartEmailLoginJSONRequestBody defines body for StartEmailLogin for application/json ContentType.
 type StartEmailLoginJSONRequestBody StartEmailLoginJSONBody
 
@@ -413,6 +459,18 @@ type SetMyPasswordJSONRequestBody SetMyPasswordJSONBody
 
 // ConfirmRegisterTOTPJSONRequestBody defines body for ConfirmRegisterTOTP for application/json ContentType.
 type ConfirmRegisterTOTPJSONRequestBody ConfirmRegisterTOTPJSONBody
+
+// RedeemRecoveryCodeJSONRequestBody defines body for RedeemRecoveryCode for application/json ContentType.
+type RedeemRecoveryCodeJSONRequestBody RedeemRecoveryCodeJSONBody
+
+// StartEmailRecoveryJSONRequestBody defines body for StartEmailRecovery for application/json ContentType.
+type StartEmailRecoveryJSONRequestBody StartEmailRecoveryJSONBody
+
+// VerifyEmailRecoveryJSONRequestBody defines body for VerifyEmailRecovery for application/json ContentType.
+type VerifyEmailRecoveryJSONRequestBody VerifyEmailRecoveryJSONBody
+
+// RedeemRecoveryLinkJSONRequestBody defines body for RedeemRecoveryLink for application/json ContentType.
+type RedeemRecoveryLinkJSONRequestBody RedeemRecoveryLinkJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -497,6 +555,9 @@ type ServerInterface interface {
 	// SetMyPassword パスワードを設定・変更する（フィーチャー password）
 	// (POST /v1/me/password:set)
 	SetMyPassword(w http.ResponseWriter, r *http.Request)
+	// RegenerateMyRecoveryCodes リカバリーコードを作り直す
+	// (POST /v1/me/recovery-codes:regenerate)
+	RegenerateMyRecoveryCodes(w http.ResponseWriter, r *http.Request)
 	// ListMySessions 本人の有効なセッションの一覧
 	// (GET /v1/me/sessions)
 	ListMySessions(w http.ResponseWriter, r *http.Request)
@@ -512,6 +573,21 @@ type ServerInterface interface {
 	// StartRegisterTOTP TOTP（認証器アプリ）の登録を始める
 	// (POST /v1/me/totp:start)
 	StartRegisterTOTP(w http.ResponseWriter, r *http.Request)
+	// RedeemRecoveryCode 確認済みのメールアドレスとリカバリーコードで復旧を始める（4.12）
+	// (POST /v1/recovery/code:redeem)
+	RedeemRecoveryCode(w http.ResponseWriter, r *http.Request)
+	// StartEmailRecovery 確認済みのメールによる復旧を始める（4.12）
+	// (POST /v1/recovery/email:start)
+	StartEmailRecovery(w http.ResponseWriter, r *http.Request)
+	// VerifyEmailRecovery メールのコードかリンクのトークンで復旧専用のセッションを得る
+	// (POST /v1/recovery/email:verify)
+	VerifyEmailRecovery(w http.ResponseWriter, r *http.Request)
+	// RedeemRecoveryLink 運営者が発行した復旧用リンクで復旧専用のセッションを得る
+	// (POST /v1/recovery/link:redeem)
+	RedeemRecoveryLink(w http.ResponseWriter, r *http.Request)
+	// CompleteRecovery 復旧を終える
+	// (POST /v1/recovery:complete)
+	CompleteRecovery(w http.ResponseWriter, r *http.Request)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -985,6 +1061,20 @@ func (siw *ServerInterfaceWrapper) SetMyPassword(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// RegenerateMyRecoveryCodes operation middleware
+func (siw *ServerInterfaceWrapper) RegenerateMyRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RegenerateMyRecoveryCodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListMySessions operation middleware
 func (siw *ServerInterfaceWrapper) ListMySessions(w http.ResponseWriter, r *http.Request) {
 
@@ -1070,6 +1160,76 @@ func (siw *ServerInterfaceWrapper) StartRegisterTOTP(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartRegisterTOTP(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RedeemRecoveryCode operation middleware
+func (siw *ServerInterfaceWrapper) RedeemRecoveryCode(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RedeemRecoveryCode(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartEmailRecovery operation middleware
+func (siw *ServerInterfaceWrapper) StartEmailRecovery(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartEmailRecovery(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyEmailRecovery operation middleware
+func (siw *ServerInterfaceWrapper) VerifyEmailRecovery(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyEmailRecovery(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RedeemRecoveryLink operation middleware
+func (siw *ServerInterfaceWrapper) RedeemRecoveryLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RedeemRecoveryLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteRecovery operation middleware
+func (siw *ServerInterfaceWrapper) CompleteRecovery(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteRecovery(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1211,6 +1371,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/password", wrapper.PasswordLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor/passkey:start", wrapper.StartSecondFactorPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor:verify", wrapper.VerifySecondFactor)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/recovery/code:redeem", wrapper.RedeemRecoveryCode)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/recovery/email:start", wrapper.StartEmailRecovery)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/recovery/email:verify", wrapper.VerifyEmailRecovery)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/recovery/link:redeem", wrapper.RedeemRecoveryLink)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/recovery:complete", wrapper.CompleteRecovery)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/recovery-codes:regenerate", wrapper.RegenerateMyRecoveryCodes)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/logout", wrapper.Logout)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/sessions", wrapper.ListMySessions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/sessions/{id}:revoke", wrapper.RevokeMySession)
@@ -2445,7 +2611,10 @@ type ListMyMethods200JSONResponse struct {
 	Password *struct {
 		CreatedAt time.Time `json:"created_at"`
 	} `json:"password,omitempty"`
-	Totp []MyTOTP `json:"totp"`
+
+	// RecoveryCodesRemaining 未使用のリカバリーコードの数
+	RecoveryCodesRemaining int      `json:"recovery_codes_remaining"`
+	Totp                   []MyTOTP `json:"totp"`
 }
 
 func (response ListMyMethods200JSONResponse) VisitListMyMethodsResponse(w http.ResponseWriter) error {
@@ -2605,7 +2774,7 @@ type FinishRegisterPasskeyResponseObject interface {
 	VisitFinishRegisterPasskeyResponse(w http.ResponseWriter) error
 }
 
-type FinishRegisterPasskey200JSONResponse MyPasskey
+type FinishRegisterPasskey200JSONResponse RegisteredPasskey
 
 func (response FinishRegisterPasskey200JSONResponse) VisitFinishRegisterPasskeyResponse(w http.ResponseWriter) error {
 
@@ -2870,6 +3039,43 @@ func (response SetMyPassword429JSONResponse) VisitSetMyPasswordResponse(w http.R
 	return err
 }
 
+type RegenerateMyRecoveryCodesRequestObject struct {
+}
+
+type RegenerateMyRecoveryCodesResponseObject interface {
+	VisitRegenerateMyRecoveryCodesResponse(w http.ResponseWriter) error
+}
+
+type RegenerateMyRecoveryCodes200JSONResponse struct {
+	RecoveryCodes []string `json:"recovery_codes"`
+}
+
+func (response RegenerateMyRecoveryCodes200JSONResponse) VisitRegenerateMyRecoveryCodesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RegenerateMyRecoveryCodes401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RegenerateMyRecoveryCodes401JSONResponse) VisitRegenerateMyRecoveryCodesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMySessionsRequestObject struct {
 }
 
@@ -3005,7 +3211,10 @@ type ConfirmRegisterTOTPResponseObject interface {
 
 type ConfirmRegisterTOTP200JSONResponse struct {
 	Login *LoginResult `json:"login,omitempty"`
-	Totp  MyTOTP       `json:"totp"`
+
+	// RecoveryCodes 最初の強い認証手段なら、リカバリーコード（表示は1回だけ。4.12）
+	RecoveryCodes *[]string `json:"recovery_codes,omitempty"`
+	Totp          MyTOTP    `json:"totp"`
 }
 
 func (response ConfirmRegisterTOTP200JSONResponse) VisitConfirmRegisterTOTPResponse(w http.ResponseWriter) error {
@@ -3112,6 +3321,364 @@ func (response StartRegisterTOTP409JSONResponse) VisitStartRegisterTOTPResponse(
 	return err
 }
 
+type RedeemRecoveryCodeRequestObject struct {
+	Body *RedeemRecoveryCodeJSONRequestBody
+}
+
+type RedeemRecoveryCodeResponseObject interface {
+	VisitRedeemRecoveryCodeResponse(w http.ResponseWriter) error
+}
+
+type RedeemRecoveryCode200JSONResponse LoginResult
+
+func (response RedeemRecoveryCode200JSONResponse) VisitRedeemRecoveryCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemRecoveryCode401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RedeemRecoveryCode401JSONResponse) VisitRedeemRecoveryCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemRecoveryCode403JSONResponse struct{ DeniedJSONResponse }
+
+func (response RedeemRecoveryCode403JSONResponse) VisitRedeemRecoveryCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemRecoveryCode404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RedeemRecoveryCode404JSONResponse) VisitRedeemRecoveryCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemRecoveryCode429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response RedeemRecoveryCode429JSONResponse) VisitRedeemRecoveryCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailRecoveryRequestObject struct {
+	Body *StartEmailRecoveryJSONRequestBody
+}
+
+type StartEmailRecoveryResponseObject interface {
+	VisitStartEmailRecoveryResponse(w http.ResponseWriter) error
+}
+
+type StartEmailRecovery200JSONResponse struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	FlowId    string    `json:"flow_id"`
+}
+
+func (response StartEmailRecovery200JSONResponse) VisitStartEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailRecovery400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response StartEmailRecovery400JSONResponse) VisitStartEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailRecovery404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response StartEmailRecovery404JSONResponse) VisitStartEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailRecovery429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response StartEmailRecovery429JSONResponse) VisitStartEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyEmailRecoveryRequestObject struct {
+	Body *VerifyEmailRecoveryJSONRequestBody
+}
+
+type VerifyEmailRecoveryResponseObject interface {
+	VisitVerifyEmailRecoveryResponse(w http.ResponseWriter) error
+}
+
+type VerifyEmailRecovery200JSONResponse LoginResult
+
+func (response VerifyEmailRecovery200JSONResponse) VisitVerifyEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyEmailRecovery401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response VerifyEmailRecovery401JSONResponse) VisitVerifyEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyEmailRecovery403JSONResponse struct{ DeniedJSONResponse }
+
+func (response VerifyEmailRecovery403JSONResponse) VisitVerifyEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyEmailRecovery404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response VerifyEmailRecovery404JSONResponse) VisitVerifyEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyEmailRecovery429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response VerifyEmailRecovery429JSONResponse) VisitVerifyEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemRecoveryLinkRequestObject struct {
+	Body *RedeemRecoveryLinkJSONRequestBody
+}
+
+type RedeemRecoveryLinkResponseObject interface {
+	VisitRedeemRecoveryLinkResponse(w http.ResponseWriter) error
+}
+
+type RedeemRecoveryLink200JSONResponse LoginResult
+
+func (response RedeemRecoveryLink200JSONResponse) VisitRedeemRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemRecoveryLink401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RedeemRecoveryLink401JSONResponse) VisitRedeemRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemRecoveryLink403JSONResponse struct{ DeniedJSONResponse }
+
+func (response RedeemRecoveryLink403JSONResponse) VisitRedeemRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemRecoveryLink404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RedeemRecoveryLink404JSONResponse) VisitRedeemRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemRecoveryLink429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response RedeemRecoveryLink429JSONResponse) VisitRedeemRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteRecoveryRequestObject struct {
+}
+
+type CompleteRecoveryResponseObject interface {
+	VisitCompleteRecoveryResponse(w http.ResponseWriter) error
+}
+
+type CompleteRecovery200JSONResponse struct {
+	// RecoveryCodes 新しいリカバリーコード（表示は1回だけ）
+	RecoveryCodes   []string `json:"recovery_codes"`
+	SessionsRevoked int      `json:"sessions_revoked"`
+}
+
+func (response CompleteRecovery200JSONResponse) VisitCompleteRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteRecovery401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteRecovery401JSONResponse) VisitCompleteRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteRecovery409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CompleteRecovery409JSONResponse) VisitCompleteRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetWebAuthnRelatedOrigins passkey を使う origin の一覧（Related Origin Requests）
@@ -3195,6 +3762,9 @@ type StrictServerInterface interface {
 	// SetMyPassword パスワードを設定・変更する（フィーチャー password）
 	// (POST /v1/me/password:set)
 	SetMyPassword(ctx context.Context, request SetMyPasswordRequestObject) (SetMyPasswordResponseObject, error)
+	// RegenerateMyRecoveryCodes リカバリーコードを作り直す
+	// (POST /v1/me/recovery-codes:regenerate)
+	RegenerateMyRecoveryCodes(ctx context.Context, request RegenerateMyRecoveryCodesRequestObject) (RegenerateMyRecoveryCodesResponseObject, error)
 	// ListMySessions 本人の有効なセッションの一覧
 	// (GET /v1/me/sessions)
 	ListMySessions(ctx context.Context, request ListMySessionsRequestObject) (ListMySessionsResponseObject, error)
@@ -3210,6 +3780,21 @@ type StrictServerInterface interface {
 	// StartRegisterTOTP TOTP（認証器アプリ）の登録を始める
 	// (POST /v1/me/totp:start)
 	StartRegisterTOTP(ctx context.Context, request StartRegisterTOTPRequestObject) (StartRegisterTOTPResponseObject, error)
+	// RedeemRecoveryCode 確認済みのメールアドレスとリカバリーコードで復旧を始める（4.12）
+	// (POST /v1/recovery/code:redeem)
+	RedeemRecoveryCode(ctx context.Context, request RedeemRecoveryCodeRequestObject) (RedeemRecoveryCodeResponseObject, error)
+	// StartEmailRecovery 確認済みのメールによる復旧を始める（4.12）
+	// (POST /v1/recovery/email:start)
+	StartEmailRecovery(ctx context.Context, request StartEmailRecoveryRequestObject) (StartEmailRecoveryResponseObject, error)
+	// VerifyEmailRecovery メールのコードかリンクのトークンで復旧専用のセッションを得る
+	// (POST /v1/recovery/email:verify)
+	VerifyEmailRecovery(ctx context.Context, request VerifyEmailRecoveryRequestObject) (VerifyEmailRecoveryResponseObject, error)
+	// RedeemRecoveryLink 運営者が発行した復旧用リンクで復旧専用のセッションを得る
+	// (POST /v1/recovery/link:redeem)
+	RedeemRecoveryLink(ctx context.Context, request RedeemRecoveryLinkRequestObject) (RedeemRecoveryLinkResponseObject, error)
+	// CompleteRecovery 復旧を終える
+	// (POST /v1/recovery:complete)
+	CompleteRecovery(ctx context.Context, request CompleteRecoveryRequestObject) (CompleteRecoveryResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -4031,6 +4616,30 @@ func (sh *strictHandler) SetMyPassword(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// RegenerateMyRecoveryCodes operation middleware
+func (sh *strictHandler) RegenerateMyRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	var request RegenerateMyRecoveryCodesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RegenerateMyRecoveryCodes(ctx, request.(RegenerateMyRecoveryCodesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RegenerateMyRecoveryCodes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RegenerateMyRecoveryCodesResponseObject); ok {
+		if err := validResponse.VisitRegenerateMyRecoveryCodesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListMySessions operation middleware
 func (sh *strictHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
 	var request ListMySessionsRequestObject
@@ -4155,6 +4764,154 @@ func (sh *strictHandler) StartRegisterTOTP(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StartRegisterTOTPResponseObject); ok {
 		if err := validResponse.VisitStartRegisterTOTPResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RedeemRecoveryCode operation middleware
+func (sh *strictHandler) RedeemRecoveryCode(w http.ResponseWriter, r *http.Request) {
+	var request RedeemRecoveryCodeRequestObject
+
+	var body RedeemRecoveryCodeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RedeemRecoveryCode(ctx, request.(RedeemRecoveryCodeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RedeemRecoveryCode")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RedeemRecoveryCodeResponseObject); ok {
+		if err := validResponse.VisitRedeemRecoveryCodeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartEmailRecovery operation middleware
+func (sh *strictHandler) StartEmailRecovery(w http.ResponseWriter, r *http.Request) {
+	var request StartEmailRecoveryRequestObject
+
+	var body StartEmailRecoveryJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartEmailRecovery(ctx, request.(StartEmailRecoveryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartEmailRecovery")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartEmailRecoveryResponseObject); ok {
+		if err := validResponse.VisitStartEmailRecoveryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyEmailRecovery operation middleware
+func (sh *strictHandler) VerifyEmailRecovery(w http.ResponseWriter, r *http.Request) {
+	var request VerifyEmailRecoveryRequestObject
+
+	var body VerifyEmailRecoveryJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyEmailRecovery(ctx, request.(VerifyEmailRecoveryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyEmailRecovery")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyEmailRecoveryResponseObject); ok {
+		if err := validResponse.VisitVerifyEmailRecoveryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RedeemRecoveryLink operation middleware
+func (sh *strictHandler) RedeemRecoveryLink(w http.ResponseWriter, r *http.Request) {
+	var request RedeemRecoveryLinkRequestObject
+
+	var body RedeemRecoveryLinkJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RedeemRecoveryLink(ctx, request.(RedeemRecoveryLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RedeemRecoveryLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RedeemRecoveryLinkResponseObject); ok {
+		if err := validResponse.VisitRedeemRecoveryLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteRecovery operation middleware
+func (sh *strictHandler) CompleteRecovery(w http.ResponseWriter, r *http.Request) {
+	var request CompleteRecoveryRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteRecovery(ctx, request.(CompleteRecoveryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteRecovery")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteRecoveryResponseObject); ok {
+		if err := validResponse.VisitCompleteRecoveryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -25,6 +25,7 @@ import (
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/password"
+	"github.com/imohiyoko/iam/authn/recovery"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/totp"
 	"github.com/imohiyoko/iam/authn/warning"
@@ -75,6 +76,8 @@ type App struct {
 	password *password.Service
 	perIP    *ratelimit.Limiter
 	links    *loginlink.Service
+	// recovery はリカバリーコードと復旧の完了（4.12）。
+	recovery *recovery.Service
 	notifier *eventlog.Relay
 	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
 	scheduler *eventlog.Scheduler
@@ -147,6 +150,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 			AbsoluteLifetime: ss.AbsoluteLifetime.Default.D(), IdleTimeout: ss.IdleTimeout.Default.D(),
 			ValidityMaxDelay: ss.ValidityMaxDelay.D(), RotationInterval: ss.RotationInterval.D(), RotationGrace: ss.RotationGrace.D(),
 			RequireSecondFactor: cfg.Security.SecondFactor.Required, SecondFactorTTL: cfg.Security.SecondFactor.TTL.D(),
+			RecoveryTTL: cfg.Security.Recovery.TTL.D(),
 		},
 	}
 	via := make([]port.VerifiedVia, 0, len(cfg.Realm.VerifiedVia))
@@ -166,6 +170,13 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	}
 	a.perIP = a.limiter(cfg.Security.Login.RateLimit.PerIP)
 	a.links = &loginlink.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Sessions: a.sessions, Log: d.Logger}
+	ar := cfg.Security.Password.Argon2
+	a.recovery = &recovery.Service{
+		Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Notify: a.notify,
+		Params:     password.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
+		PerAccount: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
+	}
+
 	a.oauth = &oauth.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Dev: cfg.Dev, TTL: cfg.Security.EmailFlow.TTL.D(), Log: d.Logger,
@@ -194,7 +205,6 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		if cfg.Security.SecondFactor.Required {
 			minLength = password.MinLengthWithSecondFactor
 		}
-		ar := cfg.Security.Password.Argon2
 		a.password = &password.Service{
 			Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Breach: d.BreachCheck,
 			Params:    password.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},

@@ -50,6 +50,8 @@ func newEnv(t *testing.T) *env {
 	cfg.Dev = true
 	// 応答時間の下限は guard_test で確かめる。ほかのテストでは待たない。
 	cfg.Security.Login.MinResponseTime = 0
+	// パスワードとリカバリーコードのハッシュは軽くする（強さは authn/password で確かめる）。
+	cfg.Security.Password.Argon2 = config.Argon2{MemoryKiB: 8, Iterations: 1, Parallelism: 1}
 	return &env{cfg: cfg, out: out, logs: logs, deps: Deps{
 		Storage: memory.New(clk), Ephemeral: ephemeral.New(clk), KeyStore: ks,
 		EventSink: stdout.New(out), Notifier: &dev.Notifier{Log: log}, Clock: clk, Logger: log,

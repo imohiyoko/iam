@@ -19,8 +19,11 @@ import (
 	"github.com/imohiyoko/iam/shared/ratelimit"
 )
 
-// loginPrefix はログインの要求のパス。本人確認の前の応答を返しうる。
-const loginPrefix = "/v1/login/"
+// loginPrefix・recoveryPrefix はログインと復旧の要求のパス。本人確認の前の応答を返しうる。
+const (
+	loginPrefix    = "/v1/login/"
+	recoveryPrefix = "/v1/recovery/"
+)
 
 // withLoginGuard はログインの要求に、応答時間の下限と接続元ごとの回数の上限をかける（design.md 4.9、4.1）。
 //
@@ -29,7 +32,7 @@ const loginPrefix = "/v1/login/"
 func (a *App) withLoginGuard(h http.Handler) http.Handler {
 	floor := a.cfg.Security.Login.MinResponseTime.D()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, loginPrefix) {
+		if r.Method != http.MethodPost || (!strings.HasPrefix(r.URL.Path, loginPrefix) && !strings.HasPrefix(r.URL.Path, recoveryPrefix)) {
 			h.ServeHTTP(w, r)
 			return
 		}

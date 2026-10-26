@@ -20,11 +20,13 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"slices"
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -67,6 +69,8 @@ const (
 	purposeLogin  = "login"
 	purposeSignup = "signup"
 	purposeAdd    = "add_email" // ログイン済みのユーザーがメールを足す（4.2）
+	// purposeRecovery は確認済みのメールによるアカウントの復旧（4.12）。復旧専用のセッションを出す。
+	purposeRecovery = "recovery"
 )
 
 // state はフローの状態。EphemeralStore に暗号化して置く。
@@ -313,9 +317,8 @@ func (s *Service) Verify(ctx context.Context, realmID string, in Verify) (Verifi
 }
 
 // take はコードかリンクをフローの状態と照合し、合えばフローを使い終える（1回限り）。
-// 照合に使った方式（code / link）も返す。addFor が空ならログイン・登録のフローだけ、
-// 空でなければそのユーザー（内部 ID）のメールの追加のフローだけを受け付ける。
-func (s *Service) take(ctx context.Context, realmID string, in Verify, addFor string) (state, string, error) {
+// 照合に使った方式（code / link）も返す。accept が受け付けないフロー（目的やユーザーが違う）は失敗にする。
+func (s *Service) take(ctx context.Context, realmID string, in Verify, accept func(state) bool) (state, string, error) {
 	if in.FlowID == "" || (in.Code == "") == (in.LinkToken == "") {
 		return state{}, "", errors.New("flow id and exactly one of code or link token are required")
 	}
@@ -339,7 +342,7 @@ func (s *Service) take(ctx context.Context, realmID string, in Verify, addFor st
 	if st.RealmID != realmID || !now.Before(st.ExpiresAt) {
 		return state{}, "", errors.New("flow expired or in another realm")
 	}
-	if (st.Purpose == purposeAdd) != (addFor != "") || (addFor != "" && st.UserID != addFor) {
+	if !accept(st) {
 		return state{}, "", errors.New("flow is for another purpose or user")
 	}
 	// 試行回数はフローごとに数え、上限を超えたらフローを捨てる。
@@ -368,7 +371,7 @@ func (s *Service) take(ctx context.Context, realmID string, in Verify, addFor st
 }
 
 func (s *Service) verify(ctx context.Context, realmID string, in Verify) (Verified, error) {
-	st, method, err := s.take(ctx, realmID, in, "")
+	st, method, err := s.take(ctx, realmID, in, func(st state) bool { return st.Purpose == purposeLogin || st.Purpose == purposeSignup })
 	if err != nil {
 		return Verified{}, err
 	}
@@ -423,7 +426,7 @@ func (s *Service) verify(ctx context.Context, realmID string, in Verify) (Verifi
 // VerifyAdd は、ログイン済みのユーザー（内部 ID）がメールの追加のフローを完了する。
 // 照合の失敗は ErrAuthFailed。所有を確かめた後、アドレスが使われていれば account.ErrEmailExists を返す。
 func (s *Service) VerifyAdd(ctx context.Context, realmID, userID string, in Verify) (port.UserEmail, error) {
-	st, _, err := s.take(ctx, realmID, in, userID)
+	st, _, err := s.take(ctx, realmID, in, func(st state) bool { return st.Purpose == purposeAdd && st.UserID == userID })
 	if err != nil {
 		s.recordFailure(ctx, realmID, in.Client, err)
 		return port.UserEmail{}, ErrAuthFailed
@@ -436,6 +439,111 @@ func (s *Service) VerifyAdd(ctx context.Context, realmID, userID string, in Veri
 		return err
 	})
 	return e, err
+}
+
+// StartRecovery は確認済みのメールによる復旧（4.12）を始める。確認済みのアドレスにだけコードとリンクを送り、
+// 応答はアカウントの有無で変えない（4.9）。
+func (s *Service) StartRecovery(ctx context.Context, realmID, email string, c Client) (Started, error) {
+	email, err := account.NormalizeEmail(email)
+	if err != nil {
+		return Started{}, err
+	}
+	if err := s.limit(ctx, realmID, email, c); err != nil {
+		return Started{}, err
+	}
+	flowID, code, link, err := secrets()
+	if err != nil {
+		return Started{}, err
+	}
+	now := s.Clock.Now()
+	st := state{RealmID: realmID, Purpose: purposeRecovery, CodeHash: digest(code), LinkHash: digest(link), ExpiresAt: now.Add(s.ttl())}
+	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		e, err := s.Accounts.FindByEmail(ctx, tx, realmID, email)
+		switch {
+		case err == nil && e.VerifiedAt != nil:
+			u, err := tx.Users().Get(ctx, realmID, e.UserID)
+			if err != nil {
+				return err
+			}
+			st.UserID, st.PublicID, st.EmailID = u.ID, u.PublicID, e.ID
+			n := port.Notification{Type: notify.TypeAccountRecovery, RealmID: realmID, UserID: u.PublicID}
+			if _, err := s.Notify.Enqueue(ctx, tx, n, &notify.Secret{To: email, Code: code, Token: link, ExpiresAt: st.ExpiresAt}); err != nil {
+				return err
+			}
+		case err == nil, errors.Is(err, errs.NotFound):
+		default:
+			return err
+		}
+		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
+			Type: "recovery.email.requested", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "anonymous"},
+			IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+			Details: map[string]any{"user_id": st.PublicID, "sent": st.UserID != ""},
+		})
+		return err
+	})
+	if err != nil {
+		return Started{}, err
+	}
+	return s.store(ctx, flowID, st)
+}
+
+// VerifyRecovery は復旧のフローのコードかリンクを照合し、復旧専用のセッションを発行する（警告 recovered_via_email を評価する）。
+// 失敗は ErrAuthFailed、停止（security_risk 以外）や警告の deny は errs.Denial。
+func (s *Service) VerifyRecovery(ctx context.Context, realmID string, in Verify) (Verified, error) {
+	out, err := s.verifyRecovery(ctx, realmID, in)
+	if err != nil {
+		s.recordFailure(ctx, realmID, in.Client, err)
+		if denied, ok := errors.AsType[errs.Denial](err); ok {
+			return Verified{}, denied
+		}
+		return Verified{}, ErrAuthFailed
+	}
+	s.Sessions.Committed(ctx, realmID, out.Session)
+	return out, nil
+}
+
+func (s *Service) verifyRecovery(ctx context.Context, realmID string, in Verify) (Verified, error) {
+	st, method, err := s.take(ctx, realmID, in, func(st state) bool { return st.Purpose == purposeRecovery && st.UserID != "" })
+	if err != nil {
+		return Verified{}, err
+	}
+	now := s.Clock.Now()
+	var out Verified
+	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		u, err := tx.Users().Get(ctx, realmID, st.UserID)
+		if err != nil {
+			return err
+		}
+		if _, err := account.Check(ctx, tx, u, now, now, account.RecoveryIgnores...); err != nil {
+			return err
+		}
+		// 開始の後にメールが外されていれば通さない。
+		es, err := tx.Emails().ListByUser(ctx, realmID, u.ID)
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(es, func(e port.UserEmail) bool { return e.ID == st.EmailID && e.VerifiedAt != nil })
+		if i < 0 {
+			return errors.New("email no longer verified for user")
+		}
+		e := es[i]
+		is, err := s.Sessions.Issue(ctx, tx, session.Issue{
+			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"otp"}, Credentials: []string{e.ID}, Recovery: true,
+			Evidence: warning.Evidence{RecoveredViaEmail: true},
+			IP:       in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID, ReplaceToken: in.ReplaceToken,
+		})
+		if err != nil {
+			return err
+		}
+		out.Session, out.UserID = is, u.PublicID
+		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
+			Type: "recovery.started", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
+			SessionID: is.Session.ID, IP: in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID,
+			Details: map[string]any{"via": "email", "method": "email_" + method},
+		})
+		return err
+	})
+	return out, err
 }
 
 // recordFailure は失敗を監査ログに残す（理由の種別は内部向け。6.1）。
