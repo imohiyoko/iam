@@ -112,6 +112,9 @@ type Issue struct {
 	// ReplaceToken は同じブラウザが持っていた古いセッションのトークン。ログイン時に ID を入れ替える（5.2）。
 	// トークン（秘密を含む）で指定させ、ID だけで他人のセッションを失効させられないようにする。
 	ReplaceToken string
+	// AuthenticatedAt は認証の時刻。空なら今。2要素目の完了では1要素目の時刻を引き継ぎ、
+	// 要素の間に始まった停止が解除で戻らないようにする（4.7）。
+	AuthenticatedAt time.Time
 }
 
 // Issued は発行したセッションと、クライアントに渡すトークン。
@@ -166,10 +169,14 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	if err != nil {
 		return Issued{}, err
 	}
+	authAt := now
+	if !in.AuthenticatedAt.IsZero() {
+		authAt = in.AuthenticatedAt
+	}
 	s := port.Session{
 		ID: id.NewExternal(id.Session), RealmID: in.RealmID, PrincipalType: port.PrincipalUser, PrincipalID: in.UserID,
 		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: warningsJSON, IP: ip, UserAgent: ua,
-		AuthenticatedAt: now, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime), Restriction: restriction,
+		AuthenticatedAt: authAt, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime), Restriction: restriction,
 	}
 	if restriction != port.RestrictionNone {
 		s.ExpiresAt = earliest(s.ExpiresAt, now.Add(m.secondFactorTTL()))
@@ -329,7 +336,7 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 	}
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
-		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried,
+		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt,
 	})
 	if err != nil {
 		return Issued{}, err

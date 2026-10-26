@@ -304,3 +304,23 @@ func TestValidateStorageErrorIsNotInvalid(t *testing.T) {
 		t.Fatalf("kind: %v", errs.KindOf(err))
 	}
 }
+
+func TestCompleteSecondFactorKeepsAuthenticatedAt(t *testing.T) {
+	k, m, u := setup(t)
+	m.Config.RequireSecondFactor = true
+	first := issue(t, k, m, u, "")
+	if first.Session.Restriction != port.RestrictionEnroll {
+		t.Fatalf("restriction = %q", first.Session.Restriction)
+	}
+	k.Clock.Advance(time.Minute)
+	var out session.Issued
+	k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		out, err = m.CompleteSecondFactor(ctx, tx, k.RealmID, first.Session.ID, session.SecondFactor{AMR: []string{"otp"}})
+		return err
+	})
+	// 要素の間に始まった停止を、解除の後にこのセッションが越えないよう、1要素目の時刻を引き継ぐ。
+	if !out.Session.AuthenticatedAt.Equal(first.Session.AuthenticatedAt) {
+		t.Fatalf("AuthenticatedAt = %v, want %v", out.Session.AuthenticatedAt, first.Session.AuthenticatedAt)
+	}
+}
