@@ -128,7 +128,8 @@ func (s *Service) RemoveEmail(ctx context.Context, tx port.Tx, realmID, userID, 
 	if err != nil {
 		return err
 	}
-	after := Methods{Identities: m.Identities}
+	after := m
+	after.Emails = nil
 	for _, x := range m.Emails {
 		if x.ID != e.ID {
 			after.Emails = append(after.Emails, x)
