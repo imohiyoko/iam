@@ -17,11 +17,36 @@ type AuthnConnection struct {
 	CreatedAt string
 }
 
+type AuthnPasskey struct {
+	ID           string
+	PublicID     string
+	RealmID      string
+	UserID       string
+	CredentialID []byte
+	PublicKey    []byte
+	Alg          int64
+	SignCount    int64
+	Flags        int64
+	Aaguid       []byte
+	Transports   string
+	Name         string
+	CreatedAt    string
+	LastUsedAt   sql.NullString
+	RevokedAt    sql.NullString
+	RevokeReason string
+}
+
 type AuthnRealm struct {
 	ID        string
 	Slug      string
 	Settings  []byte
 	CreatedAt string
+}
+
+type AuthnRevokedPasskeyCredential struct {
+	RealmID      string
+	CredentialID []byte
+	RevokedAt    string
 }
 
 type AuthnServiceAccount struct {

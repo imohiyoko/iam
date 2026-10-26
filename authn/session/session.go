@@ -354,7 +354,7 @@ func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now tim
 	if u.ValidUntil != nil {
 		next = earliest(next, *u.ValidUntil)
 	}
-	// 認証に使った外部 ID が無効化されていれば、そのセッションも使えない（4.6）。
+	// 認証に使った外部 ID や passkey が無効化されていれば、そのセッションも使えない（4.6）。
 	if err := checkCredentials(ctx, tx, s); err != nil {
 		return time.Time{}, port.User{}, err
 	}
@@ -363,24 +363,39 @@ func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now tim
 
 func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 	var identities []port.Identity
+	var passkeys []port.Passkey
 	for _, c := range s.AuthCredentialIDs {
-		if !strings.HasPrefix(c, string(id.Identity)+"_") {
+		var revoked, found bool
+		switch {
+		case strings.HasPrefix(c, string(id.Identity)+"_"):
+			if identities == nil {
+				var err error
+				if identities, err = tx.Identities().ListByUser(ctx, s.RealmID, s.PrincipalID); err != nil {
+					return err
+				}
+			}
+			for _, i := range identities {
+				if i.ID == c {
+					found, revoked = true, i.RevokedAt != nil
+				}
+			}
+		case strings.HasPrefix(c, string(id.Passkey)+"_"):
+			if passkeys == nil {
+				var err error
+				if passkeys, err = tx.Passkeys().ListByUser(ctx, s.RealmID, s.PrincipalID); err != nil {
+					return err
+				}
+			}
+			for _, p := range passkeys {
+				if p.ID == c {
+					found, revoked = true, p.RevokedAt != nil
+				}
+			}
+		default:
 			continue
 		}
-		if identities == nil {
-			var err error
-			if identities, err = tx.Identities().ListByUser(ctx, s.RealmID, s.PrincipalID); err != nil {
-				return err
-			}
-		}
-		found := false
-		for _, i := range identities {
-			if i.ID == c {
-				if i.RevokedAt != nil {
-					return rejected("credential revoked")
-				}
-				found = true
-			}
+		if revoked {
+			return rejected("credential revoked")
 		}
 		if !found {
 			return rejected("credential missing")

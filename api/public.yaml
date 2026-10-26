@@ -28,6 +28,26 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
 
+  /.well-known/webauthn:
+    get:
+      operationId: getWebAuthnRelatedOrigins
+      summary: passkey を使う origin の一覧（Related Origin Requests）
+      description: |
+        `passkey.rp_id` のドメインで返す内容。rp_id のドメインの外の origin で passkey を使うときに必要（design.md 2.5）。
+      responses:
+        "200":
+          description: origin の一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [origins]
+                properties:
+                  origins:
+                    type: array
+                    items: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/login/email:start:
     post:
       operationId: startEmailLogin
@@ -183,6 +203,51 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/login/passkey:start:
+    post:
+      operationId: startPasskeyLogin
+      summary: passkey でのログインを始める
+      description: |
+        `options` を `navigator.credentials.get()` に渡す（`PublicKeyCredential.parseRequestOptionsFromJSON(options.publicKey)`）。
+        どのユーザーかは認証器が選ぶ（discoverable credential）。本人確認（UV）を求める。
+        フロー ID は `__Host-iam_passkey` Cookie と本文で返す。
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PasskeyCeremony" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/login/passkey:finish:
+    post:
+      operationId: finishPasskeyLogin
+      summary: passkey でのログインを完了する
+      description: |
+        `credential` は `navigator.credentials.get()` の結果の JSON（`PublicKeyCredential.toJSON()`）。
+        `flow_id` は本文か `__Host-iam_passkey` Cookie で渡す。成功するとセッションを発行する。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential]
+              properties:
+                flow_id: { type: string }
+                credential: { type: object, additionalProperties: true }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: ログインした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   /v1/logout:
     post:
       operationId: logout
@@ -232,7 +297,7 @@ paths:
   /v1/me/methods:
     get:
       operationId: listMyMethods
-      summary: 本人の認証手段（メールと連携した外部 ID）の一覧
+      summary: 本人の認証手段（メール、連携した外部 ID、passkey）の一覧
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -243,7 +308,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [emails, identities]
+                required: [emails, identities, passkeys]
                 properties:
                   emails:
                     type: array
@@ -251,6 +316,9 @@ paths:
                   identities:
                     type: array
                     items: { $ref: "#/components/schemas/MyIdentity" }
+                  passkeys:
+                    type: array
+                    items: { $ref: "#/components/schemas/MyPasskey" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
 
   /v1/me/emails:start:
@@ -434,6 +502,102 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /v1/me/passkeys:start:
+    post:
+      operationId: startRegisterPasskey
+      summary: passkey の登録を始める
+      description: |
+        `options` を `navigator.credentials.create()` に渡す（`PublicKeyCredential.parseCreationOptionsFromJSON(options.publicKey)`）。
+        登録済みの passkey は除外を求める。フロー ID は `__Host-iam_passkey` Cookie と本文で返す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PasskeyCeremony" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/passkeys:finish:
+    post:
+      operationId: finishRegisterPasskey
+      summary: passkey の登録を完了する
+      description: |
+        `credential` は `navigator.credentials.create()` の結果の JSON（`PublicKeyCredential.toJSON()`）。
+        登録済みなら `409 passkey_exists`、無効化した passkey は再登録できない（`409 passkey_revoked`。4.6）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential]
+              properties:
+                flow_id: { type: string }
+                credential: { type: object, additionalProperties: true }
+                name: { type: string, maxLength: 64, description: 表示用の名前。省略すると `Passkey` }
+      responses:
+        "200":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyPasskey" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/passkeys/{id}:rename:
+    post:
+      operationId: renameMyPasskey
+      summary: passkey の名前を変える
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: 変えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyPasskey" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/passkeys/{id}:revoke:
+    post:
+      operationId: revokeMyPasskey
+      summary: passkey を無効化する
+      description: |
+        削除せず無効化し、同じ passkey は再登録できない（4.6）。最後のログインの手段なら `409 last_method`。
+        その passkey で作ったセッションは、遅くとも `validity_max_delay` の後に使えなくなる。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 無効化した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -548,3 +712,22 @@ components:
         id: { type: string, description: 公開の外部 ID の紐付けの ID（idn_…） }
         connection: { type: string, description: connection の slug（google など） }
         created_at: { type: string, format: date-time }
+    MyPasskey:
+      type: object
+      required: [id, name, created_at, backup_eligible]
+      properties:
+        id: { type: string, description: 公開の passkey の ID（psk_…） }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        backup_eligible: { type: boolean, description: 同期される passkey か（認証器の BE フラグ） }
+    PasskeyCeremony:
+      type: object
+      required: [flow_id, options, expires_at]
+      properties:
+        flow_id: { type: string }
+        options:
+          type: object
+          additionalProperties: true
+          description: "`{\"publicKey\": …}`。WebAuthn の options の JSON の形"
+        expires_at: { type: string, format: date-time }

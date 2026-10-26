@@ -10,6 +10,22 @@ import (
 	"database/sql"
 )
 
+const addRevokedPasskeyCredential = `-- name: AddRevokedPasskeyCredential :exec
+INSERT INTO authn_revoked_passkey_credentials (realm_id, credential_id, revoked_at) VALUES (?, ?, ?)
+ON CONFLICT (realm_id, credential_id) DO NOTHING
+`
+
+type AddRevokedPasskeyCredentialParams struct {
+	RealmID      string
+	CredentialID []byte
+	RevokedAt    string
+}
+
+func (q *Queries) AddRevokedPasskeyCredential(ctx context.Context, arg AddRevokedPasskeyCredentialParams) error {
+	_, err := q.db.ExecContext(ctx, addRevokedPasskeyCredential, arg.RealmID, arg.CredentialID, arg.RevokedAt)
+	return err
+}
+
 const createConnection = `-- name: CreateConnection :exec
 INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at) VALUES (?, ?, ?, ?, ?, ?)
 `
@@ -99,6 +115,53 @@ func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) 
 		arg.ConnectionID,
 		arg.ProviderSubject,
 		arg.CreatedAt,
+		arg.RevokedAt,
+		arg.RevokeReason,
+	)
+	return err
+}
+
+const createPasskey = `-- name: CreatePasskey :exec
+INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,
+    transports, name, created_at, last_used_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreatePasskeyParams struct {
+	ID           string
+	PublicID     string
+	RealmID      string
+	UserID       string
+	CredentialID []byte
+	PublicKey    []byte
+	Alg          int64
+	SignCount    int64
+	Flags        int64
+	Aaguid       []byte
+	Transports   string
+	Name         string
+	CreatedAt    string
+	LastUsedAt   sql.NullString
+	RevokedAt    sql.NullString
+	RevokeReason string
+}
+
+func (q *Queries) CreatePasskey(ctx context.Context, arg CreatePasskeyParams) error {
+	_, err := q.db.ExecContext(ctx, createPasskey,
+		arg.ID,
+		arg.PublicID,
+		arg.RealmID,
+		arg.UserID,
+		arg.CredentialID,
+		arg.PublicKey,
+		arg.Alg,
+		arg.SignCount,
+		arg.Flags,
+		arg.Aaguid,
+		arg.Transports,
+		arg.Name,
+		arg.CreatedAt,
+		arg.LastUsedAt,
 		arg.RevokedAt,
 		arg.RevokeReason,
 	)
@@ -490,6 +553,105 @@ func (q *Queries) GetIdentityBySubject(ctx context.Context, arg GetIdentityBySub
 	return i, err
 }
 
+const getPasskey = `-- name: GetPasskey :one
+SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason FROM authn_passkeys WHERE realm_id = ? AND id = ?
+`
+
+type GetPasskeyParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetPasskey(ctx context.Context, arg GetPasskeyParams) (AuthnPasskey, error) {
+	row := q.db.QueryRowContext(ctx, getPasskey, arg.RealmID, arg.ID)
+	var i AuthnPasskey
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.UserID,
+		&i.CredentialID,
+		&i.PublicKey,
+		&i.Alg,
+		&i.SignCount,
+		&i.Flags,
+		&i.Aaguid,
+		&i.Transports,
+		&i.Name,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
+const getPasskeyByCredentialID = `-- name: GetPasskeyByCredentialID :one
+SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason FROM authn_passkeys WHERE realm_id = ? AND credential_id = ? AND revoked_at IS NULL
+`
+
+type GetPasskeyByCredentialIDParams struct {
+	RealmID      string
+	CredentialID []byte
+}
+
+func (q *Queries) GetPasskeyByCredentialID(ctx context.Context, arg GetPasskeyByCredentialIDParams) (AuthnPasskey, error) {
+	row := q.db.QueryRowContext(ctx, getPasskeyByCredentialID, arg.RealmID, arg.CredentialID)
+	var i AuthnPasskey
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.UserID,
+		&i.CredentialID,
+		&i.PublicKey,
+		&i.Alg,
+		&i.SignCount,
+		&i.Flags,
+		&i.Aaguid,
+		&i.Transports,
+		&i.Name,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
+const getPasskeyByPublicID = `-- name: GetPasskeyByPublicID :one
+SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason FROM authn_passkeys WHERE realm_id = ? AND public_id = ?
+`
+
+type GetPasskeyByPublicIDParams struct {
+	RealmID  string
+	PublicID string
+}
+
+func (q *Queries) GetPasskeyByPublicID(ctx context.Context, arg GetPasskeyByPublicIDParams) (AuthnPasskey, error) {
+	row := q.db.QueryRowContext(ctx, getPasskeyByPublicID, arg.RealmID, arg.PublicID)
+	var i AuthnPasskey
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.UserID,
+		&i.CredentialID,
+		&i.PublicKey,
+		&i.Alg,
+		&i.SignCount,
+		&i.Flags,
+		&i.Aaguid,
+		&i.Transports,
+		&i.Name,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
 const getServiceAccount = `-- name: GetServiceAccount :one
 SELECT id, realm_id, name, created_at FROM authn_service_accounts WHERE realm_id = ? AND id = ?
 `
@@ -620,6 +782,22 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, arg GetUserByPublicIDPa
 	return i, err
 }
 
+const isPasskeyCredentialRevoked = `-- name: IsPasskeyCredentialRevoked :one
+SELECT COUNT(*) FROM authn_revoked_passkey_credentials WHERE realm_id = ? AND credential_id = ?
+`
+
+type IsPasskeyCredentialRevokedParams struct {
+	RealmID      string
+	CredentialID []byte
+}
+
+func (q *Queries) IsPasskeyCredentialRevoked(ctx context.Context, arg IsPasskeyCredentialRevokedParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, isPasskeyCredentialRevoked, arg.RealmID, arg.CredentialID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const listConnections = `-- name: ListConnections :many
 SELECT id, realm_id, slug, type, config, created_at FROM authn_connections WHERE realm_id = ? ORDER BY slug
 `
@@ -725,6 +903,55 @@ func (q *Queries) ListIdentitiesByUser(ctx context.Context, arg ListIdentitiesBy
 			&i.ConnectionID,
 			&i.ProviderSubject,
 			&i.CreatedAt,
+			&i.RevokedAt,
+			&i.RevokeReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPasskeysByUser = `-- name: ListPasskeysByUser :many
+SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason FROM authn_passkeys WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
+`
+
+type ListPasskeysByUserParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) ListPasskeysByUser(ctx context.Context, arg ListPasskeysByUserParams) ([]AuthnPasskey, error) {
+	rows, err := q.db.QueryContext(ctx, listPasskeysByUser, arg.RealmID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnPasskey
+	for rows.Next() {
+		var i AuthnPasskey
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.UserID,
+			&i.CredentialID,
+			&i.PublicKey,
+			&i.Alg,
+			&i.SignCount,
+			&i.Flags,
+			&i.Aaguid,
+			&i.Transports,
+			&i.Name,
+			&i.CreatedAt,
+			&i.LastUsedAt,
 			&i.RevokedAt,
 			&i.RevokeReason,
 		); err != nil {
@@ -873,6 +1100,24 @@ func (q *Queries) ListSessionsByPrincipal(ctx context.Context, arg ListSessionsB
 	return items, nil
 }
 
+const renamePasskey = `-- name: RenamePasskey :execrows
+UPDATE authn_passkeys SET name = ? WHERE realm_id = ? AND id = ?
+`
+
+type RenamePasskeyParams struct {
+	Name    string
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) RenamePasskey(ctx context.Context, arg RenamePasskeyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renamePasskey, arg.Name, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const revokeIdentity = `-- name: RevokeIdentity :exec
 UPDATE authn_user_identities SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
 `
@@ -886,6 +1131,27 @@ type RevokeIdentityParams struct {
 
 func (q *Queries) RevokeIdentity(ctx context.Context, arg RevokeIdentityParams) error {
 	_, err := q.db.ExecContext(ctx, revokeIdentity,
+		arg.RevokedAt,
+		arg.RevokeReason,
+		arg.RealmID,
+		arg.ID,
+	)
+	return err
+}
+
+const revokePasskey = `-- name: RevokePasskey :exec
+UPDATE authn_passkeys SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
+`
+
+type RevokePasskeyParams struct {
+	RevokedAt    sql.NullString
+	RevokeReason string
+	RealmID      string
+	ID           string
+}
+
+func (q *Queries) RevokePasskey(ctx context.Context, arg RevokePasskeyParams) error {
+	_, err := q.db.ExecContext(ctx, revokePasskey,
 		arg.RevokedAt,
 		arg.RevokeReason,
 		arg.RealmID,
@@ -1012,6 +1278,32 @@ type TouchSessionParams struct {
 
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, touchSession, arg.At, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const usePasskey = `-- name: UsePasskey :execrows
+UPDATE authn_passkeys SET sign_count = ?, flags = ?, last_used_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type UsePasskeyParams struct {
+	SignCount  int64
+	Flags      int64
+	LastUsedAt sql.NullString
+	RealmID    string
+	ID         string
+}
+
+func (q *Queries) UsePasskey(ctx context.Context, arg UsePasskeyParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, usePasskey,
+		arg.SignCount,
+		arg.Flags,
+		arg.LastUsedAt,
+		arg.RealmID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}

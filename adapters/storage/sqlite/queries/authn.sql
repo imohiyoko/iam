@@ -110,3 +110,36 @@ SELECT * FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND 
 
 -- name: ListRoleBindingsByRole :many
 SELECT * FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY created_at, id;
+
+-- name: CreatePasskey :exec
+INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,
+    transports, name, created_at, last_used_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: IsPasskeyCredentialRevoked :one
+SELECT COUNT(*) FROM authn_revoked_passkey_credentials WHERE realm_id = ? AND credential_id = ?;
+
+-- name: GetPasskeyByCredentialID :one
+SELECT * FROM authn_passkeys WHERE realm_id = ? AND credential_id = ? AND revoked_at IS NULL;
+
+-- name: GetPasskeyByPublicID :one
+SELECT * FROM authn_passkeys WHERE realm_id = ? AND public_id = ?;
+
+-- name: GetPasskey :one
+SELECT * FROM authn_passkeys WHERE realm_id = ? AND id = ?;
+
+-- name: ListPasskeysByUser :many
+SELECT * FROM authn_passkeys WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
+
+-- name: UsePasskey :execrows
+UPDATE authn_passkeys SET sign_count = ?, flags = ?, last_used_at = ? WHERE realm_id = ? AND id = ?;
+
+-- name: RenamePasskey :execrows
+UPDATE authn_passkeys SET name = ? WHERE realm_id = ? AND id = ?;
+
+-- name: RevokePasskey :exec
+UPDATE authn_passkeys SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
+
+-- name: AddRevokedPasskeyCredential :exec
+INSERT INTO authn_revoked_passkey_credentials (realm_id, credential_id, revoked_at) VALUES (?, ?, ?)
+ON CONFLICT (realm_id, credential_id) DO NOTHING;

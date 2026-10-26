@@ -111,6 +111,48 @@ type IdentityRepo interface {
 	ListByUser(ctx context.Context, realmID, userID string) ([]Identity, error)
 }
 
+// Passkey は passkeys の1行（design.md 3.1、9.4）。公開鍵は COSE の形で持つ（秘密ではない）。
+// 無効化は削除ではなく RevokedAt を記録し、credential_id は revoked_passkey_credentials にも残す（4.6）。
+// ID は内部 ID で、API に出すのは PublicID（ADR 0045）。
+type Passkey struct {
+	ID           string
+	PublicID     string // 外部 ID。realm 内で一意
+	RealmID      string
+	UserID       string
+	CredentialID []byte // 認証器が決める値。realm 内で一意
+	PublicKey    []byte // COSE_Key
+	Alg          int64  // COSE のアルゴリズム（ES256 = -7、EdDSA = -8）
+	SignCount    uint32
+	// Flags は認証器のフラグ（UP、UV、BE、BS など）。BE は登録の後に変わらないことを検証に使う。
+	Flags        uint8
+	AAGUID       []byte
+	Transports   []string
+	Name         string
+	CreatedAt    time.Time
+	LastUsedAt   *time.Time
+	RevokedAt    *time.Time
+	RevokeReason string
+}
+
+// PasskeyRepo は passkeys と revoked_passkey_credentials の Repository。
+type PasskeyRepo interface {
+	// Create は、(realm, CredentialID) か (realm, PublicID) が重複するか、CredentialID が無効化済み
+	// （revoked_passkey_credentials にある）なら errs.Conflict を返す（4.6 の再登録の拒否）。
+	Create(ctx context.Context, p Passkey) error
+	// GetByCredentialID は無効化していない passkey を返す。無ければ errs.NotFound。
+	GetByCredentialID(ctx context.Context, realmID string, credentialID []byte) (Passkey, error)
+	GetByPublicID(ctx context.Context, realmID, publicID string) (Passkey, error)
+	// ListByUser はユーザーの passkey を作成時刻の順（同時刻は ID の順）に返す（無効化したものも含む）。
+	ListByUser(ctx context.Context, realmID, userID string) ([]Passkey, error)
+	// Used はログインに使ったことを記録する（署名の回数、フラグ、最終利用時刻）。無ければ errs.NotFound。
+	Used(ctx context.Context, realmID, id string, signCount uint32, flags uint8, at time.Time) error
+	// Rename は名前を変える。無ければ errs.NotFound。
+	Rename(ctx context.Context, realmID, id, name string) error
+	// Revoke は at に無効化し、credential_id を無効化済みに加える。既に無効化されていれば何もしない。
+	// 無ければ errs.NotFound。
+	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+}
+
 // Connection は connections の1行（外部の IdP との接続）。秘密を含む設定はコアが暗号化してから渡す。
 type Connection struct {
 	ID        string

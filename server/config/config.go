@@ -47,6 +47,38 @@ type Config struct {
 
 	// IDs は採番の方式（ADR 0045）。
 	IDs IDs `yaml:"ids"`
+
+	// Passkey は passkey（WebAuthn）の Relying Party（design.md 2.5）。
+	Passkey Passkey `yaml:"passkey"`
+}
+
+// Passkey は passkey の Relying Party の設定。省略した項目は server.public_url から決める。
+// rp_id も public_url も無ければ passkey は使えない。
+type Passkey struct {
+	// RPID は passkey を結び付けるドメイン（example.com など）。既定は public_url のホスト。
+	// 作った後に変えると、登録済みの passkey が使えなくなる。
+	RPID   string `yaml:"rp_id"`
+	RPName string `yaml:"rp_name"` // 既定は realm.slug
+	// Origins は passkey を使う画面の origin。既定は public_url。rp_id のドメインの外の origin は
+	// Related Origin Requests（/.well-known/webauthn を rp_id のドメインで返す）で関連付ける。
+	Origins []string `yaml:"origins"`
+}
+
+// PasskeyRP は passkey の Relying Party を既定値で補って返す。使えなければ ok=false。
+func (c Config) PasskeyRP() (rpID, rpName string, origins []string, ok bool) {
+	rpID, rpName, origins = c.Passkey.RPID, c.Passkey.RPName, c.Passkey.Origins
+	if u, err := url.Parse(c.Server.PublicURL); err == nil && u.Host != "" {
+		if rpID == "" {
+			rpID = u.Hostname()
+		}
+		if len(origins) == 0 {
+			origins = []string{u.Scheme + "://" + u.Host}
+		}
+	}
+	if rpName == "" {
+		rpName = c.Realm.Slug
+	}
+	return rpID, rpName, origins, rpID != "" && len(origins) > 0
 }
 
 // IDs は内部 ID と外部 ID の採番の方式（id.Generators の名前）。
@@ -256,6 +288,28 @@ func Parse(b []byte) (Config, error) {
 	return c, c.Validate()
 }
 
+func (c Config) validatePasskey() []string {
+	var problems []string
+	rpID, _, origins, ok := c.PasskeyRP()
+	if !ok {
+		if c.Passkey.RPID != "" || len(c.Passkey.Origins) > 0 {
+			problems = append(problems, "passkey: rp_id and origins are required (or set server.public_url)")
+		}
+		return problems
+	}
+	if strings.ContainsAny(rpID, ":/") || strings.Trim(rpID, ".") != rpID {
+		problems = append(problems, "passkey.rp_id must be a domain name without scheme or port")
+	}
+	for _, o := range origins {
+		u, err := url.Parse(o)
+		if err != nil || !(u.Scheme == "https" || (c.Dev && u.Scheme == "http")) || u.Host == "" || u.User != nil ||
+			(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+			problems = append(problems, fmt.Sprintf("passkey.origins: %q must be an https origin (http only with dev: true)", o))
+		}
+	}
+	return problems
+}
+
 // WarningActions は security.warnings を評価器の形にする。
 func (c Config) WarningActions() map[string]warning.Action {
 	out := make(map[string]warning.Action, len(c.Security.Warnings))
@@ -336,6 +390,7 @@ func (c Config) Validate() error {
 	if c.Outbox.Interval.D() <= 0 {
 		problems = append(problems, "outbox.interval must be positive")
 	}
+	problems = append(problems, c.validatePasskey()...)
 	if len(problems) > 0 {
 		return fmt.Errorf("config: %s", strings.Join(problems, "; "))
 	}

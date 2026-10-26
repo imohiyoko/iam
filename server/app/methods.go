@@ -50,7 +50,7 @@ func (s publicServer) ListMyMethods(ctx context.Context, _ publicapi.ListMyMetho
 	if !ok {
 		return publicapi.ListMyMethods401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
-	out := publicapi.ListMyMethods200JSONResponse{Emails: []publicapi.MyEmail{}, Identities: []publicapi.MyIdentity{}}
+	out := publicapi.ListMyMethods200JSONResponse{Emails: []publicapi.MyEmail{}, Identities: []publicapi.MyIdentity{}, Passkeys: []publicapi.MyPasskey{}}
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		m, err := s.a.accounts.ListMethods(ctx, tx, s.a.realm.ID, au.PrincipalID)
 		if err != nil {
@@ -69,6 +69,9 @@ func (s publicServer) ListMyMethods(ctx context.Context, _ publicapi.ListMyMetho
 		}
 		for _, i := range m.Identities {
 			out.Identities = append(out.Identities, publicapi.MyIdentity{Id: i.PublicID, Connection: slugs[i.ConnectionID], CreatedAt: i.CreatedAt})
+		}
+		for _, p := range m.Passkeys {
+			out.Passkeys = append(out.Passkeys, myPasskey(p))
 		}
 		return nil
 	})
