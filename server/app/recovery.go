@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/emailflow"
@@ -208,7 +209,7 @@ func (s adminServer) IssueRecoveryLink(ctx context.Context, req adminapi.IssueRe
 		return adminapi.IssueRecoveryLink403JSONResponse(d.Body), nil
 	case !s.a.recoveryAllows(recoveryByLink):
 		return adminapi.IssueRecoveryLink404JSONResponse(adminError("not_found", "operator_link recovery is disabled")), nil
-	case req.Body == nil || strings.TrimSpace(req.Body.Reason) == "" || len(req.Body.Reason) > 1000:
+	case req.Body == nil || strings.TrimSpace(req.Body.Reason) == "" || utf8.RuneCountInString(req.Body.Reason) > 1000:
 		return adminapi.IssueRecoveryLink400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_reason", ""))}, nil
 	}
 	ttl := loginLinkTTL
@@ -227,6 +228,9 @@ func (s adminServer) IssueRecoveryLink(ctx context.Context, req adminapi.IssueRe
 		if u.Status != port.UserActive {
 			return errs.New(errs.KindNotFound, "user cannot recover")
 		}
+		if err := s.a.outranks(ctx, tx, p, u.ID); err != nil {
+			return err
+		}
 		_, err = eventlog.Record(ctx, tx, s.a.deps.Clock, audit.Event{
 			Type: "recovery.link_issued", Result: audit.ResultSuccess, RealmID: s.a.realm.ID, Actor: p.Actor, RequestID: requestID(ctx),
 			Details: map[string]any{"user_id": u.PublicID, "reason": req.Body.Reason, "expires_at": exp.UTC().Format(time.RFC3339)},
@@ -235,6 +239,9 @@ func (s adminServer) IssueRecoveryLink(ctx context.Context, req adminapi.IssueRe
 	})
 	if errors.Is(err, errs.NotFound) {
 		return adminapi.IssueRecoveryLink404JSONResponse(adminError("not_found", "")), nil
+	}
+	if errors.Is(err, errOutranked) {
+		return adminapi.IssueRecoveryLink403JSONResponse(adminError(errs.CodePermissionDenied, "")), nil
 	}
 	if err != nil {
 		return nil, err

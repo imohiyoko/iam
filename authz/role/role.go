@@ -89,3 +89,38 @@ func Allowed(ctx context.Context, tx port.Tx, realmID string, t port.PrincipalTy
 	}
 	return false, nil
 }
+
+// Covers は、主体が対象のユーザーの realm 全体のロールの権限をすべて持つかを返す。
+// 対象になりすませる操作（ログイン用・復旧用のリンクの発行）で、下位のロールが上位のロールの人を乗っ取れないようにする。
+func Covers(ctx context.Context, tx port.Tx, realmID string, t port.PrincipalType, principalID, targetUserID string) (bool, error) {
+	have, err := perms(ctx, tx, realmID, t, principalID)
+	if err != nil {
+		return false, err
+	}
+	need, err := perms(ctx, tx, realmID, port.PrincipalUser, targetUserID)
+	if err != nil {
+		return false, err
+	}
+	for p := range need {
+		if _, ok := have[p]; !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func perms(ctx context.Context, tx port.Tx, realmID string, t port.PrincipalType, principalID string) (map[string]struct{}, error) {
+	bs, err := tx.RoleBindings().ListByPrincipal(ctx, realmID, t, principalID)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]struct{}{}
+	for _, b := range bs {
+		if b.OrgID == "" {
+			for _, p := range builtin[b.Role] {
+				out[p] = struct{}{}
+			}
+		}
+	}
+	return out, nil
+}

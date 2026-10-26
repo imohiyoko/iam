@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -248,5 +249,26 @@ func TestRecoveryLinkWhileSuspended(t *testing.T) {
 	// 停止はセキュリティ担当が解除するまで続く。
 	if status, out, _ := l.passkeyLogin(t, b); status != 403 {
 		t.Fatalf("login while suspended: %d %v", status, out)
+	}
+}
+
+// 下位のロールの運営者は、上位のロールの人に復旧用・ログイン用のリンクを出せない（乗っ取りの防止）。
+func TestOperatorLinksRequireCoveringRole(t *testing.T) {
+	l := newPasskeyEnv(t)
+	ownerID, owner := l.operator(t, "owner@example.com", role.RealmOwner)
+	adminID, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
+	_, support := l.operator(t, "support@example.com", role.RealmSupport)
+	reason := map[string]string{"reason": strings.Repeat("電", 1000)} // 文字数で数える
+	if status, out := l.admin(t, "/v1/admin/users/"+adminID+":recovery_link", support, reason); status != 403 {
+		t.Fatalf("support → admin recovery link: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/users/"+ownerID+":login_link", admin, nil); status != 403 {
+		t.Fatalf("admin → owner login link: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/users/"+adminID+":recovery_link", owner, reason); status != 200 {
+		t.Fatalf("owner → admin recovery link: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/users/"+adminID+":recovery_link", owner, map[string]string{"reason": strings.Repeat("電", 1001)}); status != 400 {
+		t.Fatalf("reason over 1000 chars: %d %v", status, out)
 	}
 }

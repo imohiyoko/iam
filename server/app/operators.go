@@ -168,10 +168,16 @@ func (s adminServer) IssueLoginLink(ctx context.Context, req adminapi.IssueLogin
 		if u.Status != port.UserActive {
 			return errs.New(errs.KindNotFound, "user cannot log in")
 		}
+		if err := s.a.outranks(ctx, tx, p, u.ID); err != nil {
+			return err
+		}
 		return s.a.recordLoginLink(ctx, tx, p.Actor, u.PublicID, requestID(ctx))
 	})
 	if errors.Is(err, errs.NotFound) {
 		return adminapi.IssueLoginLink404JSONResponse(adminError("not_found", "")), nil
+	}
+	if errors.Is(err, errOutranked) {
+		return adminapi.IssueLoginLink403JSONResponse(adminError(errs.CodePermissionDenied, "")), nil
 	}
 	if err != nil {
 		return nil, err
@@ -252,4 +258,19 @@ func (s adminServer) CreateConnection(ctx context.Context, req adminapi.CreateCo
 		return nil, err
 	}
 	return adminapi.CreateConnection201JSONResponse{Id: c.ID, Slug: c.Slug}, nil
+}
+
+// errOutranked は、対象のユーザーが呼び出し側の持たない権限のロールを持つこと。
+var errOutranked = errors.New("target holds permissions the caller lacks")
+
+// outranks は、対象になりすませる操作の前に、呼び出し側が対象のロールの権限をすべて持つかを確かめる。
+func (a *App) outranks(ctx context.Context, tx port.Tx, p adminPrincipal, targetUserID string) error {
+	ok, err := role.Covers(ctx, tx, a.realm.ID, p.Type, p.ID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errOutranked
+	}
+	return nil
 }
