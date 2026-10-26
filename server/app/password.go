@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/password"
-	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -52,12 +51,6 @@ func errCode(err error) string {
 	return ""
 }
 
-// revokeOthers はパスワードの変更・削除の後に、このセッションの他のセッションを失効させる（5.2）。
-func (s publicServer) revokeOthers(ctx context.Context, au auth) error {
-	_, err := s.a.sessions.RevokeAll(ctx, s.a.realm.ID, au.PrincipalID, au.SessionID, session.ReasonCredentialChanged, au.Actor(), requestID(ctx))
-	return err
-}
-
 func (s publicServer) SetMyPassword(ctx context.Context, req publicapi.SetMyPasswordRequestObject) (publicapi.SetMyPasswordResponseObject, error) {
 	au, ok := authFrom(ctx)
 	if !ok {
@@ -70,7 +63,7 @@ func (s publicServer) SetMyPassword(ctx context.Context, req publicapi.SetMyPass
 		return publicapi.SetMyPassword400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
 	recent := s.a.deps.Clock.Now().Sub(au.AuthenticatedAt) <= s.a.cfg.Security.Session.MaxAuthAge.Default.D()
-	_, err := s.a.password.Set(ctx, s.a.realm.ID, au.PrincipalID, req.Body.Password, deref(req.Body.CurrentPassword), recent, au.Actor(), requestID(ctx))
+	_, err := s.a.password.Set(ctx, s.a.realm.ID, au.PrincipalID, req.Body.Password, deref(req.Body.CurrentPassword), recent, au.SessionID, au.Actor(), requestID(ctx))
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.SetMyPassword429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
@@ -84,9 +77,6 @@ func (s publicServer) SetMyPassword(ctx context.Context, req publicapi.SetMyPass
 	case err != nil:
 		return nil, err
 	}
-	if err := s.revokeOthers(ctx, au); err != nil {
-		return nil, err
-	}
 	return publicapi.SetMyPassword204Response{}, nil
 }
 
@@ -98,7 +88,7 @@ func (s publicServer) RemoveMyPassword(ctx context.Context, req publicapi.Remove
 	if s.a.password == nil || req.Body == nil {
 		return publicapi.RemoveMyPassword404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	}
-	err := s.a.password.Remove(ctx, s.a.realm.ID, au.PrincipalID, req.Body.CurrentPassword, au.Actor(), requestID(ctx))
+	err := s.a.password.Remove(ctx, s.a.realm.ID, au.PrincipalID, req.Body.CurrentPassword, au.SessionID, au.Actor(), requestID(ctx))
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.RemoveMyPassword429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
@@ -109,9 +99,6 @@ func (s publicServer) RemoveMyPassword(ctx context.Context, req publicapi.Remove
 	case errors.Is(err, password.ErrNoPassword):
 		return publicapi.RemoveMyPassword404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	case err != nil:
-		return nil, err
-	}
-	if err := s.revokeOthers(ctx, au); err != nil {
 		return nil, err
 	}
 	return publicapi.RemoveMyPassword204Response{}, nil

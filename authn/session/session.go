@@ -666,27 +666,41 @@ func (m *Manager) RevokeAll(ctx context.Context, realmID, userID, except, reason
 	var ids []string
 	err := m.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		ids, err = tx.Sessions().RevokeByPrincipal(ctx, realmID, port.PrincipalUser, userID, except, m.Clock.Now(), reason)
-		if err != nil || len(ids) == 0 {
-			return err
-		}
-		subject, err := userActor(ctx, tx, realmID, userID)
-		if err != nil {
-			return err
-		}
-		_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
-			Type: "session.revoked", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
-			Details: map[string]any{"sessions": ids, "reason": reason, "user_id": subject.ID},
-		})
+		ids, err = m.RevokeAllTx(ctx, tx, realmID, userID, except, reason, actor, requestID)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	for _, sid := range ids {
-		m.forget(ctx, realmID, sid)
+	m.ForgetIDs(ctx, realmID, ids)
+	return ids, nil
+}
+
+// RevokeAllTx は RevokeAll を呼び出し側のトランザクションで行う。確定の後に ForgetIDs で返した ID のキャッシュを消す。
+func (m *Manager) RevokeAllTx(ctx context.Context, tx port.Tx, realmID, userID, except, reason string, actor audit.Actor, requestID string) ([]string, error) {
+	ids, err := tx.Sessions().RevokeByPrincipal(ctx, realmID, port.PrincipalUser, userID, except, m.Clock.Now(), reason)
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	subject, err := userActor(ctx, tx, realmID, userID)
+	if err != nil {
+		return nil, err
+	}
+	_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
+		Type: "session.revoked", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
+		Details: map[string]any{"sessions": ids, "reason": reason, "user_id": subject.ID},
+	})
+	if err != nil {
+		return nil, err
 	}
 	return ids, nil
+}
+
+// ForgetIDs はセッションの検証結果のキャッシュを消す（呼び出し側のトランザクションで失効させた後に呼ぶ）。
+func (m *Manager) ForgetIDs(ctx context.Context, realmID string, sessionIDs []string) {
+	for _, sid := range sessionIDs {
+		m.forget(ctx, realmID, sid)
+	}
 }
 
 func (m *Manager) revokeInTx(ctx context.Context, tx port.Tx, s port.Session, reason string, actor audit.Actor, requestID string) error {

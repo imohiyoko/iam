@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -111,7 +112,7 @@ func (s *Service) dummyHash() string {
 }
 
 // Login はメールとパスワードで照合し、セッションを発行する。失敗は ErrAuthFailed（回数の上限を超えれば
-// *ratelimit.ExceededError、警告の deny なら *warning.DeniedError）。
+// *ratelimit.ExceededError、警告の deny なら *warning.DeniedError）。基盤の障害はそのまま返す。
 func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, error) {
 	email, err := account.NormalizeEmail(in.Email)
 	if err != nil {
@@ -120,19 +121,30 @@ func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, 
 	if err := s.allow(ctx, realmID, email); err != nil {
 		return Result{}, err
 	}
+	if len(in.Password) > MaxInputBytes {
+		// 長さはアカウントの有無に関わらないので、照合せずに失敗させてよい。
+		s.recordFailure(ctx, realmID, in.Client, fmt.Errorf("%w: password too long", errRejected))
+		return Result{}, ErrAuthFailed
+	}
 	pw := Normalize(in.Password)
 	cred, u, emailID, err := s.check(ctx, realmID, email, pw)
 	if err != nil {
 		s.recordFailure(ctx, realmID, in.Client, err)
-		return Result{}, ErrAuthFailed
+		if errors.Is(err, errRejected) {
+			return Result{}, ErrAuthFailed
+		}
+		return Result{}, err
 	}
 	breached := s.breached(ctx, pw)
 	var out Result
 	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		// 照合と発行の間に変更・削除されていれば通さない。
 		cur, err := tx.Passwords().GetActive(ctx, realmID, u.ID)
-		if err != nil || cur.ID != cred.ID || cur.Hash != cred.Hash {
-			return errors.New("password changed during login")
+		if errors.Is(err, errs.NotFound) || (err == nil && (cur.ID != cred.ID || cur.Hash != cred.Hash)) {
+			return fmt.Errorf("%w: password changed during login", errRejected)
+		}
+		if err != nil {
+			return err
 		}
 		if cred.rehash {
 			h, err := Hash(pw, s.params())
@@ -161,17 +173,21 @@ func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, 
 	})
 	if err != nil {
 		s.recordFailure(ctx, realmID, in.Client, err)
-		if _, denied := errors.AsType[*warning.DeniedError](err); denied {
-			return Result{}, err
+		if errors.Is(err, errRejected) {
+			return Result{}, ErrAuthFailed
 		}
-		return Result{}, ErrAuthFailed
+		return Result{}, err // *warning.DeniedError と基盤の障害
 	}
 	s.Sessions.Committed(ctx, realmID, out.Session)
 	return out, nil
 }
 
+// errRejected は照合の失敗（アカウントが無い・メールが未確認・ログインできない・パスワードが違う）。
+// 外には ErrAuthFailed として返す。基盤の障害はこれに含めない。
+var errRejected = errors.New("password login rejected")
+
 // errUnusable はメールが未確認か、ユーザーがログインできないこと（理由は外部に返さない）。
-var errUnusable = errors.New("email unverified or user cannot log in")
+var errUnusable = fmt.Errorf("%w: email unverified or user cannot log in", errRejected)
 
 type checked struct {
 	port.PasswordCredential
@@ -211,12 +227,14 @@ func (s *Service) check(ctx context.Context, realmID, email, pw string) (checked
 	}
 	ok, rehash, err := Verify(pw, hash, s.params())
 	switch {
+	case errors.Is(lookup, errs.NotFound):
+		return checked{}, port.User{}, "", fmt.Errorf("%w: %w", errRejected, lookup)
 	case lookup != nil:
 		return checked{}, port.User{}, "", lookup
 	case err != nil:
 		return checked{}, port.User{}, "", err
 	case !ok:
-		return checked{}, port.User{}, "", errors.New("password mismatch")
+		return checked{}, port.User{}, "", fmt.Errorf("%w: password mismatch", errRejected)
 	}
 	return checked{PasswordCredential: cred, rehash: rehash}, u, emailID, nil
 }
@@ -247,9 +265,9 @@ func (s *Service) breached(ctx context.Context, pw string) *bool {
 }
 
 // Set はユーザー（内部 ID）のパスワードを設定する。既にあれば current と照合して置き換える。初めての設定は
-// 直近の認証（recentAuth）を求める。呼び出し側は確定の後に他のセッションを失効させる（5.2）。
+// 直近の認証（recentAuth）を求める。同じトランザクションで keepSession 以外のセッションを失効させる（5.2）。
 // 長さと漏洩の確認で拒否すれば ErrTooShort・ErrTooLong・ErrBreached。
-func (s *Service) Set(ctx context.Context, realmID, userID, newPassword, current string, recentAuth bool, actor audit.Actor, requestID string) (port.PasswordCredential, error) {
+func (s *Service) Set(ctx context.Context, realmID, userID, newPassword, current string, recentAuth bool, keepSession string, actor audit.Actor, requestID string) (port.PasswordCredential, error) {
 	pw := Normalize(newPassword)
 	if err := checkLength(pw, s.minLength()); err != nil {
 		return port.PasswordCredential{}, err
@@ -266,6 +284,7 @@ func (s *Service) Set(ctx context.Context, realmID, userID, newPassword, current
 	}
 	now := s.Clock.Now()
 	c := port.PasswordCredential{ID: id.New(id.Password), RealmID: realmID, UserID: userID, Hash: h, CreatedAt: now}
+	var revoked []string
 	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		old, err := tx.Passwords().GetActive(ctx, realmID, userID)
 		switch {
@@ -288,18 +307,27 @@ func (s *Service) Set(ctx context.Context, realmID, userID, newPassword, current
 			Type: "password.set", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
 			Details: map[string]any{"replaced": old.ID != ""},
 		})
+		if err != nil {
+			return err
+		}
+		revoked, err = s.Sessions.RevokeAllTx(ctx, tx, realmID, userID, keepSession, session.ReasonCredentialChanged, actor, requestID)
 		return err
 	})
-	return c, err
+	if err != nil {
+		return port.PasswordCredential{}, err
+	}
+	s.Sessions.ForgetIDs(ctx, realmID, revoked)
+	return c, nil
 }
 
 // Remove はパスワードを current と照合して無効化する。最後のログインの手段なら account.ErrLastMethod。
-// 呼び出し側は確定の後に他のセッションを失効させる（5.2）。
-func (s *Service) Remove(ctx context.Context, realmID, userID, current string, actor audit.Actor, requestID string) error {
+// 同じトランザクションで keepSession 以外のセッションを失効させる（5.2）。
+func (s *Service) Remove(ctx context.Context, realmID, userID, current, keepSession string, actor audit.Actor, requestID string) error {
 	if err := s.allowUser(ctx, realmID, userID); err != nil {
 		return err
 	}
-	return s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+	var revoked []string
+	err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		old, err := tx.Passwords().GetActive(ctx, realmID, userID)
 		if errors.Is(err, errs.NotFound) {
 			return ErrNoPassword
@@ -310,8 +338,17 @@ func (s *Service) Remove(ctx context.Context, realmID, userID, current string, a
 		if err := s.matches(old, current); err != nil {
 			return err
 		}
-		return s.Accounts.RevokePassword(ctx, tx, realmID, userID, old, ReasonRemoved, actor, requestID)
+		if err := s.Accounts.RevokePassword(ctx, tx, realmID, userID, old, ReasonRemoved, actor, requestID); err != nil {
+			return err
+		}
+		revoked, err = s.Sessions.RevokeAllTx(ctx, tx, realmID, userID, keepSession, session.ReasonCredentialChanged, actor, requestID)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	s.Sessions.ForgetIDs(ctx, realmID, revoked)
+	return nil
 }
 
 func (s *Service) allowUser(ctx context.Context, realmID, userID string) error {

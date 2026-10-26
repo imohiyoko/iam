@@ -27,7 +27,7 @@ func init() {
 			return nil, err
 		}
 		u, err := url.Parse(cfg.Option("url", DefaultURL))
-		if err != nil || u.Host == "" || (u.Scheme != "https" && !(cfg.Dev && u.Scheme == "http")) {
+		if err != nil || u.Host == "" || (u.Scheme != "https" && (!cfg.Dev || u.Scheme != "http")) {
 			return nil, errors.New("breach_check hibp: url must be an https URL (http only in development mode)")
 		}
 		timeout := 2 * time.Second

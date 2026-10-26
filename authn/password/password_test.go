@@ -113,14 +113,14 @@ func TestSetAndLogin(t *testing.T) {
 		{strings.Repeat("x", password.MaxLength+1), password.ErrTooLong},
 		{"password1234567890", password.ErrBreached},
 	} {
-		if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, c.pw, "", true, audit.Actor{}, ""); !errors.Is(err, c.want) {
+		if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, c.pw, "", true, "", audit.Actor{}, ""); !errors.Is(err, c.want) {
 			t.Errorf("set %q = %v, want %v", c.pw, err, c.want)
 		}
 	}
-	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", false, audit.Actor{}, ""); !errors.Is(err, password.ErrReauthRequired) {
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", false, "", audit.Actor{}, ""); !errors.Is(err, password.ErrReauthRequired) {
 		t.Fatalf("first set without recent auth = %v", err)
 	}
-	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", true, audit.Actor{}, ""); err != nil {
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", true, "", audit.Actor{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	res, err := e.svc.Login(ctx, e.k.RealmID, password.Login{Email: "Alice@Example.com", Password: good})
@@ -141,10 +141,10 @@ func TestSetAndLogin(t *testing.T) {
 		}
 	}
 	// 変更には今のパスワードが要る。
-	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, "another long passphrase", "wrong", true, audit.Actor{}, ""); !errors.Is(err, password.ErrCurrentPassword) {
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, "another long passphrase", "wrong", true, "", audit.Actor{}, ""); !errors.Is(err, password.ErrCurrentPassword) {
 		t.Fatalf("change with wrong current = %v", err)
 	}
-	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, "another long passphrase", good, false, audit.Actor{}, ""); err != nil {
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, "another long passphrase", good, false, "", audit.Actor{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.svc.Login(ctx, e.k.RealmID, password.Login{Email: "alice@example.com", Password: good}); !errors.Is(err, errs.AuthenticationFailed) {
@@ -158,7 +158,7 @@ func TestLoginRateLimitedAndBreachWarning(t *testing.T) {
 	u := e.user(t, "bob@example.com")
 	// 設定の時は確認できなかった（障害）が、後で漏洩が分かった。
 	e.breach.fail = true
-	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, "password1234567890", "", true, audit.Actor{}, ""); err != nil {
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, "password1234567890", "", true, "", audit.Actor{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	e.breach.fail = false
@@ -180,25 +180,88 @@ func TestRemove(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	u := e.user(t, "carol@example.com")
-	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, good, audit.Actor{}, ""); !errors.Is(err, password.ErrNoPassword) {
+	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, good, "", audit.Actor{}, ""); !errors.Is(err, password.ErrNoPassword) {
 		t.Fatalf("remove without password = %v", err)
 	}
-	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", true, audit.Actor{}, ""); err != nil {
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", true, "", audit.Actor{}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, "wrong", audit.Actor{}, ""); !errors.Is(err, password.ErrCurrentPassword) {
+	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, "wrong", "", audit.Actor{}, ""); !errors.Is(err, password.ErrCurrentPassword) {
 		t.Fatalf("remove with wrong current = %v", err)
 	}
 	// メールのコードが使えなければ、パスワードが最後のログインの手段。
 	e.acc.VerifiedVia = nil
-	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, good, audit.Actor{}, ""); !errors.Is(err, account.ErrLastMethod) {
+	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, good, "", audit.Actor{}, ""); !errors.Is(err, account.ErrLastMethod) {
 		t.Fatalf("remove last method = %v", err)
 	}
 	e.acc.VerifiedVia = []port.VerifiedVia{port.VerifiedViaCode}
-	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, good, audit.Actor{}, ""); err != nil {
+	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, good, "", audit.Actor{}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.svc.Login(ctx, e.k.RealmID, password.Login{Email: "carol@example.com", Password: good}); !errors.Is(err, errs.AuthenticationFailed) {
 		t.Fatalf("login after remove = %v", err)
+	}
+}
+
+// failingStorage はトランザクションをすべて失敗させる（基盤の障害）。
+type failingStorage struct{ port.Storage }
+
+var errDown = errors.New("storage down")
+
+func (failingStorage) Tx(context.Context, func(context.Context, port.Tx) error) error { return errDown }
+
+func TestLoginDoesNotHideInfrastructureErrors(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	u := e.user(t, "dave@example.com")
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", true, "", audit.Actor{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	// 上限を超える入力は照合せずに認証の失敗にする。
+	long := strings.Repeat("a", password.MaxInputBytes+1)
+	if _, err := e.svc.Login(ctx, e.k.RealmID, password.Login{Email: "dave@example.com", Password: long}); !errors.Is(err, errs.AuthenticationFailed) {
+		t.Fatalf("too long = %v", err)
+	}
+	e.svc.Storage = failingStorage{e.k.Storage}
+	if _, err := e.svc.Login(ctx, e.k.RealmID, password.Login{Email: "dave@example.com", Password: good}); !errors.Is(err, errDown) {
+		t.Fatalf("storage failure = %v, want it returned as is", err)
+	}
+}
+
+func TestSetAndRemoveRevokeOtherSessions(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	u := e.user(t, "erin@example.com")
+	issue := func() string {
+		var id string
+		e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+			is, err := e.svc.Sessions.Issue(ctx, tx, session.Issue{RealmID: e.k.RealmID, UserID: u.ID, AuthMethods: []string{"otp"}})
+			id = is.Session.ID
+			return err
+		})
+		return id
+	}
+	revoked := func(id string) bool {
+		var r bool
+		e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+			s, err := tx.Sessions().Get(ctx, e.k.RealmID, id)
+			r = s.RevokedAt != nil
+			return err
+		})
+		return r
+	}
+	keep, other := issue(), issue()
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", true, keep, audit.Actor{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if revoked(keep) || !revoked(other) {
+		t.Fatalf("after set: keep revoked=%v, other revoked=%v", revoked(keep), revoked(other))
+	}
+	other = issue()
+	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, good, keep, audit.Actor{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if revoked(keep) || !revoked(other) {
+		t.Fatalf("after remove: keep revoked=%v, other revoked=%v", revoked(keep), revoked(other))
 	}
 }

@@ -15,6 +15,8 @@ const (
 	MinLengthWithSecondFactor = 8
 	// MaxLength は長さの上限（ハッシュの計算を際限なく重くしないため）。64 文字以上は受け入れる（NIST）。
 	MaxLength = 128
+	// MaxInputBytes は受け取る入力の上限（公開 API の maxLength）。ログインではこれを超えれば照合しない。
+	MaxInputBytes = 1024
 )
 
 var (
