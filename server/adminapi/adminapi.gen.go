@@ -173,7 +173,7 @@ type ServerInterface interface {
 	// (POST /v1/admin/users/{id}/credentials/{credential_id}:revoke)
 	RevokeUserCredential(w http.ResponseWriter, r *http.Request, id string, credentialId string)
 	// RevokeAllUserCredentials 侵害時の初動として、ユーザーの全認証情報と全セッションを無効化する（4.6）
-	// (POST /v1/admin/users/{id}/credentials:revoke_all)
+	// (POST /v1/admin/users/{id}/credentials:revoke-all)
 	RevokeAllUserCredentials(w http.ResponseWriter, r *http.Request, id string)
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)
@@ -552,7 +552,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/credentials", wrapper.ListUserCredentials)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials/{credential_id}:revoke", wrapper.RevokeUserCredential)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/password:revoke", wrapper.RevokeUserPassword)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials:revoke_all", wrapper.RevokeAllUserCredentials)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials:revoke-all", wrapper.RevokeAllUserCredentials)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/sessions/{id}:revoke", wrapper.RevokeSession)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
 
@@ -1228,7 +1228,7 @@ type StrictServerInterface interface {
 	// (POST /v1/admin/users/{id}/credentials/{credential_id}:revoke)
 	RevokeUserCredential(ctx context.Context, request RevokeUserCredentialRequestObject) (RevokeUserCredentialResponseObject, error)
 	// RevokeAllUserCredentials 侵害時の初動として、ユーザーの全認証情報と全セッションを無効化する（4.6）
-	// (POST /v1/admin/users/{id}/credentials:revoke_all)
+	// (POST /v1/admin/users/{id}/credentials:revoke-all)
 	RevokeAllUserCredentials(ctx context.Context, request RevokeAllUserCredentialsRequestObject) (RevokeAllUserCredentialsResponseObject, error)
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)

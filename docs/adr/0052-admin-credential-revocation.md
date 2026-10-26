@@ -16,7 +16,7 @@
   - `GET /v1/admin/users/{id}/credentials`：有効な passkey・外部 ID の紐付け・TOTP・パスワードの一覧（個人情報は含めない）
   - `POST /v1/admin/users/{id}/credentials/{credential_id}:revoke`：公開 ID（`psk_`・`idn_`・`otp_`）で個別に無効化
   - `POST /v1/admin/users/{id}/password:revoke`：パスワードの無効化
-  - `POST /v1/admin/users/{id}/credentials:revoke_all`：全認証情報と全セッションの一括の無効化
+  - `POST /v1/admin/users/{id}/credentials:revoke-all`：全認証情報と全セッションの一括の無効化
 - 本人と違い、運営者は最後の1つも無効化できる。以後は復旧の手順（4.12）で戻る。メールは無効化しない（復旧の経路）
 - 削除せず `revoked_*` を記録し、取り消せない。passkey は credential_id の再登録も拒否する（0049）
 - セッション：

@@ -86,7 +86,7 @@ func TestAdminRevokeCredentials(t *testing.T) {
 	if _, status, _, _ := l.enrollTOTP(t, cookie); status != 200 {
 		t.Fatalf("totp again: %d", status)
 	}
-	status, out := l.admin(t, "/v1/admin/users/"+uid+"/credentials:revoke_all", sec, nil)
+	status, out := l.admin(t, "/v1/admin/users/"+uid+"/credentials:revoke-all", sec, nil)
 	if status != 200 || out["passkeys"] != 0.0 || out["totp"] != 1.0 || out["sessions"].(float64) < 1 {
 		t.Fatalf("revoke all: %d %v", status, out)
 	}
@@ -97,7 +97,7 @@ func TestAdminRevokeCredentials(t *testing.T) {
 	if status := l.adminGet(t, "/v1/admin/users/"+uid+"/credentials", sec, &c); status != 200 || len(c.Passkeys)+len(c.Totp) != 0 {
 		t.Fatalf("credentials after revoke all: %d %+v", status, c)
 	}
-	if status, _ := l.admin(t, "/v1/admin/users/usr_missing/credentials:revoke_all", sec, nil); status != 404 {
+	if status, _ := l.admin(t, "/v1/admin/users/usr_missing/credentials:revoke-all", sec, nil); status != 404 {
 		t.Fatalf("unknown user: %d", status)
 	}
 }

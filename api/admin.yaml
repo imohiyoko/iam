@@ -154,7 +154,7 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
-  /v1/admin/users/{id}/credentials:revoke_all:
+  /v1/admin/users/{id}/credentials:revoke-all:
     post:
       operationId: revokeAllUserCredentials
       summary: 侵害時の初動として、ユーザーの全認証情報と全セッションを無効化する（4.6）
