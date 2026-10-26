@@ -101,3 +101,36 @@ func TestAdminRevokeCredentials(t *testing.T) {
 		t.Fatalf("unknown user: %d", status)
 	}
 }
+
+func TestAdminRevokePassword(t *testing.T) {
+	l := newPasswordEnv(t)
+	res, cookie := l.login(t, "pat@example.com")
+	uid := res["user_id"].(string)
+	const pw = "a long and memorable passphrase"
+	if status, _ := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": pw}); status != 204 {
+		t.Fatalf("set: %d", status)
+	}
+	_, pcookie := l.passwordLoginCookie(t, "pat@example.com", pw)
+	_, sec := l.operator(t, "sec@example.com", role.RealmSecurity)
+	if status, _ := l.admin(t, "/v1/admin/users/"+uid+"/password:revoke", sec, nil); status != 204 {
+		t.Fatalf("revoke password: %d", status)
+	}
+	// パスワードはセッションの認証情報に入らないので、全セッションをすぐに失効させる。
+	for _, c := range []string{cookie, pcookie} {
+		if status, _ := l.me(t, c); status != 401 {
+			t.Fatalf("session after password revoke: %d", status)
+		}
+	}
+	if status, _, _ := l.passwordLogin(t, "pat@example.com", pw); status != 401 {
+		t.Fatalf("login after revoke: %d", status)
+	}
+}
+
+func (l *loginEnv) passwordLoginCookie(t *testing.T, email, pw string) (int, string) {
+	t.Helper()
+	status, _, c := l.passwordLogin(t, email, pw)
+	if status != 200 || c == "" {
+		t.Fatalf("password login: %d", status)
+	}
+	return status, c
+}
