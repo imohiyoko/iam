@@ -23,6 +23,7 @@ import (
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
+	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/config"
@@ -62,6 +63,8 @@ type App struct {
 	notify   *notify.Service
 	email    *emailflow.Service
 	oauth    *oauth.Service
+	// passkeys は passkey の登録とログイン。Relying Party が決まらない構成（public_url も rp_id も無い）では nil。
+	passkeys *passkey.Service
 	perIP    *ratelimit.Limiter
 	links    *loginlink.Service
 	notifier *eventlog.Relay
@@ -155,6 +158,16 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.oauth = &oauth.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Dev: cfg.Dev, TTL: cfg.Security.EmailFlow.TTL.D(), Log: d.Logger,
+	}
+	if rpID, rpName, origins, ok := cfg.PasskeyRP(); ok {
+		a.passkeys, err = passkey.New(passkey.Config{RPID: rpID, RPName: rpName, Origins: origins}, passkey.Service{
+			Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Log: d.Logger,
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		d.Logger.Info("passkeys are disabled: set server.public_url or passkey.rp_id and passkey.origins")
 	}
 	// 開発用の Notifier には、秘密の取り出し方を渡す（配信用のアプリ無しでメールのログインを試せるように）。
 	if dc, ok := d.Notifier.(devClaimer); ok && cfg.Dev {

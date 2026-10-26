@@ -106,3 +106,33 @@ func TestExternalIDsMustBeRandom(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPasskeyRelyingParty(t *testing.T) {
+	c, err := Parse([]byte("dev: true\nserver: {public_url: \"https://id.example.com\"}\nrealm: {slug: acme}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rp, name, origins, ok := c.PasskeyRP(); !ok || rp != "id.example.com" || name != "acme" || len(origins) != 1 || origins[0] != "https://id.example.com" {
+		t.Fatalf("defaults = %q %q %v %v", rp, name, origins, ok)
+	}
+	c, err = Parse([]byte("dev: true\npasskey: {rp_id: example.com, origins: [\"https://id.example.com\", \"https://app.example.net\"]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rp, _, origins, ok := c.PasskeyRP(); !ok || rp != "example.com" || len(origins) != 2 {
+		t.Fatalf("explicit = %q %v %v", rp, origins, ok)
+	}
+	if _, _, _, ok := Default().PasskeyRP(); ok {
+		t.Fatal("passkeys must be disabled without public_url or rp_id")
+	}
+	for _, y := range []string{
+		"passkey: {rp_id: example.com}\n",
+		"passkey: {rp_id: \"https://example.com\", origins: [\"https://example.com\"]}\n",
+		"passkey: {rp_id: example.com, origins: [\"ftp://example.com\"]}\n",
+		"passkey: {rp_id: example.com, origins: [\"https://example.com/login\"]}\n",
+	} {
+		if _, err := Parse([]byte("dev: true\n" + y)); err == nil || !strings.Contains(err.Error(), "passkey") {
+			t.Errorf("%s: want passkey error, got %v", y, err)
+		}
+	}
+}

@@ -45,14 +45,17 @@ type state struct {
 	outbox   []port.OutboxMessage
 	outboxIx map[string]int
 
-	users        map[string]port.User
-	emails       map[string]port.UserEmail
-	identities   map[string]port.Identity
-	connections  map[string]port.Connection
-	sessions     map[string]port.Session
-	accounts     map[string]port.ServiceAccount
-	credentials  map[string]port.ServiceAccountCredential
-	roleBindings map[string]port.RoleBinding
+	users      map[string]port.User
+	emails     map[string]port.UserEmail
+	identities map[string]port.Identity
+	passkeys   map[string]port.Passkey
+	// revokedPasskeys は無効化した credential_id（realm と credential_id の組）。再登録を拒否する（4.6）。
+	revokedPasskeys map[string]time.Time
+	connections     map[string]port.Connection
+	sessions        map[string]port.Session
+	accounts        map[string]port.ServiceAccount
+	credentials     map[string]port.ServiceAccountCredential
+	roleBindings    map[string]port.RoleBinding
 }
 
 // Storage はインメモリの Storage。
@@ -71,6 +74,7 @@ func New(clk clock.Clock) *Storage {
 		realms: map[string]port.Realm{}, features: map[string]port.FeatureRecord{},
 		dataKeys: map[string]port.DataKey{}, outboxIx: map[string]int{},
 		users: map[string]port.User{}, emails: map[string]port.UserEmail{}, identities: map[string]port.Identity{},
+		passkeys: map[string]port.Passkey{}, revokedPasskeys: map[string]time.Time{},
 		connections: map[string]port.Connection{}, sessions: map[string]port.Session{},
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
 		roleBindings: map[string]port.RoleBinding{},
@@ -121,6 +125,7 @@ func (t *tx) Outbox() port.OutboxRepo      { return outbox{t} }
 func (t *tx) Users() port.UserRepo                     { return users{t} }
 func (t *tx) Emails() port.EmailRepo                   { return emails{t} }
 func (t *tx) Identities() port.IdentityRepo            { return identities{t} }
+func (t *tx) Passkeys() port.PasskeyRepo               { return passkeys{t} }
 func (t *tx) Connections() port.ConnectionRepo         { return connections{t} }
 func (t *tx) Sessions() port.SessionRepo               { return sessions{t} }
 func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t} }

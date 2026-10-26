@@ -60,3 +60,4 @@
 | [0046](0046-m1-login-flows.md) | M1 のログインの流れ（メールのフロー、通知の claim、OAuth）の細部 | 承認 |
 | [0047](0047-m1-login-guards.md) | M1 のログインの守り（警告、応答時間の下限、レートリミット）の細部 | 承認 |
 | [0048](0048-operator-bootstrap-and-admin-auth.md) | 最初の運営者の作成と、管理 API の運営者の認証 | 承認 |
+| [0049](0049-passkey-details.md) | passkey の細部（Relying Party、本人確認、無効化と再登録の拒否） | 承認 |

@@ -41,6 +41,7 @@ type Tx interface {
 	Users() UserRepo
 	Emails() EmailRepo
 	Identities() IdentityRepo
+	Passkeys() PasskeyRepo
 	Connections() ConnectionRepo
 	Sessions() SessionRepo
 	ServiceAccounts() ServiceAccountRepo

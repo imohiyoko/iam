@@ -25,6 +25,8 @@ var authnTests = []struct {
 	{"EmailUniqueConcurrent", testEmailUniqueConcurrent},
 	{"Identities", testIdentities},
 	{"IdentityUniqueConcurrent", testIdentityUniqueConcurrent},
+	{"Passkeys", testPasskeys},
+	{"PasskeyUniqueConcurrent", testPasskeyUniqueConcurrent},
 	{"Connections", testConnections},
 	{"Sessions", testSessions},
 	{"SessionRevokeByPrincipal", testSessionRevokeByPrincipal},
@@ -505,6 +507,7 @@ func testRoleBindings(t *testing.T, h Harness) {
 const (
 	isoUser    = "usr_00000000000000000000000000"
 	isoPublic  = "usr_00000000000000000000000009"
+	isoPasskey = "psk_00000000000000000000000009"
 	isoConn    = "con_00000000000000000000000000"
 	isoSubject = "iso-subject"
 	isoEmail   = "iso-email-index"
@@ -638,4 +641,5 @@ var authnIsolationCases = []IsolationCase{
 			return n + m, err
 		},
 	},
+	passkeyIsolationCase,
 }
