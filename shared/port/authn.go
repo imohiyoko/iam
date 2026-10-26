@@ -410,3 +410,85 @@ type ServiceAccountRepo interface {
 	GetCredential(ctx context.Context, realmID, id string) (ServiceAccountCredential, error)
 	RevokeCredential(ctx context.Context, realmID, id string, at time.Time) error
 }
+
+// OrgKind は Org の種類（design.md 11.13）。
+type OrgKind string
+
+const (
+	// OrgPersonal はユーザーごとの個人 Org。メンバーは本人だけで、ユーザーと一緒に作り、一緒に消す。
+	OrgPersonal OrgKind = "personal"
+	OrgShared   OrgKind = "shared"
+)
+
+// Org は orgs の1行（design.md 3.1）。ID は内部 ID で、API に出すのは PublicID（ADR 0045）。
+type Org struct {
+	ID       string
+	PublicID string // 外部 ID。realm 内で一意
+	RealmID  string
+	Kind     OrgKind
+	Name     string
+	// PersonalOwnerID は個人 Org の持ち主（ユーザーの内部 ID）。共有 Org では空。realm 内で一意。
+	PersonalOwnerID string
+	ValidFrom       *time.Time // 有効期間（design.md 4.8）。nil は制限なし
+	ValidUntil      *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// OrgRepo は orgs の Repository。
+type OrgRepo interface {
+	// Create は ID・(realm, PublicID)・個人 Org の持ち主が重複すれば errs.Conflict を返す（個人 Org はユーザーに1つ）。
+	Create(ctx context.Context, o Org) error
+	Get(ctx context.Context, realmID, id string) (Org, error)
+	GetByPublicID(ctx context.Context, realmID, publicID string) (Org, error)
+	// GetPersonal はユーザーの個人 Org を返す。無ければ errs.NotFound。
+	GetPersonal(ctx context.Context, realmID, userID string) (Org, error)
+}
+
+// MembershipStatus は Membership の状態（design.md 3.1）。
+type MembershipStatus string
+
+const (
+	MembershipInvited MembershipStatus = "invited"
+	MembershipActive  MembershipStatus = "active"
+	MembershipEnded   MembershipStatus = "ended"
+)
+
+// OrgRole は Org の中の役割（design.md 4.11）。
+type OrgRole string
+
+const (
+	OrgOwner  OrgRole = "owner"
+	OrgAdmin  OrgRole = "admin"
+	OrgMember OrgRole = "member"
+)
+
+// Membership は memberships の1行。ID は内部 ID で、API に出すのは PublicID（ADR 0045）。
+type Membership struct {
+	ID       string
+	PublicID string
+	RealmID  string
+	UserID   string
+	OrgID    string
+	Status   MembershipStatus
+	Role     OrgRole
+	// EmailID はこの Org で使うメール（内部 ID）。空なら primary（4.4）。
+	EmailID     string
+	ValidFrom   *time.Time
+	ValidUntil  *time.Time
+	EndedReason string // self_leave / removed / expired / org_deleted / user_deleted
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// MembershipRepo は memberships の Repository。
+type MembershipRepo interface {
+	// Create は ID・(realm, PublicID)・(UserID, OrgID) が重複すれば errs.Conflict を返す。
+	Create(ctx context.Context, m Membership) error
+	GetByPublicID(ctx context.Context, realmID, publicID string) (Membership, error)
+	// GetByUserOrg はユーザーと Org の Membership を返す（終了したものも含む）。無ければ errs.NotFound。
+	GetByUserOrg(ctx context.Context, realmID, userID, orgID string) (Membership, error)
+	// ListByUser と ListByOrg は作成時刻の順（同時刻は ID の順）に返す（終了したものも含む）。
+	ListByUser(ctx context.Context, realmID, userID string) ([]Membership, error)
+	ListByOrg(ctx context.Context, realmID, orgID string) ([]Membership, error)
+}

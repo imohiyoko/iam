@@ -42,6 +42,10 @@ var authnTests = []struct {
 	{"SessionRevokeByPrincipal", testSessionRevokeByPrincipal},
 	{"ServiceAccounts", testServiceAccounts},
 	{"RoleBindings", testRoleBindings},
+	{"Orgs", testOrgs},
+	{"PersonalOrgUniqueConcurrent", testPersonalOrgUniqueConcurrent},
+	{"Memberships", testMemberships},
+	{"MembershipUniqueConcurrent", testMembershipUniqueConcurrent},
 }
 
 func notFound(what string, err error) error {
@@ -658,4 +662,6 @@ var authnIsolationCases = []IsolationCase{
 	passwordIsolationCase,
 	recoveryCodeIsolationCase,
 	suspensionIsolationCase,
+	orgIsolationCase,
+	membershipIsolationCase,
 }

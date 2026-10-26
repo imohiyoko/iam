@@ -49,6 +49,8 @@ type Tx interface {
 	ScheduledEvents() ScheduledEventRepo
 	Connections() ConnectionRepo
 	Sessions() SessionRepo
+	Orgs() OrgRepo
+	Memberships() MembershipRepo
 	ServiceAccounts() ServiceAccountRepo
 	RoleBindings() RoleBindingRepo
 }
