@@ -112,6 +112,9 @@ type Issue struct {
 	// ReplaceToken は同じブラウザが持っていた古いセッションのトークン。ログイン時に ID を入れ替える（5.2）。
 	// トークン（秘密を含む）で指定させ、ID だけで他人のセッションを失効させられないようにする。
 	ReplaceToken string
+	// AuthenticatedAt は認証の時刻。空なら今。2要素目の完了では1要素目の時刻を引き継ぎ、
+	// 要素の間に始まった停止が解除で戻らないようにする（4.7）。
+	AuthenticatedAt time.Time
 }
 
 // Issued は発行したセッションと、クライアントに渡すトークン。
@@ -166,10 +169,14 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	if err != nil {
 		return Issued{}, err
 	}
+	authAt := now
+	if !in.AuthenticatedAt.IsZero() {
+		authAt = in.AuthenticatedAt
+	}
 	s := port.Session{
 		ID: id.NewExternal(id.Session), RealmID: in.RealmID, PrincipalType: port.PrincipalUser, PrincipalID: in.UserID,
 		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: warningsJSON, IP: ip, UserAgent: ua,
-		AuthenticatedAt: now, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime), Restriction: restriction,
+		AuthenticatedAt: authAt, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime), Restriction: restriction,
 	}
 	if restriction != port.RestrictionNone {
 		s.ExpiresAt = earliest(s.ExpiresAt, now.Add(m.secondFactorTTL()))
@@ -329,7 +336,7 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 	}
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
-		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried,
+		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt,
 	})
 	if err != nil {
 		return Issued{}, err
@@ -511,11 +518,16 @@ func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now tim
 	if err != nil {
 		return time.Time{}, port.User{}, err
 	}
-	if !account.CanLogin(u, now) {
-		return time.Time{}, port.User{}, rejected("user cannot log in")
+	// 停止と有効期間は時刻から計算する。認証の後に始まった停止は、解除されてもこのセッションを戻さない（4.7）。
+	at, err := account.Check(ctx, tx, u, s.AuthenticatedAt, now)
+	if err != nil {
+		if errors.Is(err, account.ErrInactive) || errors.As(err, new(*account.UnavailableError)) {
+			return time.Time{}, port.User{}, rejected(err.Error())
+		}
+		return time.Time{}, port.User{}, err
 	}
-	if u.ValidUntil != nil {
-		next = earliest(next, *u.ValidUntil)
+	if at != nil {
+		next = earliest(next, *at)
 	}
 	// 認証に使った外部 ID・passkey・TOTP が無効化されていれば、そのセッションも使えない（4.6）。
 	if err := checkCredentials(ctx, tx, s); err != nil {
@@ -723,6 +735,19 @@ func (m *Manager) revokeInTx(ctx context.Context, tx port.Tx, s port.Session, re
 func (m *Manager) forget(ctx context.Context, realmID, sessionID string) {
 	if err := m.Cache.Delete(ctx, cacheKey(realmID, sessionID)); err != nil {
 		m.logger().WarnContext(ctx, "session cache delete failed", "session_id", sessionID, "error", err)
+	}
+}
+
+// Forget は主体のセッションの検証結果のキャッシュを消し、次の検証で状態（停止・有効期間など）を見直させる。
+// 状態を Storage に書いた後に呼ぶ。消せなくても上限の時間内に反映される（5.3）。
+func (m *Manager) Forget(ctx context.Context, realmID, userID string) {
+	ss, err := m.List(ctx, realmID, userID)
+	if err != nil {
+		m.logger().WarnContext(ctx, "session list for cache delete failed", "error", err)
+		return
+	}
+	for _, x := range ss {
+		m.forget(ctx, realmID, x.ID)
 	}
 }
 

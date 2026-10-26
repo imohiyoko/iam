@@ -18,6 +18,27 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AdminUserStatus.
+const (
+	Active  AdminUserStatus = "active"
+	Deleted AdminUserStatus = "deleted"
+	Merged  AdminUserStatus = "merged"
+)
+
+// Valid indicates whether the value is a known member of the AdminUserStatus enum.
+func (e AdminUserStatus) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Deleted:
+		return true
+	case Merged:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthStatus.
 const (
 	Ok          HealthStatus = "ok"
@@ -35,6 +56,17 @@ func (e HealthStatus) Valid() bool {
 		return false
 	}
 }
+
+// AdminUser defines model for AdminUser.
+type AdminUser struct {
+	Id         string          `json:"id"`
+	Status     AdminUserStatus `json:"status"`
+	ValidFrom  *time.Time      `json:"valid_from,omitempty"`
+	ValidUntil *time.Time      `json:"valid_until,omitempty"`
+}
+
+// AdminUserStatus defines model for AdminUser.Status.
+type AdminUserStatus string
 
 // ClaimedNotification defines model for ClaimedNotification.
 type ClaimedNotification struct {
@@ -65,6 +97,11 @@ type Health struct {
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
 
+// LiftRequest defines model for LiftRequest.
+type LiftRequest struct {
+	Reason string `json:"reason"`
+}
+
 // LoginLink defines model for LoginLink.
 type LoginLink struct {
 	ExpiresAt time.Time `json:"expires_at"`
@@ -82,6 +119,48 @@ type RevokedCredentials struct {
 	// Sessions 失効させたセッションの数
 	Sessions int `json:"sessions"`
 	Totp     int `json:"totp"`
+}
+
+// SuspendRequest defines model for SuspendRequest.
+type SuspendRequest struct {
+	// Category tos_violation / customer_request / security_risk / billing / realm で足したもの
+	Category string     `json:"category"`
+	EndsAt   *time.Time `json:"ends_at,omitempty"`
+
+	// ExternalRef 外部のシステム（課金など）の参照。冪等にする
+	ExternalRef *string `json:"external_ref,omitempty"`
+
+	// Reason 内部向けの理由（監査ログに出し、本人には見せない）
+	Reason   string     `json:"reason"`
+	StartsAt *time.Time `json:"starts_at,omitempty"`
+}
+
+// Suspension defines model for Suspension.
+type Suspension struct {
+	// Active 今停止中か
+	Active      bool       `json:"active"`
+	Category    string     `json:"category"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CreatedBy   *string    `json:"created_by,omitempty"`
+	EndsAt      *time.Time `json:"ends_at,omitempty"`
+	ExternalRef *string    `json:"external_ref,omitempty"`
+	Id          string     `json:"id"`
+	LiftedAt    *time.Time `json:"lifted_at,omitempty"`
+	LiftedBy    *string    `json:"lifted_by,omitempty"`
+	Reason      string     `json:"reason"`
+	StartsAt    time.Time  `json:"starts_at"`
+	UserId      string     `json:"user_id"`
+}
+
+// Suspensions defines model for Suspensions.
+type Suspensions struct {
+	Suspensions []Suspension `json:"suspensions"`
+}
+
+// UpdateUser defines model for UpdateUser.
+type UpdateUser struct {
+	ValidFrom  *time.Time `json:"valid_from,omitempty"`
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
 }
 
 // UserCredentials defines model for UserCredentials.
@@ -143,8 +222,17 @@ type IssueLoginLinkJSONBody struct {
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody CreateConnectionJSONBody
 
+// LiftSuspensionJSONRequestBody defines body for LiftSuspension for application/json ContentType.
+type LiftSuspensionJSONRequestBody = LiftRequest
+
 // CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
 type CreateUserJSONRequestBody CreateUserJSONBody
+
+// UpdateUserJSONRequestBody defines body for UpdateUser for application/json ContentType.
+type UpdateUserJSONRequestBody = UpdateUser
+
+// SuspendUserJSONRequestBody defines body for SuspendUser for application/json ContentType.
+type SuspendUserJSONRequestBody = SuspendRequest
 
 // IssueLoginLinkJSONRequestBody defines body for IssueLoginLink for application/json ContentType.
 type IssueLoginLinkJSONRequestBody IssueLoginLinkJSONBody
@@ -163,9 +251,15 @@ type ServerInterface interface {
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(w http.ResponseWriter, r *http.Request, id string)
+	// LiftSuspension 停止を解除する
+	// (POST /v1/admin/suspensions/{id}:lift)
+	LiftSuspension(w http.ResponseWriter, r *http.Request, id string)
 	// CreateUser ユーザーを登録する（確認の経路 `admin`。4.1）
 	// (POST /v1/admin/users)
 	CreateUser(w http.ResponseWriter, r *http.Request)
+	// UpdateUser ユーザーの有効期間を変更する（4.8）
+	// (PATCH /v1/admin/users/{id})
+	UpdateUser(w http.ResponseWriter, r *http.Request, id string)
 	// ListUserCredentials ユーザーの有効な認証情報の一覧（無効化の対象を選ぶため）
 	// (GET /v1/admin/users/{id}/credentials)
 	ListUserCredentials(w http.ResponseWriter, r *http.Request, id string)
@@ -178,6 +272,12 @@ type ServerInterface interface {
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)
 	RevokeUserPassword(w http.ResponseWriter, r *http.Request, id string)
+	// ListUserSuspensions ユーザーの停止の一覧（解除・終了したものも含む）
+	// (GET /v1/admin/users/{id}/suspensions)
+	ListUserSuspensions(w http.ResponseWriter, r *http.Request, id string)
+	// SuspendUser ユーザーを停止する（4.7）
+	// (POST /v1/admin/users/{id}/suspensions)
+	SuspendUser(w http.ResponseWriter, r *http.Request, id string)
 	// IssueLoginLink 1回限りのログイン用リンクのトークンを発行する
 	// (POST /v1/admin/users/{id}:login_link)
 	IssueLoginLink(w http.ResponseWriter, r *http.Request, id string)
@@ -272,11 +372,63 @@ func (siw *ServerInterfaceWrapper) RevokeSession(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// LiftSuspension operation middleware
+func (siw *ServerInterfaceWrapper) LiftSuspension(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LiftSuspension(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateUser operation middleware
 func (siw *ServerInterfaceWrapper) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateUser(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateUser operation middleware
+func (siw *ServerInterfaceWrapper) UpdateUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateUser(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -390,6 +542,58 @@ func (siw *ServerInterfaceWrapper) RevokeUserPassword(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeUserPassword(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUserSuspensions operation middleware
+func (siw *ServerInterfaceWrapper) ListUserSuspensions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUserSuspensions(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SuspendUser operation middleware
+func (siw *ServerInterfaceWrapper) SuspendUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SuspendUser(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -553,6 +757,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials/{credential_id}:revoke", wrapper.RevokeUserCredential)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/password:revoke", wrapper.RevokeUserPassword)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials:revoke-all", wrapper.RevokeAllUserCredentials)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/users/{id}", wrapper.UpdateUser)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/suspensions", wrapper.ListUserSuspensions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/suspensions", wrapper.SuspendUser)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/suspensions/{id}:lift", wrapper.LiftSuspension)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/sessions/{id}:revoke", wrapper.RevokeSession)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
 
@@ -799,6 +1007,85 @@ func (response RevokeSession404JSONResponse) VisitRevokeSessionResponse(w http.R
 	return err
 }
 
+type LiftSuspensionRequestObject struct {
+	Id   string `json:"id"`
+	Body *LiftSuspensionJSONRequestBody
+}
+
+type LiftSuspensionResponseObject interface {
+	VisitLiftSuspensionResponse(w http.ResponseWriter) error
+}
+
+type LiftSuspension200JSONResponse Suspension
+
+func (response LiftSuspension200JSONResponse) VisitLiftSuspensionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LiftSuspension400JSONResponse struct{ ErrorJSONResponse }
+
+func (response LiftSuspension400JSONResponse) VisitLiftSuspensionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LiftSuspension401JSONResponse Error
+
+func (response LiftSuspension401JSONResponse) VisitLiftSuspensionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LiftSuspension403JSONResponse Error
+
+func (response LiftSuspension403JSONResponse) VisitLiftSuspensionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LiftSuspension404JSONResponse Error
+
+func (response LiftSuspension404JSONResponse) VisitLiftSuspensionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateUserRequestObject struct {
 	Body *CreateUserJSONRequestBody
 }
@@ -876,6 +1163,85 @@ func (response CreateUser409JSONResponse) VisitCreateUserResponse(w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateUserJSONRequestBody
+}
+
+type UpdateUserResponseObject interface {
+	VisitUpdateUserResponse(w http.ResponseWriter) error
+}
+
+type UpdateUser200JSONResponse AdminUser
+
+func (response UpdateUser200JSONResponse) VisitUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUser400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateUser400JSONResponse) VisitUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUser401JSONResponse Error
+
+func (response UpdateUser401JSONResponse) VisitUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUser403JSONResponse Error
+
+func (response UpdateUser403JSONResponse) VisitUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUser404JSONResponse Error
+
+func (response UpdateUser404JSONResponse) VisitUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1125,6 +1491,163 @@ func (response RevokeUserPassword404JSONResponse) VisitRevokeUserPasswordRespons
 	return err
 }
 
+type ListUserSuspensionsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListUserSuspensionsResponseObject interface {
+	VisitListUserSuspensionsResponse(w http.ResponseWriter) error
+}
+
+type ListUserSuspensions200JSONResponse Suspensions
+
+func (response ListUserSuspensions200JSONResponse) VisitListUserSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserSuspensions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListUserSuspensions401JSONResponse) VisitListUserSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserSuspensions403JSONResponse Error
+
+func (response ListUserSuspensions403JSONResponse) VisitListUserSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserSuspensions404JSONResponse Error
+
+func (response ListUserSuspensions404JSONResponse) VisitListUserSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendUserRequestObject struct {
+	Id   string `json:"id"`
+	Body *SuspendUserJSONRequestBody
+}
+
+type SuspendUserResponseObject interface {
+	VisitSuspendUserResponse(w http.ResponseWriter) error
+}
+
+type SuspendUser200JSONResponse Suspension
+
+func (response SuspendUser200JSONResponse) VisitSuspendUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendUser201JSONResponse Suspension
+
+func (response SuspendUser201JSONResponse) VisitSuspendUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendUser400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SuspendUser400JSONResponse) VisitSuspendUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendUser401JSONResponse Error
+
+func (response SuspendUser401JSONResponse) VisitSuspendUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendUser403JSONResponse Error
+
+func (response SuspendUser403JSONResponse) VisitSuspendUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendUser404JSONResponse Error
+
+func (response SuspendUser404JSONResponse) VisitSuspendUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type IssueLoginLinkRequestObject struct {
 	Id   string `json:"id"`
 	Body *IssueLoginLinkJSONRequestBody
@@ -1218,9 +1741,15 @@ type StrictServerInterface interface {
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(ctx context.Context, request RevokeSessionRequestObject) (RevokeSessionResponseObject, error)
+	// LiftSuspension 停止を解除する
+	// (POST /v1/admin/suspensions/{id}:lift)
+	LiftSuspension(ctx context.Context, request LiftSuspensionRequestObject) (LiftSuspensionResponseObject, error)
 	// CreateUser ユーザーを登録する（確認の経路 `admin`。4.1）
 	// (POST /v1/admin/users)
 	CreateUser(ctx context.Context, request CreateUserRequestObject) (CreateUserResponseObject, error)
+	// UpdateUser ユーザーの有効期間を変更する（4.8）
+	// (PATCH /v1/admin/users/{id})
+	UpdateUser(ctx context.Context, request UpdateUserRequestObject) (UpdateUserResponseObject, error)
 	// ListUserCredentials ユーザーの有効な認証情報の一覧（無効化の対象を選ぶため）
 	// (GET /v1/admin/users/{id}/credentials)
 	ListUserCredentials(ctx context.Context, request ListUserCredentialsRequestObject) (ListUserCredentialsResponseObject, error)
@@ -1233,6 +1762,12 @@ type StrictServerInterface interface {
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)
 	RevokeUserPassword(ctx context.Context, request RevokeUserPasswordRequestObject) (RevokeUserPasswordResponseObject, error)
+	// ListUserSuspensions ユーザーの停止の一覧（解除・終了したものも含む）
+	// (GET /v1/admin/users/{id}/suspensions)
+	ListUserSuspensions(ctx context.Context, request ListUserSuspensionsRequestObject) (ListUserSuspensionsResponseObject, error)
+	// SuspendUser ユーザーを停止する（4.7）
+	// (POST /v1/admin/users/{id}/suspensions)
+	SuspendUser(ctx context.Context, request SuspendUserRequestObject) (SuspendUserResponseObject, error)
 	// IssueLoginLink 1回限りのログイン用リンクのトークンを発行する
 	// (POST /v1/admin/users/{id}:login_link)
 	IssueLoginLink(ctx context.Context, request IssueLoginLinkRequestObject) (IssueLoginLinkResponseObject, error)
@@ -1384,6 +1919,39 @@ func (sh *strictHandler) RevokeSession(w http.ResponseWriter, r *http.Request, i
 	}
 }
 
+// LiftSuspension operation middleware
+func (sh *strictHandler) LiftSuspension(w http.ResponseWriter, r *http.Request, id string) {
+	var request LiftSuspensionRequestObject
+
+	request.Id = id
+
+	var body LiftSuspensionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.LiftSuspension(ctx, request.(LiftSuspensionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "LiftSuspension")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LiftSuspensionResponseObject); ok {
+		if err := validResponse.VisitLiftSuspensionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // CreateUser operation middleware
 func (sh *strictHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var request CreateUserRequestObject
@@ -1408,6 +1976,39 @@ func (sh *strictHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateUserResponseObject); ok {
 		if err := validResponse.VisitCreateUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateUser operation middleware
+func (sh *strictHandler) UpdateUser(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateUserRequestObject
+
+	request.Id = id
+
+	var body UpdateUserJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateUser(ctx, request.(UpdateUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateUserResponseObject); ok {
+		if err := validResponse.VisitUpdateUserResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -1513,6 +2114,65 @@ func (sh *strictHandler) RevokeUserPassword(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeUserPasswordResponseObject); ok {
 		if err := validResponse.VisitRevokeUserPasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUserSuspensions operation middleware
+func (sh *strictHandler) ListUserSuspensions(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListUserSuspensionsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUserSuspensions(ctx, request.(ListUserSuspensionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUserSuspensions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUserSuspensionsResponseObject); ok {
+		if err := validResponse.VisitListUserSuspensionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SuspendUser operation middleware
+func (sh *strictHandler) SuspendUser(w http.ResponseWriter, r *http.Request, id string) {
+	var request SuspendUserRequestObject
+
+	request.Id = id
+
+	var body SuspendUserJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SuspendUser(ctx, request.(SuspendUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SuspendUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SuspendUserResponseObject); ok {
+		if err := validResponse.VisitSuspendUserResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

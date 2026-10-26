@@ -19,7 +19,6 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/session"
-	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -83,7 +82,7 @@ func (s *Service) Redeem(ctx context.Context, realmID, token string, c Client, r
 	is, uid, err := s.redeem(ctx, realmID, token, c, replaceToken)
 	if err != nil {
 		s.recordFailure(ctx, realmID, c, err)
-		if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+		if d, ok := errors.AsType[errs.Denial](err); ok {
 			return session.Issued{}, "", d
 		}
 		return session.Issued{}, "", ErrAuthFailed
@@ -125,8 +124,8 @@ func (s *Service) redeem(ctx context.Context, realmID, token string, c Client, r
 		if err != nil {
 			return err
 		}
-		if !account.CanLogin(u, now) {
-			return errors.New("user cannot log in")
+		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
+			return err
 		}
 		if out, err = s.Sessions.Issue(ctx, tx, session.Issue{
 			RealmID: realmID, UserID: u.ID, AuthMethods: []string{AMR},

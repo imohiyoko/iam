@@ -1,0 +1,73 @@
+package sqlite
+
+import (
+	"context"
+	"time"
+
+	"github.com/imohiyoko/iam/adapters/storage/sqlite/db"
+	"github.com/imohiyoko/iam/shared/port"
+)
+
+type suspensions struct{ q *db.Queries }
+
+func toSuspension(r db.AuthnSuspension) (port.Suspension, error) {
+	var p times
+	s := port.Suspension{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, TargetType: port.SuspensionTarget(r.TargetType),
+		TargetID: r.TargetID, Category: r.Category, Reason: r.Reason, ExternalRef: r.ExternalRef, StartsAt: p.at(r.StartsAt),
+		EndsAt: p.null(r.EndsAt), CreatedBy: r.CreatedBy, CreatedAt: p.at(r.CreatedAt), LiftedAt: p.null(r.LiftedAt), LiftedBy: r.LiftedBy}
+	return s, p.err
+}
+
+func (r suspensions) Create(ctx context.Context, s port.Suspension) error {
+	return mapErr(r.q.CreateSuspension(ctx, db.CreateSuspensionParams{ID: s.ID, PublicID: s.PublicID, RealmID: s.RealmID,
+		TargetType: string(s.TargetType), TargetID: s.TargetID, Category: s.Category, Reason: s.Reason, ExternalRef: s.ExternalRef,
+		StartsAt: formatTime(s.StartsAt), EndsAt: nullTime(s.EndsAt), CreatedBy: s.CreatedBy, CreatedAt: formatTime(s.CreatedAt),
+		LiftedAt: nullTime(s.LiftedAt), LiftedBy: s.LiftedBy}))
+}
+
+func (r suspensions) GetByPublicID(ctx context.Context, realmID, publicID string) (port.Suspension, error) {
+	row, err := r.q.GetSuspensionByPublicID(ctx, db.GetSuspensionByPublicIDParams{RealmID: realmID, PublicID: publicID})
+	return one(row, err, toSuspension)
+}
+
+func (r suspensions) ListByTarget(ctx context.Context, realmID string, t port.SuspensionTarget, targetID string) ([]port.Suspension, error) {
+	rs, err := r.q.ListSuspensionsByTarget(ctx, db.ListSuspensionsByTargetParams{RealmID: realmID, TargetType: string(t), TargetID: targetID})
+	return rows(rs, err, toSuspension)
+}
+
+func (r suspensions) Lift(ctx context.Context, realmID, id string, at time.Time, by string) error {
+	if _, err := r.q.GetSuspension(ctx, db.GetSuspensionParams{RealmID: realmID, ID: id}); err != nil {
+		return mapErr(err)
+	}
+	return mapErr(r.q.LiftSuspension(ctx, db.LiftSuspensionParams{LiftedAt: nullTime(&at), LiftedBy: by, RealmID: realmID, ID: id}))
+}
+
+// ---------------------------------------------------------------------------
+
+type scheduledEvents struct{ q *db.Queries }
+
+func toScheduled(r db.ScheduledEvent) (port.ScheduledEvent, error) {
+	var p times
+	e := port.ScheduledEvent{ID: r.ID, RealmID: r.RealmID, Ref: r.Ref, Type: r.EventType, Payload: r.Payload, FireAt: p.at(r.FireAt),
+		FiredAt: p.null(r.FiredAt), CreatedAt: p.at(r.CreatedAt)}
+	return e, p.err
+}
+
+func (r scheduledEvents) Schedule(ctx context.Context, e port.ScheduledEvent) error {
+	return mapErr(r.q.ScheduleEvent(ctx, db.ScheduleEventParams{ID: e.ID, RealmID: e.RealmID, Ref: e.Ref, EventType: e.Type,
+		Payload: nonNil(e.Payload), FireAt: formatTime(e.FireAt), FiredAt: nullTime(e.FiredAt), CreatedAt: formatTime(e.CreatedAt)}))
+}
+
+func (r scheduledEvents) Due(ctx context.Context, now time.Time, limit int) ([]port.ScheduledEvent, error) {
+	rs, err := r.q.DueScheduledEvents(ctx, db.DueScheduledEventsParams{Now: formatTime(now), Lim: int64(limit)})
+	return rows(rs, err, toScheduled)
+}
+
+func (r scheduledEvents) MarkFired(ctx context.Context, realmID, id string, at time.Time) (bool, error) {
+	n, err := r.q.MarkScheduledEventFired(ctx, db.MarkScheduledEventFiredParams{FiredAt: nullTime(&at), RealmID: realmID, ID: id})
+	return n > 0, mapErr(err)
+}
+
+func (r scheduledEvents) CancelByRef(ctx context.Context, realmID, ref string) error {
+	return mapErr(r.q.CancelScheduledEvents(ctx, db.CancelScheduledEventsParams{RealmID: realmID, Ref: ref}))
+}

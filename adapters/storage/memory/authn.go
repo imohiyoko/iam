@@ -431,3 +431,14 @@ func sortByCreated[T any](out []T, key func(T) (time.Time, string)) {
 		return ii < ij
 	})
 }
+
+func (r users) SetValidity(_ context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error {
+	u, err := get(r.t.s.users, realmID, id, func(u port.User) string { return u.RealmID }, "user")
+	if err != nil {
+		return err
+	}
+	u = cloneUser(u)
+	u.ValidFrom, u.ValidUntil, u.UpdatedAt = cloneTime(from), cloneTime(until), updatedAt
+	setKey(r.t, r.t.s.users, id, u)
+	return nil
+}

@@ -34,14 +34,34 @@ const (
 	PermPIIRead            = "pii:read"
 	// PermCredentialsRevoke はユーザーの認証情報の一覧と無効化（4.6）。
 	PermCredentialsRevoke = "credentials:revoke"
+	// PermSuspensionsRead は停止の一覧（4.7）。
+	PermSuspensionsRead = "suspensions:read"
+	// PermUsersUpdate はユーザーの有効期間などの変更（4.8）。
+	PermUsersUpdate = "users:update"
+	// PermSuspensionsAny は realm で足した種別を含む、すべての種別の停止と解除（realm:owner）。
+	PermSuspensionsAny = "suspensions:*"
 )
 
+// SuspensionPerm は停止の種別ごとの停止・解除の権限（`suspensions:<category>`。4.11）。
+// realm で足した種別は realm:owner（suspensions:*）だけが扱える。
+func SuspensionPerm(category string) string { return "suspensions:" + category }
+
+func suspend(categories ...string) []string {
+	out := []string{PermSuspensionsRead}
+	for _, c := range categories {
+		out = append(out, SuspensionPerm(c))
+	}
+	return out
+}
+
 var builtin = map[string][]string{
-	RealmOwner:           {PermSessionsRevoke, PermUsersCreate, PermUsersLoginLink, PermConnectionsManage, PermPIIRead, PermCredentialsRevoke},
-	RealmAdmin:           {PermSessionsRevoke, PermUsersCreate, PermUsersLoginLink, PermCredentialsRevoke},
-	RealmSecurity:        {PermSessionsRevoke, PermCredentialsRevoke},
-	RealmSupport:         {},
-	RealmBilling:         {},
+	RealmOwner: append([]string{PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
+		PermCredentialsRevoke, PermSuspensionsAny}, suspend("tos_violation", "customer_request", "security_risk", "billing")...),
+	RealmAdmin: append([]string{PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersLoginLink, PermCredentialsRevoke},
+		suspend("tos_violation", "customer_request")...),
+	RealmSecurity:        append([]string{PermSessionsRevoke, PermCredentialsRevoke}, suspend("security_risk")...),
+	RealmSupport:         {PermSuspensionsRead},
+	RealmBilling:         suspend("billing"),
 	NotificationDelivery: {PermNotificationsClaim},
 }
 

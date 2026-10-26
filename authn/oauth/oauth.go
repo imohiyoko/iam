@@ -309,7 +309,7 @@ func (s *Service) Complete(ctx context.Context, realmID string, in Complete) (Re
 		if errors.Is(err, ErrAccountExists) || errors.Is(err, ErrEmailUnverified) {
 			return Result{}, err
 		}
-		if denied, ok := errors.AsType[*warning.DeniedError](err); ok {
+		if denied, ok := errors.AsType[errs.Denial](err); ok {
 			return Result{}, denied
 		}
 		return Result{}, ErrAuthFailed
@@ -595,8 +595,8 @@ func (s *Service) login(ctx context.Context, realmID string, conn port.Connectio
 		if err != nil {
 			return err
 		}
-		if !account.CanLogin(u, now) {
-			return errors.New("user cannot log in")
+		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
+			return err
 		}
 		is, err := s.Sessions.Issue(ctx, tx, session.Issue{
 			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"fed"}, Credentials: []string{ident.ID},

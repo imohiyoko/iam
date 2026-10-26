@@ -104,6 +104,13 @@ func WithCode(k Kind, code, msg string) error {
 	return &Error{Kind: k, Code: code, Msg: msg}
 }
 
+// Denial は本人確認の後の拒否で、理由のコードを本人に返してよいもの（4.9。警告の deny、停止、有効期間の外など）。
+type Denial interface {
+	error
+	// Reasons は拒否の理由のコード（`warning_denied.<code>`、`suspended.<category>`、`outside_validity` など）。
+	Reasons() []string
+}
+
 // AuthenticationFailed は本人確認の前の失敗（理由を問わず同じコードを返す。4.9）。
 var AuthenticationFailed = &Error{Kind: KindUnauthenticated, Code: CodeAuthenticationFailed}
 

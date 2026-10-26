@@ -127,6 +127,26 @@ func (l *loginEnv) do(t *testing.T, h http.Handler, method, path string, body an
 // login はメールの所有確認でログインし、応答とセッションの Cookie を返す。
 func (l *loginEnv) login(t *testing.T, email string) (map[string]any, string) {
 	t.Helper()
+	w := l.loginVerify(t, email)
+	if w.Code != 200 {
+		t.Fatalf("verify: %d %s", w.Code, w.Body)
+	}
+	var res map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == sessionCookie {
+			return res, c.Value
+		}
+	}
+	t.Fatal("no session cookie")
+	return nil, ""
+}
+
+// loginVerify はメールのコードで確認まで進め、確認の応答を返す（拒否の応答を確かめるため）。
+func (l *loginEnv) loginVerify(t *testing.T, email string) *httptest.ResponseRecorder {
+	t.Helper()
 	ctx := context.Background()
 	w := l.do(t, l.a.PublicHandler(), "POST", "/v1/login/email:start", map[string]string{"email": email})
 	if w.Code != 200 {
@@ -151,21 +171,7 @@ func (l *loginEnv) login(t *testing.T, email string) (map[string]any, string) {
 		t.Fatalf("claim body: %s %v", w.Body, err)
 	}
 	l.codes = append(l.codes, sec.Code)
-	w = l.do(t, l.a.PublicHandler(), "POST", "/v1/login/email:verify", map[string]string{"flow_id": st.FlowID, "code": sec.Code})
-	if w.Code != 200 {
-		t.Fatalf("verify: %d %s", w.Code, w.Body)
-	}
-	var res map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range w.Result().Cookies() {
-		if c.Name == sessionCookie {
-			return res, c.Value
-		}
-	}
-	t.Fatal("no session cookie")
-	return nil, ""
+	return l.do(t, l.a.PublicHandler(), "POST", "/v1/login/email:verify", map[string]string{"flow_id": st.FlowID, "code": sec.Code})
 }
 
 func TestEmailSignupThenLogin(t *testing.T) {

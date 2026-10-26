@@ -13,6 +13,7 @@ import (
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/audit"
+	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/port"
 	"github.com/imohiyoko/iam/shared/ratelimit"
@@ -105,8 +106,8 @@ func rateLimited(ex *ratelimit.ExceededError) publicapi.RateLimitedJSONResponse 
 		Headers: publicapi.RateLimitedResponseHeaders{RetryAfter: retryAfter(ex)}}
 }
 
-// denied は警告による拒否の応答。本人確認の後なので理由を返す（4.9）。
-func denied(d *warning.DeniedError) publicapi.DeniedJSONResponse {
+// denied は本人確認の後の拒否（警告、停止など）の応答。理由を返す（4.9）。
+func denied(d errs.Denial) publicapi.DeniedJSONResponse {
 	reasons := d.Reasons()
 	return publicapi.DeniedJSONResponse{Error: reasons[0], Reasons: &reasons}
 }

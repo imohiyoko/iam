@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/password"
-	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/ratelimit"
@@ -30,7 +29,7 @@ func (s publicServer) PasswordLogin(ctx context.Context, req publicapi.PasswordL
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.PasswordLogin429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
-	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.PasswordLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	switch {

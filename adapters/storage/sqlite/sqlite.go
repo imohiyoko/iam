@@ -190,6 +190,8 @@ func (t *tx) Identities() port.IdentityRepo            { return identities{t.q} 
 func (t *tx) Passkeys() port.PasskeyRepo               { return passkeys{t.q} }
 func (t *tx) TOTP() port.TOTPRepo                      { return totps{t.q} }
 func (t *tx) Passwords() port.PasswordRepo             { return passwords{t.q} }
+func (t *tx) Suspensions() port.SuspensionRepo         { return suspensions{t.q} }
+func (t *tx) ScheduledEvents() port.ScheduledEventRepo { return scheduledEvents{t.q} }
 func (t *tx) Connections() port.ConnectionRepo         { return connections{t.q} }
 func (t *tx) Sessions() port.SessionRepo               { return sessions{t.q} }
 func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t.q} }

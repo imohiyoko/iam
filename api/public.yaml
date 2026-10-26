@@ -843,7 +843,7 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     Denied:
-      description: 本人確認の後の拒否。`reasons` に拒否理由のコード（`warning_denied.<code>` など。4.9）
+      description: 本人確認の後の拒否。`reasons` に拒否理由のコード（`warning_denied.<code>`、`suspended.<category>`、`outside_validity` など。4.9）
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }

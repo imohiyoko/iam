@@ -98,6 +98,23 @@ type AuthnSession struct {
 	Restriction       string
 }
 
+type AuthnSuspension struct {
+	ID          string
+	PublicID    string
+	RealmID     string
+	TargetType  string
+	TargetID    string
+	Category    string
+	Reason      string
+	ExternalRef string
+	StartsAt    string
+	EndsAt      sql.NullString
+	CreatedBy   string
+	CreatedAt   string
+	LiftedAt    sql.NullString
+	LiftedBy    string
+}
+
 type AuthnTotpCredential struct {
 	ID               string
 	PublicID         string
@@ -163,6 +180,17 @@ type AuthzRoleBinding struct {
 	PrincipalID   string
 	OrgID         string
 	CreatedAt     string
+}
+
+type ScheduledEvent struct {
+	ID        string
+	RealmID   string
+	Ref       string
+	EventType string
+	Payload   []byte
+	FireAt    string
+	FiredAt   sql.NullString
+	CreatedAt string
 }
 
 type SharedAuditEvent struct {

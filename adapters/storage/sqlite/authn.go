@@ -350,3 +350,15 @@ func (r roleBindings) ListByRole(ctx context.Context, realmID, role string) ([]p
 	rs, err := r.q.ListRoleBindingsByRole(ctx, db.ListRoleBindingsByRoleParams{RealmID: realmID, Role: role})
 	return rows(rs, err, toRoleBinding)
 }
+
+func (r users) SetValidity(ctx context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error {
+	n, err := r.q.SetUserValidity(ctx, db.SetUserValidityParams{ValidFrom: nullTime(from), ValidUntil: nullTime(until),
+		UpdatedAt: formatTime(updatedAt), RealmID: realmID, ID: id})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return errs.New(errs.KindNotFound, "user")
+	}
+	return nil
+}

@@ -146,10 +146,15 @@ func TestSecondFactorAndPasswordRules(t *testing.T) {
 		// 本番では OWASP の下限より軽くできない。
 		"security: {password: {argon2: {memory_kib: 8192}}}\n",
 		"security: {password: {argon2: {iterations: 1}}}\n",
+		"dev: true\nsecurity: {suspension_categories: [billing]}\n",
+		"dev: true\nsecurity: {suspension_categories: [Fraud]}\n",
 	} {
 		if _, err := Parse([]byte(y)); err == nil || !strings.Contains(err.Error(), "security.") {
 			t.Errorf("%s: want a security error, got %v", y, err)
 		}
+	}
+	if _, err := Parse([]byte("dev: true\nsecurity: {suspension_categories: [fraud_review]}\n")); err != nil {
+		t.Errorf("extra category: %v", err)
 	}
 	if _, err := Parse([]byte("dev: true\nsecurity: {password: {argon2: {memory_kib: 8, iterations: 1}}}\n")); err != nil {
 		t.Errorf("light params in dev: %v", err)

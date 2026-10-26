@@ -76,8 +76,10 @@ type App struct {
 	perIP    *ratelimit.Limiter
 	links    *loginlink.Service
 	notifier *eventlog.Relay
-	public   http.Handler
-	admin    http.Handler
+	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
+	scheduler *eventlog.Scheduler
+	public    http.Handler
+	admin     http.Handler
 }
 
 // New は起動前の検査を行い、App を組み立てる。binary はこのバイナリに含まれるフィーチャー。
@@ -154,7 +156,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if !slices.Contains(via, port.VerifiedViaCode) {
 		d.Logger.Warn("realm.verified_via does not include code: email codes and links are disabled, and email recovery is unavailable")
 	}
-	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via}
+	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via, ExtraCategories: cfg.Security.SuspensionCategories}
 	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
 	a.email = &emailflow.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
@@ -209,6 +211,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 			return sec.To, sec.Code, sec.Token, err
 		})
 	}
+	a.scheduler = &eventlog.Scheduler{Storage: d.Storage, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger}
 	a.notifier = &eventlog.Relay{
 		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Clock, d.Logger), Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
@@ -375,9 +378,10 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	for i, l := range []net.Listener{pubL, admL} {
 		go func() { errc <- servers[i].Serve(l) }()
 	}
-	relayDone, notifyDone := make(chan struct{}), make(chan struct{})
+	relayDone, notifyDone, schedDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() { a.relay.Run(ctx); close(relayDone) }()
 	go func() { a.notifier.Run(ctx); close(notifyDone) }()
+	go func() { a.scheduler.Run(ctx); close(schedDone) }()
 
 	a.deps.Logger.Info("iam started", "public", pubL.Addr().String(), "admin", admL.Addr().String(),
 		"realm", a.realm.Slug, "features", a.plan.Active)
@@ -398,6 +402,7 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	}
 	<-relayDone
 	<-notifyDone
+	<-schedDone
 	// 止める前に残りを送る（届かなければ次の起動で送る）。
 	for _, r := range []*eventlog.Relay{a.relay, a.notifier} {
 		if _, err := r.Flush(shutdownCtx); err != nil {
