@@ -67,6 +67,7 @@ var ErrAuthFailed = errs.WithCode(errs.KindUnauthenticated, errs.CodeAuthenticat
 const (
 	purposeLogin  = "login"
 	purposeSignup = "signup"
+	purposeAdd    = "add_email" // ログイン済みのユーザーがメールを足す（4.2）
 )
 
 // state はフローの状態。EphemeralStore に暗号化して置く。
@@ -76,7 +77,7 @@ type state struct {
 	UserID    string    `json:"user_id,omitempty"`
 	PublicID  string    `json:"public_id,omitempty"`
 	EmailID   string    `json:"email_id,omitempty"`
-	Email     string    `json:"email,omitempty"` // 登録時のみ（所有確認が済むまでユーザーを作らないため）
+	Email     string    `json:"email,omitempty"` // 登録と追加のときだけ（所有確認が済むまでアドレスを置かないため）
 	CodeHash  []byte    `json:"code_hash"`
 	LinkHash  []byte    `json:"link_hash"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -134,15 +135,7 @@ func (s *Service) Start(ctx context.Context, realmID, email string, c Client) (S
 	if err := s.limit(ctx, realmID, email, c); err != nil {
 		return Started{}, err
 	}
-	flowID, err := randomToken()
-	if err != nil {
-		return Started{}, err
-	}
-	code, err := randomCode()
-	if err != nil {
-		return Started{}, err
-	}
-	link, err := randomToken()
+	flowID, code, link, err := secrets()
 	if err != nil {
 		return Started{}, err
 	}
@@ -183,6 +176,23 @@ func (s *Service) Start(ctx context.Context, realmID, email string, c Client) (S
 	if err != nil {
 		return Started{}, err
 	}
+	return s.store(ctx, flowID, st)
+}
+
+// secrets はフロー ID、コード、リンクのトークンを作る。
+func secrets() (flowID, code, link string, err error) {
+	if flowID, err = randomToken(); err != nil {
+		return
+	}
+	if code, err = randomCode(); err != nil {
+		return
+	}
+	link, err = randomToken()
+	return
+}
+
+// store はフローの状態を封をして EphemeralStore に置く。
+func (s *Service) store(ctx context.Context, flowID string, st state) (Started, error) {
 	b, err := json.Marshal(st)
 	if err != nil {
 		return Started{}, err
@@ -195,6 +205,55 @@ func (s *Service) Start(ctx context.Context, realmID, email string, c Client) (S
 		return Started{}, err
 	}
 	return Started{FlowID: flowID, ExpiresAt: st.ExpiresAt}, nil
+}
+
+// StartAdd は、ログイン済みのユーザー（内部 ID）が足すメールの所有確認を始める。
+// アドレスが別のユーザーで使われていても、所有を確かめるまでは同じ応答を返す（4.9）。
+// 本人のメールなら ErrEmailExists。realm で `code` が無効なら account.ErrViaNotAllowed。
+func (s *Service) StartAdd(ctx context.Context, realmID, userID, email string, c Client) (Started, error) {
+	if !s.Accounts.Allows(port.VerifiedViaCode) {
+		return Started{}, account.ErrViaNotAllowed
+	}
+	email, err := account.NormalizeEmail(email)
+	if err != nil {
+		return Started{}, err
+	}
+	if err := s.limit(ctx, realmID, email, c); err != nil {
+		return Started{}, err
+	}
+	flowID, code, link, err := secrets()
+	if err != nil {
+		return Started{}, err
+	}
+	now := s.Clock.Now()
+	st := state{RealmID: realmID, Purpose: purposeAdd, UserID: userID, Email: email,
+		CodeHash: digest(code), LinkHash: digest(link), ExpiresAt: now.Add(s.ttl())}
+	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		u, err := tx.Users().Get(ctx, realmID, userID)
+		if err != nil {
+			return err
+		}
+		st.PublicID = u.PublicID
+		switch e, err := s.Accounts.FindByEmail(ctx, tx, realmID, email); {
+		case err == nil && e.UserID == userID:
+			return account.ErrEmailExists
+		case err != nil && !errors.Is(err, errs.NotFound):
+			return err
+		}
+		n := port.Notification{Type: notify.TypeEmailVerification, RealmID: realmID, UserID: u.PublicID}
+		if _, err := s.Notify.Enqueue(ctx, tx, n, &notify.Secret{To: email, Code: code, Token: link, ExpiresAt: st.ExpiresAt}); err != nil {
+			return err
+		}
+		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
+			Type: "email.verification.requested", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
+			IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, Details: map[string]any{"purpose": purposeAdd},
+		})
+		return err
+	})
+	if err != nil {
+		return Started{}, err
+	}
+	return s.store(ctx, flowID, st)
 }
 
 // limit はアドレスごとの回数を数える。登録の有無に関係なく数えるので、制限されたことからアカウントの有無は分からない。
@@ -254,38 +313,44 @@ func (s *Service) Verify(ctx context.Context, realmID string, in Verify) (Verifi
 	return out, nil
 }
 
-func (s *Service) verify(ctx context.Context, realmID string, in Verify) (Verified, error) {
+// take はコードかリンクをフローの状態と照合し、合えばフローを使い終える（1回限り）。
+// 照合に使った方式（code / link）も返す。addFor が空ならログイン・登録のフローだけ、
+// 空でなければそのユーザー（内部 ID）のメールの追加のフローだけを受け付ける。
+func (s *Service) take(ctx context.Context, realmID string, in Verify, addFor string) (state, string, error) {
 	if in.FlowID == "" || (in.Code == "") == (in.LinkToken == "") {
-		return Verified{}, errors.New("flow id and exactly one of code or link token are required")
+		return state{}, "", errors.New("flow id and exactly one of code or link token are required")
 	}
 	key := flowKey(in.FlowID)
 	b, ok, err := s.Cache.Get(ctx, key)
 	if err != nil {
-		return Verified{}, err
+		return state{}, "", err
 	}
 	if !ok {
-		return Verified{}, errors.New("flow not found")
+		return state{}, "", errors.New("flow not found")
 	}
 	pt, err := s.Crypter.Open(ctx, "flow.email", b)
 	if err != nil {
-		return Verified{}, err
+		return state{}, "", err
 	}
 	var st state
 	if err := json.Unmarshal(pt, &st); err != nil {
-		return Verified{}, err
+		return state{}, "", err
 	}
 	now := s.Clock.Now()
 	if st.RealmID != realmID || !now.Before(st.ExpiresAt) {
-		return Verified{}, errors.New("flow expired or in another realm")
+		return state{}, "", errors.New("flow expired or in another realm")
+	}
+	if (st.Purpose == purposeAdd) != (addFor != "") || (addFor != "" && st.UserID != addFor) {
+		return state{}, "", errors.New("flow is for another purpose or user")
 	}
 	// 試行回数はフローごとに数え、上限を超えたらフローを捨てる。
 	n, err := s.Cache.Incr(ctx, key+":tries", st.ExpiresAt.Sub(now))
 	if err != nil {
-		return Verified{}, err
+		return state{}, "", err
 	}
 	if n > s.maxAttempts() {
 		_ = s.Cache.Delete(ctx, key)
-		return Verified{}, errors.New("too many attempts")
+		return state{}, "", errors.New("too many attempts")
 	}
 	method := "code"
 	match := subtle.ConstantTimeCompare(digest(in.Code), st.CodeHash) == 1
@@ -294,13 +359,21 @@ func (s *Service) verify(ctx context.Context, realmID string, in Verify) (Verifi
 		match = subtle.ConstantTimeCompare(digest(in.LinkToken), st.LinkHash) == 1
 	}
 	if !match {
-		return Verified{}, errors.New("code mismatch")
+		return state{}, "", errors.New("code mismatch")
 	}
 	// 1回限り：取り出せた要求だけが続ける（同時の照合は1つだけ通る）。
 	if _, ok, err := s.Cache.Take(ctx, key); err != nil || !ok {
-		return Verified{}, errors.New("flow already used")
+		return state{}, "", errors.New("flow already used")
 	}
+	return st, method, nil
+}
 
+func (s *Service) verify(ctx context.Context, realmID string, in Verify) (Verified, error) {
+	st, method, err := s.take(ctx, realmID, in, "")
+	if err != nil {
+		return Verified{}, err
+	}
+	now := s.Clock.Now()
 	var out Verified
 	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		userID, emailID := st.UserID, st.EmailID
@@ -346,6 +419,24 @@ func (s *Service) verify(ctx context.Context, realmID string, in Verify) (Verifi
 		s.Sessions.Committed(ctx, realmID, out.Session)
 	}
 	return out, err
+}
+
+// VerifyAdd は、ログイン済みのユーザー（内部 ID）がメールの追加のフローを完了する。
+// 照合の失敗は ErrAuthFailed。所有を確かめた後、アドレスが使われていれば account.ErrEmailExists を返す。
+func (s *Service) VerifyAdd(ctx context.Context, realmID, userID string, in Verify) (port.UserEmail, error) {
+	st, _, err := s.take(ctx, realmID, in, userID)
+	if err != nil {
+		s.recordFailure(ctx, realmID, in.Client, err)
+		return port.UserEmail{}, ErrAuthFailed
+	}
+	var e port.UserEmail
+	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		e, err = s.Accounts.AddEmail(ctx, tx, realmID, userID, st.Email, port.VerifiedViaCode,
+			audit.Actor{Type: "user", ID: st.PublicID}, in.Client.RequestID)
+		return err
+	})
+	return e, err
 }
 
 // recordFailure は失敗を監査ログに残す（理由の種別は内部向け。6.1）。

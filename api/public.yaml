@@ -229,6 +229,211 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/methods:
+    get:
+      operationId: listMyMethods
+      summary: 本人の認証手段（メールと連携した外部 ID）の一覧
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 作成時刻の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [emails, identities]
+                properties:
+                  emails:
+                    type: array
+                    items: { $ref: "#/components/schemas/MyEmail" }
+                  identities:
+                    type: array
+                    items: { $ref: "#/components/schemas/MyIdentity" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  /v1/me/emails:start:
+    post:
+      operationId: startAddEmail
+      summary: メールの追加を始める（所有確認のコードとリンクを通知する）
+      description: |
+        ログイン済みの本人だけが足せる（4.2）。アドレスが別のユーザーで使われていても、所有を確かめるまでは
+        同じ応答を返す。本人のメールなら `409 email_exists`。realm で `code` の経路が無効なら
+        `400 verification_method_disabled`。`flow_id` はブラウザには `__Host-iam_flow` Cookie でも渡す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, maxLength: 254 }
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flow_id, expires_at]
+                properties:
+                  flow_id: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/me/emails:verify:
+    post:
+      operationId: verifyAddEmail
+      summary: コードかリンクのトークンでメールの追加を完了する
+      description: |
+        `flow_id` は本文か `__Host-iam_flow` Cookie で渡す。照合の失敗は `401 authentication_failed`。
+        所有を確かめた後、アドレスが使われていれば `409 email_exists`（自動リンクしない）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                flow_id: { type: string }
+                code: { type: string }
+                token: { type: string }
+      responses:
+        "200":
+          description: 足した（primary にはしない）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyEmail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/emails/{id}:make-primary:
+    post:
+      operationId: makeMyEmailPrimary
+      summary: 確認済みのメールを primary にする
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: primary にした }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/emails/{id}:remove:
+    post:
+      operationId: removeMyEmail
+      summary: メールを消す
+      description: |
+        primary は消せない（`409 primary_email`。先に別のメールを primary にする）。最後の確認済みメールは
+        `409 last_email`、消すとログインの手段が無くなるなら `409 last_method`（4.3）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 消した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/identities/{connection}:start:
+    post:
+      operationId: startLinkIdentity
+      summary: 外部プロバイダ（OAuth / OIDC）の連携を始める
+      description: |
+        ログイン済みの本人だけが連携できる（4.2）。戻り先で受け取った `state` と `code` を
+        `/v1/me/identities:complete` に渡す。`flow_id` はブラウザには `__Host-iam_oauth` Cookie でも渡す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: connection, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                redirect_uri: { type: string }
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flow_id, authorization_url, expires_at]
+                properties:
+                  flow_id: { type: string }
+                  authorization_url: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/identities:complete:
+    post:
+      operationId: completeLinkIdentity
+      summary: プロバイダからの戻りで連携を完了する
+      description: |
+        フローを始めた本人のセッションでだけ完了できる。失敗は `401 authentication_failed`。
+        外部 ID が既にどれかのユーザーに紐付いていれば `409 identity_exists`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, code]
+              properties:
+                flow_id: { type: string }
+                state: { type: string }
+                code: { type: string }
+      responses:
+        "200":
+          description: 連携した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyIdentity" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/identities/{id}:unlink:
+    post:
+      operationId: unlinkMyIdentity
+      summary: 外部 ID の連携を解除する
+      description: |
+        削除ではなく無効化する（4.6）。その外部 ID で作ったセッションも使えなくなる。
+        最後のログインの手段なら `409 last_method`。同じ外部 ID は後でまた連携できる。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 解除した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -251,6 +456,11 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     NotFound:
       description: 見つからない
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: 状態が合わず受け付けられない。`error` に理由のコード（`email_exists`、`last_method` など）
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -321,3 +531,20 @@ components:
           type: array
           items: { type: string }
         current: { type: boolean, description: このリクエストのセッションか }
+    MyEmail:
+      type: object
+      required: [id, email, primary, verified, created_at]
+      properties:
+        id: { type: string, description: 公開のメール ID（eml_…） }
+        email: { type: string, description: アドレス。最小化モード（9.6）では空 }
+        primary: { type: boolean }
+        verified: { type: boolean }
+        verified_via: { type: string, description: "`code`、`oauth_provider`、`admin` など" }
+        created_at: { type: string, format: date-time }
+    MyIdentity:
+      type: object
+      required: [id, connection, created_at]
+      properties:
+        id: { type: string, description: 公開の外部 ID の紐付けの ID（idn_…） }
+        connection: { type: string, description: connection の slug（google など） }
+        created_at: { type: string, format: date-time }

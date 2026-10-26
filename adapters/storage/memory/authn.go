@@ -83,6 +83,9 @@ func (r emails) Create(_ context.Context, e port.UserEmail) error {
 		if x.RealmID == e.RealmID && bytes.Equal(x.Index, e.Index) {
 			return errs.New(errs.KindConflict, "email index exists in realm")
 		}
+		if x.RealmID == e.RealmID && x.PublicID == e.PublicID {
+			return errs.New(errs.KindConflict, "email public id exists in realm")
+		}
 	}
 	setKey(r.t, r.t.s.emails, e.ID, cloneEmail(e))
 	return nil
@@ -95,6 +98,37 @@ func (r emails) GetByIndex(_ context.Context, realmID string, index []byte) (por
 		}
 	}
 	return port.UserEmail{}, errs.New(errs.KindNotFound, "email")
+}
+
+func (r emails) GetByPublicID(_ context.Context, realmID, publicID string) (port.UserEmail, error) {
+	for _, x := range r.t.s.emails {
+		if x.RealmID == realmID && x.PublicID == publicID {
+			return cloneEmail(x), nil
+		}
+	}
+	return port.UserEmail{}, errs.New(errs.KindNotFound, "email")
+}
+
+func (r emails) SetPrimary(_ context.Context, realmID, userID, id string) error {
+	e, err := get(r.t.s.emails, realmID, id, func(e port.UserEmail) string { return e.RealmID }, "email")
+	if err != nil || e.UserID != userID {
+		return errs.New(errs.KindNotFound, "email %s", id)
+	}
+	for k, x := range r.t.s.emails {
+		if x.RealmID == realmID && x.UserID == userID && x.IsPrimary != (k == id) {
+			x.IsPrimary = k == id
+			setKey(r.t, r.t.s.emails, k, x)
+		}
+	}
+	return nil
+}
+
+func (r emails) Delete(_ context.Context, realmID, id string) error {
+	if _, err := get(r.t.s.emails, realmID, id, func(e port.UserEmail) string { return e.RealmID }, "email"); err != nil {
+		return err
+	}
+	deleteKey(r.t, r.t.s.emails, id)
+	return nil
 }
 
 func (r emails) ListByUser(_ context.Context, realmID, userID string) ([]port.UserEmail, error) {
@@ -119,8 +153,11 @@ func (r identities) Create(_ context.Context, i port.Identity) error {
 		return errs.New(errs.KindConflict, "identity %s exists", i.ID)
 	}
 	for _, x := range r.t.s.identities {
-		if x.ConnectionID == i.ConnectionID && x.ProviderSubject == i.ProviderSubject {
+		if x.ConnectionID == i.ConnectionID && x.ProviderSubject == i.ProviderSubject && x.RevokedAt == nil && i.RevokedAt == nil {
 			return errs.New(errs.KindConflict, "identity exists for connection")
+		}
+		if x.RealmID == i.RealmID && x.PublicID == i.PublicID {
+			return errs.New(errs.KindConflict, "identity public id exists in realm")
 		}
 	}
 	setKey(r.t, r.t.s.identities, i.ID, cloneIdentity(i))
@@ -129,11 +166,31 @@ func (r identities) Create(_ context.Context, i port.Identity) error {
 
 func (r identities) GetBySubject(_ context.Context, realmID, connectionID, subject string) (port.Identity, error) {
 	for _, x := range r.t.s.identities {
-		if x.RealmID == realmID && x.ConnectionID == connectionID && x.ProviderSubject == subject {
+		if x.RealmID == realmID && x.ConnectionID == connectionID && x.ProviderSubject == subject && x.RevokedAt == nil {
 			return cloneIdentity(x), nil
 		}
 	}
 	return port.Identity{}, errs.New(errs.KindNotFound, "identity")
+}
+
+func (r identities) GetByPublicID(_ context.Context, realmID, publicID string) (port.Identity, error) {
+	for _, x := range r.t.s.identities {
+		if x.RealmID == realmID && x.PublicID == publicID {
+			return cloneIdentity(x), nil
+		}
+	}
+	return port.Identity{}, errs.New(errs.KindNotFound, "identity")
+}
+
+func (r identities) Revoke(_ context.Context, realmID, id string, at time.Time, reason string) error {
+	i, err := get(r.t.s.identities, realmID, id, func(i port.Identity) string { return i.RealmID }, "identity")
+	if err != nil || i.RevokedAt != nil {
+		return err
+	}
+	i = cloneIdentity(i)
+	i.RevokedAt, i.RevokeReason = &at, reason
+	setKey(r.t, r.t.s.identities, id, i)
+	return nil
 }
 
 func (r identities) ListByUser(_ context.Context, realmID, userID string) ([]port.Identity, error) {

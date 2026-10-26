@@ -109,6 +109,32 @@ type LoginResult struct {
 	Warnings []Warning `json:"warnings"`
 }
 
+// MyEmail defines model for MyEmail.
+type MyEmail struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Email アドレス。最小化モード（9.6）では空
+	Email string `json:"email"`
+
+	// Id 公開のメール ID（eml_…）
+	Id       string `json:"id"`
+	Primary  bool   `json:"primary"`
+	Verified bool   `json:"verified"`
+
+	// VerifiedVia `code`、`oauth_provider`、`admin` など
+	VerifiedVia *string `json:"verified_via,omitempty"`
+}
+
+// MyIdentity defines model for MyIdentity.
+type MyIdentity struct {
+	// Connection connection の slug（google など）
+	Connection string    `json:"connection"`
+	CreatedAt  time.Time `json:"created_at"`
+
+	// Id 公開の外部 ID の紐付けの ID（idn_…）
+	Id string `json:"id"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	AuthMethods     []string  `json:"auth_methods"`
@@ -141,6 +167,9 @@ type WarningSeverity string
 
 // BadRequest defines model for BadRequest.
 type BadRequest = Error
+
+// Conflict defines model for Conflict.
+type Conflict = Error
 
 // Denied defines model for Denied.
 type Denied = Error
@@ -186,6 +215,30 @@ type CompleteOAuthLoginJSONBody struct {
 	State       string  `json:"state"`
 }
 
+// StartAddEmailJSONBody defines parameters for StartAddEmail.
+type StartAddEmailJSONBody struct {
+	Email string `json:"email"`
+}
+
+// VerifyAddEmailJSONBody defines parameters for VerifyAddEmail.
+type VerifyAddEmailJSONBody struct {
+	Code   *string `json:"code,omitempty"`
+	FlowId *string `json:"flow_id,omitempty"`
+	Token  *string `json:"token,omitempty"`
+}
+
+// StartLinkIdentityJSONBody defines parameters for StartLinkIdentity.
+type StartLinkIdentityJSONBody struct {
+	RedirectUri *string `json:"redirect_uri,omitempty"`
+}
+
+// CompleteLinkIdentityJSONBody defines parameters for CompleteLinkIdentity.
+type CompleteLinkIdentityJSONBody struct {
+	Code   string  `json:"code"`
+	FlowId *string `json:"flow_id,omitempty"`
+	State  string  `json:"state"`
+}
+
 // StartEmailLoginJSONRequestBody defines body for StartEmailLogin for application/json ContentType.
 type StartEmailLoginJSONRequestBody StartEmailLoginJSONBody
 
@@ -200,6 +253,18 @@ type StartOAuthLoginJSONRequestBody StartOAuthLoginJSONBody
 
 // CompleteOAuthLoginJSONRequestBody defines body for CompleteOAuthLogin for application/json ContentType.
 type CompleteOAuthLoginJSONRequestBody CompleteOAuthLoginJSONBody
+
+// StartAddEmailJSONRequestBody defines body for StartAddEmail for application/json ContentType.
+type StartAddEmailJSONRequestBody StartAddEmailJSONBody
+
+// VerifyAddEmailJSONRequestBody defines body for VerifyAddEmail for application/json ContentType.
+type VerifyAddEmailJSONRequestBody VerifyAddEmailJSONBody
+
+// StartLinkIdentityJSONRequestBody defines body for StartLinkIdentity for application/json ContentType.
+type StartLinkIdentityJSONRequestBody StartLinkIdentityJSONBody
+
+// CompleteLinkIdentityJSONRequestBody defines body for CompleteLinkIdentity for application/json ContentType.
+type CompleteLinkIdentityJSONRequestBody CompleteLinkIdentityJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -224,6 +289,30 @@ type ServerInterface interface {
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// MakeMyEmailPrimary 確認済みのメールを primary にする
+	// (POST /v1/me/emails/{id}:make-primary)
+	MakeMyEmailPrimary(w http.ResponseWriter, r *http.Request, id string)
+	// RemoveMyEmail メールを消す
+	// (POST /v1/me/emails/{id}:remove)
+	RemoveMyEmail(w http.ResponseWriter, r *http.Request, id string)
+	// StartAddEmail メールの追加を始める（所有確認のコードとリンクを通知する）
+	// (POST /v1/me/emails:start)
+	StartAddEmail(w http.ResponseWriter, r *http.Request)
+	// VerifyAddEmail コードかリンクのトークンでメールの追加を完了する
+	// (POST /v1/me/emails:verify)
+	VerifyAddEmail(w http.ResponseWriter, r *http.Request)
+	// StartLinkIdentity 外部プロバイダ（OAuth / OIDC）の連携を始める
+	// (POST /v1/me/identities/{connection}:start)
+	StartLinkIdentity(w http.ResponseWriter, r *http.Request, connection string)
+	// UnlinkMyIdentity 外部 ID の連携を解除する
+	// (POST /v1/me/identities/{id}:unlink)
+	UnlinkMyIdentity(w http.ResponseWriter, r *http.Request, id string)
+	// CompleteLinkIdentity プロバイダからの戻りで連携を完了する
+	// (POST /v1/me/identities:complete)
+	CompleteLinkIdentity(w http.ResponseWriter, r *http.Request)
+	// ListMyMethods 本人の認証手段（メールと連携した外部 ID）の一覧
+	// (GET /v1/me/methods)
+	ListMyMethods(w http.ResponseWriter, r *http.Request)
 	// ListMySessions 本人の有効なセッションの一覧
 	// (GET /v1/me/sessions)
 	ListMySessions(w http.ResponseWriter, r *http.Request)
@@ -342,6 +431,166 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MakeMyEmailPrimary operation middleware
+func (siw *ServerInterfaceWrapper) MakeMyEmailPrimary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MakeMyEmailPrimary(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveMyEmail operation middleware
+func (siw *ServerInterfaceWrapper) RemoveMyEmail(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveMyEmail(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartAddEmail operation middleware
+func (siw *ServerInterfaceWrapper) StartAddEmail(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartAddEmail(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyAddEmail operation middleware
+func (siw *ServerInterfaceWrapper) VerifyAddEmail(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyAddEmail(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartLinkIdentity operation middleware
+func (siw *ServerInterfaceWrapper) StartLinkIdentity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection" -------------
+	var connection string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection", r.PathValue("connection"), &connection, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartLinkIdentity(w, r, connection)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UnlinkMyIdentity operation middleware
+func (siw *ServerInterfaceWrapper) UnlinkMyIdentity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UnlinkMyIdentity(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteLinkIdentity operation middleware
+func (siw *ServerInterfaceWrapper) CompleteLinkIdentity(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteLinkIdentity(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyMethods operation middleware
+func (siw *ServerInterfaceWrapper) ListMyMethods(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyMethods(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -520,11 +769,21 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/logout", wrapper.Logout)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/sessions", wrapper.ListMySessions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/sessions/{id}:revoke", wrapper.RevokeMySession)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/methods", wrapper.ListMyMethods)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/emails:start", wrapper.StartAddEmail)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/emails:verify", wrapper.VerifyAddEmail)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/emails/{id}:make-primary", wrapper.MakeMyEmailPrimary)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/emails/{id}:remove", wrapper.RemoveMyEmail)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/{connection}:start", wrapper.StartLinkIdentity)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities:complete", wrapper.CompleteLinkIdentity)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/{id}:unlink", wrapper.UnlinkMyIdentity)
 
 	return m
 }
 
 type BadRequestJSONResponse Error
+
+type ConflictJSONResponse Error
 
 type DeniedJSONResponse Error
 
@@ -946,6 +1205,469 @@ func (response Logout204Response) VisitLogoutResponse(w http.ResponseWriter) err
 	return nil
 }
 
+type MakeMyEmailPrimaryRequestObject struct {
+	Id string `json:"id"`
+}
+
+type MakeMyEmailPrimaryResponseObject interface {
+	VisitMakeMyEmailPrimaryResponse(w http.ResponseWriter) error
+}
+
+type MakeMyEmailPrimary204Response struct {
+}
+
+func (response MakeMyEmailPrimary204Response) VisitMakeMyEmailPrimaryResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type MakeMyEmailPrimary401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response MakeMyEmailPrimary401JSONResponse) VisitMakeMyEmailPrimaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MakeMyEmailPrimary404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response MakeMyEmailPrimary404JSONResponse) VisitMakeMyEmailPrimaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MakeMyEmailPrimary409JSONResponse struct{ ConflictJSONResponse }
+
+func (response MakeMyEmailPrimary409JSONResponse) VisitMakeMyEmailPrimaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyEmailRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RemoveMyEmailResponseObject interface {
+	VisitRemoveMyEmailResponse(w http.ResponseWriter) error
+}
+
+type RemoveMyEmail204Response struct {
+}
+
+func (response RemoveMyEmail204Response) VisitRemoveMyEmailResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveMyEmail401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RemoveMyEmail401JSONResponse) VisitRemoveMyEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyEmail404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RemoveMyEmail404JSONResponse) VisitRemoveMyEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyEmail409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RemoveMyEmail409JSONResponse) VisitRemoveMyEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartAddEmailRequestObject struct {
+	Body *StartAddEmailJSONRequestBody
+}
+
+type StartAddEmailResponseObject interface {
+	VisitStartAddEmailResponse(w http.ResponseWriter) error
+}
+
+type StartAddEmail200JSONResponse struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	FlowId    string    `json:"flow_id"`
+}
+
+func (response StartAddEmail200JSONResponse) VisitStartAddEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartAddEmail400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response StartAddEmail400JSONResponse) VisitStartAddEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartAddEmail401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response StartAddEmail401JSONResponse) VisitStartAddEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartAddEmail409JSONResponse struct{ ConflictJSONResponse }
+
+func (response StartAddEmail409JSONResponse) VisitStartAddEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartAddEmail429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response StartAddEmail429JSONResponse) VisitStartAddEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyAddEmailRequestObject struct {
+	Body *VerifyAddEmailJSONRequestBody
+}
+
+type VerifyAddEmailResponseObject interface {
+	VisitVerifyAddEmailResponse(w http.ResponseWriter) error
+}
+
+type VerifyAddEmail200JSONResponse MyEmail
+
+func (response VerifyAddEmail200JSONResponse) VisitVerifyAddEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyAddEmail401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response VerifyAddEmail401JSONResponse) VisitVerifyAddEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyAddEmail409JSONResponse struct{ ConflictJSONResponse }
+
+func (response VerifyAddEmail409JSONResponse) VisitVerifyAddEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLinkIdentityRequestObject struct {
+	Connection string `json:"connection"`
+	Body       *StartLinkIdentityJSONRequestBody
+}
+
+type StartLinkIdentityResponseObject interface {
+	VisitStartLinkIdentityResponse(w http.ResponseWriter) error
+}
+
+type StartLinkIdentity200JSONResponse struct {
+	AuthorizationUrl string    `json:"authorization_url"`
+	ExpiresAt        time.Time `json:"expires_at"`
+	FlowId           string    `json:"flow_id"`
+}
+
+func (response StartLinkIdentity200JSONResponse) VisitStartLinkIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLinkIdentity400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response StartLinkIdentity400JSONResponse) VisitStartLinkIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLinkIdentity401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response StartLinkIdentity401JSONResponse) VisitStartLinkIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLinkIdentity404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response StartLinkIdentity404JSONResponse) VisitStartLinkIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnlinkMyIdentityRequestObject struct {
+	Id string `json:"id"`
+}
+
+type UnlinkMyIdentityResponseObject interface {
+	VisitUnlinkMyIdentityResponse(w http.ResponseWriter) error
+}
+
+type UnlinkMyIdentity204Response struct {
+}
+
+func (response UnlinkMyIdentity204Response) VisitUnlinkMyIdentityResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type UnlinkMyIdentity401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UnlinkMyIdentity401JSONResponse) VisitUnlinkMyIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnlinkMyIdentity404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UnlinkMyIdentity404JSONResponse) VisitUnlinkMyIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnlinkMyIdentity409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UnlinkMyIdentity409JSONResponse) VisitUnlinkMyIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteLinkIdentityRequestObject struct {
+	Body *CompleteLinkIdentityJSONRequestBody
+}
+
+type CompleteLinkIdentityResponseObject interface {
+	VisitCompleteLinkIdentityResponse(w http.ResponseWriter) error
+}
+
+type CompleteLinkIdentity200JSONResponse MyIdentity
+
+func (response CompleteLinkIdentity200JSONResponse) VisitCompleteLinkIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteLinkIdentity401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteLinkIdentity401JSONResponse) VisitCompleteLinkIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteLinkIdentity409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CompleteLinkIdentity409JSONResponse) VisitCompleteLinkIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyMethodsRequestObject struct {
+}
+
+type ListMyMethodsResponseObject interface {
+	VisitListMyMethodsResponse(w http.ResponseWriter) error
+}
+
+type ListMyMethods200JSONResponse struct {
+	Emails     []MyEmail    `json:"emails"`
+	Identities []MyIdentity `json:"identities"`
+}
+
+func (response ListMyMethods200JSONResponse) VisitListMyMethodsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyMethods401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyMethods401JSONResponse) VisitListMyMethodsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMySessionsRequestObject struct {
 }
 
@@ -1050,6 +1772,30 @@ type StrictServerInterface interface {
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
+	// MakeMyEmailPrimary 確認済みのメールを primary にする
+	// (POST /v1/me/emails/{id}:make-primary)
+	MakeMyEmailPrimary(ctx context.Context, request MakeMyEmailPrimaryRequestObject) (MakeMyEmailPrimaryResponseObject, error)
+	// RemoveMyEmail メールを消す
+	// (POST /v1/me/emails/{id}:remove)
+	RemoveMyEmail(ctx context.Context, request RemoveMyEmailRequestObject) (RemoveMyEmailResponseObject, error)
+	// StartAddEmail メールの追加を始める（所有確認のコードとリンクを通知する）
+	// (POST /v1/me/emails:start)
+	StartAddEmail(ctx context.Context, request StartAddEmailRequestObject) (StartAddEmailResponseObject, error)
+	// VerifyAddEmail コードかリンクのトークンでメールの追加を完了する
+	// (POST /v1/me/emails:verify)
+	VerifyAddEmail(ctx context.Context, request VerifyAddEmailRequestObject) (VerifyAddEmailResponseObject, error)
+	// StartLinkIdentity 外部プロバイダ（OAuth / OIDC）の連携を始める
+	// (POST /v1/me/identities/{connection}:start)
+	StartLinkIdentity(ctx context.Context, request StartLinkIdentityRequestObject) (StartLinkIdentityResponseObject, error)
+	// UnlinkMyIdentity 外部 ID の連携を解除する
+	// (POST /v1/me/identities/{id}:unlink)
+	UnlinkMyIdentity(ctx context.Context, request UnlinkMyIdentityRequestObject) (UnlinkMyIdentityResponseObject, error)
+	// CompleteLinkIdentity プロバイダからの戻りで連携を完了する
+	// (POST /v1/me/identities:complete)
+	CompleteLinkIdentity(ctx context.Context, request CompleteLinkIdentityRequestObject) (CompleteLinkIdentityResponseObject, error)
+	// ListMyMethods 本人の認証手段（メールと連携した外部 ID）の一覧
+	// (GET /v1/me/methods)
+	ListMyMethods(ctx context.Context, request ListMyMethodsRequestObject) (ListMyMethodsResponseObject, error)
 	// ListMySessions 本人の有効なセッションの一覧
 	// (GET /v1/me/sessions)
 	ListMySessions(ctx context.Context, request ListMySessionsRequestObject) (ListMySessionsResponseObject, error)
@@ -1298,6 +2044,237 @@ func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(LogoutResponseObject); ok {
 		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MakeMyEmailPrimary operation middleware
+func (sh *strictHandler) MakeMyEmailPrimary(w http.ResponseWriter, r *http.Request, id string) {
+	var request MakeMyEmailPrimaryRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MakeMyEmailPrimary(ctx, request.(MakeMyEmailPrimaryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MakeMyEmailPrimary")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MakeMyEmailPrimaryResponseObject); ok {
+		if err := validResponse.VisitMakeMyEmailPrimaryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveMyEmail operation middleware
+func (sh *strictHandler) RemoveMyEmail(w http.ResponseWriter, r *http.Request, id string) {
+	var request RemoveMyEmailRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveMyEmail(ctx, request.(RemoveMyEmailRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveMyEmail")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveMyEmailResponseObject); ok {
+		if err := validResponse.VisitRemoveMyEmailResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartAddEmail operation middleware
+func (sh *strictHandler) StartAddEmail(w http.ResponseWriter, r *http.Request) {
+	var request StartAddEmailRequestObject
+
+	var body StartAddEmailJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartAddEmail(ctx, request.(StartAddEmailRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartAddEmail")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartAddEmailResponseObject); ok {
+		if err := validResponse.VisitStartAddEmailResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyAddEmail operation middleware
+func (sh *strictHandler) VerifyAddEmail(w http.ResponseWriter, r *http.Request) {
+	var request VerifyAddEmailRequestObject
+
+	var body VerifyAddEmailJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyAddEmail(ctx, request.(VerifyAddEmailRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyAddEmail")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyAddEmailResponseObject); ok {
+		if err := validResponse.VisitVerifyAddEmailResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartLinkIdentity operation middleware
+func (sh *strictHandler) StartLinkIdentity(w http.ResponseWriter, r *http.Request, connection string) {
+	var request StartLinkIdentityRequestObject
+
+	request.Connection = connection
+
+	var body StartLinkIdentityJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartLinkIdentity(ctx, request.(StartLinkIdentityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartLinkIdentity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartLinkIdentityResponseObject); ok {
+		if err := validResponse.VisitStartLinkIdentityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UnlinkMyIdentity operation middleware
+func (sh *strictHandler) UnlinkMyIdentity(w http.ResponseWriter, r *http.Request, id string) {
+	var request UnlinkMyIdentityRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UnlinkMyIdentity(ctx, request.(UnlinkMyIdentityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UnlinkMyIdentity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UnlinkMyIdentityResponseObject); ok {
+		if err := validResponse.VisitUnlinkMyIdentityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteLinkIdentity operation middleware
+func (sh *strictHandler) CompleteLinkIdentity(w http.ResponseWriter, r *http.Request) {
+	var request CompleteLinkIdentityRequestObject
+
+	var body CompleteLinkIdentityJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteLinkIdentity(ctx, request.(CompleteLinkIdentityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteLinkIdentity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteLinkIdentityResponseObject); ok {
+		if err := validResponse.VisitCompleteLinkIdentityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyMethods operation middleware
+func (sh *strictHandler) ListMyMethods(w http.ResponseWriter, r *http.Request) {
+	var request ListMyMethodsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyMethods(ctx, request.(ListMyMethodsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyMethods")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyMethodsResponseObject); ok {
+		if err := validResponse.VisitListMyMethodsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

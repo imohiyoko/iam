@@ -68,7 +68,7 @@ type Created struct {
 }
 
 // CreateWithEmail はユーザーを、確認済みのメール（primary）と一緒に作る。
-// アドレスが既に使われていれば errs.Conflict（自動リンクはしない。4.2）。
+// アドレスが既に使われていれば ErrEmailExists（errs.Conflict。自動リンクはしない。4.2）。
 func (s *Service) CreateWithEmail(ctx context.Context, tx port.Tx, realmID, email string, via port.VerifiedVia, actor audit.Actor, requestID string) (Created, error) {
 	if !s.Allows(via) {
 		return Created{}, ErrViaNotAllowed
@@ -77,17 +77,8 @@ func (s *Service) CreateWithEmail(ctx context.Context, tx port.Tx, realmID, emai
 	if err != nil {
 		return Created{}, err
 	}
-	// 書き込みの前に重複を確かめる。ユーザーを作った後でメールの一意制約に当たると、呼び出し側が
-	// errs.Conflict を受けて処理を続けたとき、メールの無いユーザーが残る（13.5 の不変条件に反する）。
-	// 一意制約は同時に登録されたときの最後の守りとして残す。
-	ix, err := s.Crypter.EmailIndex(ctx, email)
+	ix, err := s.unusedIndex(ctx, tx, realmID, email)
 	if err != nil {
-		return Created{}, err
-	}
-	switch _, err := tx.Emails().GetByIndex(ctx, realmID, ix.Value); {
-	case err == nil:
-		return Created{}, errs.New(errs.KindConflict, "email already registered")
-	case !errors.Is(err, errs.NotFound):
 		return Created{}, err
 	}
 	now := s.Clock.Now()
@@ -98,17 +89,8 @@ func (s *Service) CreateWithEmail(ctx context.Context, tx port.Tx, realmID, emai
 	if err := s.Crypter.CreateDataKey(ctx, tx.DataKeys(), u.ID, now); err != nil {
 		return Created{}, err
 	}
-	dom, err := s.Crypter.DomainIndex(ctx, email)
+	e, err := s.createEmail(ctx, tx, realmID, u.ID, email, ix, via, true, now)
 	if err != nil {
-		return Created{}, err
-	}
-	ct, err := s.Crypter.Encrypt(ctx, tx.DataKeys(), u.ID, []byte(email), "email")
-	if err != nil {
-		return Created{}, err
-	}
-	e := port.UserEmail{ID: id.New(id.Email), RealmID: realmID, UserID: u.ID, Ciphertext: ct, Index: ix.Value,
-		DomainIndex: dom.Value, IndexKeyID: ix.KeyID, VerifiedAt: &now, VerifiedVia: via, IsPrimary: true, CreatedAt: now}
-	if err := tx.Emails().Create(ctx, e); err != nil {
 		return Created{}, err
 	}
 	if actor.Type == "" {
@@ -119,6 +101,42 @@ func (s *Service) CreateWithEmail(ctx context.Context, tx port.Tx, realmID, emai
 		Details: map[string]any{"user_id": u.PublicID, "verified_via": string(via)},
 	})
 	return Created{User: u, Email: e}, err
+}
+
+// ErrEmailExists は、アドレスが既にどれかのユーザーに紐付いていること（1つのアドレスは1ユーザーにだけ紐付く。4.2）。
+var ErrEmailExists = errs.WithCode(errs.KindConflict, "email_exists", "email already registered")
+
+// unusedIndex はアドレスのブラインドインデックスを返す。既に使われていれば ErrEmailExists。
+// 書き込みの前に確かめる。ユーザーを作った後でメールの一意制約に当たると、呼び出し側が
+// errs.Conflict を受けて処理を続けたとき、メールの無いユーザーが残る（13.5 の不変条件に反する）。
+// 一意制約は同時に登録されたときの最後の守りとして残す。
+func (s *Service) unusedIndex(ctx context.Context, tx port.Tx, realmID, email string) (pii.Index, error) {
+	ix, err := s.Crypter.EmailIndex(ctx, email)
+	if err != nil {
+		return pii.Index{}, err
+	}
+	switch _, err := tx.Emails().GetByIndex(ctx, realmID, ix.Value); {
+	case err == nil:
+		return pii.Index{}, ErrEmailExists
+	case !errors.Is(err, errs.NotFound):
+		return pii.Index{}, err
+	}
+	return ix, nil
+}
+
+// createEmail は確認済みのメールを、ユーザーのデータ鍵で暗号化して置く。
+func (s *Service) createEmail(ctx context.Context, tx port.Tx, realmID, userID, email string, ix pii.Index, via port.VerifiedVia, primary bool, now time.Time) (port.UserEmail, error) {
+	dom, err := s.Crypter.DomainIndex(ctx, email)
+	if err != nil {
+		return port.UserEmail{}, err
+	}
+	ct, err := s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, []byte(email), "email")
+	if err != nil {
+		return port.UserEmail{}, err
+	}
+	e := port.UserEmail{ID: id.New(id.Email), PublicID: id.NewExternal(id.Email), RealmID: realmID, UserID: userID, Ciphertext: ct,
+		Index: ix.Value, DomainIndex: dom.Value, IndexKeyID: ix.KeyID, VerifiedAt: &now, VerifiedVia: via, IsPrimary: primary, CreatedAt: now}
+	return e, tx.Emails().Create(ctx, e)
 }
 
 // EmailAddress はメールのアドレスを復号する。データ鍵が消されていれば pii.ErrShredded。
