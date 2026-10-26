@@ -53,7 +53,7 @@ func newUser(realmID string) port.User {
 }
 
 func newEmail(realmID, userID string, index string) port.UserEmail {
-	return port.UserEmail{ID: id.New(id.Email), RealmID: realmID, UserID: userID, Ciphertext: []byte("ct-" + index),
+	return port.UserEmail{ID: id.New(id.Email), PublicID: id.NewExternal(id.Email), RealmID: realmID, UserID: userID, Ciphertext: []byte("ct-" + index),
 		Index: []byte(index), DomainIndex: []byte("dom"), IndexKeyID: "ik_1", VerifiedAt: ptr(T0),
 		VerifiedVia: port.VerifiedViaCode, IsPrimary: true, CreatedAt: T0}
 }
@@ -145,7 +145,43 @@ func testEmails(t *testing.T, h Harness) {
 		if err != nil || len(list) != 2 || !reflect.DeepEqual(list[0], e2) || list[1].ID != e1.ID {
 			return fmt.Errorf("emails.ListByUser = %+v, %v", list, err)
 		}
-		return nil
+		if got, err := r.GetByPublicID(ctx, r1, e1.PublicID); err != nil || !reflect.DeepEqual(got, e1) {
+			return fmt.Errorf("emails.GetByPublicID = %+v, %v", got, err)
+		}
+		_, err = r.GetByPublicID(ctx, r2, e1.PublicID)
+		return notFound("public id from another realm", err)
+	})
+	// primary の付け替えと削除。
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		r := tx.Emails()
+		if err := r.SetPrimary(ctx, r1, u1, e2.ID); err != nil {
+			return err
+		}
+		list, err := r.ListByUser(ctx, r1, u1)
+		if err != nil || len(list) != 2 || !list[0].IsPrimary || list[1].IsPrimary {
+			return fmt.Errorf("after SetPrimary = %+v, %v", list, err)
+		}
+		if err := notFound("SetPrimary for another user", r.SetPrimary(ctx, r1, u2, e1.ID)); err != nil {
+			return err
+		}
+		if err := notFound("SetPrimary in another realm", r.SetPrimary(ctx, r2, u1, e1.ID)); err != nil {
+			return err
+		}
+		if err := notFound("Delete in another realm", r.Delete(ctx, r2, e1.ID)); err != nil {
+			return err
+		}
+		if err := r.Delete(ctx, r1, e1.ID); err != nil {
+			return err
+		}
+		if err := notFound("Delete twice", r.Delete(ctx, r1, e1.ID)); err != nil {
+			return err
+		}
+		_, err = r.GetByIndex(ctx, r1, []byte("a"))
+		if err := notFound("deleted email", err); err != nil {
+			return err
+		}
+		// 消したアドレスは別のユーザーが使える。
+		return r.Create(ctx, newEmail(r1, u2, "a"))
 	})
 }
 
@@ -163,19 +199,19 @@ func testIdentities(t *testing.T, h Harness) {
 	s, _ := open(t, h)
 	r, u := id.New(id.Realm), id.New(id.User)
 	conn := id.New(id.Connection)
-	i := port.Identity{ID: id.New(id.Identity), RealmID: r, UserID: u, ConnectionID: conn, ProviderSubject: "sub-1", CreatedAt: T0}
+	i := port.Identity{ID: id.New(id.Identity), PublicID: id.NewExternal(id.Identity), RealmID: r, UserID: u, ConnectionID: conn, ProviderSubject: "sub-1", CreatedAt: T0}
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Identities()
 		if err := repo.Create(ctx, i); err != nil {
 			return err
 		}
 		dup := i
-		dup.ID, dup.UserID = id.New(id.Identity), id.New(id.User)
+		dup.ID, dup.PublicID, dup.UserID = id.New(id.Identity), id.NewExternal(id.Identity), id.New(id.User)
 		if err := conflict("same subject", repo.Create(ctx, dup)); err != nil {
 			return err
 		}
 		other := i
-		other.ID, other.ConnectionID = id.New(id.Identity), id.New(id.Connection)
+		other.ID, other.PublicID, other.ConnectionID = id.New(id.Identity), id.NewExternal(id.Identity), id.New(id.Connection)
 		if err := repo.Create(ctx, other); err != nil {
 			return err
 		}
@@ -191,7 +227,39 @@ func testIdentities(t *testing.T, h Harness) {
 		if err != nil || len(list) != 2 {
 			return fmt.Errorf("identities.ListByUser = %+v, %v", list, err)
 		}
-		return nil
+		if got, err := repo.GetByPublicID(ctx, r, i.PublicID); err != nil || got.ID != i.ID {
+			return fmt.Errorf("identities.GetByPublicID = %+v, %v", got, err)
+		}
+		_, err = repo.GetByPublicID(ctx, r, id.NewExternal(id.Identity))
+		return notFound("missing public id", err)
+	})
+	// 無効化：GetBySubject から消え、同じ外部 ID を別の行として紐付け直せる。無効化は1回だけ効く。
+	at := T0.Add(time.Hour)
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.Identities()
+		if err := repo.Revoke(ctx, r, i.ID, at, "unlinked"); err != nil {
+			return err
+		}
+		if err := repo.Revoke(ctx, r, i.ID, at.Add(time.Hour), "again"); err != nil {
+			return err
+		}
+		got, err := repo.GetByPublicID(ctx, r, i.PublicID)
+		if err != nil || got.RevokedAt == nil || !got.RevokedAt.Equal(at) || got.RevokeReason != "unlinked" {
+			return fmt.Errorf("revoked identity = %+v, %v", got, err)
+		}
+		_, err = repo.GetBySubject(ctx, r, conn, "sub-1")
+		if err := notFound("revoked subject", err); err != nil {
+			return err
+		}
+		again := i
+		again.ID, again.PublicID = id.New(id.Identity), id.NewExternal(id.Identity)
+		if err := repo.Create(ctx, again); err != nil {
+			return fmt.Errorf("relink after revoke: %w", err)
+		}
+		if got, err := repo.GetBySubject(ctx, r, conn, "sub-1"); err != nil || got.ID != again.ID {
+			return fmt.Errorf("GetBySubject after relink = %+v, %v", got, err)
+		}
+		return notFound("revoke in another realm", repo.Revoke(ctx, id.New(id.Realm), again.ID, at, "x"))
 	})
 }
 
@@ -200,7 +268,7 @@ func testIdentityUniqueConcurrent(t *testing.T, h Harness) {
 	r, conn := id.New(id.Realm), id.New(id.Connection)
 	ExactlyOneSucceeds(t, Concurrent(16, func(int) error {
 		return s.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
-			return tx.Identities().Create(ctx, port.Identity{ID: id.New(id.Identity), RealmID: r, UserID: id.New(id.User),
+			return tx.Identities().Create(ctx, port.Identity{ID: id.New(id.Identity), PublicID: id.NewExternal(id.Identity), RealmID: r, UserID: id.New(id.User),
 				ConnectionID: conn, ProviderSubject: "same", CreatedAt: T0})
 		})
 	}))
@@ -491,7 +559,7 @@ var authnIsolationCases = []IsolationCase{
 	{
 		Name: "Identities.GetBySubject+ListByUser",
 		Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
-			return tx.Identities().Create(ctx, port.Identity{ID: id.New(id.Identity), RealmID: r, UserID: isoUser,
+			return tx.Identities().Create(ctx, port.Identity{ID: id.New(id.Identity), PublicID: id.NewExternal(id.Identity), RealmID: r, UserID: isoUser,
 				ConnectionID: isoConn, ProviderSubject: isoSubject, CreatedAt: T0})
 		},
 		Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {

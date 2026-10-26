@@ -36,12 +36,13 @@ func (q *Queries) CreateConnection(ctx context.Context, arg CreateConnectionPara
 }
 
 const createEmail = `-- name: CreateEmail :exec
-INSERT INTO authn_user_emails (id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_user_emails (id, public_id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateEmailParams struct {
 	ID          string
+	PublicID    string
 	RealmID     string
 	UserID      string
 	Ciphertext  []byte
@@ -57,6 +58,7 @@ type CreateEmailParams struct {
 func (q *Queries) CreateEmail(ctx context.Context, arg CreateEmailParams) error {
 	_, err := q.db.ExecContext(ctx, createEmail,
 		arg.ID,
+		arg.PublicID,
 		arg.RealmID,
 		arg.UserID,
 		arg.Ciphertext,
@@ -72,28 +74,33 @@ func (q *Queries) CreateEmail(ctx context.Context, arg CreateEmailParams) error 
 }
 
 const createIdentity = `-- name: CreateIdentity :exec
-INSERT INTO authn_user_identities (id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_user_identities (id, public_id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateIdentityParams struct {
 	ID              string
+	PublicID        string
 	RealmID         string
 	UserID          string
 	ConnectionID    string
 	ProviderSubject string
 	CreatedAt       string
 	RevokedAt       sql.NullString
+	RevokeReason    string
 }
 
 func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) error {
 	_, err := q.db.ExecContext(ctx, createIdentity,
 		arg.ID,
+		arg.PublicID,
 		arg.RealmID,
 		arg.UserID,
 		arg.ConnectionID,
 		arg.ProviderSubject,
 		arg.CreatedAt,
 		arg.RevokedAt,
+		arg.RevokeReason,
 	)
 	return err
 }
@@ -254,6 +261,23 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 	return err
 }
 
+const deleteEmail = `-- name: DeleteEmail :execrows
+DELETE FROM authn_user_emails WHERE realm_id = ? AND id = ?
+`
+
+type DeleteEmailParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) DeleteEmail(ctx context.Context, arg DeleteEmailParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteEmail, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getConnection = `-- name: GetConnection :one
 SELECT id, realm_id, slug, type, config, created_at FROM authn_connections WHERE realm_id = ? AND id = ?
 `
@@ -300,8 +324,37 @@ func (q *Queries) GetConnectionBySlug(ctx context.Context, arg GetConnectionBySl
 	return i, err
 }
 
+const getEmail = `-- name: GetEmail :one
+SELECT id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at, public_id FROM authn_user_emails WHERE realm_id = ? AND id = ?
+`
+
+type GetEmailParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetEmail(ctx context.Context, arg GetEmailParams) (AuthnUserEmail, error) {
+	row := q.db.QueryRowContext(ctx, getEmail, arg.RealmID, arg.ID)
+	var i AuthnUserEmail
+	err := row.Scan(
+		&i.ID,
+		&i.RealmID,
+		&i.UserID,
+		&i.Ciphertext,
+		&i.EmailIndex,
+		&i.DomainIndex,
+		&i.IndexKeyID,
+		&i.VerifiedAt,
+		&i.VerifiedVia,
+		&i.IsPrimary,
+		&i.CreatedAt,
+		&i.PublicID,
+	)
+	return i, err
+}
+
 const getEmailByIndex = `-- name: GetEmailByIndex :one
-SELECT id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at FROM authn_user_emails WHERE realm_id = ? AND email_index = ?
+SELECT id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at, public_id FROM authn_user_emails WHERE realm_id = ? AND email_index = ?
 `
 
 type GetEmailByIndexParams struct {
@@ -324,12 +377,94 @@ func (q *Queries) GetEmailByIndex(ctx context.Context, arg GetEmailByIndexParams
 		&i.VerifiedVia,
 		&i.IsPrimary,
 		&i.CreatedAt,
+		&i.PublicID,
+	)
+	return i, err
+}
+
+const getEmailByPublicID = `-- name: GetEmailByPublicID :one
+SELECT id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at, public_id FROM authn_user_emails WHERE realm_id = ? AND public_id = ?
+`
+
+type GetEmailByPublicIDParams struct {
+	RealmID  string
+	PublicID string
+}
+
+func (q *Queries) GetEmailByPublicID(ctx context.Context, arg GetEmailByPublicIDParams) (AuthnUserEmail, error) {
+	row := q.db.QueryRowContext(ctx, getEmailByPublicID, arg.RealmID, arg.PublicID)
+	var i AuthnUserEmail
+	err := row.Scan(
+		&i.ID,
+		&i.RealmID,
+		&i.UserID,
+		&i.Ciphertext,
+		&i.EmailIndex,
+		&i.DomainIndex,
+		&i.IndexKeyID,
+		&i.VerifiedAt,
+		&i.VerifiedVia,
+		&i.IsPrimary,
+		&i.CreatedAt,
+		&i.PublicID,
+	)
+	return i, err
+}
+
+const getIdentity = `-- name: GetIdentity :one
+SELECT id, public_id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at, revoke_reason FROM authn_user_identities WHERE realm_id = ? AND id = ?
+`
+
+type GetIdentityParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetIdentity(ctx context.Context, arg GetIdentityParams) (AuthnUserIdentity, error) {
+	row := q.db.QueryRowContext(ctx, getIdentity, arg.RealmID, arg.ID)
+	var i AuthnUserIdentity
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.UserID,
+		&i.ConnectionID,
+		&i.ProviderSubject,
+		&i.CreatedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
+const getIdentityByPublicID = `-- name: GetIdentityByPublicID :one
+SELECT id, public_id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at, revoke_reason FROM authn_user_identities WHERE realm_id = ? AND public_id = ?
+`
+
+type GetIdentityByPublicIDParams struct {
+	RealmID  string
+	PublicID string
+}
+
+func (q *Queries) GetIdentityByPublicID(ctx context.Context, arg GetIdentityByPublicIDParams) (AuthnUserIdentity, error) {
+	row := q.db.QueryRowContext(ctx, getIdentityByPublicID, arg.RealmID, arg.PublicID)
+	var i AuthnUserIdentity
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.UserID,
+		&i.ConnectionID,
+		&i.ProviderSubject,
+		&i.CreatedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
 	)
 	return i, err
 }
 
 const getIdentityBySubject = `-- name: GetIdentityBySubject :one
-SELECT id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at FROM authn_user_identities WHERE realm_id = ? AND connection_id = ? AND provider_subject = ?
+SELECT id, public_id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at, revoke_reason FROM authn_user_identities WHERE realm_id = ? AND connection_id = ? AND provider_subject = ? AND revoked_at IS NULL
 `
 
 type GetIdentityBySubjectParams struct {
@@ -343,12 +478,14 @@ func (q *Queries) GetIdentityBySubject(ctx context.Context, arg GetIdentityBySub
 	var i AuthnUserIdentity
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
 		&i.RealmID,
 		&i.UserID,
 		&i.ConnectionID,
 		&i.ProviderSubject,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.RevokeReason,
 	)
 	return i, err
 }
@@ -518,7 +655,7 @@ func (q *Queries) ListConnections(ctx context.Context, realmID string) ([]AuthnC
 }
 
 const listEmailsByUser = `-- name: ListEmailsByUser :many
-SELECT id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at FROM authn_user_emails WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
+SELECT id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at, public_id FROM authn_user_emails WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
 `
 
 type ListEmailsByUserParams struct {
@@ -547,6 +684,7 @@ func (q *Queries) ListEmailsByUser(ctx context.Context, arg ListEmailsByUserPara
 			&i.VerifiedVia,
 			&i.IsPrimary,
 			&i.CreatedAt,
+			&i.PublicID,
 		); err != nil {
 			return nil, err
 		}
@@ -562,7 +700,7 @@ func (q *Queries) ListEmailsByUser(ctx context.Context, arg ListEmailsByUserPara
 }
 
 const listIdentitiesByUser = `-- name: ListIdentitiesByUser :many
-SELECT id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at FROM authn_user_identities WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at, revoke_reason FROM authn_user_identities WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
 `
 
 type ListIdentitiesByUserParams struct {
@@ -581,12 +719,14 @@ func (q *Queries) ListIdentitiesByUser(ctx context.Context, arg ListIdentitiesBy
 		var i AuthnUserIdentity
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.RealmID,
 			&i.UserID,
 			&i.ConnectionID,
 			&i.ProviderSubject,
 			&i.CreatedAt,
 			&i.RevokedAt,
+			&i.RevokeReason,
 		); err != nil {
 			return nil, err
 		}
@@ -733,6 +873,27 @@ func (q *Queries) ListSessionsByPrincipal(ctx context.Context, arg ListSessionsB
 	return items, nil
 }
 
+const revokeIdentity = `-- name: RevokeIdentity :exec
+UPDATE authn_user_identities SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
+`
+
+type RevokeIdentityParams struct {
+	RevokedAt    sql.NullString
+	RevokeReason string
+	RealmID      string
+	ID           string
+}
+
+func (q *Queries) RevokeIdentity(ctx context.Context, arg RevokeIdentityParams) error {
+	_, err := q.db.ExecContext(ctx, revokeIdentity,
+		arg.RevokedAt,
+		arg.RevokeReason,
+		arg.RealmID,
+		arg.ID,
+	)
+	return err
+}
+
 const revokeServiceAccountCredential = `-- name: RevokeServiceAccountCredential :execrows
 UPDATE authn_service_account_credentials SET revoked_at = coalesce(revoked_at, ?1) WHERE realm_id = ?2 AND id = ?3
 `
@@ -822,6 +983,21 @@ func (q *Queries) RevokeSessionsByPrincipal(ctx context.Context, arg RevokeSessi
 		return nil, err
 	}
 	return items, nil
+}
+
+const setPrimaryEmail = `-- name: SetPrimaryEmail :exec
+UPDATE authn_user_emails SET is_primary = (id = ?1) WHERE realm_id = ?2 AND user_id = ?3
+`
+
+type SetPrimaryEmailParams struct {
+	ID      string
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) SetPrimaryEmail(ctx context.Context, arg SetPrimaryEmailParams) error {
+	_, err := q.db.ExecContext(ctx, setPrimaryEmail, arg.ID, arg.RealmID, arg.UserID)
+	return err
 }
 
 const touchSession = `-- name: TouchSession :execrows

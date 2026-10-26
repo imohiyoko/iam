@@ -111,14 +111,14 @@ type emails struct{ q *db.Queries }
 
 func toEmail(r db.AuthnUserEmail) (port.UserEmail, error) {
 	var p times
-	e := port.UserEmail{ID: r.ID, RealmID: r.RealmID, UserID: r.UserID, Ciphertext: r.Ciphertext, Index: r.EmailIndex,
+	e := port.UserEmail{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, UserID: r.UserID, Ciphertext: r.Ciphertext, Index: r.EmailIndex,
 		DomainIndex: r.DomainIndex, IndexKeyID: r.IndexKeyID, VerifiedAt: p.null(r.VerifiedAt), VerifiedVia: port.VerifiedVia(r.VerifiedVia),
 		IsPrimary: r.IsPrimary != 0, CreatedAt: p.at(r.CreatedAt)}
 	return e, p.err
 }
 
 func (r emails) Create(ctx context.Context, e port.UserEmail) error {
-	return mapErr(r.q.CreateEmail(ctx, db.CreateEmailParams{ID: e.ID, RealmID: e.RealmID, UserID: e.UserID, Ciphertext: nonNil(e.Ciphertext),
+	return mapErr(r.q.CreateEmail(ctx, db.CreateEmailParams{ID: e.ID, PublicID: e.PublicID, RealmID: e.RealmID, UserID: e.UserID, Ciphertext: nonNil(e.Ciphertext),
 		EmailIndex: nonNil(e.Index), DomainIndex: nonNil(e.DomainIndex), IndexKeyID: e.IndexKeyID, VerifiedAt: nullTime(e.VerifiedAt),
 		VerifiedVia: string(e.VerifiedVia), IsPrimary: boolInt(e.IsPrimary), CreatedAt: formatTime(e.CreatedAt)}))
 }
@@ -126,6 +126,27 @@ func (r emails) Create(ctx context.Context, e port.UserEmail) error {
 func (r emails) GetByIndex(ctx context.Context, realmID string, index []byte) (port.UserEmail, error) {
 	row, err := r.q.GetEmailByIndex(ctx, db.GetEmailByIndexParams{RealmID: realmID, EmailIndex: nonNil(index)})
 	return one(row, err, toEmail)
+}
+
+func (r emails) GetByPublicID(ctx context.Context, realmID, publicID string) (port.UserEmail, error) {
+	row, err := r.q.GetEmailByPublicID(ctx, db.GetEmailByPublicIDParams{RealmID: realmID, PublicID: publicID})
+	return one(row, err, toEmail)
+}
+
+func (r emails) SetPrimary(ctx context.Context, realmID, userID, id string) error {
+	e, err := r.q.GetEmail(ctx, db.GetEmailParams{RealmID: realmID, ID: id})
+	if err != nil {
+		return mapErr(err)
+	}
+	if e.UserID != userID {
+		return errs.New(errs.KindNotFound, "email %s", id)
+	}
+	return mapErr(r.q.SetPrimaryEmail(ctx, db.SetPrimaryEmailParams{ID: id, RealmID: realmID, UserID: userID}))
+}
+
+func (r emails) Delete(ctx context.Context, realmID, id string) error {
+	n, err := r.q.DeleteEmail(ctx, db.DeleteEmailParams{RealmID: realmID, ID: id})
+	return affected(n, err, "email")
 }
 
 func (r emails) ListByUser(ctx context.Context, realmID, userID string) ([]port.UserEmail, error) {
@@ -139,14 +160,27 @@ type identities struct{ q *db.Queries }
 
 func toIdentity(r db.AuthnUserIdentity) (port.Identity, error) {
 	var p times
-	i := port.Identity{ID: r.ID, RealmID: r.RealmID, UserID: r.UserID, ConnectionID: r.ConnectionID, ProviderSubject: r.ProviderSubject,
-		CreatedAt: p.at(r.CreatedAt), RevokedAt: p.null(r.RevokedAt)}
+	i := port.Identity{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, UserID: r.UserID, ConnectionID: r.ConnectionID,
+		ProviderSubject: r.ProviderSubject, CreatedAt: p.at(r.CreatedAt), RevokedAt: p.null(r.RevokedAt), RevokeReason: r.RevokeReason}
 	return i, p.err
 }
 
 func (r identities) Create(ctx context.Context, i port.Identity) error {
-	return mapErr(r.q.CreateIdentity(ctx, db.CreateIdentityParams{ID: i.ID, RealmID: i.RealmID, UserID: i.UserID, ConnectionID: i.ConnectionID,
-		ProviderSubject: i.ProviderSubject, CreatedAt: formatTime(i.CreatedAt), RevokedAt: nullTime(i.RevokedAt)}))
+	return mapErr(r.q.CreateIdentity(ctx, db.CreateIdentityParams{ID: i.ID, PublicID: i.PublicID, RealmID: i.RealmID, UserID: i.UserID,
+		ConnectionID: i.ConnectionID, ProviderSubject: i.ProviderSubject, CreatedAt: formatTime(i.CreatedAt), RevokedAt: nullTime(i.RevokedAt),
+		RevokeReason: i.RevokeReason}))
+}
+
+func (r identities) GetByPublicID(ctx context.Context, realmID, publicID string) (port.Identity, error) {
+	row, err := r.q.GetIdentityByPublicID(ctx, db.GetIdentityByPublicIDParams{RealmID: realmID, PublicID: publicID})
+	return one(row, err, toIdentity)
+}
+
+func (r identities) Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error {
+	if _, err := r.q.GetIdentity(ctx, db.GetIdentityParams{RealmID: realmID, ID: id}); err != nil {
+		return mapErr(err)
+	}
+	return mapErr(r.q.RevokeIdentity(ctx, db.RevokeIdentityParams{RevokedAt: nullTime(&at), RevokeReason: reason, RealmID: realmID, ID: id}))
 }
 
 func (r identities) GetBySubject(ctx context.Context, realmID, connectionID, subject string) (port.Identity, error) {

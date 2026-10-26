@@ -92,16 +92,19 @@ type AuthnUserEmail struct {
 	VerifiedVia string
 	IsPrimary   int64
 	CreatedAt   string
+	PublicID    string
 }
 
 type AuthnUserIdentity struct {
 	ID              string
+	PublicID        string
 	RealmID         string
 	UserID          string
 	ConnectionID    string
 	ProviderSubject string
 	CreatedAt       string
 	RevokedAt       sql.NullString
+	RevokeReason    string
 }
 
 type AuthzRoleBinding struct {

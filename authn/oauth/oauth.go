@@ -183,6 +183,8 @@ type state struct {
 	Nonce        string    `json:"nonce"`
 	RedirectURI  string    `json:"redirect_uri"`
 	ExpiresAt    time.Time `json:"expires_at"`
+	// LinkUserID は連携のフローで、連携先のユーザー（内部 ID）。空ならログイン・登録のフロー（4.2）。
+	LinkUserID string `json:"link_user_id,omitempty"`
 }
 
 const sealPurpose = "flow.oauth"
@@ -217,6 +219,18 @@ type Started struct {
 
 // Start はフローを始め、プロバイダの認可 URL を返す。redirectURI が空なら既定の戻り先。
 func (s *Service) Start(ctx context.Context, realmID, slug, redirectURI string) (Started, error) {
+	return s.start(ctx, realmID, slug, redirectURI, "")
+}
+
+// StartLink は、ログイン済みのユーザー（内部 ID）に外部 ID を連携するフローを始める（4.2）。
+func (s *Service) StartLink(ctx context.Context, realmID, slug, redirectURI, userID string) (Started, error) {
+	if userID == "" {
+		return Started{}, errors.New("oauth: link requires a user")
+	}
+	return s.start(ctx, realmID, slug, redirectURI, userID)
+}
+
+func (s *Service) start(ctx context.Context, realmID, slug, redirectURI, linkUserID string) (Started, error) {
 	c, cfg, err := s.connection(ctx, realmID, slug)
 	if err != nil {
 		return Started{}, err
@@ -235,7 +249,7 @@ func (s *Service) Start(ctx context.Context, realmID, slug, redirectURI string) 
 	flowID, st, verifier, nonce := tokens[0], tokens[1], tokens[2], tokens[3]
 	now := s.Clock.Now()
 	data := state{RealmID: realmID, ConnectionID: c.ID, FlowHash: digest(flowID), Verifier: verifier, Nonce: nonce,
-		RedirectURI: redirectURI, ExpiresAt: now.Add(s.ttl())}
+		RedirectURI: redirectURI, ExpiresAt: now.Add(s.ttl()), LinkUserID: linkUserID}
 	b, err := json.Marshal(data)
 	if err != nil {
 		return Started{}, err
@@ -304,31 +318,100 @@ func (s *Service) Complete(ctx context.Context, realmID string, in Complete) (Re
 }
 
 func (s *Service) complete(ctx context.Context, realmID string, in Complete) (Result, error) {
+	conn, c, err := s.finish(ctx, realmID, in, "")
+	if err != nil {
+		return Result{}, err
+	}
+	return s.login(ctx, realmID, conn, c, in, s.Clock.Now())
+}
+
+// ErrIdentityExists は、外部 ID が既に別のユーザー（または同じユーザー）に紐付いていること。
+// 本人はプロバイダで外部 ID の所有を示したので、理由を返してよい。
+var ErrIdentityExists = errs.WithCode(errs.KindConflict, "identity_exists", "the provider account is already linked")
+
+// CompleteLink はプロバイダからの戻りで、ログイン済みのユーザー（内部 ID）に外部 ID を紐付ける。
+// フローを始めたユーザーと違えば ErrAuthFailed。メールは足さない（足すには所有確認のフローを使う）。
+func (s *Service) CompleteLink(ctx context.Context, realmID, userID string, in Complete) (port.Identity, error) {
+	ident, err := s.completeLink(ctx, realmID, userID, in)
+	if err != nil {
+		if errors.Is(err, ErrIdentityExists) {
+			return port.Identity{}, err
+		}
+		s.recordFailure(ctx, realmID, in.Client, err)
+		return port.Identity{}, ErrAuthFailed
+	}
+	return ident, nil
+}
+
+func (s *Service) completeLink(ctx context.Context, realmID, userID string, in Complete) (port.Identity, error) {
+	if userID == "" {
+		return port.Identity{}, errors.New("link requires a user")
+	}
+	conn, c, err := s.finish(ctx, realmID, in, userID)
+	if err != nil {
+		return port.Identity{}, err
+	}
+	var ident port.Identity
+	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		switch _, err := tx.Identities().GetBySubject(ctx, realmID, conn.ID, c.Subject); {
+		case err == nil:
+			return ErrIdentityExists
+		case !errors.Is(err, errs.NotFound):
+			return err
+		}
+		u, err := tx.Users().Get(ctx, realmID, userID)
+		if err != nil {
+			return err
+		}
+		ident = port.Identity{ID: id.New(id.Identity), PublicID: id.NewExternal(id.Identity), RealmID: realmID, UserID: u.ID,
+			ConnectionID: conn.ID, ProviderSubject: c.Subject, CreatedAt: s.Clock.Now()}
+		if err := tx.Identities().Create(ctx, ident); err != nil {
+			if errors.Is(err, errs.Conflict) {
+				return ErrIdentityExists
+			}
+			return err
+		}
+		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
+			Type: "identity.linked", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
+			IP: in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID,
+			Details: map[string]any{"connection_id": conn.ID, "identity_id": ident.PublicID, "user_id": u.PublicID},
+		})
+		return err
+	})
+	return ident, err
+}
+
+// finish はフローの状態を取り出して確かめ、認可コードを ID トークンのクレームに替える。
+// linkUserID が空ならログイン・登録のフローだけ、空でなければそのユーザーの連携のフローだけを受け付ける。
+func (s *Service) finish(ctx context.Context, realmID string, in Complete, linkUserID string) (port.Connection, claims, error) {
 	if in.FlowID == "" || in.State == "" || in.Code == "" {
-		return Result{}, errors.New("flow id, state and code are required")
+		return port.Connection{}, claims{}, errors.New("flow id, state and code are required")
 	}
 	// 1回限り：取り出せた要求だけが続ける。
 	b, ok, err := s.Cache.Take(ctx, stateKey(in.State))
 	if err != nil {
-		return Result{}, err
+		return port.Connection{}, claims{}, err
 	}
 	if !ok {
-		return Result{}, errors.New("unknown or used state")
+		return port.Connection{}, claims{}, errors.New("unknown or used state")
 	}
 	pt, err := s.Crypter.Open(ctx, sealPurpose, b)
 	if err != nil {
-		return Result{}, err
+		return port.Connection{}, claims{}, err
 	}
 	var st state
 	if err := json.Unmarshal(pt, &st); err != nil {
-		return Result{}, err
+		return port.Connection{}, claims{}, err
 	}
 	now := s.Clock.Now()
 	if st.RealmID != realmID || !now.Before(st.ExpiresAt) {
-		return Result{}, errors.New("flow expired or in another realm")
+		return port.Connection{}, claims{}, errors.New("flow expired or in another realm")
 	}
 	if subtle.ConstantTimeCompare(st.FlowHash, digest(in.FlowID)) != 1 {
-		return Result{}, errors.New("state is bound to another flow")
+		return port.Connection{}, claims{}, errors.New("state is bound to another flow")
+	}
+	if st.LinkUserID != linkUserID {
+		return port.Connection{}, claims{}, errors.New("flow is for another purpose or user")
 	}
 
 	var conn port.Connection
@@ -336,20 +419,20 @@ func (s *Service) complete(ctx context.Context, realmID string, in Complete) (Re
 		conn, err = tx.Connections().Get(ctx, realmID, st.ConnectionID)
 		return err
 	}); err != nil {
-		return Result{}, err
+		return port.Connection{}, claims{}, err
 	}
 	var cfg Config
 	if err := json.Unmarshal(conn.Config, &cfg); err != nil {
-		return Result{}, err
+		return port.Connection{}, claims{}, err
 	}
 	if err := cfg.Validate(s.Dev); err != nil {
-		return Result{}, err
+		return port.Connection{}, claims{}, err
 	}
-	claims, err := s.exchange(ctx, cfg, st, in.Code, now)
+	c, err := s.exchange(ctx, cfg, st, in.Code, now)
 	if err != nil {
-		return Result{}, err
+		return port.Connection{}, claims{}, err
 	}
-	return s.login(ctx, realmID, conn, claims, in, now)
+	return conn, c, nil
 }
 
 // claims は ID トークンのうち使うもの。
@@ -550,7 +633,7 @@ func (s *Service) signup(ctx context.Context, tx port.Tx, realmID string, conn p
 	if err != nil {
 		return port.Identity{}, err
 	}
-	ident := port.Identity{ID: id.New(id.Identity), RealmID: realmID, UserID: created.User.ID, ConnectionID: conn.ID,
+	ident := port.Identity{ID: id.New(id.Identity), PublicID: id.NewExternal(id.Identity), RealmID: realmID, UserID: created.User.ID, ConnectionID: conn.ID,
 		ProviderSubject: c.Subject, CreatedAt: now}
 	if err := tx.Identities().Create(ctx, ident); err != nil {
 		return port.Identity{}, err

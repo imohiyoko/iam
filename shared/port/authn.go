@@ -52,8 +52,11 @@ const (
 )
 
 // UserEmail は user_emails の1行。アドレスはユーザーのデータ鍵で暗号化し、検索はブラインドインデックスで行う（9.5）。
+//
+// ID は内部 ID。API に出すのは PublicID（ADR 0045）。
 type UserEmail struct {
 	ID          string
+	PublicID    string // 外部 ID。realm 内で一意
 	RealmID     string
 	UserID      string
 	Ciphertext  []byte // 最小化モード（index_only）では空
@@ -71,26 +74,39 @@ type EmailRepo interface {
 	// Create は (realm, Index) が重複すれば errs.Conflict を返す（1つのアドレスは1ユーザーにだけ紐付く。4.2）。
 	Create(ctx context.Context, e UserEmail) error
 	GetByIndex(ctx context.Context, realmID string, index []byte) (UserEmail, error)
+	GetByPublicID(ctx context.Context, realmID, publicID string) (UserEmail, error)
 	// ListByUser はユーザーのメールを作成時刻の順（同時刻は ID の順）に返す。
 	ListByUser(ctx context.Context, realmID, userID string) ([]UserEmail, error)
+	// SetPrimary は id のメールを primary にし、同じユーザーのほかのメールの primary を外す。無ければ errs.NotFound。
+	SetPrimary(ctx context.Context, realmID, userID, id string) error
+	// Delete はメールを消す。無ければ errs.NotFound。
+	Delete(ctx context.Context, realmID, id string) error
 }
 
 // Identity は user_identities の1行。外部の IdP の ID（connection, provider_subject）とユーザーの紐付け。
+// 解除は削除ではなく無効化（RevokedAt。4.6）。ID は内部 ID で、API に出すのは PublicID。
 type Identity struct {
 	ID              string
+	PublicID        string // 外部 ID。realm 内で一意
 	RealmID         string
 	UserID          string
 	ConnectionID    string
 	ProviderSubject string // 暗号化しない（9.5）
 	CreatedAt       time.Time
 	RevokedAt       *time.Time
+	RevokeReason    string
 }
 
 // IdentityRepo は user_identities の Repository。
 type IdentityRepo interface {
-	// Create は (ConnectionID, ProviderSubject) が重複すれば errs.Conflict を返す。
+	// Create は、無効化されていない同じ (ConnectionID, ProviderSubject) があれば errs.Conflict を返す。
+	// 無効化した紐付けは残したまま、同じ外部 ID を新しい行として紐付け直せる。
 	Create(ctx context.Context, i Identity) error
+	// GetBySubject は無効化されていない紐付けを返す。無ければ errs.NotFound。
 	GetBySubject(ctx context.Context, realmID, connectionID, subject string) (Identity, error)
+	GetByPublicID(ctx context.Context, realmID, publicID string) (Identity, error)
+	// Revoke は at に無効化する。既に無効化されていれば何もしない。無ければ errs.NotFound。
+	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
 	// ListByUser はユーザーの外部 ID を作成時刻の順（同時刻は ID の順）に返す。
 	ListByUser(ctx context.Context, realmID, userID string) ([]Identity, error)
 }

@@ -8,20 +8,42 @@ SELECT * FROM authn_users WHERE realm_id = ? AND id = ?;
 SELECT * FROM authn_users WHERE realm_id = ? AND public_id = ?;
 
 -- name: CreateEmail :exec
-INSERT INTO authn_user_emails (id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_user_emails (id, public_id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetEmailByIndex :one
 SELECT * FROM authn_user_emails WHERE realm_id = ? AND email_index = ?;
+
+-- name: GetEmailByPublicID :one
+SELECT * FROM authn_user_emails WHERE realm_id = ? AND public_id = ?;
+
+-- name: GetEmail :one
+SELECT * FROM authn_user_emails WHERE realm_id = ? AND id = ?;
+
+-- name: SetPrimaryEmail :exec
+UPDATE authn_user_emails SET is_primary = (id = sqlc.arg(id)) WHERE realm_id = sqlc.arg(realm_id) AND user_id = sqlc.arg(user_id);
+
+-- name: DeleteEmail :execrows
+DELETE FROM authn_user_emails WHERE realm_id = ? AND id = ?;
 
 -- name: ListEmailsByUser :many
 SELECT * FROM authn_user_emails WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
 
 -- name: CreateIdentity :exec
-INSERT INTO authn_user_identities (id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_user_identities (id, public_id, realm_id, user_id, connection_id, provider_subject, created_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetIdentityBySubject :one
-SELECT * FROM authn_user_identities WHERE realm_id = ? AND connection_id = ? AND provider_subject = ?;
+SELECT * FROM authn_user_identities WHERE realm_id = ? AND connection_id = ? AND provider_subject = ? AND revoked_at IS NULL;
+
+-- name: GetIdentityByPublicID :one
+SELECT * FROM authn_user_identities WHERE realm_id = ? AND public_id = ?;
+
+-- name: GetIdentity :one
+SELECT * FROM authn_user_identities WHERE realm_id = ? AND id = ?;
+
+-- name: RevokeIdentity :exec
+UPDATE authn_user_identities SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
 
 -- name: ListIdentitiesByUser :many
 SELECT * FROM authn_user_identities WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
