@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -30,6 +31,10 @@ var ErrAuthFailed = errs.WithCode(errs.KindUnauthenticated, errs.CodeAuthenticat
 
 // ErrTOTPExists は、有効な TOTP を登録済みであること（1人に1つ）。
 var ErrTOTPExists = errs.WithCode(errs.KindConflict, "totp_exists", "totp already registered")
+
+// errRejected は利用者の入力による失敗（コードの不一致、未知・期限切れ・別人のフロー）。
+// 外には ErrAuthFailed として返す。基盤の障害はこれに含めず、そのまま返す。
+var errRejected = errors.New("totp rejected")
 
 const (
 	secretAAD   = "totp.secret"
@@ -150,13 +155,10 @@ func (s *Service) put(ctx context.Context, flowID string, st enrollment) error {
 }
 
 // ConfirmEnroll はコードで秘密を確かめ、TOTP を登録する。呼び出し側のトランザクションで呼ぶ。
-// コードが違えば ErrAuthFailed（回数の上限まではフローを残す）。
+// コードが違えば ErrAuthFailed（回数の上限まではフローを残す）。基盤の障害はそのまま返す。
 func (s *Service) ConfirmEnroll(ctx context.Context, tx port.Tx, realmID, userID, flowID, code string, actor audit.Actor, requestID string) (port.TOTPCredential, error) {
 	c, err := s.confirm(ctx, tx, realmID, userID, flowID, code, actor, requestID)
-	if _, limited := errors.AsType[*ratelimit.ExceededError](err); limited {
-		return port.TOTPCredential{}, err
-	}
-	if err != nil && !errors.Is(err, ErrAuthFailed) && !errors.Is(err, ErrTOTPExists) {
+	if errors.Is(err, errRejected) {
 		s.logger().DebugContext(ctx, "totp enrollment failed", "error", err)
 		return port.TOTPCredential{}, ErrAuthFailed
 	}
@@ -165,14 +167,17 @@ func (s *Service) ConfirmEnroll(ctx context.Context, tx port.Tx, realmID, userID
 
 func (s *Service) confirm(ctx context.Context, tx port.Tx, realmID, userID, flowID, code string, actor audit.Actor, requestID string) (port.TOTPCredential, error) {
 	if flowID == "" {
-		return port.TOTPCredential{}, errors.New("flow id is required")
+		return port.TOTPCredential{}, fmt.Errorf("%w: flow id is required", errRejected)
 	}
 	if err := s.PerUser.Allow(ctx, "totp:"+realmID+":"+userID); err != nil {
 		return port.TOTPCredential{}, err
 	}
 	b, ok, err := s.Cache.Take(ctx, flowKey(flowID))
-	if err != nil || !ok {
-		return port.TOTPCredential{}, errors.New("unknown or used flow")
+	if err != nil {
+		return port.TOTPCredential{}, err
+	}
+	if !ok {
+		return port.TOTPCredential{}, fmt.Errorf("%w: unknown or used flow", errRejected)
 	}
 	pt, err := s.Crypter.Open(ctx, sealPurpose, b)
 	if err != nil {
@@ -184,7 +189,7 @@ func (s *Service) confirm(ctx context.Context, tx port.Tx, realmID, userID, flow
 	}
 	now := s.Clock.Now()
 	if st.RealmID != realmID || subtle.ConstantTimeCompare([]byte(st.UserID), []byte(userID)) != 1 || !now.Before(st.ExpiresAt) {
-		return port.TOTPCredential{}, errors.New("flow expired or for another user")
+		return port.TOTPCredential{}, fmt.Errorf("%w: flow expired or for another user", errRejected)
 	}
 	step, ok := Verify(st.Secret, code, now)
 	if !ok {
@@ -193,7 +198,7 @@ func (s *Service) confirm(ctx context.Context, tx port.Tx, realmID, userID, flow
 				return port.TOTPCredential{}, err
 			}
 		}
-		return port.TOTPCredential{}, ErrAuthFailed
+		return port.TOTPCredential{}, fmt.Errorf("%w: code mismatch", errRejected)
 	}
 	if err := active(ctx, tx, realmID, userID); err != nil {
 		return port.TOTPCredential{}, err
@@ -215,18 +220,18 @@ func (s *Service) confirm(ctx context.Context, tx port.Tx, realmID, userID, flow
 }
 
 // Verify はユーザーの有効な TOTP のどれかでコードを確かめ、使った TOTP を返す。使った時間窓を記録し、
-// 同じか前の窓のコードは拒否する。呼び出し側のトランザクションで呼ぶ。失敗は ErrAuthFailed（上限を超えれば
-// *ratelimit.ExceededError）。
+// 同じか前の窓のコードは拒否する。呼び出し側のトランザクションで呼ぶ。コードの不一致と再利用は ErrAuthFailed
+// （上限を超えれば *ratelimit.ExceededError）。基盤の障害はそのまま返す。
 func (s *Service) Verify(ctx context.Context, tx port.Tx, realmID, userID, code string) (port.TOTPCredential, error) {
 	if err := s.PerUser.Allow(ctx, "totp:"+realmID+":"+userID); err != nil {
 		return port.TOTPCredential{}, err
 	}
 	c, err := s.verify(ctx, tx, realmID, userID, code)
-	if err != nil {
+	if errors.Is(err, errRejected) || errors.Is(err, errs.Conflict) {
 		s.logger().DebugContext(ctx, "totp verification failed", "error", err)
 		return port.TOTPCredential{}, ErrAuthFailed
 	}
-	return c, nil
+	return c, err
 }
 
 func (s *Service) verify(ctx context.Context, tx port.Tx, realmID, userID, code string) (port.TOTPCredential, error) {
@@ -251,7 +256,7 @@ func (s *Service) verify(ctx context.Context, tx port.Tx, realmID, userID, code 
 			return c, nil
 		}
 	}
-	return port.TOTPCredential{}, errors.New("no totp matched")
+	return port.TOTPCredential{}, fmt.Errorf("%w: no totp matched", errRejected)
 }
 
 // active は有効な TOTP があれば ErrTOTPExists を返す。

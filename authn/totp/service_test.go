@@ -150,3 +150,28 @@ func TestVerifyRateLimited(t *testing.T) {
 		t.Fatal("want rate limited")
 	}
 }
+
+func TestVerifyReturnsInfrastructureErrors(t *testing.T) {
+	k, s := setup(t)
+	ctx := context.Background()
+	u := k.SeedUser(t)
+	e, err := s.BeginEnroll(ctx, k.RealmID, u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := secretOf(t, e)
+	if _, err := confirm(k, s, u.ID, e.FlowID, totp.Code(secret, totp.Step(k.Clock.Now()))); err != nil {
+		t.Fatal(err)
+	}
+	// データキーが無いと秘密を戻せない。これは基盤の障害で、コードの不一致として隠さない。
+	if err := k.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		return tx.DataKeys().Delete(ctx, u.ID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	k.Clock.Advance(time.Minute)
+	err = verify(k, s, u.ID, totp.Code(secret, totp.Step(k.Clock.Now())))
+	if err == nil || errors.Is(err, errs.AuthenticationFailed) {
+		t.Fatalf("verify without data key = %v, want an infrastructure error", err)
+	}
+}
