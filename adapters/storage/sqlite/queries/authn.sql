@@ -211,3 +211,15 @@ UPDATE scheduled_events SET fired_at = ? WHERE realm_id = ? AND id = ? AND fired
 
 -- name: CancelScheduledEvents :exec
 DELETE FROM scheduled_events WHERE realm_id = ? AND ref = ? AND fired_at IS NULL;
+
+-- name: DeleteRecoveryCodes :exec
+DELETE FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ?;
+
+-- name: CreateRecoveryCode :exec
+INSERT INTO authn_recovery_codes (id, realm_id, user_id, lookup, hash, created_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListRecoveryCodes :many
+SELECT * FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ? ORDER BY id;
+
+-- name: UseRecoveryCode :execrows
+UPDATE authn_recovery_codes SET used_at = ? WHERE realm_id = ? AND id = ? AND used_at IS NULL;

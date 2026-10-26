@@ -27,7 +27,11 @@ import (
 	"github.com/imohiyoko/iam/shared/port"
 )
 
-const purpose = "login_link"
+// 封の目的。ログイン用と復旧用で分け、取り違えて使えないようにする。
+const (
+	purpose         = "login_link"
+	purposeRecovery = "recovery_link"
+)
 
 // MaxTTL はリンクの有効期間の上限。
 const MaxTTL = 24 * time.Hour
@@ -47,6 +51,16 @@ type payload struct {
 
 // Issue はユーザー（公開 ID）のログイン用リンクのトークンを作る。
 func Issue(ctx context.Context, c *pii.Crypter, realmID, publicUserID string, expiresAt time.Time) (string, error) {
+	return issue(ctx, c, purpose, realmID, publicUserID, expiresAt)
+}
+
+// IssueRecovery は、運営者が IAM の外で本人確認した後に渡す復旧用リンクのトークンを作る（4.12）。
+// 使うと復旧専用のセッションになる。
+func IssueRecovery(ctx context.Context, c *pii.Crypter, realmID, publicUserID string, expiresAt time.Time) (string, error) {
+	return issue(ctx, c, purposeRecovery, realmID, publicUserID, expiresAt)
+}
+
+func issue(ctx context.Context, c *pii.Crypter, seal, realmID, publicUserID string, expiresAt time.Time) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -55,7 +69,7 @@ func Issue(ctx context.Context, c *pii.Crypter, realmID, publicUserID string, ex
 	if err != nil {
 		return "", err
 	}
-	sealed, err := c.Seal(ctx, purpose, raw)
+	sealed, err := c.Seal(ctx, seal, raw)
 	if err != nil {
 		return "", err
 	}
@@ -79,7 +93,16 @@ type Client struct {
 
 // Redeem はトークンを確かめてセッションを発行する。失敗は ErrAuthFailed（警告による拒否は理由つき）。
 func (s *Service) Redeem(ctx context.Context, realmID, token string, c Client, replaceToken string) (session.Issued, string, error) {
-	is, uid, err := s.redeem(ctx, realmID, token, c, replaceToken)
+	return s.redeemOrFail(ctx, realmID, token, c, replaceToken, false)
+}
+
+// RedeemRecovery は復旧用リンクのトークンを確かめ、復旧専用のセッションを発行する（security_risk の停止は見ない）。
+func (s *Service) RedeemRecovery(ctx context.Context, realmID, token string, c Client, replaceToken string) (session.Issued, string, error) {
+	return s.redeemOrFail(ctx, realmID, token, c, replaceToken, true)
+}
+
+func (s *Service) redeemOrFail(ctx context.Context, realmID, token string, c Client, replaceToken string, recovery bool) (session.Issued, string, error) {
+	is, uid, err := s.redeem(ctx, realmID, token, c, replaceToken, recovery)
 	if err != nil {
 		s.recordFailure(ctx, realmID, c, err)
 		if d, ok := errors.AsType[errs.Denial](err); ok {
@@ -90,12 +113,17 @@ func (s *Service) Redeem(ctx context.Context, realmID, token string, c Client, r
 	return is, uid, nil
 }
 
-func (s *Service) redeem(ctx context.Context, realmID, token string, c Client, replaceToken string) (session.Issued, string, error) {
+func (s *Service) redeem(ctx context.Context, realmID, token string, c Client, replaceToken string, recovery bool) (session.Issued, string, error) {
+	seal, used, typ, method := purpose, "loginlink:v1:used:", "login.succeeded", "login_link"
+	var ignore []string
+	if recovery {
+		seal, used, typ, method, ignore = purposeRecovery, "recoverylink:v1:used:", "recovery.started", "operator_link", account.RecoveryIgnores
+	}
 	sealed, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil || len(token) > 1024 {
 		return session.Issued{}, "", errors.New("malformed token")
 	}
-	raw, err := s.Crypter.Open(ctx, purpose, sealed)
+	raw, err := s.Crypter.Open(ctx, seal, sealed)
 	if err != nil {
 		return session.Issued{}, "", errors.New("token does not open")
 	}
@@ -111,7 +139,7 @@ func (s *Service) redeem(ctx context.Context, realmID, token string, c Client, r
 		return session.Issued{}, "", errors.New("token expired")
 	}
 	// 1回限り：最初に数えた要求だけが続ける。期限まで覚えておけば足りる。
-	n, err := s.Cache.Incr(ctx, "loginlink:v1:used:"+p.Nonce, p.ExpiresAt.Sub(now)+time.Minute)
+	n, err := s.Cache.Incr(ctx, used+p.Nonce, p.ExpiresAt.Sub(now)+time.Minute)
 	if err != nil {
 		return session.Issued{}, "", err
 	}
@@ -124,19 +152,19 @@ func (s *Service) redeem(ctx context.Context, realmID, token string, c Client, r
 		if err != nil {
 			return err
 		}
-		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
+		if _, err := account.Check(ctx, tx, u, now, now, ignore...); err != nil {
 			return err
 		}
 		if out, err = s.Sessions.Issue(ctx, tx, session.Issue{
-			RealmID: realmID, UserID: u.ID, AuthMethods: []string{AMR},
+			RealmID: realmID, UserID: u.ID, AuthMethods: []string{AMR}, Recovery: recovery,
 			IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, ReplaceToken: replaceToken,
 		}); err != nil {
 			return err
 		}
 		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
-			Type: "login.succeeded", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
+			Type: typ, Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
 			SessionID: out.Session.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
-			Details: map[string]any{"method": "login_link"},
+			Details: map[string]any{"method": method},
 		})
 		return err
 	})

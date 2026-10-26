@@ -328,6 +328,172 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/recovery/code:redeem:
+    post:
+      operationId: redeemRecoveryCode
+      summary: 確認済みのメールアドレスとリカバリーコードで復旧を始める（4.12）
+      description: |
+        成功すると復旧専用のセッション（`next: recovery`）を発行する。そのセッションでは新しい認証手段の登録と
+        `/v1/recovery:complete` しかできない。コードは1回限り。失敗の理由は返さない（4.9）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email: { type: string, maxLength: 254 }
+                code: { type: string, maxLength: 64 }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: 復旧専用のセッションを発行した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/recovery/email:start:
+    post:
+      operationId: startEmailRecovery
+      summary: 確認済みのメールによる復旧を始める（4.12）
+      description: |
+        確認済みのアドレスにだけコードとリンクを通知する。応答はアカウントの有無で変えない（4.9）。
+        `flow_id` は要求した側だけが持つ秘密で、ブラウザには `__Host-iam_flow` Cookie でも渡す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, maxLength: 254 }
+      responses:
+        "200":
+          description: 開始した（送信したかどうかは返さない）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flow_id, expires_at]
+                properties:
+                  flow_id: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/recovery/email:verify:
+    post:
+      operationId: verifyEmailRecovery
+      summary: メールのコードかリンクのトークンで復旧専用のセッションを得る
+      description: |
+        `code` と `token` のどちらか1つを渡す。警告 `recovered_via_email` を評価する（deny ならメールでは復旧できない）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                flow_id: { type: string }
+                code: { type: string }
+                token: { type: string }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: 復旧専用のセッションを発行した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/recovery/link:redeem:
+    post:
+      operationId: redeemRecoveryLink
+      summary: 運営者が発行した復旧用リンクで復旧専用のセッションを得る
+      description: トークンは1回限りで、期限がある（管理 API の `issueRecoveryLink` が発行する）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, maxLength: 1024 }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: 復旧専用のセッションを発行した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/recovery:complete:
+    post:
+      operationId: completeRecovery
+      summary: 復旧を終える
+      description: |
+        復旧専用のセッションで、新しい認証手段を登録した後に呼ぶ（未登録なら `409 new_method_required`）。全セッション
+        （このセッションも）を失効させ、新しいリカバリーコードを1回だけ返し、確認済みの全メールに通知する。古い認証手段は
+        残るので、心当たりの無いものを無効化するよう本人に勧める。以後は新しい認証手段でログインする。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 復旧した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recovery_codes, sessions_revoked]
+                properties:
+                  recovery_codes:
+                    type: array
+                    description: 新しいリカバリーコード（表示は1回だけ）
+                    items: { type: string }
+                  sessions_revoked: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/recovery-codes:regenerate:
+    post:
+      operationId: regenerateMyRecoveryCodes
+      summary: リカバリーコードを作り直す
+      description: |
+        古いコードは使えなくなる。新しいコードは1回だけ返す。直近の認証（`max_auth_age`）を求め、過ぎていれば
+        `401 reauthentication_required`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 作り直した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recovery_codes]
+                properties:
+                  recovery_codes:
+                    type: array
+                    items: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
   /v1/logout:
     post:
       operationId: logout
@@ -388,8 +554,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [emails, identities, passkeys, totp]
+                required: [emails, identities, passkeys, totp, recovery_codes_remaining]
                 properties:
+                  recovery_codes_remaining: { type: integer, description: 未使用のリカバリーコードの数 }
                   emails:
                     type: array
                     items: { $ref: "#/components/schemas/MyEmail" }
@@ -633,10 +800,10 @@ paths:
                 name: { type: string, maxLength: 64, description: 表示用の名前。省略すると `Passkey` }
       responses:
         "200":
-          description: 登録した
+          description: 登録した。最初の強い認証手段なら `recovery_codes` を1回だけ返す（4.12）
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/MyPasskey" }
+              schema: { $ref: "#/components/schemas/RegisteredPasskey" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -793,6 +960,10 @@ paths:
                 properties:
                   totp: { $ref: "#/components/schemas/MyTOTP" }
                   login: { $ref: "#/components/schemas/LoginResult" }
+                  recovery_codes:
+                    type: array
+                    description: 最初の強い認証手段なら、リカバリーコード（表示は1回だけ。4.12）
+                    items: { type: string }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -887,10 +1058,11 @@ components:
         token: { type: string, description: "`return_token: true` のときだけ。Bearer で使う" }
         next:
           type: string
-          enum: [second_factor, enroll]
+          enum: [second_factor, enroll, recovery]
           description: |
-            セッションが制限つきのときの次の手順（4.1、2.8）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-            登録だけができる。制限つきのセッションは短い期限で失効し、決まった API にしか使えない（他は未ログインの扱い）。
+            セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
+            登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+            決まった API にしか使えない（他は未ログインの扱い）。
         second_factor_methods:
           type: array
           description: "`next: second_factor` のとき使える2要素目（`passkey`、`totp`）"
@@ -945,6 +1117,15 @@ components:
         created_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time }
         backup_eligible: { type: boolean, description: 同期される passkey か（認証器の BE フラグ） }
+    RegisteredPasskey:
+      allOf:
+        - $ref: "#/components/schemas/MyPasskey"
+        - type: object
+          properties:
+            recovery_codes:
+              type: array
+              description: 最初の強い認証手段なら、リカバリーコード（表示は1回だけ。4.12）
+              items: { type: string }
     MyTOTP:
       type: object
       required: [id, created_at]

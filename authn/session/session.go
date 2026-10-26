@@ -48,6 +48,8 @@ type Config struct {
 	RequireSecondFactor bool
 	// SecondFactorTTL は2要素目の確認・登録を待つ制限つきのセッションの寿命。既定 10 分。
 	SecondFactorTTL time.Duration
+	// RecoveryTTL は復旧専用のセッションの寿命（4.12）。既定 15 分。
+	RecoveryTTL time.Duration
 }
 
 // 失効の理由。
@@ -61,6 +63,8 @@ const (
 	ReasonCredentialChanged = "credential_changed" // #nosec G101 -- 失効の理由で、秘密ではない
 	// ReasonSecondFactor は2要素目の確認で、制限つきのセッションを通常のセッションに替えたこと。
 	ReasonSecondFactor = "second_factor_completed"
+	// ReasonRecovered はアカウントの復旧の完了で、全セッションを失効させたこと（4.12）。
+	ReasonRecovered = "account_recovered"
 )
 
 // 2要素目の種類（LoginResult の second_factor_methods）。
@@ -115,6 +119,8 @@ type Issue struct {
 	// AuthenticatedAt は認証の時刻。空なら今。2要素目の完了では1要素目の時刻を引き継ぎ、
 	// 要素の間に始まった停止が解除で戻らないようにする（4.7）。
 	AuthenticatedAt time.Time
+	// Recovery は復旧専用のセッション（新しい認証手段の登録と復旧の完了だけ。4.12）を発行する。2要素目は求めない。
+	Recovery bool
 }
 
 // Issued は発行したセッションと、クライアントに渡すトークン。
@@ -145,6 +151,9 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	restriction, methods, err := m.secondFactor(ctx, tx, in)
 	if err != nil {
 		return Issued{}, err
+	}
+	if in.Recovery {
+		restriction, methods = port.RestrictionRecovery, nil
 	}
 	ev := in.Evidence
 	ev.AMR = in.AuthMethods
@@ -178,7 +187,11 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: warningsJSON, IP: ip, UserAgent: ua,
 		AuthenticatedAt: authAt, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime), Restriction: restriction,
 	}
-	if restriction != port.RestrictionNone {
+	switch restriction {
+	case port.RestrictionNone:
+	case port.RestrictionRecovery:
+		s.ExpiresAt = earliest(s.ExpiresAt, now.Add(m.recoveryTTL()))
+	default:
 		s.ExpiresAt = earliest(s.ExpiresAt, now.Add(m.secondFactorTTL()))
 	}
 	token, hash, err := newToken(s.ID)
@@ -243,6 +256,13 @@ func carry(ws, carried []warning.Warning) []warning.Warning {
 		}
 	}
 	return ws
+}
+
+func (m *Manager) recoveryTTL() time.Duration {
+	if m.Config.RecoveryTTL <= 0 {
+		return 15 * time.Minute
+	}
+	return m.Config.RecoveryTTL
 }
 
 func (m *Manager) secondFactorTTL() time.Duration {
@@ -519,7 +539,12 @@ func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now tim
 		return time.Time{}, port.User{}, err
 	}
 	// 停止と有効期間は時刻から計算する。認証の後に始まった停止は、解除されてもこのセッションを戻さない（4.7）。
-	at, err := account.Check(ctx, tx, u, s.AuthenticatedAt, now)
+	// 復旧専用のセッションは security_risk の停止を見ない（認証手段を入れ替えてから、セキュリティ担当が解除する。4.12）。
+	var ignore []string
+	if s.Restriction == port.RestrictionRecovery {
+		ignore = account.RecoveryIgnores
+	}
+	at, err := account.Check(ctx, tx, u, s.AuthenticatedAt, now, ignore...)
 	if err != nil {
 		if errors.Is(err, account.ErrInactive) || errors.As(err, new(*account.UnavailableError)) {
 			return time.Time{}, port.User{}, rejected(err.Error())

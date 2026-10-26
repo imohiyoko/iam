@@ -211,6 +211,28 @@ type PasswordRepo interface {
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
 }
 
+// RecoveryCode は authn_recovery_codes の1行（design.md 4.12）。コードは表示の1回だけで、argon2id のハッシュを持つ。
+// Lookup はコードの先頭の数文字（平文）で、照合するハッシュを1つに絞る（ユーザーの組の中で一意）。
+type RecoveryCode struct {
+	ID        string
+	RealmID   string
+	UserID    string
+	Lookup    string
+	Hash      string
+	CreatedAt time.Time
+	UsedAt    *time.Time
+}
+
+// RecoveryCodeRepo は authn_recovery_codes の Repository。
+type RecoveryCodeRepo interface {
+	// Replace はユーザーのコードをすべて消し、codes に置き換える（空なら消すだけ）。
+	Replace(ctx context.Context, realmID, userID string, codes []RecoveryCode) error
+	// ListByUser はユーザーのコード（使用済みも含む）を ID の順に返す。
+	ListByUser(ctx context.Context, realmID, userID string) ([]RecoveryCode, error)
+	// MarkUsed は未使用なら at に使用済みにして true を返す。使用済み・無ければ false（同時の使用は1つだけ通る）。
+	MarkUsed(ctx context.Context, realmID, id string, at time.Time) (bool, error)
+}
+
 // SuspensionTarget は停止の対象の種類（design.md 4.7）。
 type SuspensionTarget string
 
@@ -339,6 +361,8 @@ const (
 	RestrictionSecondFactor SessionRestriction = "second_factor"
 	// RestrictionEnroll は2要素目が必須で未登録のユーザーが、2要素目の登録だけができる。
 	RestrictionEnroll SessionRestriction = "enroll"
+	// RestrictionRecovery はアカウントの復旧で、新しい認証手段の登録と復旧の完了だけができる（4.12）。
+	RestrictionRecovery SessionRestriction = "recovery"
 )
 
 // SessionRepo は sessions の Repository。

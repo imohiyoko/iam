@@ -131,6 +131,8 @@ type Security struct {
 	SecondFactor SecondFactor `yaml:"second_factor"`
 	// Password はフィーチャー password（design.md 4.1）。
 	Password Password `yaml:"password"`
+	// Recovery はアカウントの復旧（design.md 4.12）。
+	Recovery Recovery `yaml:"recovery"`
 	// SuspensionCategories は realm で足す停止の種別（design.md 4.7）。組み込みの種別は書かない。
 	// 停止・解除できるのは realm:owner だけ。
 	SuspensionCategories []string `yaml:"suspension_categories"`
@@ -166,6 +168,20 @@ type SecondFactor struct {
 	// Issuer は認証器アプリに表示する発行者の名前。空なら passkey.rp_name か realm.slug。
 	Issuer string `yaml:"issuer"`
 }
+
+// Recovery はアカウントの復旧の設定。
+type Recovery struct {
+	// Methods は使える復旧の経路（recovery_code / email / operator_link）。
+	Methods []string `yaml:"methods"`
+	// TTL は復旧専用のセッションの寿命。
+	TTL Duration `yaml:"ttl"`
+}
+
+// KnownRecoveryMethods は復旧の経路。
+var KnownRecoveryMethods = []string{"recovery_code", "email", "operator_link"}
+
+// Allows は経路が有効かを返す。
+func (r Recovery) Allows(method string) bool { return slices.Contains(r.Methods, method) }
 
 // Password はパスワードの設定。最低長は2段階認証の要否で決まる（必須なら 8 文字、そうでなければ 15 文字）。
 type Password struct {
@@ -284,6 +300,7 @@ func Default() Config {
 		}, EmailFlow: EmailFlow{TTL: Duration(10 * time.Minute), MaxAttempts: 5},
 			SecondFactor: SecondFactor{TTL: Duration(10 * time.Minute), MaxAttempts: 5},
 			Password:     Password{Argon2: Argon2{MemoryKiB: 64 * 1024, Iterations: 2, Parallelism: 1}},
+			Recovery:     Recovery{Methods: slices.Clone(KnownRecoveryMethods), TTL: Duration(15 * time.Minute)},
 			Login: Login{MinResponseTime: Duration(300 * time.Millisecond),
 				RateLimit: RateLimit{Window: Duration(10 * time.Minute), PerIP: 100, PerAccount: 5}},
 		},
@@ -394,6 +411,14 @@ func (c Config) Validate() error {
 	}
 	if sf := c.Security.SecondFactor; sf.TTL.D() <= 0 || sf.TTL.D() > time.Hour || sf.MaxAttempts < 1 || sf.MaxAttempts > 10 {
 		problems = append(problems, "security.second_factor: ttl must be within (0, 1h] and max_attempts within [1, 10]")
+	}
+	for _, m := range c.Security.Recovery.Methods {
+		if !slices.Contains(KnownRecoveryMethods, m) {
+			problems = append(problems, fmt.Sprintf("security.recovery.methods: unknown %q (known: %v)", m, KnownRecoveryMethods))
+		}
+	}
+	if t := c.Security.Recovery.TTL.D(); t <= 0 || t > time.Hour {
+		problems = append(problems, "security.recovery.ttl must be within (0, 1h]")
 	}
 	for _, c := range c.Security.SuspensionCategories {
 		if !categoryRE.MatchString(c) || slices.Contains(builtinCategories, c) {

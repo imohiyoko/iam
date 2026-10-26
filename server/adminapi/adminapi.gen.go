@@ -116,6 +116,9 @@ type RevokedCredentials struct {
 	Passkeys   int  `json:"passkeys"`
 	Password   bool `json:"password"`
 
+	// RecoveryCodes 消した未使用のリカバリーコードの数
+	RecoveryCodes int `json:"recovery_codes"`
+
 	// Sessions 失効させたセッションの数
 	Sessions int `json:"sessions"`
 	Totp     int `json:"totp"`
@@ -219,6 +222,12 @@ type IssueLoginLinkJSONBody struct {
 	TtlSeconds *int `json:"ttl_seconds,omitempty"`
 }
 
+// IssueRecoveryLinkJSONBody defines parameters for IssueRecoveryLink.
+type IssueRecoveryLinkJSONBody struct {
+	Reason     string `json:"reason"`
+	TtlSeconds *int   `json:"ttl_seconds,omitempty"`
+}
+
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody CreateConnectionJSONBody
 
@@ -236,6 +245,9 @@ type SuspendUserJSONRequestBody = SuspendRequest
 
 // IssueLoginLinkJSONRequestBody defines body for IssueLoginLink for application/json ContentType.
 type IssueLoginLinkJSONRequestBody IssueLoginLinkJSONBody
+
+// IssueRecoveryLinkJSONRequestBody defines body for IssueRecoveryLink for application/json ContentType.
+type IssueRecoveryLinkJSONRequestBody IssueRecoveryLinkJSONBody
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -281,6 +293,9 @@ type ServerInterface interface {
 	// IssueLoginLink 1回限りのログイン用リンクのトークンを発行する
 	// (POST /v1/admin/users/{id}:login_link)
 	IssueLoginLink(w http.ResponseWriter, r *http.Request, id string)
+	// IssueRecoveryLink 1回限りの復旧用リンクのトークンを発行する（4.12）
+	// (POST /v1/admin/users/{id}:recovery_link)
+	IssueRecoveryLink(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -629,6 +644,32 @@ func (siw *ServerInterfaceWrapper) IssueLoginLink(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// IssueRecoveryLink operation middleware
+func (siw *ServerInterfaceWrapper) IssueRecoveryLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IssueRecoveryLink(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -753,6 +794,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/notifications/{id}:claim", wrapper.ClaimNotification)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users", wrapper.CreateUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:login_link", wrapper.IssueLoginLink)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:recovery_link", wrapper.IssueRecoveryLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/credentials", wrapper.ListUserCredentials)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials/{credential_id}:revoke", wrapper.RevokeUserCredential)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/password:revoke", wrapper.RevokeUserPassword)
@@ -1727,6 +1769,85 @@ func (response IssueLoginLink404JSONResponse) VisitIssueLoginLinkResponse(w http
 	return err
 }
 
+type IssueRecoveryLinkRequestObject struct {
+	Id   string `json:"id"`
+	Body *IssueRecoveryLinkJSONRequestBody
+}
+
+type IssueRecoveryLinkResponseObject interface {
+	VisitIssueRecoveryLinkResponse(w http.ResponseWriter) error
+}
+
+type IssueRecoveryLink200JSONResponse LoginLink
+
+func (response IssueRecoveryLink200JSONResponse) VisitIssueRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueRecoveryLink400JSONResponse struct{ ErrorJSONResponse }
+
+func (response IssueRecoveryLink400JSONResponse) VisitIssueRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueRecoveryLink401JSONResponse Error
+
+func (response IssueRecoveryLink401JSONResponse) VisitIssueRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueRecoveryLink403JSONResponse Error
+
+func (response IssueRecoveryLink403JSONResponse) VisitIssueRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueRecoveryLink404JSONResponse Error
+
+func (response IssueRecoveryLink404JSONResponse) VisitIssueRecoveryLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealth ヘルスチェック
@@ -1771,6 +1892,9 @@ type StrictServerInterface interface {
 	// IssueLoginLink 1回限りのログイン用リンクのトークンを発行する
 	// (POST /v1/admin/users/{id}:login_link)
 	IssueLoginLink(ctx context.Context, request IssueLoginLinkRequestObject) (IssueLoginLinkResponseObject, error)
+	// IssueRecoveryLink 1回限りの復旧用リンクのトークンを発行する（4.12）
+	// (POST /v1/admin/users/{id}:recovery_link)
+	IssueRecoveryLink(ctx context.Context, request IssueRecoveryLinkRequestObject) (IssueRecoveryLinkResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -2209,6 +2333,39 @@ func (sh *strictHandler) IssueLoginLink(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(IssueLoginLinkResponseObject); ok {
 		if err := validResponse.VisitIssueLoginLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// IssueRecoveryLink operation middleware
+func (sh *strictHandler) IssueRecoveryLink(w http.ResponseWriter, r *http.Request, id string) {
+	var request IssueRecoveryLinkRequestObject
+
+	request.Id = id
+
+	var body IssueRecoveryLinkJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.IssueRecoveryLink(ctx, request.(IssueRecoveryLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "IssueRecoveryLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(IssueRecoveryLinkResponseObject); ok {
+		if err := validResponse.VisitIssueRecoveryLinkResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

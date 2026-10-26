@@ -128,3 +128,31 @@ func TestPasswordDisabledByDefault(t *testing.T) {
 		t.Fatalf("password login without the feature: %d", status)
 	}
 }
+
+// 忘れたパスワードは、メールによる復旧で今のパスワード無しに再設定する（4.12、ADR 0051 の残り）。
+func TestPasswordResetViaRecovery(t *testing.T) {
+	l := newPasswordEnv(t)
+	_, cookie := l.login(t, "pat@example.com")
+	if status, _ := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": "correct horse battery staple"}); status != 204 {
+		t.Fatal("set")
+	}
+	_, st := l.mePost(t, "", "/v1/recovery/email:start", map[string]string{"email": "pat@example.com"})
+	code := l.claimLast(t)
+	status, out, rec := l.post(t, "", "/v1/recovery/email:verify", map[string]string{"flow_id": st["flow_id"].(string), "code": code})
+	if status != 200 || out["next"] != "recovery" {
+		t.Fatalf("verify: %d %v", status, out)
+	}
+	l.advance(time.Second)
+	if status, res := l.mePost(t, rec, "/v1/me/password:set", map[string]string{"password": "a brand new passphrase"}); status != 204 {
+		t.Fatalf("reset in recovery: %d %v", status, res)
+	}
+	if status, res := l.mePost(t, rec, "/v1/recovery:complete", nil); status != 200 {
+		t.Fatalf("complete: %d %v", status, res)
+	}
+	if status, _, _ := l.passwordLogin(t, "pat@example.com", "correct horse battery staple"); status != 401 {
+		t.Fatalf("old password: %d", status)
+	}
+	if status, _, _ := l.passwordLogin(t, "pat@example.com", "a brand new passphrase"); status != 200 {
+		t.Fatalf("new password: %d", status)
+	}
+}

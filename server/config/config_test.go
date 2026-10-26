@@ -147,6 +147,8 @@ func TestSecondFactorAndPasswordRules(t *testing.T) {
 		"security: {password: {argon2: {memory_kib: 8192}}}\n",
 		"security: {password: {argon2: {iterations: 1}}}\n",
 		"dev: true\nsecurity: {suspension_categories: [billing]}\n",
+		"dev: true\nsecurity: {recovery: {methods: [sms]}}\n",
+		"dev: true\nsecurity: {recovery: {ttl: 2h}}\n",
 		"dev: true\nsecurity: {suspension_categories: [Fraud]}\n",
 	} {
 		if _, err := Parse([]byte(y)); err == nil || !strings.Contains(err.Error(), "security.") {

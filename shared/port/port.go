@@ -44,6 +44,7 @@ type Tx interface {
 	Passkeys() PasskeyRepo
 	TOTP() TOTPRepo
 	Passwords() PasswordRepo
+	RecoveryCodes() RecoveryCodeRepo
 	Suspensions() SuspensionRepo
 	ScheduledEvents() ScheduledEventRepo
 	Connections() ConnectionRepo

@@ -27,6 +27,10 @@ const (
 	TypeEmailVerification = "email_verification"
 	TypeMagicLink         = "magic_link"
 	TypeAccountExists     = "account_exists"
+	// TypeAccountRecovery はメールによる復旧のコードとリンク（4.12）。
+	TypeAccountRecovery = "account_recovery"
+	// TypeAccountRecovered は復旧の完了の知らせ（確認済みの全メールへ。4.12）。
+	TypeAccountRecovered = "account_recovered"
 )
 
 // Secret は claim で1回だけ返すもの。

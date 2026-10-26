@@ -149,7 +149,18 @@ func (s publicServer) FinishRegisterPasskey(ctx context.Context, req publicapi.F
 	case err != nil:
 		return nil, err
 	}
-	return publicapi.FinishRegisterPasskey200JSONResponse(myPasskey(p)), nil
+	m := myPasskey(p)
+	out := publicapi.FinishRegisterPasskey200JSONResponse{Id: m.Id, Name: m.Name, CreatedAt: m.CreatedAt, LastUsedAt: m.LastUsedAt,
+		BackupEligible: m.BackupEligible}
+	// passkey は別のトランザクションで登録済み。コードを作れなくても登録は成功で、本人は作り直せる。
+	if err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		out.RecoveryCodes, err = s.initialCodes(ctx, tx, au)
+		return err
+	}); err != nil {
+		s.a.deps.Logger.WarnContext(ctx, "could not issue recovery codes", "error", err)
+	}
+	return out, nil
 }
 
 func (s publicServer) RenameMyPasskey(ctx context.Context, req publicapi.RenameMyPasskeyRequestObject) (publicapi.RenameMyPasskeyResponseObject, error) {

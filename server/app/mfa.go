@@ -18,15 +18,18 @@ import (
 // 2段階認証（design.md 4.1、2.8）。1要素目の後のセッションが制限つきなら、2要素目で通常のセッションに替える。
 
 // restrictedAllowed は制限つきのセッションで使える API。他の API では未ログインとして扱う。
+// 復旧専用のセッション（4.12）は新しい認証手段の登録と復旧の完了だけ。外部 ID の連携は戻り先の扱いが別なので含めない。
 var restrictedAllowed = map[string][]port.SessionRestriction{
 	"POST /v1/login/second-factor/passkey:start": {port.RestrictionSecondFactor, port.RestrictionEnroll},
 	"POST /v1/login/second-factor:verify":        {port.RestrictionSecondFactor, port.RestrictionEnroll},
-	"POST /v1/logout":                            {port.RestrictionSecondFactor, port.RestrictionEnroll},
-	"GET /v1/me/methods":                         {port.RestrictionEnroll},
-	"POST /v1/me/passkeys:start":                 {port.RestrictionEnroll},
-	"POST /v1/me/passkeys:finish":                {port.RestrictionEnroll},
-	"POST /v1/me/totp:start":                     {port.RestrictionEnroll},
-	"POST /v1/me/totp:confirm":                   {port.RestrictionEnroll},
+	"POST /v1/logout":                            {port.RestrictionSecondFactor, port.RestrictionEnroll, port.RestrictionRecovery},
+	"GET /v1/me/methods":                         {port.RestrictionEnroll, port.RestrictionRecovery},
+	"POST /v1/me/passkeys:start":                 {port.RestrictionEnroll, port.RestrictionRecovery},
+	"POST /v1/me/passkeys:finish":                {port.RestrictionEnroll, port.RestrictionRecovery},
+	"POST /v1/me/totp:start":                     {port.RestrictionEnroll, port.RestrictionRecovery},
+	"POST /v1/me/totp:confirm":                   {port.RestrictionEnroll, port.RestrictionRecovery},
+	"POST /v1/me/password:set":                   {port.RestrictionRecovery},
+	"POST /v1/recovery:complete":                 {port.RestrictionRecovery},
 }
 
 func restrictionAllows(r port.SessionRestriction, method, path string) bool {
@@ -43,6 +46,9 @@ func (s publicServer) loginResult(ctx context.Context, is session.Issued, userID
 		out.Next, out.SecondFactorMethods = &next, &methods
 	case port.RestrictionEnroll:
 		next := publicapi.Enroll
+		out.Next = &next
+	case port.RestrictionRecovery:
+		next := publicapi.Recovery
 		out.Next = &next
 	}
 	if deref(returnToken) {
@@ -160,11 +166,15 @@ func (s publicServer) ConfirmRegisterTOTP(ctx context.Context, req publicapi.Con
 	c := s.a.clientOf(ctx)
 	var t port.TOTPCredential
 	var is session.Issued
+	var codes *[]string
 	upgrade := au.Restriction == port.RestrictionEnroll
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
 		t, err = s.a.totp.ConfirmEnroll(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Body.FlowId, req.Body.Code, au.Actor(), c.RequestID)
-		if err != nil || !upgrade {
+		if err != nil {
+			return err
+		}
+		if codes, err = s.initialCodes(ctx, tx, au); err != nil || !upgrade {
 			return err
 		}
 		// 登録だけのセッションは、登録に使ったコードを2要素目として通常のセッションに替える。
@@ -185,7 +195,7 @@ func (s publicServer) ConfirmRegisterTOTP(ctx context.Context, req publicapi.Con
 	case err != nil:
 		return nil, err
 	}
-	out := publicapi.ConfirmRegisterTOTP200JSONResponse{Totp: myTOTP(t)}
+	out := publicapi.ConfirmRegisterTOTP200JSONResponse{Totp: myTOTP(t), RecoveryCodes: codes}
 	if upgrade {
 		s.a.sessions.Committed(ctx, s.a.realm.ID, is)
 		login := s.loginResult(ctx, is, au.PublicID, false, req.Body.ReturnToken)

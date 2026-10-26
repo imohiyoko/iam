@@ -16,6 +16,9 @@ const CodeOutsideValidity = "outside_validity"
 // SuspendedCode は停止の拒否理由のコード（`suspended.<category>`）。
 func SuspendedCode(category string) string { return "suspended." + category }
 
+// RecoveryIgnores は復旧（4.12）で見ない停止の種別。security_risk で止められた本人は、復旧で認証手段を入れ替える。
+var RecoveryIgnores = []string{CategorySecurityRisk}
+
 // ErrInactive は削除・統合済みのユーザー。理由は返さない（本人の状態ではなく、もう本人がいない）。
 var ErrInactive = errors.New("account: user is not active")
 
@@ -35,8 +38,9 @@ func (e *UnavailableError) Reasons() []string { return append([]string(nil), e.C
 // Check はユーザーが now に使えるかを時刻から計算する（4.7、4.8）。削除・統合済みなら ErrInactive、有効期間の外か
 // 停止中なら *UnavailableError を返す。since は判定の始まりで、[since, now] に重なる停止も停止中とみなす。
 // セッションの検証では認証の時刻を渡し、停止の後に解除しても、停止をまたいだセッションは戻らない（ログインは now を渡す）。
+// ignore の種別の停止は見ない（復旧専用のセッション。RecoveryIgnores）。
 // next は now より後で可否が次に変わりうる最も早い時刻（予約した停止の開始、有効期間の終わり）で、無ければ nil。
-func Check(ctx context.Context, tx port.Tx, u port.User, since, now time.Time) (*time.Time, error) {
+func Check(ctx context.Context, tx port.Tx, u port.User, since, now time.Time, ignore ...string) (*time.Time, error) {
 	if u.Status != port.UserActive {
 		return nil, ErrInactive
 	}
@@ -53,6 +57,9 @@ func Check(ctx context.Context, tx port.Tx, u port.User, since, now time.Time) (
 	}
 	seen := map[string]bool{}
 	for _, s := range ss {
+		if slices.Contains(ignore, s.Category) {
+			continue
+		}
 		end := s.EndsAt
 		if s.LiftedAt != nil && (end == nil || s.LiftedAt.Before(*end)) {
 			end = s.LiftedAt
