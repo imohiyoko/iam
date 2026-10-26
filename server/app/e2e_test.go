@@ -101,7 +101,10 @@ func (l *loginEnv) me(t *testing.T, cookie string) (int, []map[string]any) {
 
 // E2E：OAuth で登録 → ログアウト → メールコードで再ログイン（roadmap M1 の完了条件）。
 func TestE2EOAuthSignupLogoutEmailRelogin(t *testing.T) {
-	l := newLoginEnvWith(t, nil, feature.Registered())
+	e2eOAuthSignupLogoutEmailRelogin(t, newLoginEnvWith(t, nil, feature.Registered()))
+}
+
+func e2eOAuthSignupLogoutEmailRelogin(t *testing.T, l *loginEnv) {
 	_, owner := l.operator(t, "owner@example.com", role.RealmOwner)
 	idp := newFakeIdP(t, l, owner)
 

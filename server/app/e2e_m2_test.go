@@ -18,7 +18,10 @@ import (
 // 下の E2E はゴール（1人が複数の手段を持ち、失っても戻れる）を通しで確かめる。
 
 func TestE2EM2LoseEverythingAndRecover(t *testing.T) {
-	l := newRecoveryEnv(t, nil)
+	e2eM2LoseEverythingAndRecover(t, newRecoveryEnv(t, nil))
+}
+
+func e2eM2LoseEverythingAndRecover(t *testing.T, l *loginEnv) {
 	res, cookie := l.login(t, "pat@example.com")
 	uid := res["user_id"].(string)
 	l.advance(time.Second)
