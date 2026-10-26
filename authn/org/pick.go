@@ -8,6 +8,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/port"
@@ -15,7 +16,8 @@ import (
 
 // Pick はログインで入る Org を決める（design.md 4.4、ADR 0057）。
 //
-//  1. 候補：active な Membership を持ち、Org と Membership が停止中でも有効期間の外でもない Org（Check。ログインポリシーは後で足す）
+//  1. 候補：active な Membership を持ち、Org と Membership が停止中でも有効期間の外でもなく、Org の段で deny にした警告に当たらない Org
+//     （Check、warningsDenied。ログインポリシーは後で足す）
 //  2. 明示的な指定があれば、それが候補にあること（所属が無ければ ErrNoAvailableOrg、使えなければ理由つきの *account.UnavailableError）
 //  3. ログインの手がかり（使ったメールや OAuth のアドレスを結び付けた Membership、passkey の既定の Org）に結び付いた候補。
 //     1つならそれ。複数なら前回の Org がその中にあればそれ、無ければ選ばせる（Choices を返し、4 へ進む）
@@ -37,10 +39,17 @@ func (s *Service) Pick(ctx context.Context, tx port.Tx, u port.User, in session.
 			return session.PickedOrg{}, err
 		}
 		_, err = Check(ctx, tx, o, m, now)
+		if err == nil {
+			// Org の段で deny にした警告に当たる認証では、その Org に入れない（ログインは成功する。10章）。
+			err = s.warningsDenied(o, in.Warnings)
+		}
 		if m.OrgID == in.Explicit && err != nil {
 			return session.PickedOrg{}, err
 		}
 		if _, ok := errors.AsType[*account.UnavailableError](err); ok {
+			continue
+		}
+		if _, ok := errors.AsType[*warning.DeniedError](err); ok {
 			continue
 		}
 		if err != nil {

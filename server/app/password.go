@@ -62,7 +62,7 @@ func (s publicServer) SetMyPassword(ctx context.Context, req publicapi.SetMyPass
 	if req.Body == nil {
 		return publicapi.SetMyPassword400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
-	recent := s.a.deps.Clock.Now().Sub(au.AuthenticatedAt) <= s.a.cfg.Security.Session.MaxAuthAge.Default.D()
+	recent := s.recent(au)
 	var err error
 	if au.Restriction == port.RestrictionRecovery {
 		// 復旧では今のパスワードを求めない（忘れたときの再設定。4.12）。

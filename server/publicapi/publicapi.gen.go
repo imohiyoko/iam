@@ -201,18 +201,60 @@ func (e OrgMemberStatus) Valid() bool {
 	}
 }
 
+// Defines values for OrgSettingsWarnings.
+const (
+	OrgSettingsWarningsDeny   OrgSettingsWarnings = "deny"
+	OrgSettingsWarningsIgnore OrgSettingsWarnings = "ignore"
+	OrgSettingsWarningsWarn   OrgSettingsWarnings = "warn"
+)
+
+// Valid indicates whether the value is a known member of the OrgSettingsWarnings enum.
+func (e OrgSettingsWarnings) Valid() bool {
+	switch e {
+	case OrgSettingsWarningsDeny:
+		return true
+	case OrgSettingsWarningsIgnore:
+		return true
+	case OrgSettingsWarningsWarn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrgSettingsViewEffectiveWarnings.
+const (
+	OrgSettingsViewEffectiveWarningsDeny   OrgSettingsViewEffectiveWarnings = "deny"
+	OrgSettingsViewEffectiveWarningsIgnore OrgSettingsViewEffectiveWarnings = "ignore"
+	OrgSettingsViewEffectiveWarningsWarn   OrgSettingsViewEffectiveWarnings = "warn"
+)
+
+// Valid indicates whether the value is a known member of the OrgSettingsViewEffectiveWarnings enum.
+func (e OrgSettingsViewEffectiveWarnings) Valid() bool {
+	switch e {
+	case OrgSettingsViewEffectiveWarningsDeny:
+		return true
+	case OrgSettingsViewEffectiveWarningsIgnore:
+		return true
+	case OrgSettingsViewEffectiveWarningsWarn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WarningAction.
 const (
-	Deny WarningAction = "deny"
-	Warn WarningAction = "warn"
+	WarningActionDeny WarningAction = "deny"
+	WarningActionWarn WarningAction = "warn"
 )
 
 // Valid indicates whether the value is a known member of the WarningAction enum.
 func (e WarningAction) Valid() bool {
 	switch e {
-	case Deny:
+	case WarningActionDeny:
 		return true
-	case Warn:
+	case WarningActionWarn:
 		return true
 	default:
 		return false
@@ -429,6 +471,40 @@ type OrgMemberRole string
 
 // OrgMemberStatus defines model for OrgMember.Status.
 type OrgMemberStatus string
+
+// OrgSettings Org の段の設定。省いた項目は realm に従う
+type OrgSettings struct {
+	// AbsoluteLifetimeSeconds 認証の時刻からのセッションの寿命
+	AbsoluteLifetimeSeconds *int64 `json:"absolute_lifetime_seconds,omitempty"`
+	IdleTimeoutSeconds      *int64 `json:"idle_timeout_seconds,omitempty"`
+
+	// MaxAuthAgeSeconds 重要な操作に求める直近の認証の期限
+	MaxAuthAgeSeconds *int64 `json:"max_auth_age_seconds,omitempty"`
+
+	// Warnings 警告のコードごとのアクション
+	Warnings *map[string]OrgSettingsWarnings `json:"warnings,omitempty"`
+}
+
+// OrgSettingsWarnings defines model for OrgSettings.Warnings.
+type OrgSettingsWarnings string
+
+// OrgSettingsView defines model for OrgSettingsView.
+type OrgSettingsView struct {
+	Effective struct {
+		AbsoluteLifetimeSeconds int64 `json:"absolute_lifetime_seconds"`
+		IdleTimeoutSeconds      int64 `json:"idle_timeout_seconds"`
+		MaxAuthAgeSeconds       int64 `json:"max_auth_age_seconds"`
+
+		// Warnings すべての警告のコードのアクション（フィーチャー warnings が動いていなければ空）
+		Warnings map[string]OrgSettingsViewEffectiveWarnings `json:"warnings"`
+	} `json:"effective"`
+
+	// Settings Org の段の設定。省いた項目は realm に従う
+	Settings OrgSettings `json:"settings"`
+}
+
+// OrgSettingsViewEffectiveWarnings defines model for OrgSettingsView.Effective.Warnings.
+type OrgSettingsViewEffectiveWarnings string
 
 // OrgSuspension defines model for OrgSuspension.
 type OrgSuspension struct {
@@ -789,6 +865,9 @@ type UpdateOrgMemberJSONRequestBody UpdateOrgMemberJSONBody
 // SuspendOrgMemberJSONRequestBody defines body for SuspendOrgMember for application/json ContentType.
 type SuspendOrgMemberJSONRequestBody SuspendOrgMemberJSONBody
 
+// PutMyOrgSettingsJSONRequestBody defines body for PutMyOrgSettings for application/json ContentType.
+type PutMyOrgSettingsJSONRequestBody = OrgSettings
+
 // LiftOrgSuspensionJSONRequestBody defines body for LiftOrgSuspension for application/json ContentType.
 type LiftOrgSuspensionJSONRequestBody LiftOrgSuspensionJSONBody
 
@@ -935,6 +1014,12 @@ type ServerInterface interface {
 	// RemoveOrgMember メンバーを除名する（Org の owner と admin。4.10）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}:remove)
 	RemoveOrgMember(w http.ResponseWriter, r *http.Request, id string, membershipId string)
+	// GetMyOrgSettings Org の段のセキュリティ設定を返す（2.8）
+	// (GET /v1/me/orgs/{id}/settings)
+	GetMyOrgSettings(w http.ResponseWriter, r *http.Request, id string)
+	// PutMyOrgSettings Org の段のセキュリティ設定を置き換える（2.8、5.4、10章）
+	// (PUT /v1/me/orgs/{id}/settings)
+	PutMyOrgSettings(w http.ResponseWriter, r *http.Request, id string)
 	// LiftOrgSuspension メンバーの停止を解除する（Org の owner と admin。customer_request だけ）
 	// (POST /v1/me/orgs/{id}/suspensions/{suspension_id}:lift)
 	LiftOrgSuspension(w http.ResponseWriter, r *http.Request, id string, suspensionId string)
@@ -1727,6 +1812,58 @@ func (siw *ServerInterfaceWrapper) RemoveOrgMember(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetMyOrgSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetMyOrgSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMyOrgSettings(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutMyOrgSettings operation middleware
+func (siw *ServerInterfaceWrapper) PutMyOrgSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutMyOrgSettings(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // LiftOrgSuspension operation middleware
 func (siw *ServerInterfaceWrapper) LiftOrgSuspension(w http.ResponseWriter, r *http.Request) {
 
@@ -2393,6 +2530,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs", wrapper.ListMyOrgs)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs", wrapper.CreateMyOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/members", wrapper.ListOrgMembers)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/settings", wrapper.GetMyOrgSettings)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/me/orgs/{id}/settings", wrapper.PutMyOrgSettings)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:delete", wrapper.DeleteMyOrg)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:cancel-deletion", wrapper.CancelMyOrgDeletion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:leave", wrapper.LeaveMyOrg)
@@ -4600,6 +4739,163 @@ func (response RemoveOrgMember409JSONResponse) VisitRemoveOrgMemberResponse(w ht
 	return err
 }
 
+type GetMyOrgSettingsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetMyOrgSettingsResponseObject interface {
+	VisitGetMyOrgSettingsResponse(w http.ResponseWriter) error
+}
+
+type GetMyOrgSettings200JSONResponse OrgSettingsView
+
+func (response GetMyOrgSettings200JSONResponse) VisitGetMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyOrgSettings401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetMyOrgSettings401JSONResponse) VisitGetMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyOrgSettings403JSONResponse struct{ DeniedJSONResponse }
+
+func (response GetMyOrgSettings403JSONResponse) VisitGetMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyOrgSettings404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetMyOrgSettings404JSONResponse) VisitGetMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutMyOrgSettingsRequestObject struct {
+	Id   string `json:"id"`
+	Body *PutMyOrgSettingsJSONRequestBody
+}
+
+type PutMyOrgSettingsResponseObject interface {
+	VisitPutMyOrgSettingsResponse(w http.ResponseWriter) error
+}
+
+type PutMyOrgSettings200JSONResponse OrgSettingsView
+
+func (response PutMyOrgSettings200JSONResponse) VisitPutMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutMyOrgSettings400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutMyOrgSettings400JSONResponse) VisitPutMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutMyOrgSettings401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response PutMyOrgSettings401JSONResponse) VisitPutMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutMyOrgSettings403JSONResponse struct{ DeniedJSONResponse }
+
+func (response PutMyOrgSettings403JSONResponse) VisitPutMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutMyOrgSettings404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutMyOrgSettings404JSONResponse) VisitPutMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutMyOrgSettings409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PutMyOrgSettings409JSONResponse) VisitPutMyOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type LiftOrgSuspensionRequestObject struct {
 	Id           string `json:"id"`
 	SuspensionId string `json:"suspension_id"`
@@ -6302,6 +6598,12 @@ type StrictServerInterface interface {
 	// RemoveOrgMember メンバーを除名する（Org の owner と admin。4.10）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}:remove)
 	RemoveOrgMember(ctx context.Context, request RemoveOrgMemberRequestObject) (RemoveOrgMemberResponseObject, error)
+	// GetMyOrgSettings Org の段のセキュリティ設定を返す（2.8）
+	// (GET /v1/me/orgs/{id}/settings)
+	GetMyOrgSettings(ctx context.Context, request GetMyOrgSettingsRequestObject) (GetMyOrgSettingsResponseObject, error)
+	// PutMyOrgSettings Org の段のセキュリティ設定を置き換える（2.8、5.4、10章）
+	// (PUT /v1/me/orgs/{id}/settings)
+	PutMyOrgSettings(ctx context.Context, request PutMyOrgSettingsRequestObject) (PutMyOrgSettingsResponseObject, error)
 	// LiftOrgSuspension メンバーの停止を解除する（Org の owner と admin。customer_request だけ）
 	// (POST /v1/me/orgs/{id}/suspensions/{suspension_id}:lift)
 	LiftOrgSuspension(ctx context.Context, request LiftOrgSuspensionRequestObject) (LiftOrgSuspensionResponseObject, error)
@@ -7394,6 +7696,65 @@ func (sh *strictHandler) RemoveOrgMember(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RemoveOrgMemberResponseObject); ok {
 		if err := validResponse.VisitRemoveOrgMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMyOrgSettings operation middleware
+func (sh *strictHandler) GetMyOrgSettings(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetMyOrgSettingsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMyOrgSettings(ctx, request.(GetMyOrgSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMyOrgSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMyOrgSettingsResponseObject); ok {
+		if err := validResponse.VisitGetMyOrgSettingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutMyOrgSettings operation middleware
+func (sh *strictHandler) PutMyOrgSettings(w http.ResponseWriter, r *http.Request, id string) {
+	var request PutMyOrgSettingsRequestObject
+
+	request.Id = id
+
+	var body PutMyOrgSettingsJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutMyOrgSettings(ctx, request.(PutMyOrgSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutMyOrgSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutMyOrgSettingsResponseObject); ok {
+		if err := validResponse.VisitPutMyOrgSettingsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

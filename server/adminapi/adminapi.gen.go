@@ -117,6 +117,48 @@ func (e OrgKind) Valid() bool {
 	}
 }
 
+// Defines values for OrgSettingsWarnings.
+const (
+	OrgSettingsWarningsDeny   OrgSettingsWarnings = "deny"
+	OrgSettingsWarningsIgnore OrgSettingsWarnings = "ignore"
+	OrgSettingsWarningsWarn   OrgSettingsWarnings = "warn"
+)
+
+// Valid indicates whether the value is a known member of the OrgSettingsWarnings enum.
+func (e OrgSettingsWarnings) Valid() bool {
+	switch e {
+	case OrgSettingsWarningsDeny:
+		return true
+	case OrgSettingsWarningsIgnore:
+		return true
+	case OrgSettingsWarningsWarn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrgSettingsViewEffectiveWarnings.
+const (
+	OrgSettingsViewEffectiveWarningsDeny   OrgSettingsViewEffectiveWarnings = "deny"
+	OrgSettingsViewEffectiveWarningsIgnore OrgSettingsViewEffectiveWarnings = "ignore"
+	OrgSettingsViewEffectiveWarningsWarn   OrgSettingsViewEffectiveWarnings = "warn"
+)
+
+// Valid indicates whether the value is a known member of the OrgSettingsViewEffectiveWarnings enum.
+func (e OrgSettingsViewEffectiveWarnings) Valid() bool {
+	switch e {
+	case OrgSettingsViewEffectiveWarningsDeny:
+		return true
+	case OrgSettingsViewEffectiveWarningsIgnore:
+		return true
+	case OrgSettingsViewEffectiveWarningsWarn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SuspensionTargetType.
 const (
 	SuspensionTargetTypeMembership SuspensionTargetType = "membership"
@@ -238,6 +280,40 @@ type Org struct {
 
 // OrgKind defines model for Org.Kind.
 type OrgKind string
+
+// OrgSettings Org の段の設定。省いた項目は realm に従う
+type OrgSettings struct {
+	// AbsoluteLifetimeSeconds 認証の時刻からのセッションの寿命
+	AbsoluteLifetimeSeconds *int64 `json:"absolute_lifetime_seconds,omitempty"`
+	IdleTimeoutSeconds      *int64 `json:"idle_timeout_seconds,omitempty"`
+
+	// MaxAuthAgeSeconds 重要な操作に求める直近の認証の期限
+	MaxAuthAgeSeconds *int64 `json:"max_auth_age_seconds,omitempty"`
+
+	// Warnings 警告のコードごとのアクション
+	Warnings *map[string]OrgSettingsWarnings `json:"warnings,omitempty"`
+}
+
+// OrgSettingsWarnings defines model for OrgSettings.Warnings.
+type OrgSettingsWarnings string
+
+// OrgSettingsView defines model for OrgSettingsView.
+type OrgSettingsView struct {
+	Effective struct {
+		AbsoluteLifetimeSeconds int64 `json:"absolute_lifetime_seconds"`
+		IdleTimeoutSeconds      int64 `json:"idle_timeout_seconds"`
+		MaxAuthAgeSeconds       int64 `json:"max_auth_age_seconds"`
+
+		// Warnings すべての警告のコードのアクション（フィーチャー warnings が動いていなければ空）
+		Warnings map[string]OrgSettingsViewEffectiveWarnings `json:"warnings"`
+	} `json:"effective"`
+
+	// Settings Org の段の設定。省いた項目は realm に従う
+	Settings OrgSettings `json:"settings"`
+}
+
+// OrgSettingsViewEffectiveWarnings defines model for OrgSettingsView.Effective.Warnings.
+type OrgSettingsViewEffectiveWarnings string
 
 // RevokedCredentials defines model for RevokedCredentials.
 type RevokedCredentials struct {
@@ -416,6 +492,9 @@ type CreateOrgJSONRequestBody CreateOrgJSONBody
 // UpdateOrgJSONRequestBody defines body for UpdateOrg for application/json ContentType.
 type UpdateOrgJSONRequestBody = Validity
 
+// PutOrgSettingsJSONRequestBody defines body for PutOrgSettings for application/json ContentType.
+type PutOrgSettingsJSONRequestBody = OrgSettings
+
 // SuspendOrgJSONRequestBody defines body for SuspendOrg for application/json ContentType.
 type SuspendOrgJSONRequestBody = SuspendRequest
 
@@ -478,6 +557,12 @@ type ServerInterface interface {
 	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/memberships)
 	ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams)
+	// GetOrgSettings Org の段のセキュリティ設定を返す（2.8）
+	// (GET /v1/admin/orgs/{id}/settings)
+	GetOrgSettings(w http.ResponseWriter, r *http.Request, id string)
+	// PutOrgSettings Org の段のセキュリティ設定を置き換える（2.8、5.4、10章）
+	// (PUT /v1/admin/orgs/{id}/settings)
+	PutOrgSettings(w http.ResponseWriter, r *http.Request, id string)
 	// ListOrgSuspensions Orgの停止の一覧（解除・終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/suspensions)
 	ListOrgSuspensions(w http.ResponseWriter, r *http.Request, id string)
@@ -790,6 +875,58 @@ func (siw *ServerInterfaceWrapper) ListOrgMemberships(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListOrgMemberships(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOrgSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetOrgSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOrgSettings(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutOrgSettings operation middleware
+func (siw *ServerInterfaceWrapper) PutOrgSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutOrgSettings(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1431,6 +1568,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs", wrapper.CreateOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.GetOrg)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.UpdateOrg)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/settings", wrapper.GetOrgSettings)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/orgs/{id}/settings", wrapper.PutOrgSettings)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}:delete", wrapper.DeleteOrg)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}:cancel-deletion", wrapper.CancelOrgDeletion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/memberships", wrapper.ListOrgMemberships)
@@ -2204,6 +2343,163 @@ func (response ListOrgMemberships404JSONResponse) VisitListOrgMembershipsRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgSettingsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetOrgSettingsResponseObject interface {
+	VisitGetOrgSettingsResponse(w http.ResponseWriter) error
+}
+
+type GetOrgSettings200JSONResponse OrgSettingsView
+
+func (response GetOrgSettings200JSONResponse) VisitGetOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgSettings401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetOrgSettings401JSONResponse) VisitGetOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgSettings403JSONResponse Error
+
+func (response GetOrgSettings403JSONResponse) VisitGetOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgSettings404JSONResponse Error
+
+func (response GetOrgSettings404JSONResponse) VisitGetOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutOrgSettingsRequestObject struct {
+	Id   string `json:"id"`
+	Body *PutOrgSettingsJSONRequestBody
+}
+
+type PutOrgSettingsResponseObject interface {
+	VisitPutOrgSettingsResponse(w http.ResponseWriter) error
+}
+
+type PutOrgSettings200JSONResponse OrgSettingsView
+
+func (response PutOrgSettings200JSONResponse) VisitPutOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutOrgSettings400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PutOrgSettings400JSONResponse) VisitPutOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutOrgSettings401JSONResponse Error
+
+func (response PutOrgSettings401JSONResponse) VisitPutOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutOrgSettings403JSONResponse Error
+
+func (response PutOrgSettings403JSONResponse) VisitPutOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutOrgSettings404JSONResponse Error
+
+func (response PutOrgSettings404JSONResponse) VisitPutOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutOrgSettings409JSONResponse Error
+
+func (response PutOrgSettings409JSONResponse) VisitPutOrgSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3661,6 +3957,12 @@ type StrictServerInterface interface {
 	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/memberships)
 	ListOrgMemberships(ctx context.Context, request ListOrgMembershipsRequestObject) (ListOrgMembershipsResponseObject, error)
+	// GetOrgSettings Org の段のセキュリティ設定を返す（2.8）
+	// (GET /v1/admin/orgs/{id}/settings)
+	GetOrgSettings(ctx context.Context, request GetOrgSettingsRequestObject) (GetOrgSettingsResponseObject, error)
+	// PutOrgSettings Org の段のセキュリティ設定を置き換える（2.8、5.4、10章）
+	// (PUT /v1/admin/orgs/{id}/settings)
+	PutOrgSettings(ctx context.Context, request PutOrgSettingsRequestObject) (PutOrgSettingsResponseObject, error)
 	// ListOrgSuspensions Orgの停止の一覧（解除・終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/suspensions)
 	ListOrgSuspensions(ctx context.Context, request ListOrgSuspensionsRequestObject) (ListOrgSuspensionsResponseObject, error)
@@ -4042,6 +4344,65 @@ func (sh *strictHandler) ListOrgMemberships(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListOrgMembershipsResponseObject); ok {
 		if err := validResponse.VisitListOrgMembershipsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOrgSettings operation middleware
+func (sh *strictHandler) GetOrgSettings(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetOrgSettingsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOrgSettings(ctx, request.(GetOrgSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOrgSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOrgSettingsResponseObject); ok {
+		if err := validResponse.VisitGetOrgSettingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutOrgSettings operation middleware
+func (sh *strictHandler) PutOrgSettings(w http.ResponseWriter, r *http.Request, id string) {
+	var request PutOrgSettingsRequestObject
+
+	request.Id = id
+
+	var body PutOrgSettingsJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutOrgSettings(ctx, request.(PutOrgSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutOrgSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutOrgSettingsResponseObject); ok {
+		if err := validResponse.VisitPutOrgSettingsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

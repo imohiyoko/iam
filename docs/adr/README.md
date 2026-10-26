@@ -73,3 +73,4 @@
 | [0059](0059-leaving-removal-and-transfer.md) | 退会・除名・オーナーの譲渡 | 承認 |
 | [0060](0060-org-deletion-and-scheduled-cleanup.md) | Org の削除と、予約した後始末 | 承認 |
 | [0061](0061-account-deletion.md) | アカウントの削除 | 承認 |
+| [0062](0062-org-tier-settings.md) | 設定の Org の段（セッションの寿命と警告のアクション） | 承認 |

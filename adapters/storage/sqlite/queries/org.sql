@@ -17,6 +17,9 @@ UPDATE orgs SET valid_from = ?, valid_until = ?, updated_at = ? WHERE realm_id =
 -- name: SetOrgDeletion :execrows
 UPDATE orgs SET deletion_scheduled_at = ?, deleted_at = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
 
+-- name: SetOrgSettings :execrows
+UPDATE orgs SET settings = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
+
 -- name: GetMembership :one
 SELECT * FROM memberships WHERE realm_id = ? AND id = ?;
 

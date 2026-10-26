@@ -337,7 +337,7 @@ func (q *Queries) GetMembershipByUserOrg(ctx context.Context, arg GetMembershipB
 }
 
 const getOrg = `-- name: GetOrg :one
-SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at FROM orgs WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = ? AND id = ?
 `
 
 type GetOrgParams struct {
@@ -361,12 +361,13 @@ func (q *Queries) GetOrg(ctx context.Context, arg GetOrgParams) (Org, error) {
 		&i.UpdatedAt,
 		&i.DeletionScheduledAt,
 		&i.DeletedAt,
+		&i.Settings,
 	)
 	return i, err
 }
 
 const getOrgByPublicID = `-- name: GetOrgByPublicID :one
-SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at FROM orgs WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = ? AND public_id = ?
 `
 
 type GetOrgByPublicIDParams struct {
@@ -390,12 +391,13 @@ func (q *Queries) GetOrgByPublicID(ctx context.Context, arg GetOrgByPublicIDPara
 		&i.UpdatedAt,
 		&i.DeletionScheduledAt,
 		&i.DeletedAt,
+		&i.Settings,
 	)
 	return i, err
 }
 
 const getPersonalOrg = `-- name: GetPersonalOrg :one
-SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at FROM orgs WHERE realm_id = ? AND kind = 'personal' AND personal_owner_id = ?
+SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = ? AND kind = 'personal' AND personal_owner_id = ?
 `
 
 type GetPersonalOrgParams struct {
@@ -419,6 +421,7 @@ func (q *Queries) GetPersonalOrg(ctx context.Context, arg GetPersonalOrgParams) 
 		&i.UpdatedAt,
 		&i.DeletionScheduledAt,
 		&i.DeletedAt,
+		&i.Settings,
 	)
 	return i, err
 }
@@ -588,6 +591,30 @@ func (q *Queries) SetOrgDeletion(ctx context.Context, arg SetOrgDeletionParams) 
 	result, err := q.db.ExecContext(ctx, setOrgDeletion,
 		arg.DeletionScheduledAt,
 		arg.DeletedAt,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setOrgSettings = `-- name: SetOrgSettings :execrows
+UPDATE orgs SET settings = ?, updated_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type SetOrgSettingsParams struct {
+	Settings  []byte
+	UpdatedAt string
+	RealmID   string
+	ID        string
+}
+
+func (q *Queries) SetOrgSettings(ctx context.Context, arg SetOrgSettingsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setOrgSettings,
+		arg.Settings,
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.ID,

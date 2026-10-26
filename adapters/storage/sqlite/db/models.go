@@ -244,6 +244,7 @@ type Org struct {
 	UpdatedAt           string
 	DeletionScheduledAt sql.NullString
 	DeletedAt           sql.NullString
+	Settings            []byte
 }
 
 type ScheduledEvent struct {

@@ -749,6 +749,9 @@ func (s publicServer) SwitchMyOrg(ctx context.Context, req publicapi.SwitchMyOrg
 	switch {
 	case errors.Is(err, org.ErrNoAvailableOrg):
 		return publicapi.SwitchMyOrg403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errs.CodeNoAvailableOrg}}, nil
+	case errors.Is(err, session.ErrReauthRequired):
+		// 切り替え先の Org の寿命を超えている（5.4）。再認証のログインで、その Org を指定して入り直す。
+		return publicapi.SwitchMyOrg401JSONResponse{UnauthenticatedJSONResponse: publicapi.UnauthenticatedJSONResponse{Error: session.CodeReauthRequired}}, nil
 	case errors.Is(err, errs.Unauthenticated), errors.Is(err, errs.NotFound):
 		return publicapi.SwitchMyOrg401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	case err != nil:

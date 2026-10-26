@@ -457,6 +457,8 @@ type Org struct {
 	DeletionScheduledAt *time.Time
 	// DeletedAt は削除した時刻。削除した Org は墓標として行を残す。
 	DeletedAt *time.Time
+	// Settings は Org の段のセキュリティ設定（design.md 2.8。JSON、形は authn/org が決める）。nil は未設定（realm に従う）。
+	Settings  []byte
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -473,6 +475,8 @@ type OrgRepo interface {
 	SetValidity(ctx context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error
 	// SetDeletion は削除の予定と削除の時刻を置き換える。無ければ errs.NotFound。
 	SetDeletion(ctx context.Context, realmID, id string, scheduledAt, deletedAt *time.Time, updatedAt time.Time) error
+	// SetSettings は Org の段の設定を置き換える。nil は未設定に戻す。無ければ errs.NotFound。
+	SetSettings(ctx context.Context, realmID, id string, settings []byte, updatedAt time.Time) error
 }
 
 // MembershipStatus は Membership の状態（design.md 3.1）。

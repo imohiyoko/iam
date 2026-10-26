@@ -22,6 +22,15 @@ type auth struct {
 	viaCookie bool
 }
 
+// recent は直近に認証したセッションか（active な Org の max_auth_age の内。5.4）。
+func (s publicServer) recent(au auth) bool {
+	age := au.MaxAuthAge
+	if age <= 0 {
+		age = s.a.cfg.Security.Session.MaxAuthAge.Default.D()
+	}
+	return s.a.deps.Clock.Now().Sub(au.AuthenticatedAt) <= age
+}
+
 func authFrom(ctx context.Context) (auth, bool) {
 	a, ok := ctx.Value(authKey{}).(auth)
 	return a, ok

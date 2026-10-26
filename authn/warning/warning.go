@@ -148,32 +148,85 @@ func Validate(actions map[string]Action) error {
 // Evaluate は該当した警告のうち ignore でないものを返す。deny が1つでもあれば *DeniedError も返す。
 // e が nil（フィーチャーが動いていない）なら何もしない。
 func (e *Evaluator) Evaluate(ev Evidence) ([]Warning, error) {
+	return e.Apply(e.Hits(ev), nil)
+}
+
+// Hits は該当した警告をすべて（ignore のものも）、realm の段のアクションをつけて返す。
+// セッションに残し、Org の段で厳しくしたアクションを後から当てはめる（Apply。2.8、10章）。
+func (e *Evaluator) Hits(ev Evidence) []Warning {
 	if e == nil {
-		return nil, nil
+		return nil
 	}
 	var out []Warning
-	var denied []string
 	for _, r := range e.rules {
 		params, hit := r.Check(ev)
 		if !hit {
 			continue
 		}
-		a, ok := e.actions[r.Code]
-		if !ok {
-			a = r.Default
+		out = append(out, Warning{Code: r.Code, Severity: r.Severity, Action: e.action(r), Params: params})
+	}
+	return out
+}
+
+func (e *Evaluator) action(r Rule) Action {
+	if a, ok := e.actions[r.Code]; ok {
+		return a
+	}
+	return r.Default
+}
+
+// Action は realm の段の code のアクションを返す。未知のコードは ignore。
+func (e *Evaluator) Action(code string) Action {
+	if e == nil {
+		return Ignore
+	}
+	for _, r := range e.rules {
+		if r.Code == code {
+			return e.action(r)
+		}
+	}
+	return Ignore
+}
+
+// Apply は該当した警告（Hits）に、realm の段のアクションと、org（Org の段。厳しくする向きだけ効く）を当てはめ、
+// ignore でないものを返す。deny が1つでもあれば *DeniedError も返す。e が nil なら何もしない。
+func (e *Evaluator) Apply(hits []Warning, org map[string]Action) ([]Warning, error) {
+	if e == nil {
+		return nil, nil
+	}
+	var out []Warning
+	var denied []string
+	for _, w := range hits {
+		a := e.Action(w.Code)
+		if o, ok := org[w.Code]; ok && Stricter(o, a) {
+			a = o
 		}
 		switch a {
 		case Ignore:
 			continue
 		case Deny:
-			denied = append(denied, r.Code)
+			denied = append(denied, w.Code)
 		}
-		out = append(out, Warning{Code: r.Code, Severity: r.Severity, Action: a, Params: params})
+		w.Action = a
+		out = append(out, w)
 	}
 	if len(denied) > 0 {
 		return out, &DeniedError{Codes: denied}
 	}
 	return out, nil
+}
+
+// Stricter は a が b より厳しいか（ignore < warn < deny）。
+func Stricter(a, b Action) bool { return rank(a) > rank(b) }
+
+func rank(a Action) int {
+	switch a {
+	case Warn:
+		return 1
+	case Deny:
+		return 2
+	}
+	return 0
 }
 
 // DeniedError は警告が deny になったことを表す。本人確認の後なので、理由のコードを本人に返す（4.9）。

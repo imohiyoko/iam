@@ -65,6 +65,8 @@ type Service struct {
 	InvitationTTL time.Duration
 	// DeletionGrace は本人（owner）による Org の削除の猶予期間。0 なら猶予なし。
 	DeletionGrace time.Duration
+	// Rules は Org の段の設定の規則（2.8）。
+	Rules Rules
 }
 
 // NormalizeName は名前の前後の空白を除き、形式を確かめる。
