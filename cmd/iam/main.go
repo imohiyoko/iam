@@ -43,6 +43,8 @@ const usage = `usage: iam <command> [flags]
 commands:
   serve     -config iam.yaml        IAM を起動する
   migrate   -config iam.yaml        Storage のマイグレーションを適用する
+  features enable -config iam.yaml <name>
+                                    フィーチャーを有効にする（準備処理の後に active。サーバーは再起動で反映）
   version   [-manifest]             バージョン（とバイナリの構成）を表示する
   keys generate -out keys.json      KeyStore（file）用の鍵を作る
   operator create -config iam.yaml -email <address> [-role realm:owner] [-ttl 15m]
@@ -72,6 +74,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return keys(args[1:], stdout, stderr)
 	case "operator":
 		return operator(ctx, args[1:], stdout, stderr)
+	case "features":
+		return features(ctx, args[1:], stdout, stderr)
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return nil
@@ -236,6 +240,43 @@ func operator(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	} else {
 		fmt.Fprintln(stdout, "open <public_url>/login/link#token=<token> in a browser, or POST /v1/login/link:redeem {\"token\": \"...\"}")
 	}
+	return nil
+}
+
+func features(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	const use = "usage: iam features enable -config iam.yaml <name>"
+	if len(args) == 0 || args[0] != "enable" {
+		return errors.New(use)
+	}
+	fs := flag.NewFlagSet("features enable", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cfg, err := loadConfig(fs, args[1:])
+	if err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New(use)
+	}
+	name := fs.Arg(0)
+	log := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	deps, closeFn, err := build(ctx, cfg, log, stdout)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	a, err := app.New(ctx, cfg, deps, feature.Registered())
+	if err != nil {
+		return err
+	}
+	changed, err := a.EnableFeature(ctx, name)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		fmt.Fprintf(stdout, "%s is already active\n", name)
+		return nil
+	}
+	fmt.Fprintf(stdout, "%s is now active. Restart the servers to apply it.\n", name)
 	return nil
 }
 

@@ -1616,6 +1616,48 @@ func (q *Queries) ListTOTPByUser(ctx context.Context, arg ListTOTPByUserParams) 
 	return items, nil
 }
 
+const listUsers = `-- name: ListUsers :many
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at FROM authn_users WHERE realm_id = ? AND id > ?2 ORDER BY id LIMIT ?3
+`
+
+type ListUsersParams struct {
+	RealmID string
+	After   string
+	Lim     int64
+}
+
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]AuthnUser, error) {
+	rows, err := q.db.QueryContext(ctx, listUsers, arg.RealmID, arg.After, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnUser
+	for rows.Next() {
+		var i AuthnUser
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.Status,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markScheduledEventFired = `-- name: MarkScheduledEventFired :execrows
 UPDATE scheduled_events SET fired_at = ? WHERE realm_id = ? AND id = ? AND fired_at IS NULL
 `

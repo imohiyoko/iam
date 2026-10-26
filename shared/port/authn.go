@@ -38,6 +38,8 @@ type UserRepo interface {
 	Create(ctx context.Context, u User) error // ID か (realm, PublicID) が重複すれば errs.Conflict
 	Get(ctx context.Context, realmID, id string) (User, error)
 	GetByPublicID(ctx context.Context, realmID, publicID string) (User, error)
+	// List は realm のユーザーを内部 ID の順に、afterID より後から最大 limit 件返す（準備処理などの一括の処理用）。
+	List(ctx context.Context, realmID, afterID string, limit int) ([]User, error)
 	// SetValidity は有効期間（design.md 4.8）を置き換える。無ければ errs.NotFound。
 	SetValidity(ctx context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error
 }

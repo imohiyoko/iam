@@ -29,6 +29,13 @@ type Service struct {
 	VerifiedVia []port.VerifiedVia
 	// ExtraCategories は realm で足した停止の種別（4.7）。
 	ExtraCategories []string
+	// Orgs はユーザーと同じトランザクションで個人 Org を作る（11.13）。nil ならフィーチャー org が動いていない。
+	Orgs PersonalOrgs
+}
+
+// PersonalOrgs は個人 Org を作るもの（authn/org）。
+type PersonalOrgs interface {
+	CreatePersonal(ctx context.Context, tx port.Tx, u port.User, actor audit.Actor, requestID string) (port.Org, error)
 }
 
 // ErrEmailInvalid はメールアドレスの形式の誤り。
@@ -98,11 +105,18 @@ func (s *Service) CreateWithEmail(ctx context.Context, tx port.Tx, realmID, emai
 	if actor.Type == "" {
 		actor = audit.Actor{Type: "user", ID: u.PublicID}
 	}
-	_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
+	if _, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{
 		Type: "user.created", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
 		Details: map[string]any{"user_id": u.PublicID, "verified_via": string(via)},
-	})
-	return Created{User: u, Email: e}, err
+	}); err != nil {
+		return Created{}, err
+	}
+	if s.Orgs != nil {
+		if _, err := s.Orgs.CreatePersonal(ctx, tx, u, actor, requestID); err != nil {
+			return Created{}, err
+		}
+	}
+	return Created{User: u, Email: e}, nil
 }
 
 // ErrEmailExists は、アドレスが既にどれかのユーザーに紐付いていること（1つのアドレスは1ユーザーにだけ紐付く。4.2）。

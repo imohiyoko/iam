@@ -65,6 +65,20 @@ func (r users) GetByPublicID(_ context.Context, realmID, publicID string) (port.
 	return port.User{}, errs.New(errs.KindNotFound, "user")
 }
 
+func (r users) List(_ context.Context, realmID, afterID string, limit int) ([]port.User, error) {
+	var out []port.User
+	for _, u := range r.t.s.users {
+		if u.RealmID == realmID && u.ID > afterID {
+			out = append(out, cloneUser(u))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 // ---------------------------------------------------------------------------
 
 type emails struct{ t *tx }

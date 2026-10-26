@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ var authnTests = []struct {
 	fn   func(*testing.T, Harness)
 }{
 	{"Users", testUsers},
+	{"UserList", testUserList},
 	{"Emails", testEmails},
 	{"EmailUniqueConcurrent", testEmailUniqueConcurrent},
 	{"Identities", testIdentities},
@@ -119,6 +121,43 @@ func testUsers(t *testing.T, h Harness) {
 		}
 		_, err = tx.Users().Get(ctx, id.New(id.Realm), u.ID)
 		return notFound("user from another realm", err)
+	})
+}
+
+func testUserList(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r := id.New(id.Realm)
+	var ids []string
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		for range 5 {
+			u := newUser(r)
+			ids = append(ids, u.ID)
+			if err := tx.Users().Create(ctx, u); err != nil {
+				return err
+			}
+		}
+		slices.Sort(ids)
+		var got []string
+		for after := ""; ; {
+			page, err := tx.Users().List(ctx, r, after, 2)
+			if err != nil {
+				return err
+			}
+			if len(page) == 0 {
+				break
+			}
+			if len(page) > 2 {
+				return fmt.Errorf("users.List returned %d > limit", len(page))
+			}
+			for _, u := range page {
+				got = append(got, u.ID)
+			}
+			after = page[len(page)-1].ID
+		}
+		if !slices.Equal(got, ids) {
+			return fmt.Errorf("users.List = %v, want %v", got, ids)
+		}
+		return nil
 	})
 }
 
@@ -546,7 +585,7 @@ func countOne[V any](_ V, err error) (int, error) {
 
 var authnIsolationCases = []IsolationCase{
 	{
-		Name: "Users.Get+GetByPublicID",
+		Name: "Users.Get+GetByPublicID+List",
 		Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
 			u := newUser(r)
 			u.ID, u.PublicID = isoUser, isoPublic
@@ -558,7 +597,11 @@ var authnIsolationCases = []IsolationCase{
 				return 0, err
 			}
 			m, err := countOne(tx.Users().GetByPublicID(ctx, r, isoPublic))
-			return n + m, err
+			if err != nil {
+				return 0, err
+			}
+			l, err := count(tx.Users().List(ctx, r, "", 10))
+			return n + m + l, err
 		},
 	},
 	{

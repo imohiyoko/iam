@@ -105,6 +105,11 @@ func (r users) GetByPublicID(ctx context.Context, realmID, publicID string) (por
 	return one(row, err, toUser)
 }
 
+func (r users) List(ctx context.Context, realmID, afterID string, limit int) ([]port.User, error) {
+	rs, err := r.q.ListUsers(ctx, db.ListUsersParams{RealmID: realmID, After: afterID, Lim: int64(limit)})
+	return rows(rs, err, toUser)
+}
+
 // ---------------------------------------------------------------------------
 
 type emails struct{ q *db.Queries }

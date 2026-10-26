@@ -98,6 +98,14 @@ type Manager struct {
 	Log     *slog.Logger
 	// Warnings は認証の警告の評価器（10章）。nil ならフィーチャー warnings が動いておらず、評価しない。
 	Warnings *warning.Evaluator
+	// Orgs はセッションの active な Org を決める（4.4）。nil ならフィーチャー org が動いておらず、active な Org を持たない。
+	Orgs OrgPicker
+}
+
+// OrgPicker はログインで入る Org を決めるもの（authn/org）。
+type OrgPicker interface {
+	// Pick は Org の内部 ID を返す。explicit（内部 ID）が空でなければ、その Org に入る。
+	Pick(ctx context.Context, tx port.Tx, u port.User, explicit, requestID string) (string, error)
 }
 
 // Issue は新しいセッションの発行の内容。
@@ -121,6 +129,8 @@ type Issue struct {
 	AuthenticatedAt time.Time
 	// Recovery は復旧専用のセッション（新しい認証手段の登録と復旧の完了だけ。4.12）を発行する。2要素目は求めない。
 	Recovery bool
+	// OrgID は入る Org の内部 ID（明示的な指定、2要素目の前の段の Org）。空なら OrgPicker が決める。
+	OrgID string
 }
 
 // Issued は発行したセッションと、クライアントに渡すトークン。
@@ -199,9 +209,15 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	s.TokenHash = hash
-	actor, err := userActor(ctx, tx, in.RealmID, in.UserID)
+	u, err := tx.Users().Get(ctx, in.RealmID, in.UserID)
 	if err != nil {
 		return Issued{}, err
+	}
+	actor := audit.Actor{Type: "user", ID: u.PublicID}
+	if m.Orgs != nil {
+		if s.ActiveOrgID, err = m.Orgs.Pick(ctx, tx, u, in.OrgID, in.RequestID); err != nil {
+			return Issued{}, err
+		}
 	}
 	if err := tx.Sessions().Create(ctx, s); err != nil {
 		return Issued{}, err
@@ -228,8 +244,16 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 			replaced = old.ID
 		}
 	}
+	var orgPublicID string
+	if s.ActiveOrgID != "" {
+		o, err := tx.Orgs().Get(ctx, in.RealmID, s.ActiveOrgID)
+		if err != nil {
+			return Issued{}, err
+		}
+		orgPublicID = o.PublicID
+	}
 	_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
-		Type: "session.created", Result: audit.ResultSuccess, RealmID: in.RealmID,
+		Type: "session.created", Result: audit.ResultSuccess, RealmID: in.RealmID, OrgID: orgPublicID,
 		Actor: actor, SessionID: s.ID, IP: in.IP, UserAgent: in.UserAgent,
 		RequestID: in.RequestID, Details: details,
 	})
@@ -357,6 +381,7 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
 		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt,
+		OrgID: old.ActiveOrgID,
 	})
 	if err != nil {
 		return Issued{}, err
@@ -421,7 +446,9 @@ type Validated struct {
 	PrincipalType port.PrincipalType
 	PrincipalID   string // 内部 ID。外に出さない（ADR 0045）
 	// PublicID は主体の公開 ID。API の応答や監査ログにはこちらを使う。
-	PublicID        string
+	PublicID string
+	// ActiveOrgID は active な Org の内部 ID。フィーチャー org が動いていなければ空。
+	ActiveOrgID     string
 	AuthMethods     []string
 	AuthenticatedAt time.Time
 	// Restriction は使える操作の制限（2要素目の確認待ちなど）。空なら制限なし。
@@ -436,6 +463,7 @@ type cached struct {
 	PrincipalType   port.PrincipalType      `json:"pt"`
 	PrincipalID     string                  `json:"p"`
 	PublicID        string                  `json:"u"`
+	ActiveOrgID     string                  `json:"o,omitempty"`
 	AuthMethods     []string                `json:"amr"`
 	AuthenticatedAt time.Time               `json:"at"`
 	CreatedAt       time.Time               `json:"c"`
@@ -487,7 +515,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 			next = earliest(next, now.Add(m.Config.IdleTimeout))
 		}
 		c = cached{Hash: s.TokenHash, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
-			AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
+			ActiveOrgID: s.ActiveOrgID, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
 		return nil
 	})
 	if errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) {
@@ -509,7 +537,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 
 func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Validated {
 	v := Validated{SessionID: sid, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
-		PublicID: c.PublicID, AuthMethods: c.AuthMethods, AuthenticatedAt: c.AuthenticatedAt, Restriction: c.Restriction}
+		PublicID: c.PublicID, ActiveOrgID: c.ActiveOrgID, AuthMethods: c.AuthMethods, AuthenticatedAt: c.AuthenticatedAt, Restriction: c.Restriction}
 	if m.Config.RotationInterval > 0 && !now.Before(c.CreatedAt.Add(m.Config.RotationInterval)) {
 		v.RotateDue = true
 	}
