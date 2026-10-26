@@ -189,3 +189,24 @@ func TestPasskeySecondFactor(t *testing.T) {
 		t.Fatalf("amr: %v", got)
 	}
 }
+
+// single_factor を deny にしても、2要素目を待つ制限つきのセッションは発行し、2要素目の後に評価する。
+func TestSingleFactorDenyWaitsForSecondFactor(t *testing.T) {
+	l := newLoginEnvWith(t, func(c *config.Config) {
+		c.Security.SecondFactor.Required = true
+		c.Security.Warnings = map[string]string{"single_factor": "deny"}
+	}, nil)
+	login, enroll := l.login(t, "sam@example.com")
+	if login["next"] != "enroll" || len(login["warnings"].([]any)) != 0 {
+		t.Fatalf("login: %v", login)
+	}
+	secret, status, res, _ := l.enrollTOTP(t, enroll)
+	if status != 200 || res["login"] == nil {
+		t.Fatalf("confirm: %d %v", status, res)
+	}
+	_, restricted := l.login(t, "sam@example.com")
+	l.advance(30 * time.Second)
+	if status, res, _ := l.post(t, restricted, "/v1/login/second-factor:verify", map[string]string{"totp_code": l.code(t, secret)}); status != 200 || len(res["warnings"].([]any)) != 0 {
+		t.Fatalf("verify: %d %v", status, res)
+	}
+}

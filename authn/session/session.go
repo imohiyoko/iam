@@ -105,6 +105,8 @@ type Issue struct {
 	IP        string
 	UserAgent string
 	RequestID string
+	// Carried は前の段（2要素目の前の制限つきのセッション）の警告。評価の結果に合わせて残す。
+	Carried []warning.Warning
 	// ReplaceToken は同じブラウザが持っていた古いセッションのトークン。ログイン時に ID を入れ替える（5.2）。
 	// トークン（秘密を含む）で指定させ、ID だけで他人のセッションを失効させられないようにする。
 	ReplaceToken string
@@ -135,12 +137,21 @@ func (m *Manager) Committed(ctx context.Context, realmID string, is Issued) {
 func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, error) {
 	now := m.Clock.Now()
 	// 認証の後・セッションの作成の前に警告を評価する（10章、11.8 の post_authentication）。
-	ev := in.Evidence
-	ev.AMR = in.AuthMethods
-	warnings, err := m.Warnings.Evaluate(ev)
+	restriction, methods, err := m.secondFactor(ctx, tx, in)
 	if err != nil {
 		return Issued{}, err
 	}
+	ev := in.Evidence
+	ev.AMR = in.AuthMethods
+	warnings, err := m.Warnings.Evaluate(ev)
+	if restriction != port.RestrictionNone {
+		// 2要素目を待つ間は1要素なのが当然なので、single_factor は2要素目の後に評価する（deny でも2要素目に進める）。
+		warnings, err = withoutSingleFactor(warnings, err)
+	}
+	if err != nil {
+		return Issued{}, err
+	}
+	warnings = carry(warnings, in.Carried)
 	warningsJSON, err := json.Marshal(nonNilWarnings(warnings))
 	if err != nil {
 		return Issued{}, err
@@ -150,10 +161,6 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	ua, err := m.encrypt(ctx, tx, in.UserID, in.UserAgent, "session.user_agent")
-	if err != nil {
-		return Issued{}, err
-	}
-	restriction, methods, err := m.secondFactor(ctx, tx, in)
 	if err != nil {
 		return Issued{}, err
 	}
@@ -205,6 +212,28 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		RequestID: in.RequestID, Details: details,
 	})
 	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced, SecondFactorMethods: methods}, err
+}
+
+func withoutSingleFactor(ws []warning.Warning, err error) ([]warning.Warning, error) {
+	ws = slices.DeleteFunc(ws, func(w warning.Warning) bool { return w.Code == warning.CodeSingleFactor })
+	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+		codes := slices.DeleteFunc(slices.Clone(d.Codes), func(c string) bool { return c == warning.CodeSingleFactor })
+		if len(codes) == 0 {
+			return ws, nil
+		}
+		return ws, &warning.DeniedError{Codes: codes}
+	}
+	return ws, err
+}
+
+// carry は前の段の警告のうち、新しい評価に無いコードのものを足す。
+func carry(ws, carried []warning.Warning) []warning.Warning {
+	for _, c := range carried {
+		if !slices.ContainsFunc(ws, func(w warning.Warning) bool { return w.Code == c.Code }) {
+			ws = append(ws, c)
+		}
+	}
+	return ws
 }
 
 func (m *Manager) secondFactorTTL() time.Duration {
@@ -290,9 +319,15 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 			amr = append(amr, a)
 		}
 	}
+	var carried []warning.Warning
+	if len(old.Warnings) > 0 {
+		if err := json.Unmarshal(old.Warnings, &carried); err != nil {
+			return Issued{}, err
+		}
+	}
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
-		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID,
+		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried,
 	})
 	if err != nil {
 		return Issued{}, err
