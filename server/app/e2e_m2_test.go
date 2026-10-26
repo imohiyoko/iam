@@ -12,7 +12,7 @@ import (
 //   - 最後の認証手段・最後の確認済みメールを本人が消せない：TestUnlinkLastMethod、TestPasskeyLastMethod、TestAddAndRemoveEmail
 //   - 無効化した passkey の再登録が拒否される：TestPasskeyRegisterLoginRevoke、下の E2E
 //   - 偽の時計で、予約した停止と有効期間の境界が時刻どおりに効く：TestAdminSuspensions、TestAdminValidity、authn/account の TestSuspensionBoundaries
-//   - 復旧専用のセッションで認証手段の登録以外が拒否される：TestRecoveryCodeFlow ほか（assertRecoveryOnly）
+//   - 復旧専用のセッションで認証手段の登録以外が拒否される（復旧の完了とログアウトは使える。ADR 0054）：TestRecoveryCodeFlow ほか（assertRecoveryOnly）、下の E2E
 //   - 無効化した認証情報で作られたセッションが使えなくなる：TestPasskeyRegisterLoginRevoke、TestAdminRevokeCredentials、下の E2E
 //
 // 下の E2E はゴール（1人が複数の手段を持ち、失っても戻れる）を通しで確かめる。
@@ -80,7 +80,12 @@ func TestE2EM2LoseEverythingAndRecover(t *testing.T) {
 		t.Fatalf("login after recovery: %d", status)
 	}
 	// 新しいリカバリーコードは使える（次に失ったとき）。
-	if status, out, _ := l.post(t, "", "/v1/recovery/code:redeem", map[string]string{"email": "pat@example.com", "code": fresh[0]}); status != 200 || out["next"] != "recovery" {
+	status, out, rec2 := l.post(t, "", "/v1/recovery/code:redeem", map[string]string{"email": "pat@example.com", "code": fresh[0]})
+	if status != 200 || out["next"] != "recovery" {
 		t.Fatalf("new recovery code: %d %v", status, out)
+	}
+	// 復旧専用のセッションでもログアウトはできる（ADR 0054）。
+	if w := l.do(t, l.a.PublicHandler(), "POST", "/v1/logout", nil, "Cookie", sessionCookie+"="+rec2); w.Code != 204 {
+		t.Fatalf("logout in recovery: %d %s", w.Code, w.Body)
 	}
 }
