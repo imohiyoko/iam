@@ -924,6 +924,12 @@ type ServerInterface interface {
 	// BindMyOrgEmail この Org で使うメールを結び付ける（4.4）
 	// (POST /v1/me/orgs/{id}:bind-email)
 	BindMyOrgEmail(w http.ResponseWriter, r *http.Request, id string)
+	// CancelMyOrgDeletion Org の削除の予定を取り消す（Org の owner。猶予期間の間だけ）
+	// (POST /v1/me/orgs/{id}:cancel-deletion)
+	CancelMyOrgDeletion(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteMyOrg 共有 Org を削除する（Org の owner。4.10）
+	// (POST /v1/me/orgs/{id}:delete)
+	DeleteMyOrg(w http.ResponseWriter, r *http.Request, id string)
 	// LeaveMyOrg 共有 Org から退会する（4.10）
 	// (POST /v1/me/orgs/{id}:leave)
 	LeaveMyOrg(w http.ResponseWriter, r *http.Request, id string)
@@ -1737,6 +1743,58 @@ func (siw *ServerInterfaceWrapper) BindMyOrgEmail(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// CancelMyOrgDeletion operation middleware
+func (siw *ServerInterfaceWrapper) CancelMyOrgDeletion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelMyOrgDeletion(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMyOrg operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMyOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMyOrg(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // LeaveMyOrg operation middleware
 func (siw *ServerInterfaceWrapper) LeaveMyOrg(w http.ResponseWriter, r *http.Request) {
 
@@ -2288,6 +2346,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs", wrapper.ListMyOrgs)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs", wrapper.CreateMyOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/members", wrapper.ListOrgMembers)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:delete", wrapper.DeleteMyOrg)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:cancel-deletion", wrapper.CancelMyOrgDeletion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:leave", wrapper.LeaveMyOrg)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:transfer", wrapper.TransferMyOrg)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:remove", wrapper.RemoveOrgMember)
@@ -4533,6 +4593,160 @@ func (response BindMyOrgEmail409JSONResponse) VisitBindMyOrgEmailResponse(w http
 	return err
 }
 
+type CancelMyOrgDeletionRequestObject struct {
+	Id string `json:"id"`
+}
+
+type CancelMyOrgDeletionResponseObject interface {
+	VisitCancelMyOrgDeletionResponse(w http.ResponseWriter) error
+}
+
+type CancelMyOrgDeletion204Response struct {
+}
+
+func (response CancelMyOrgDeletion204Response) VisitCancelMyOrgDeletionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type CancelMyOrgDeletion401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CancelMyOrgDeletion401JSONResponse) VisitCancelMyOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelMyOrgDeletion403JSONResponse struct{ DeniedJSONResponse }
+
+func (response CancelMyOrgDeletion403JSONResponse) VisitCancelMyOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelMyOrgDeletion404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CancelMyOrgDeletion404JSONResponse) VisitCancelMyOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelMyOrgDeletion409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CancelMyOrgDeletion409JSONResponse) VisitCancelMyOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteMyOrgResponseObject interface {
+	VisitDeleteMyOrgResponse(w http.ResponseWriter) error
+}
+
+type DeleteMyOrg200JSONResponse struct {
+	// Deleted もう削除したか
+	Deleted   bool      `json:"deleted"`
+	DeletesAt time.Time `json:"deletes_at"`
+}
+
+func (response DeleteMyOrg200JSONResponse) VisitDeleteMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrg401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteMyOrg401JSONResponse) VisitDeleteMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrg403JSONResponse struct{ DeniedJSONResponse }
+
+func (response DeleteMyOrg403JSONResponse) VisitDeleteMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrg404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteMyOrg404JSONResponse) VisitDeleteMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrg409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteMyOrg409JSONResponse) VisitDeleteMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type LeaveMyOrgRequestObject struct {
 	Id string `json:"id"`
 }
@@ -5936,6 +6150,12 @@ type StrictServerInterface interface {
 	// BindMyOrgEmail この Org で使うメールを結び付ける（4.4）
 	// (POST /v1/me/orgs/{id}:bind-email)
 	BindMyOrgEmail(ctx context.Context, request BindMyOrgEmailRequestObject) (BindMyOrgEmailResponseObject, error)
+	// CancelMyOrgDeletion Org の削除の予定を取り消す（Org の owner。猶予期間の間だけ）
+	// (POST /v1/me/orgs/{id}:cancel-deletion)
+	CancelMyOrgDeletion(ctx context.Context, request CancelMyOrgDeletionRequestObject) (CancelMyOrgDeletionResponseObject, error)
+	// DeleteMyOrg 共有 Org を削除する（Org の owner。4.10）
+	// (POST /v1/me/orgs/{id}:delete)
+	DeleteMyOrg(ctx context.Context, request DeleteMyOrgRequestObject) (DeleteMyOrgResponseObject, error)
 	// LeaveMyOrg 共有 Org から退会する（4.10）
 	// (POST /v1/me/orgs/{id}:leave)
 	LeaveMyOrg(ctx context.Context, request LeaveMyOrgRequestObject) (LeaveMyOrgResponseObject, error)
@@ -7025,6 +7245,58 @@ func (sh *strictHandler) BindMyOrgEmail(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(BindMyOrgEmailResponseObject); ok {
 		if err := validResponse.VisitBindMyOrgEmailResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelMyOrgDeletion operation middleware
+func (sh *strictHandler) CancelMyOrgDeletion(w http.ResponseWriter, r *http.Request, id string) {
+	var request CancelMyOrgDeletionRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelMyOrgDeletion(ctx, request.(CancelMyOrgDeletionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelMyOrgDeletion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelMyOrgDeletionResponseObject); ok {
+		if err := validResponse.VisitCancelMyOrgDeletionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteMyOrg operation middleware
+func (sh *strictHandler) DeleteMyOrg(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteMyOrgRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteMyOrg(ctx, request.(DeleteMyOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteMyOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteMyOrgResponseObject); ok {
+		if err := validResponse.VisitDeleteMyOrgResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -78,6 +78,22 @@ func testOrgs(t *testing.T, h Harness) {
 		if err := notFound("set validity in another realm", repo.SetValidity(ctx, id.New(id.Realm), shared.ID, nil, nil, at)); err != nil {
 			return err
 		}
+		del := T0.Add(30 * 24 * time.Hour)
+		if err := repo.SetDeletion(ctx, r, shared.ID, &del, nil, at); err != nil {
+			return err
+		}
+		if got, _ := repo.Get(ctx, r, shared.ID); got.DeletionScheduledAt == nil || !got.DeletionScheduledAt.Equal(del) || got.DeletedAt != nil {
+			return fmt.Errorf("after scheduling deletion = %+v", got)
+		}
+		if err := repo.SetDeletion(ctx, r, shared.ID, &del, &del, at); err != nil {
+			return err
+		}
+		if got, _ := repo.GetByPublicID(ctx, r, shared.PublicID); got.DeletedAt == nil || !got.DeletedAt.Equal(del) {
+			return fmt.Errorf("after deletion = %+v", got)
+		}
+		if err := notFound("set deletion in another realm", repo.SetDeletion(ctx, id.New(id.Realm), shared.ID, nil, nil, at)); err != nil {
+			return err
+		}
 		return notFound("get in another realm", second(repo.Get(ctx, id.New(id.Realm), shared.ID)))
 	})
 }

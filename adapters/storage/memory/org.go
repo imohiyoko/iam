@@ -14,6 +14,7 @@ type orgs struct{ t *tx }
 
 func cloneOrg(o port.Org) port.Org {
 	o.ValidFrom, o.ValidUntil = cloneTime(o.ValidFrom), cloneTime(o.ValidUntil)
+	o.DeletionScheduledAt, o.DeletedAt = cloneTime(o.DeletionScheduledAt), cloneTime(o.DeletedAt)
 	return o
 }
 
@@ -66,6 +67,17 @@ func (r orgs) SetValidity(_ context.Context, realmID, id string, from, until *ti
 	}
 	o = cloneOrg(o)
 	o.ValidFrom, o.ValidUntil, o.UpdatedAt = cloneTime(from), cloneTime(until), updatedAt
+	setKey(r.t, r.t.s.orgs, id, o)
+	return nil
+}
+
+func (r orgs) SetDeletion(_ context.Context, realmID, id string, scheduledAt, deletedAt *time.Time, updatedAt time.Time) error {
+	o, err := get(r.t.s.orgs, realmID, id, func(o port.Org) string { return o.RealmID }, "org")
+	if err != nil {
+		return err
+	}
+	o = cloneOrg(o)
+	o.DeletionScheduledAt, o.DeletedAt, o.UpdatedAt = cloneTime(scheduledAt), cloneTime(deletedAt), updatedAt
 	setKey(r.t, r.t.s.orgs, id, o)
 	return nil
 }

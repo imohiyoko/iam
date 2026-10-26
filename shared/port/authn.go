@@ -439,8 +439,12 @@ type Org struct {
 	PersonalOwnerID string
 	ValidFrom       *time.Time // 有効期間（design.md 4.8）。nil は制限なし
 	ValidUntil      *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// DeletionScheduledAt は削除の予定の時刻（猶予期間の終わり。4.10）。nil なら予定なし。
+	DeletionScheduledAt *time.Time
+	// DeletedAt は削除した時刻。削除した Org は墓標として行を残す。
+	DeletedAt *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // OrgRepo は orgs の Repository。
@@ -453,6 +457,8 @@ type OrgRepo interface {
 	GetPersonal(ctx context.Context, realmID, userID string) (Org, error)
 	// SetValidity は有効期間（design.md 4.8）を置き換える。無ければ errs.NotFound。
 	SetValidity(ctx context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error
+	// SetDeletion は削除の予定と削除の時刻を置き換える。無ければ errs.NotFound。
+	SetDeletion(ctx context.Context, realmID, id string, scheduledAt, deletedAt *time.Time, updatedAt time.Time) error
 }
 
 // MembershipStatus は Membership の状態（design.md 3.1）。
@@ -518,6 +524,7 @@ const (
 	InvitationPending  InvitationStatus = "pending"
 	InvitationAccepted InvitationStatus = "accepted"
 	InvitationRevoked  InvitationStatus = "revoked"
+	InvitationExpired  InvitationStatus = "expired" // 期限の後に片付けた（アドレスの鍵を消した）
 )
 
 // Invitation は invitations の1行（design.md 3.1、4.4）。アドレスは招待ごとのデータ鍵（ID は招待の内部 ID）で暗号化し、

@@ -1066,6 +1066,52 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}:delete:
+    post:
+      operationId: deleteMyOrg
+      summary: 共有 Org を削除する（Org の owner。4.10）
+      description: |
+        realm の `org_deletion_grace`（既定30日）の後に削除する。その間はメンバーが入れず（`deletion_scheduled`）、
+        `:cancel-deletion` で取り消せる。削除では全 Membership を `org_deleted` で終え、pending の招待を取り消す。
+        個人 Org は `409 personal_org`、既に予定があれば `409 deletion_scheduled`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 削除を予約した（猶予が無ければ削除した）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deletes_at, deleted]
+                properties:
+                  deletes_at: { type: string, format: date-time }
+                  deleted: { type: boolean, description: もう削除したか }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}:cancel-deletion:
+    post:
+      operationId: cancelMyOrgDeletion
+      summary: Org の削除の予定を取り消す（Org の owner。猶予期間の間だけ）
+      description: 予定が無ければ `409 deletion_not_scheduled`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 取り消した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /v1/me/orgs/{id}:leave:
     post:
       operationId: leaveMyOrg

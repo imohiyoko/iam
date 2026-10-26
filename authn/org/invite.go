@@ -127,6 +127,11 @@ func (s *Service) Invite(ctx context.Context, tx port.Tx, o port.Org, in Invite,
 	if err := tx.Invitations().Create(ctx, inv); err != nil {
 		return Invited{}, err
 	}
+	// 期限の後にアドレスの鍵を消す（ADR 0060）。受け入れ・取り消しでは close が予約を取り消す。
+	if err := eventlog.Schedule(ctx, tx, s.Clock, o.RealmID, invitationRef(inv), EventInvitationExpired, inv.ExpiresAt,
+		map[string]any{"invitation_id": inv.PublicID}); err != nil {
+		return Invited{}, err
+	}
 	n := port.Notification{Type: TypeInvitation, RealmID: o.RealmID, UserID: userPublicID, OrgID: o.PublicID}
 	if _, err := s.Notify.Enqueue(ctx, tx, n, &notify.Secret{To: email, Token: token, ExpiresAt: inv.ExpiresAt}); err != nil {
 		return Invited{}, err
@@ -184,7 +189,36 @@ func (s *Service) close(ctx context.Context, tx port.Tx, inv port.Invitation, st
 	if !ok {
 		return ErrInvitationInvalid
 	}
+	if err := tx.ScheduledEvents().CancelByRef(ctx, inv.RealmID, invitationRef(inv)); err != nil {
+		return err
+	}
 	return tx.DataKeys().Delete(ctx, inv.ID)
+}
+
+// EventInvitationExpired は招待の期限の後始末の出来事（Scheduler の Handler は ExpireDue）。
+const EventInvitationExpired = "org.invitation.expired"
+
+func invitationRef(inv port.Invitation) string { return "invitation:" + inv.PublicID }
+
+// ExpireDue は期限を過ぎた pending の招待を expired にし、アドレスの鍵を消す（eventlog.Handler）。
+// 既に終わった招待は何もしない。
+func (s *Service) ExpireDue(ctx context.Context, tx port.Tx, e port.ScheduledEvent, details map[string]any) error {
+	publicID, _ := details["invitation_id"].(string)
+	inv, err := tx.Invitations().GetByPublicID(ctx, e.RealmID, publicID)
+	if errors.Is(err, errs.NotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if inv.Status != port.InvitationPending {
+		return nil
+	}
+	err = s.close(ctx, tx, inv, port.InvitationExpired, "")
+	if errors.Is(err, ErrInvitationInvalid) {
+		return nil
+	}
+	return err
 }
 
 // Accepted は受け入れの結果。Created は招待からの登録で作ったユーザー（ログインしていない受け入れ）。

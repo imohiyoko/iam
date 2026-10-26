@@ -216,6 +216,12 @@ type MembershipStatus string
 type Org struct {
 	CreatedAt time.Time `json:"created_at"`
 
+	// DeletedAt 削除した時刻
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+
+	// DeletionScheduledAt 削除の予定（猶予期間の終わり）
+	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
+
 	// Id 公開の Org ID
 	Id   string  `json:"id"`
 	Kind OrgKind `json:"kind"`
@@ -361,6 +367,11 @@ type ListOrgMembershipsParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// DeleteOrgJSONBody defines parameters for DeleteOrg.
+type DeleteOrgJSONBody struct {
+	Immediate *bool `json:"immediate,omitempty"`
+}
+
 // CreateUserJSONBody defines parameters for CreateUser.
 type CreateUserJSONBody struct {
 	Email string `json:"email"`
@@ -394,6 +405,9 @@ type UpdateOrgJSONRequestBody = Validity
 
 // SuspendOrgJSONRequestBody defines body for SuspendOrg for application/json ContentType.
 type SuspendOrgJSONRequestBody = SuspendRequest
+
+// DeleteOrgJSONRequestBody defines body for DeleteOrg for application/json ContentType.
+type DeleteOrgJSONRequestBody DeleteOrgJSONBody
 
 // LiftSuspensionJSONRequestBody defines body for LiftSuspension for application/json ContentType.
 type LiftSuspensionJSONRequestBody = LiftRequest
@@ -451,6 +465,12 @@ type ServerInterface interface {
 	// SuspendOrg Orgを停止する（4.7）
 	// (POST /v1/admin/orgs/{id}/suspensions)
 	SuspendOrg(w http.ResponseWriter, r *http.Request, id string)
+	// CancelOrgDeletion Org の削除の予定を取り消す
+	// (POST /v1/admin/orgs/{id}:cancel-deletion)
+	CancelOrgDeletion(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteOrg 共有 Org を削除する（4.10）
+	// (POST /v1/admin/orgs/{id}:delete)
+	DeleteOrg(w http.ResponseWriter, r *http.Request, id string)
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(w http.ResponseWriter, r *http.Request, id string)
@@ -794,6 +814,58 @@ func (siw *ServerInterfaceWrapper) SuspendOrg(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SuspendOrg(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelOrgDeletion operation middleware
+func (siw *ServerInterfaceWrapper) CancelOrgDeletion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelOrgDeletion(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteOrg operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteOrg(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1250,6 +1322,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs", wrapper.CreateOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.GetOrg)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.UpdateOrg)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}:delete", wrapper.DeleteOrg)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}:cancel-deletion", wrapper.CancelOrgDeletion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/memberships", wrapper.ListOrgMemberships)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/suspensions", wrapper.ListOrgSuspensions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}/suspensions", wrapper.SuspendOrg)
@@ -2196,6 +2270,163 @@ func (response SuspendOrg409JSONResponse) VisitSuspendOrgResponse(w http.Respons
 	return err
 }
 
+type CancelOrgDeletionRequestObject struct {
+	Id string `json:"id"`
+}
+
+type CancelOrgDeletionResponseObject interface {
+	VisitCancelOrgDeletionResponse(w http.ResponseWriter) error
+}
+
+type CancelOrgDeletion200JSONResponse Org
+
+func (response CancelOrgDeletion200JSONResponse) VisitCancelOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelOrgDeletion401JSONResponse struct{ ErrorJSONResponse }
+
+func (response CancelOrgDeletion401JSONResponse) VisitCancelOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelOrgDeletion403JSONResponse Error
+
+func (response CancelOrgDeletion403JSONResponse) VisitCancelOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelOrgDeletion404JSONResponse Error
+
+func (response CancelOrgDeletion404JSONResponse) VisitCancelOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelOrgDeletion409JSONResponse Error
+
+func (response CancelOrgDeletion409JSONResponse) VisitCancelOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgRequestObject struct {
+	Id   string `json:"id"`
+	Body *DeleteOrgJSONRequestBody
+}
+
+type DeleteOrgResponseObject interface {
+	VisitDeleteOrgResponse(w http.ResponseWriter) error
+}
+
+type DeleteOrg200JSONResponse Org
+
+func (response DeleteOrg200JSONResponse) VisitDeleteOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrg401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteOrg401JSONResponse) VisitDeleteOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrg403JSONResponse Error
+
+func (response DeleteOrg403JSONResponse) VisitDeleteOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrg404JSONResponse Error
+
+func (response DeleteOrg404JSONResponse) VisitDeleteOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrg409JSONResponse Error
+
+func (response DeleteOrg409JSONResponse) VisitDeleteOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RevokeSessionRequestObject struct {
 	Id string `json:"id"`
 }
@@ -3091,6 +3322,12 @@ type StrictServerInterface interface {
 	// SuspendOrg Orgを停止する（4.7）
 	// (POST /v1/admin/orgs/{id}/suspensions)
 	SuspendOrg(ctx context.Context, request SuspendOrgRequestObject) (SuspendOrgResponseObject, error)
+	// CancelOrgDeletion Org の削除の予定を取り消す
+	// (POST /v1/admin/orgs/{id}:cancel-deletion)
+	CancelOrgDeletion(ctx context.Context, request CancelOrgDeletionRequestObject) (CancelOrgDeletionResponseObject, error)
+	// DeleteOrg 共有 Org を削除する（4.10）
+	// (POST /v1/admin/orgs/{id}:delete)
+	DeleteOrg(ctx context.Context, request DeleteOrgRequestObject) (DeleteOrgResponseObject, error)
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(ctx context.Context, request RevokeSessionRequestObject) (RevokeSessionResponseObject, error)
@@ -3510,6 +3747,68 @@ func (sh *strictHandler) SuspendOrg(w http.ResponseWriter, r *http.Request, id s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SuspendOrgResponseObject); ok {
 		if err := validResponse.VisitSuspendOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelOrgDeletion operation middleware
+func (sh *strictHandler) CancelOrgDeletion(w http.ResponseWriter, r *http.Request, id string) {
+	var request CancelOrgDeletionRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelOrgDeletion(ctx, request.(CancelOrgDeletionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelOrgDeletion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelOrgDeletionResponseObject); ok {
+		if err := validResponse.VisitCancelOrgDeletionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteOrg operation middleware
+func (sh *strictHandler) DeleteOrg(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteOrgRequestObject
+
+	request.Id = id
+
+	var body DeleteOrgJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteOrg(ctx, request.(DeleteOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteOrgResponseObject); ok {
+		if err := validResponse.VisitDeleteOrgResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

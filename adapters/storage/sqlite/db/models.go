@@ -230,16 +230,18 @@ type Membership struct {
 }
 
 type Org struct {
-	ID              string
-	PublicID        string
-	RealmID         string
-	Kind            string
-	Name            string
-	PersonalOwnerID string
-	ValidFrom       sql.NullString
-	ValidUntil      sql.NullString
-	CreatedAt       string
-	UpdatedAt       string
+	ID                  string
+	PublicID            string
+	RealmID             string
+	Kind                string
+	Name                string
+	PersonalOwnerID     string
+	ValidFrom           sql.NullString
+	ValidUntil          sql.NullString
+	CreatedAt           string
+	UpdatedAt           string
+	DeletionScheduledAt sql.NullString
+	DeletedAt           sql.NullString
 }
 
 type ScheduledEvent struct {
