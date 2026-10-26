@@ -66,14 +66,7 @@ func (s publicServer) VerifyEmailLogin(ctx context.Context, req publicapi.Verify
 		return nil, err
 	}
 	setCookie(ctx, &http.Cookie{Name: flowCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
-	out := publicapi.VerifyEmailLogin200JSONResponse{SessionId: v.Session.Session.ID, ExpiresAt: v.Session.Session.ExpiresAt,
-		UserId: v.UserID, Created: v.Created, Warnings: warningsOut(v.Session.Warnings)}
-	if req.Body.ReturnToken != nil && *req.Body.ReturnToken {
-		out.Token = &v.Session.Token
-	}
-	// return_token でも Cookie は差し替える。送られてきた Cookie のセッションは入れ替えで失効しているため。
-	setCookie(ctx, sessionCookieFor(v.Session.Token, v.Session.Session.ExpiresAt, s.a.deps.Clock.Now()))
-	return out, nil
+	return publicapi.VerifyEmailLogin200JSONResponse(s.loginResult(ctx, v.Session, v.UserID, v.Created, req.Body.ReturnToken)), nil
 }
 
 func deref[T any](p *T) T {
@@ -104,12 +97,5 @@ func (s publicServer) RedeemLoginLink(ctx context.Context, req publicapi.RedeemL
 	if err != nil {
 		return nil, err
 	}
-	out := publicapi.RedeemLoginLink200JSONResponse{SessionId: is.Session.ID, ExpiresAt: is.Session.ExpiresAt,
-		UserId: uid, Created: false, Warnings: warningsOut(is.Warnings)}
-	if req.Body.ReturnToken != nil && *req.Body.ReturnToken {
-		out.Token = &is.Token
-	}
-	// return_token でも Cookie は差し替える。送られてきた Cookie のセッションは入れ替えで失効しているため。
-	setCookie(ctx, sessionCookieFor(is.Token, is.Session.ExpiresAt, s.a.deps.Clock.Now()))
-	return out, nil
+	return publicapi.RedeemLoginLink200JSONResponse(s.loginResult(ctx, is, uid, false, req.Body.ReturnToken)), nil
 }

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -42,6 +43,11 @@ type Config struct {
 	RotationInterval time.Duration
 	// RotationGrace は入れ替え前の ID を使える猶予（同時に送られたリクエストを失敗させないため）。
 	RotationGrace time.Duration
+	// RequireSecondFactor は2段階認証を必須にする（2.8）。2要素目が未登録のユーザーには、登録だけできる
+	// セッションを発行する。false でも、2要素目を登録したユーザーには2要素目を求める（4.1）。
+	RequireSecondFactor bool
+	// SecondFactorTTL は2要素目の確認・登録を待つ制限つきのセッションの寿命。既定 10 分。
+	SecondFactorTTL time.Duration
 }
 
 // 失効の理由。
@@ -51,7 +57,18 @@ const (
 	ReasonReplacedByLogin = "replaced_by_login"
 	ReasonUser            = "revoked_by_user"
 	ReasonAdmin           = "revoked_by_admin"
+	// ReasonSecondFactor は2要素目の確認で、制限つきのセッションを通常のセッションに替えたこと。
+	ReasonSecondFactor = "second_factor_completed"
 )
+
+// 2要素目の種類（LoginResult の second_factor_methods）。
+const (
+	SecondFactorPasskey = "passkey"
+	SecondFactorTOTP    = "totp"
+)
+
+// AMRMFA は複数の要素で認証したことを表す amr（RFC 8176）。
+const AMRMFA = "mfa"
 
 // ErrInvalid は検証の失敗。理由は外部に返さない（authentication_failed に統一する。4.9）。
 var ErrInvalid = errs.WithCode(errs.KindUnauthenticated, errs.CodeAuthenticationFailed, "session invalid")
@@ -101,6 +118,8 @@ type Issued struct {
 	Warnings []warning.Warning
 	// Replaced は入れ替えで失効させた古いセッションの ID（無ければ空）。
 	Replaced string
+	// SecondFactorMethods は、制限つき（2要素目の確認待ち）のときに使える2要素目の種類。
+	SecondFactorMethods []string
 }
 
 // Committed は Issue を呼んだトランザクションが確定した後に呼ぶ。入れ替えた古いセッションの
@@ -134,10 +153,17 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	if err != nil {
 		return Issued{}, err
 	}
+	restriction, methods, err := m.secondFactor(ctx, tx, in)
+	if err != nil {
+		return Issued{}, err
+	}
 	s := port.Session{
 		ID: id.NewExternal(id.Session), RealmID: in.RealmID, PrincipalType: port.PrincipalUser, PrincipalID: in.UserID,
 		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: warningsJSON, IP: ip, UserAgent: ua,
-		AuthenticatedAt: now, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime),
+		AuthenticatedAt: now, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime), Restriction: restriction,
+	}
+	if restriction != port.RestrictionNone {
+		s.ExpiresAt = earliest(s.ExpiresAt, now.Add(m.secondFactorTTL()))
 	}
 	token, hash, err := newToken(s.ID)
 	if err != nil {
@@ -152,6 +178,9 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	details := map[string]any{"amr": in.AuthMethods}
+	if restriction != port.RestrictionNone {
+		details["restriction"] = string(restriction)
+	}
 	var replaced string
 	if len(warnings) > 0 {
 		details["warnings"] = warnings
@@ -175,7 +204,101 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		Actor: actor, SessionID: s.ID, IP: in.IP, UserAgent: in.UserAgent,
 		RequestID: in.RequestID, Details: details,
 	})
-	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced}, err
+	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced, SecondFactorMethods: methods}, err
+}
+
+func (m *Manager) secondFactorTTL() time.Duration {
+	if m.Config.SecondFactorTTL <= 0 {
+		return 10 * time.Minute
+	}
+	return m.Config.SecondFactorTTL
+}
+
+// secondFactor は発行するセッションの制限を決める（4.1）。本人確認（UV）つきの passkey と、2要素目を
+// 確認した後（amr に mfa）は制限しない。2要素目を登録したユーザーには2要素目の確認を、必須で未登録なら登録を求める。
+func (m *Manager) secondFactor(ctx context.Context, tx port.Tx, in Issue) (port.SessionRestriction, []string, error) {
+	if slices.Contains(in.AuthMethods, AMRMFA) || (slices.Contains(in.AuthMethods, "hwk") && slices.Contains(in.AuthMethods, "user")) {
+		return port.RestrictionNone, nil, nil
+	}
+	methods, err := SecondFactors(ctx, tx, in.RealmID, in.UserID)
+	if err != nil {
+		return "", nil, err
+	}
+	switch {
+	case len(methods) > 0:
+		return port.RestrictionSecondFactor, methods, nil
+	case m.Config.RequireSecondFactor:
+		return port.RestrictionEnroll, nil, nil
+	}
+	return port.RestrictionNone, nil, nil
+}
+
+// SecondFactors はユーザーが登録している（無効化していない）2要素目の種類を返す。
+func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string) ([]string, error) {
+	var out []string
+	ps, err := tx.Passkeys().ListByUser(ctx, realmID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if slices.ContainsFunc(ps, func(p port.Passkey) bool { return p.RevokedAt == nil }) {
+		out = append(out, SecondFactorPasskey)
+	}
+	ts, err := tx.TOTP().ListByUser(ctx, realmID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if slices.ContainsFunc(ts, func(c port.TOTPCredential) bool { return c.RevokedAt == nil }) {
+		out = append(out, SecondFactorTOTP)
+	}
+	return out, nil
+}
+
+// ErrNotRestricted は、2要素目で替えようとしたセッションが制限つきでないこと。
+var ErrNotRestricted = errs.New(errs.KindFailedPrecondition, "session is not waiting for a second factor")
+
+// SecondFactor は2要素目の確認の内容。
+type SecondFactor struct {
+	AMR          []string // 確認した要素の amr（otp、hwk など）
+	CredentialID string   // 使った認証情報の ID（内部 ID）
+	IP           string
+	UserAgent    string
+	RequestID    string
+}
+
+// CompleteSecondFactor は、2要素目を確認した制限つきのセッション（内部の確認待ちか登録だけのもの）を失効させ、
+// 通常のセッションを発行する。amr は1要素目と2要素目を合わせ、mfa を加える。呼び出し側のトランザクションで呼び、
+// 確定の後に Committed を呼ぶ。
+func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID, sessionID string, f SecondFactor) (Issued, error) {
+	now := m.Clock.Now()
+	old, err := tx.Sessions().Get(ctx, realmID, sessionID)
+	if err != nil {
+		return Issued{}, err
+	}
+	if old.Restriction == port.RestrictionNone || (old.RevokedAt != nil && !now.Before(*old.RevokedAt)) || !now.Before(old.ExpiresAt) {
+		return Issued{}, ErrNotRestricted
+	}
+	actor, err := userActor(ctx, tx, realmID, old.PrincipalID)
+	if err != nil {
+		return Issued{}, err
+	}
+	if err := m.revokeInTx(ctx, tx, old, ReasonSecondFactor, actor, f.RequestID); err != nil {
+		return Issued{}, err
+	}
+	amr := slices.Clone(old.AuthMethods)
+	for _, a := range append(slices.Clone(f.AMR), AMRMFA) {
+		if !slices.Contains(amr, a) {
+			amr = append(amr, a)
+		}
+	}
+	is, err := m.Issue(ctx, tx, Issue{
+		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
+		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID,
+	})
+	if err != nil {
+		return Issued{}, err
+	}
+	is.Replaced = old.ID
+	return is, nil
 }
 
 func nonNilWarnings(w []warning.Warning) []warning.Warning {
@@ -237,20 +360,23 @@ type Validated struct {
 	PublicID        string
 	AuthMethods     []string
 	AuthenticatedAt time.Time
+	// Restriction は使える操作の制限（2要素目の確認待ちなど）。空なら制限なし。
+	Restriction port.SessionRestriction
 	// RotateDue は ID の入れ替えの時期を過ぎていることを表す（Cookie のセッションで入れ替える）。
 	RotateDue bool
 }
 
 // cached はキャッシュに置く検証の結果。秘密は置かない。
 type cached struct {
-	Hash            []byte             `json:"h"`
-	PrincipalType   port.PrincipalType `json:"pt"`
-	PrincipalID     string             `json:"p"`
-	PublicID        string             `json:"u"`
-	AuthMethods     []string           `json:"amr"`
-	AuthenticatedAt time.Time          `json:"at"`
-	CreatedAt       time.Time          `json:"c"`
-	NextCheck       time.Time          `json:"n"`
+	Hash            []byte                  `json:"h"`
+	PrincipalType   port.PrincipalType      `json:"pt"`
+	PrincipalID     string                  `json:"p"`
+	PublicID        string                  `json:"u"`
+	AuthMethods     []string                `json:"amr"`
+	AuthenticatedAt time.Time               `json:"at"`
+	CreatedAt       time.Time               `json:"c"`
+	NextCheck       time.Time               `json:"n"`
+	Restriction     port.SessionRestriction `json:"r,omitempty"`
 }
 
 func cacheKey(realmID, sessionID string) string { return "session:v1:" + realmID + ":" + sessionID }
@@ -297,7 +423,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 			next = earliest(next, now.Add(m.Config.IdleTimeout))
 		}
 		c = cached{Hash: s.TokenHash, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
-			AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next}
+			AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
 		return nil
 	})
 	if errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) {
@@ -319,7 +445,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 
 func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Validated {
 	v := Validated{SessionID: sid, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
-		PublicID: c.PublicID, AuthMethods: c.AuthMethods, AuthenticatedAt: c.AuthenticatedAt}
+		PublicID: c.PublicID, AuthMethods: c.AuthMethods, AuthenticatedAt: c.AuthenticatedAt, Restriction: c.Restriction}
 	if m.Config.RotationInterval > 0 && !now.Before(c.CreatedAt.Add(m.Config.RotationInterval)) {
 		v.RotateDue = true
 	}
@@ -354,7 +480,7 @@ func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now tim
 	if u.ValidUntil != nil {
 		next = earliest(next, *u.ValidUntil)
 	}
-	// 認証に使った外部 ID や passkey が無効化されていれば、そのセッションも使えない（4.6）。
+	// 認証に使った外部 ID・passkey・TOTP が無効化されていれば、そのセッションも使えない（4.6）。
 	if err := checkCredentials(ctx, tx, s); err != nil {
 		return time.Time{}, port.User{}, err
 	}
@@ -364,6 +490,7 @@ func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now tim
 func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 	var identities []port.Identity
 	var passkeys []port.Passkey
+	var totps []port.TOTPCredential
 	for _, c := range s.AuthCredentialIDs {
 		var revoked, found bool
 		switch {
@@ -389,6 +516,18 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 			for _, p := range passkeys {
 				if p.ID == c {
 					found, revoked = true, p.RevokedAt != nil
+				}
+			}
+		case strings.HasPrefix(c, string(id.TOTP)+"_"):
+			if totps == nil {
+				var err error
+				if totps, err = tx.TOTP().ListByUser(ctx, s.RealmID, s.PrincipalID); err != nil {
+					return err
+				}
+			}
+			for _, t := range totps {
+				if t.ID == c {
+					found, revoked = true, t.RevokedAt != nil
 				}
 			}
 		default:

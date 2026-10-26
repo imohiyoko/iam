@@ -65,12 +65,5 @@ func (s publicServer) CompleteOAuthLogin(ctx context.Context, req publicapi.Comp
 	case err != nil:
 		return nil, err
 	}
-	out := publicapi.CompleteOAuthLogin200JSONResponse{SessionId: res.Session.Session.ID, ExpiresAt: res.Session.Session.ExpiresAt,
-		UserId: res.UserID, Created: res.Created, Warnings: warningsOut(res.Session.Warnings)}
-	if req.Body.ReturnToken != nil && *req.Body.ReturnToken {
-		out.Token = &res.Session.Token
-	}
-	// return_token でも Cookie は差し替える。送られてきた Cookie のセッションは入れ替えで失効しているため。
-	setCookie(ctx, sessionCookieFor(res.Session.Token, res.Session.Session.ExpiresAt, s.a.deps.Clock.Now()))
-	return out, nil
+	return publicapi.CompleteOAuthLogin200JSONResponse(s.loginResult(ctx, res.Session, res.UserID, res.Created, req.Body.ReturnToken)), nil
 }

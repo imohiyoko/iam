@@ -76,6 +76,11 @@ func (a *App) withSession(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// 制限つき（2要素目の確認待ちなど）のセッションは、決まった API の他では未ログインとして扱う（4.1）。
+		if !restrictionAllows(v.Restriction, r.Method, r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if viaCookie && v.RotateDue {
 			if is, err := a.sessions.Rotate(ctx, a.realm.ID, v.SessionID, requestID(ctx)); err == nil {
 				http.SetCookie(w, sessionCookieFor(is.Token, is.Session.ExpiresAt, a.deps.Clock.Now()))

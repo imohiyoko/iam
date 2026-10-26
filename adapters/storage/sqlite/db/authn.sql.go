@@ -248,8 +248,8 @@ func (q *Queries) CreateServiceAccountCredential(ctx context.Context, arg Create
 
 const createSession = `-- name: CreateSession :exec
 INSERT INTO authn_sessions (id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids,
-    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateSessionParams struct {
@@ -270,6 +270,7 @@ type CreateSessionParams struct {
 	ExpiresAt         string
 	RevokedAt         sql.NullString
 	RevokeReason      string
+	Restriction       string
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
@@ -289,6 +290,39 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 		arg.CreatedAt,
 		arg.LastSeenAt,
 		arg.ExpiresAt,
+		arg.RevokedAt,
+		arg.RevokeReason,
+		arg.Restriction,
+	)
+	return err
+}
+
+const createTOTP = `-- name: CreateTOTP :exec
+INSERT INTO authn_totp_credentials (id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateTOTPParams struct {
+	ID               string
+	PublicID         string
+	RealmID          string
+	UserID           string
+	SecretCiphertext []byte
+	LastUsedStep     int64
+	CreatedAt        string
+	RevokedAt        sql.NullString
+	RevokeReason     string
+}
+
+func (q *Queries) CreateTOTP(ctx context.Context, arg CreateTOTPParams) error {
+	_, err := q.db.ExecContext(ctx, createTOTP,
+		arg.ID,
+		arg.PublicID,
+		arg.RealmID,
+		arg.UserID,
+		arg.SecretCiphertext,
+		arg.LastUsedStep,
+		arg.CreatedAt,
 		arg.RevokedAt,
 		arg.RevokeReason,
 	)
@@ -699,7 +733,7 @@ func (q *Queries) GetServiceAccountCredential(ctx context.Context, arg GetServic
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason FROM authn_sessions WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction FROM authn_sessions WHERE realm_id = ? AND id = ?
 `
 
 type GetSessionParams struct {
@@ -726,6 +760,59 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (AuthnSe
 		&i.CreatedAt,
 		&i.LastSeenAt,
 		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+		&i.Restriction,
+	)
+	return i, err
+}
+
+const getTOTP = `-- name: GetTOTP :one
+SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials WHERE realm_id = ? AND id = ?
+`
+
+type GetTOTPParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetTOTP(ctx context.Context, arg GetTOTPParams) (AuthnTotpCredential, error) {
+	row := q.db.QueryRowContext(ctx, getTOTP, arg.RealmID, arg.ID)
+	var i AuthnTotpCredential
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.UserID,
+		&i.SecretCiphertext,
+		&i.LastUsedStep,
+		&i.CreatedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
+const getTOTPByPublicID = `-- name: GetTOTPByPublicID :one
+SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials WHERE realm_id = ? AND public_id = ?
+`
+
+type GetTOTPByPublicIDParams struct {
+	RealmID  string
+	PublicID string
+}
+
+func (q *Queries) GetTOTPByPublicID(ctx context.Context, arg GetTOTPByPublicIDParams) (AuthnTotpCredential, error) {
+	row := q.db.QueryRowContext(ctx, getTOTPByPublicID, arg.RealmID, arg.PublicID)
+	var i AuthnTotpCredential
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.UserID,
+		&i.SecretCiphertext,
+		&i.LastUsedStep,
+		&i.CreatedAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
 	)
@@ -1050,7 +1137,7 @@ func (q *Queries) ListRoleBindingsByRole(ctx context.Context, arg ListRoleBindin
 }
 
 const listSessionsByPrincipal = `-- name: ListSessionsByPrincipal :many
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at DESC, id DESC
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at DESC, id DESC
 `
 
 type ListSessionsByPrincipalParams struct {
@@ -1084,6 +1171,49 @@ func (q *Queries) ListSessionsByPrincipal(ctx context.Context, arg ListSessionsB
 			&i.CreatedAt,
 			&i.LastSeenAt,
 			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.RevokeReason,
+			&i.Restriction,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTOTPByUser = `-- name: ListTOTPByUser :many
+SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
+`
+
+type ListTOTPByUserParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) ListTOTPByUser(ctx context.Context, arg ListTOTPByUserParams) ([]AuthnTotpCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listTOTPByUser, arg.RealmID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnTotpCredential
+	for rows.Next() {
+		var i AuthnTotpCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.UserID,
+			&i.SecretCiphertext,
+			&i.LastUsedStep,
+			&i.CreatedAt,
 			&i.RevokedAt,
 			&i.RevokeReason,
 		); err != nil {
@@ -1251,6 +1381,27 @@ func (q *Queries) RevokeSessionsByPrincipal(ctx context.Context, arg RevokeSessi
 	return items, nil
 }
 
+const revokeTOTP = `-- name: RevokeTOTP :exec
+UPDATE authn_totp_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
+`
+
+type RevokeTOTPParams struct {
+	RevokedAt    sql.NullString
+	RevokeReason string
+	RealmID      string
+	ID           string
+}
+
+func (q *Queries) RevokeTOTP(ctx context.Context, arg RevokeTOTPParams) error {
+	_, err := q.db.ExecContext(ctx, revokeTOTP,
+		arg.RevokedAt,
+		arg.RevokeReason,
+		arg.RealmID,
+		arg.ID,
+	)
+	return err
+}
+
 const setPrimaryEmail = `-- name: SetPrimaryEmail :exec
 UPDATE authn_user_emails SET is_primary = (id = ?1) WHERE realm_id = ?2 AND user_id = ?3
 `
@@ -1304,6 +1455,25 @@ func (q *Queries) UsePasskey(ctx context.Context, arg UsePasskeyParams) (int64, 
 		arg.RealmID,
 		arg.ID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const useTOTP = `-- name: UseTOTP :execrows
+UPDATE authn_totp_credentials SET last_used_step = ?1
+WHERE realm_id = ?2 AND id = ?3 AND last_used_step < ?1
+`
+
+type UseTOTPParams struct {
+	Step    int64
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) UseTOTP(ctx context.Context, arg UseTOTPParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, useTOTP, arg.Step, arg.RealmID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

@@ -33,7 +33,7 @@ const hostedCSP = "default-src 'none'; script-src 'self'; style-src 'self'; conn
 
 // texts は画面の文言。言語を足すときはここに足す。
 type texts struct {
-	Title, Email, SendCode, Or, ContinueWith, CodeSent, Code, Verify, UseAnother, Working string
+	Title, Email, SendCode, Or, ContinueWith, CodeSent, Code, Verify, UseAnother, Working, TOTP string
 	// Messages は API のエラーのコードなどに対応する文言（JS が使う）。
 	Messages map[string]string
 }
@@ -42,23 +42,27 @@ var catalog = map[string]texts{
 	"en": {
 		Title: "Sign in", Email: "Email address", SendCode: "Send code", Or: "or", ContinueWith: "Continue with",
 		CodeSent: "If the address can sign in, we sent a 6-digit code. It expires in a few minutes.", Code: "Code",
-		Verify: "Sign in", UseAnother: "Use another address", Working: "Signing in…",
+		Verify: "Sign in", UseAnother: "Use another address", Working: "Signing in…", TOTP: "Code from your authenticator app",
 		Messages: map[string]string{
 			"done": "You are signed in.", "warnings": "You are signed in. Please review your account security.",
 			"authentication_failed": "Sign-in failed. Please try again.", "invalid_email": "Enter a valid email address.",
 			"rate_limited": "Too many attempts. Please wait and try again.", "account_exists": "This email is already registered. Sign in with your email first, then link this provider.",
 			"email_unverified": "The provider has not verified your email address.", "error": "Something went wrong. Please try again.",
+			"second_factor_unsupported": "Confirm with your passkey in the app to finish signing in.",
+			"enroll_required":           "Set up two-step verification in the app to finish signing in.",
 		},
 	},
 	"ja": {
 		Title: "ログイン", Email: "メールアドレス", SendCode: "コードを送る", Or: "または", ContinueWith: "次で続ける：",
 		CodeSent: "ログインできるアドレスなら、6桁のコードを送りました。数分で期限が切れます。", Code: "コード",
-		Verify: "ログイン", UseAnother: "別のアドレスを使う", Working: "ログインしています…",
+		Verify: "ログイン", UseAnother: "別のアドレスを使う", Working: "ログインしています…", TOTP: "認証アプリのコード",
 		Messages: map[string]string{
 			"done": "ログインしました。", "warnings": "ログインしました。アカウントの安全性を確認してください。",
 			"authentication_failed": "ログインできませんでした。もう一度お試しください。", "invalid_email": "正しいメールアドレスを入力してください。",
 			"rate_limited": "試行が多すぎます。しばらく待ってからお試しください。", "account_exists": "このメールは登録済みです。先にメールでログインしてから、このプロバイダを連携してください。",
 			"email_unverified": "プロバイダでメールアドレスが確認されていません。", "error": "問題が起きました。もう一度お試しください。",
+			"second_factor_unsupported": "ログインを終えるには、アプリで passkey による確認をしてください。",
+			"enroll_required":           "ログインを終えるには、アプリで2段階認証を設定してください。",
 		},
 	},
 }

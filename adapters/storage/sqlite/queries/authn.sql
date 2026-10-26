@@ -62,8 +62,8 @@ SELECT * FROM authn_connections WHERE realm_id = ? ORDER BY slug;
 
 -- name: CreateSession :exec
 INSERT INTO authn_sessions (id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids,
-    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetSession :one
 SELECT * FROM authn_sessions WHERE realm_id = ? AND id = ?;
@@ -143,3 +143,23 @@ UPDATE authn_passkeys SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? A
 -- name: AddRevokedPasskeyCredential :exec
 INSERT INTO authn_revoked_passkey_credentials (realm_id, credential_id, revoked_at) VALUES (?, ?, ?)
 ON CONFLICT (realm_id, credential_id) DO NOTHING;
+
+-- name: CreateTOTP :exec
+INSERT INTO authn_totp_credentials (id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetTOTPByPublicID :one
+SELECT * FROM authn_totp_credentials WHERE realm_id = ? AND public_id = ?;
+
+-- name: GetTOTP :one
+SELECT * FROM authn_totp_credentials WHERE realm_id = ? AND id = ?;
+
+-- name: ListTOTPByUser :many
+SELECT * FROM authn_totp_credentials WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
+
+-- name: UseTOTP :execrows
+UPDATE authn_totp_credentials SET last_used_step = sqlc.arg(step)
+WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id) AND last_used_step < sqlc.arg(step);
+
+-- name: RevokeTOTP :exec
+UPDATE authn_totp_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;

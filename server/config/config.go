@@ -124,6 +124,8 @@ type Security struct {
 	Session   SessionRules `yaml:"session"`
 	EmailFlow EmailFlow    `yaml:"email_flow"`
 	Login     Login        `yaml:"login"`
+	// SecondFactor は2段階認証（design.md 2.8、4.1）。
+	SecondFactor SecondFactor `yaml:"second_factor"`
 	// Warnings は警告のコードごとのアクション（ignore / warn / deny。design.md 10章）。無いコードは既定に従う。
 	Warnings map[string]string `yaml:"warnings"`
 }
@@ -143,6 +145,18 @@ type RateLimit struct {
 	PerIP int `yaml:"per_ip"`
 	// PerAccount はメールアドレスごとの、メールのフローの開始の上限。
 	PerAccount int `yaml:"per_account"`
+}
+
+// SecondFactor は2段階認証の設定。2要素目（passkey / TOTP）を登録したユーザーには、Required でなくても2要素目を求める。
+type SecondFactor struct {
+	// Required は2段階認証を必須にする。2要素目が未登録のユーザーは、ログインの後に登録だけできる。
+	Required bool `yaml:"required"`
+	// TTL は2要素目の確認・登録を待つ制限つきのセッションの寿命。TOTP の登録のフローの期限にも使う。
+	TTL Duration `yaml:"ttl"`
+	// MaxAttempts は TOTP の登録のフローごとの照合の回数の上限。
+	MaxAttempts int `yaml:"max_attempts"`
+	// Issuer は認証器アプリに表示する発行者の名前。空なら passkey.rp_name か realm.slug。
+	Issuer string `yaml:"issuer"`
 }
 
 // EmailFlow はメールのコード・マジックリンクの設定（design.md 4.1）。
@@ -240,6 +254,7 @@ func Default() Config {
 			RotationInterval: Duration(time.Hour),
 			RotationGrace:    Duration(time.Minute),
 		}, EmailFlow: EmailFlow{TTL: Duration(10 * time.Minute), MaxAttempts: 5},
+			SecondFactor: SecondFactor{TTL: Duration(10 * time.Minute), MaxAttempts: 5},
 			Login: Login{MinResponseTime: Duration(300 * time.Millisecond),
 				RateLimit: RateLimit{Window: Duration(10 * time.Minute), PerIP: 100, PerAccount: 5}},
 		},
@@ -347,6 +362,9 @@ func (c Config) Validate() error {
 	}
 	if ef := c.Security.EmailFlow; ef.TTL.D() <= 0 || ef.TTL.D() > time.Hour || ef.MaxAttempts < 1 || ef.MaxAttempts > 10 {
 		problems = append(problems, "security.email_flow: ttl must be within (0, 1h] and max_attempts within [1, 10]")
+	}
+	if sf := c.Security.SecondFactor; sf.TTL.D() <= 0 || sf.TTL.D() > time.Hour || sf.MaxAttempts < 1 || sf.MaxAttempts > 10 {
+		problems = append(problems, "security.second_factor: ttl must be within (0, 1h] and max_attempts within [1, 10]")
 	}
 	if l := c.Security.Login; l.MinResponseTime.D() < 0 || l.MinResponseTime.D() > 5*time.Second {
 		problems = append(problems, "security.login.min_response_time must be within [0, 5s]")

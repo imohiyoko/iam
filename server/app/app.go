@@ -25,6 +25,7 @@ import (
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/totp"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -65,6 +66,8 @@ type App struct {
 	oauth    *oauth.Service
 	// passkeys は passkey の登録とログイン。Relying Party が決まらない構成（public_url も rp_id も無い）では nil。
 	passkeys *passkey.Service
+	// totp は TOTP の登録と照合（2要素目）。
+	totp     *totp.Service
 	perIP    *ratelimit.Limiter
 	links    *loginlink.Service
 	notifier *eventlog.Relay
@@ -136,6 +139,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		Config: session.Config{
 			AbsoluteLifetime: ss.AbsoluteLifetime.Default.D(), IdleTimeout: ss.IdleTimeout.Default.D(),
 			ValidityMaxDelay: ss.ValidityMaxDelay.D(), RotationInterval: ss.RotationInterval.D(), RotationGrace: ss.RotationGrace.D(),
+			RequireSecondFactor: cfg.Security.SecondFactor.Required, SecondFactorTTL: cfg.Security.SecondFactor.TTL.D(),
 		},
 	}
 	via := make([]port.VerifiedVia, 0, len(cfg.Realm.VerifiedVia))
@@ -168,6 +172,15 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		}
 	} else {
 		d.Logger.Info("passkeys are disabled: set server.public_url or passkey.rp_id and passkey.origins")
+	}
+	issuer := cfg.Security.SecondFactor.Issuer
+	if issuer == "" {
+		_, issuer, _, _ = cfg.PasskeyRP()
+	}
+	a.totp = &totp.Service{
+		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Issuer: issuer,
+		TTL: cfg.Security.SecondFactor.TTL.D(), MaxAttempts: cfg.Security.SecondFactor.MaxAttempts,
+		PerUser: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
 	}
 	// 開発用の Notifier には、秘密の取り出し方を渡す（配信用のアプリ無しでメールのログインを試せるように）。
 	if dc, ok := d.Notifier.(devClaimer); ok && cfg.Dev {

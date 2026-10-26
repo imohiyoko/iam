@@ -102,14 +102,7 @@ func (s publicServer) FinishPasskeyLogin(ctx context.Context, req publicapi.Fini
 	case err != nil:
 		return nil, err
 	}
-	out := publicapi.FinishPasskeyLogin200JSONResponse{SessionId: res.Session.Session.ID, ExpiresAt: res.Session.Session.ExpiresAt,
-		UserId: res.UserID, Created: false, Warnings: warningsOut(res.Session.Warnings)}
-	if req.Body.ReturnToken != nil && *req.Body.ReturnToken {
-		out.Token = &res.Session.Token
-	}
-	// return_token でも Cookie は差し替える。送られてきた Cookie のセッションは入れ替えで失効しているため。
-	setCookie(ctx, sessionCookieFor(res.Session.Token, res.Session.Session.ExpiresAt, s.a.deps.Clock.Now()))
-	return out, nil
+	return publicapi.FinishPasskeyLogin200JSONResponse(s.loginResult(ctx, res.Session, res.UserID, false, req.Body.ReturnToken)), nil
 }
 
 func (s publicServer) StartRegisterPasskey(ctx context.Context, _ publicapi.StartRegisterPasskeyRequestObject) (publicapi.StartRegisterPasskeyResponseObject, error) {

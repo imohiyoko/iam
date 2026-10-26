@@ -85,6 +85,19 @@ type AuthnSession struct {
 	ExpiresAt         string
 	RevokedAt         sql.NullString
 	RevokeReason      string
+	Restriction       string
+}
+
+type AuthnTotpCredential struct {
+	ID               string
+	PublicID         string
+	RealmID          string
+	UserID           string
+	SecretCiphertext []byte
+	LastUsedStep     int64
+	CreatedAt        string
+	RevokedAt        sql.NullString
+	RevokeReason     string
 }
 
 type AuthnUser struct {
