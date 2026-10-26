@@ -51,17 +51,20 @@ type (
 	NotifierFactory  func(context.Context, Config) (port.Notifier, error)
 	KeyStoreFactory  func(context.Context, Config) (port.KeyStore, error)
 	EventSinkFactory func(context.Context, Config) (port.EventSink, error)
+	// BreachCheckFactory は漏洩済みパスワードの確認（フィーチャー password で使う）。
+	BreachCheckFactory func(context.Context, Config) (port.BreachChecker, error)
 )
 
 // Kind はアダプタの種類。
 type Kind string
 
 const (
-	KindStorage   Kind = "storage"
-	KindEphemeral Kind = "ephemeral"
-	KindNotifier  Kind = "notifier"
-	KindKeyStore  Kind = "keystore"
-	KindEventSink Kind = "event_sink"
+	KindStorage     Kind = "storage"
+	KindEphemeral   Kind = "ephemeral"
+	KindNotifier    Kind = "notifier"
+	KindKeyStore    Kind = "keystore"
+	KindEventSink   Kind = "event_sink"
+	KindBreachCheck Kind = "breach_check"
 )
 
 var (
@@ -86,6 +89,9 @@ func RegisterEphemeral(name string, f EphemeralFactory) { register(KindEphemeral
 func RegisterNotifier(name string, f NotifierFactory)   { register(KindNotifier, name, f) }
 func RegisterKeyStore(name string, f KeyStoreFactory)   { register(KindKeyStore, name, f) }
 func RegisterEventSink(name string, f EventSinkFactory) { register(KindEventSink, name, f) }
+func RegisterBreachCheck(name string, f BreachCheckFactory) {
+	register(KindBreachCheck, name, f)
+}
 
 func lookup[F any](k Kind, name string) (F, error) {
 	mu.Lock()
@@ -110,6 +116,10 @@ func KeyStore(name string) (KeyStoreFactory, error) {
 }
 func EventSink(name string) (EventSinkFactory, error) {
 	return lookup[EventSinkFactory](KindEventSink, name)
+}
+
+func BreachCheck(name string) (BreachCheckFactory, error) {
+	return lookup[BreachCheckFactory](KindBreachCheck, name)
 }
 
 // Registered はバイナリに含まれるアダプタを種類ごとに名前順で返す（マニフェスト用）。

@@ -2,6 +2,7 @@ package account
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -35,6 +36,8 @@ type Methods struct {
 	Identities []port.Identity
 	Passkeys   []port.Passkey
 	TOTP       []port.TOTPCredential // 2要素目だけに使う（ログインの手段には数えない）
+	// Password は有効なパスワード（フィーチャー password）。無ければ nil。
+	Password *port.PasswordCredential
 }
 
 // ListMethods はユーザーのメールと、無効化していない外部 ID の紐付けと passkey を返す。
@@ -56,6 +59,12 @@ func (s *Service) ListMethods(ctx context.Context, tx port.Tx, realmID, userID s
 		return Methods{}, err
 	}
 	m := Methods{Emails: es}
+	switch pw, err := tx.Passwords().GetActive(ctx, realmID, userID); {
+	case err == nil:
+		m.Password = &pw
+	case !errors.Is(err, errs.NotFound):
+		return Methods{}, err
+	}
 	for _, t := range ts {
 		if t.RevokedAt == nil {
 			m.TOTP = append(m.TOTP, t)
@@ -74,10 +83,12 @@ func (s *Service) ListMethods(ctx context.Context, tx port.Tx, realmID, userID s
 	return m, nil
 }
 
-// loginMethods はログインに使える手段の数。外部 ID の紐付け、passkey、`code` が有効なら確認済みのメール。
-// パスワードなどは、そのフィーチャーを足すときにここで数える。
+// loginMethods はログインに使える手段の数。外部 ID の紐付け、passkey、パスワード、`code` が有効なら確認済みのメール。
 func (s *Service) loginMethods(m Methods) int {
 	n := len(m.Identities) + len(m.Passkeys)
+	if m.Password != nil {
+		n++
+	}
 	if s.Allows(port.VerifiedViaCode) {
 		n += verified(m.Emails)
 	}
@@ -267,6 +278,22 @@ func (s *Service) RevokePasskey(ctx context.Context, tx port.Tx, realmID, userID
 	}
 	return p, s.record(ctx, tx, realmID, "passkey.revoked", actor, requestID,
 		map[string]any{"passkey_id": p.PublicID, "reason": ReasonRevokedByUser})
+}
+
+// RevokePassword はパスワードを無効化する（削除しない）。最後のログインの手段なら ErrLastMethod。
+// 他のセッションの失効は呼び出し側が行う（5.2）。
+func (s *Service) RevokePassword(ctx context.Context, tx port.Tx, realmID, userID string, c port.PasswordCredential, reason string, actor audit.Actor, requestID string) error {
+	m, err := s.ListMethods(ctx, tx, realmID, userID)
+	if err != nil {
+		return err
+	}
+	if s.loginMethods(m) <= 1 {
+		return ErrLastMethod
+	}
+	if err := tx.Passwords().Revoke(ctx, realmID, c.ID, s.Clock.Now(), reason); err != nil {
+		return err
+	}
+	return s.record(ctx, tx, realmID, "password.removed", actor, requestID, map[string]any{"reason": reason})
 }
 
 // RevokeTOTP は TOTP を無効化する（削除しない。4.6）。TOTP は2要素目だけに使うので、最後の1つでも

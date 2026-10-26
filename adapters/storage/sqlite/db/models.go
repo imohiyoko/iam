@@ -36,6 +36,16 @@ type AuthnPasskey struct {
 	RevokeReason string
 }
 
+type AuthnPasswordCredential struct {
+	ID           string
+	RealmID      string
+	UserID       string
+	Hash         string
+	CreatedAt    string
+	RevokedAt    sql.NullString
+	RevokeReason string
+}
+
 type AuthnRealm struct {
 	ID        string
 	Slug      string

@@ -43,6 +43,7 @@ type Tx interface {
 	Identities() IdentityRepo
 	Passkeys() PasskeyRepo
 	TOTP() TOTPRepo
+	Passwords() PasswordRepo
 	Connections() ConnectionRepo
 	Sessions() SessionRepo
 	ServiceAccounts() ServiceAccountRepo
@@ -173,6 +174,13 @@ type Notification struct {
 // Notifier は出来事を外部に渡す。文面・URL・配送は外部が行う（ADR 0031）。
 type Notifier interface {
 	Notify(ctx context.Context, n Notification) error
+}
+
+// BreachChecker は漏洩済みパスワードの確認（design.md 4.1）。パスワードそのものは渡さない。
+// 外部に問い合わせるアダプタは k-匿名（SHA-1 の先頭 5 文字）で問い合わせ、残りを手元で照合する。
+type BreachChecker interface {
+	// Breached は SHA-1（大文字の16進 40 文字）のパスワードが漏洩済みかを返す。
+	Breached(ctx context.Context, sha1Hex string) (bool, error)
 }
 
 // ---------------------------------------------------------------------------

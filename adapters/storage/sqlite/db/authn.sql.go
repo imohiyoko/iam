@@ -168,6 +168,34 @@ func (q *Queries) CreatePasskey(ctx context.Context, arg CreatePasskeyParams) er
 	return err
 }
 
+const createPassword = `-- name: CreatePassword :exec
+INSERT INTO authn_password_credentials (id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreatePasswordParams struct {
+	ID           string
+	RealmID      string
+	UserID       string
+	Hash         string
+	CreatedAt    string
+	RevokedAt    sql.NullString
+	RevokeReason string
+}
+
+func (q *Queries) CreatePassword(ctx context.Context, arg CreatePasswordParams) error {
+	_, err := q.db.ExecContext(ctx, createPassword,
+		arg.ID,
+		arg.RealmID,
+		arg.UserID,
+		arg.Hash,
+		arg.CreatedAt,
+		arg.RevokedAt,
+		arg.RevokeReason,
+	)
+	return err
+}
+
 const createRoleBinding = `-- name: CreateRoleBinding :exec
 INSERT INTO authz_role_bindings (id, realm_id, role, principal_type, principal_id, org_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
 `
@@ -373,6 +401,30 @@ func (q *Queries) DeleteEmail(ctx context.Context, arg DeleteEmailParams) (int64
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const getActivePassword = `-- name: GetActivePassword :one
+SELECT id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason FROM authn_password_credentials WHERE realm_id = ? AND user_id = ? AND revoked_at IS NULL
+`
+
+type GetActivePasswordParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) GetActivePassword(ctx context.Context, arg GetActivePasswordParams) (AuthnPasswordCredential, error) {
+	row := q.db.QueryRowContext(ctx, getActivePassword, arg.RealmID, arg.UserID)
+	var i AuthnPasswordCredential
+	err := row.Scan(
+		&i.ID,
+		&i.RealmID,
+		&i.UserID,
+		&i.Hash,
+		&i.CreatedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
 }
 
 const getConnection = `-- name: GetConnection :one
@@ -680,6 +732,30 @@ func (q *Queries) GetPasskeyByPublicID(ctx context.Context, arg GetPasskeyByPubl
 		&i.Name,
 		&i.CreatedAt,
 		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
+const getPassword = `-- name: GetPassword :one
+SELECT id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason FROM authn_password_credentials WHERE realm_id = ? AND id = ?
+`
+
+type GetPasswordParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetPassword(ctx context.Context, arg GetPasswordParams) (AuthnPasswordCredential, error) {
+	row := q.db.QueryRowContext(ctx, getPassword, arg.RealmID, arg.ID)
+	var i AuthnPasswordCredential
+	err := row.Scan(
+		&i.ID,
+		&i.RealmID,
+		&i.UserID,
+		&i.Hash,
+		&i.CreatedAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
 	)
@@ -1290,6 +1366,27 @@ func (q *Queries) RevokePasskey(ctx context.Context, arg RevokePasskeyParams) er
 	return err
 }
 
+const revokePassword = `-- name: RevokePassword :exec
+UPDATE authn_password_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
+`
+
+type RevokePasswordParams struct {
+	RevokedAt    sql.NullString
+	RevokeReason string
+	RealmID      string
+	ID           string
+}
+
+func (q *Queries) RevokePassword(ctx context.Context, arg RevokePasswordParams) error {
+	_, err := q.db.ExecContext(ctx, revokePassword,
+		arg.RevokedAt,
+		arg.RevokeReason,
+		arg.RealmID,
+		arg.ID,
+	)
+	return err
+}
+
 const revokeServiceAccountCredential = `-- name: RevokeServiceAccountCredential :execrows
 UPDATE authn_service_account_credentials SET revoked_at = coalesce(revoked_at, ?1) WHERE realm_id = ?2 AND id = ?3
 `
@@ -1429,6 +1526,24 @@ type TouchSessionParams struct {
 
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, touchSession, arg.At, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updatePasswordHash = `-- name: UpdatePasswordHash :execrows
+UPDATE authn_password_credentials SET hash = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
+`
+
+type UpdatePasswordHashParams struct {
+	Hash    string
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) UpdatePasswordHash(ctx context.Context, arg UpdatePasswordHashParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updatePasswordHash, arg.Hash, arg.RealmID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

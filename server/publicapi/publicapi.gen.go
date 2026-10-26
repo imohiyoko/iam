@@ -292,6 +292,13 @@ type FinishPasskeyLoginJSONBody struct {
 	ReturnToken *bool                  `json:"return_token,omitempty"`
 }
 
+// PasswordLoginJSONBody defines parameters for PasswordLogin.
+type PasswordLoginJSONBody struct {
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	ReturnToken *bool  `json:"return_token,omitempty"`
+}
+
 // VerifySecondFactorJSONBody defines parameters for VerifySecondFactor.
 type VerifySecondFactorJSONBody struct {
 	Credential  *map[string]interface{} `json:"credential,omitempty"`
@@ -338,6 +345,17 @@ type FinishRegisterPasskeyJSONBody struct {
 	Name *string `json:"name,omitempty"`
 }
 
+// RemoveMyPasswordJSONBody defines parameters for RemoveMyPassword.
+type RemoveMyPasswordJSONBody struct {
+	CurrentPassword string `json:"current_password"`
+}
+
+// SetMyPasswordJSONBody defines parameters for SetMyPassword.
+type SetMyPasswordJSONBody struct {
+	CurrentPassword *string `json:"current_password,omitempty"`
+	Password        string  `json:"password"`
+}
+
 // ConfirmRegisterTOTPJSONBody defines parameters for ConfirmRegisterTOTP.
 type ConfirmRegisterTOTPJSONBody struct {
 	Code        string `json:"code"`
@@ -363,6 +381,9 @@ type CompleteOAuthLoginJSONRequestBody CompleteOAuthLoginJSONBody
 // FinishPasskeyLoginJSONRequestBody defines body for FinishPasskeyLogin for application/json ContentType.
 type FinishPasskeyLoginJSONRequestBody FinishPasskeyLoginJSONBody
 
+// PasswordLoginJSONRequestBody defines body for PasswordLogin for application/json ContentType.
+type PasswordLoginJSONRequestBody PasswordLoginJSONBody
+
 // VerifySecondFactorJSONRequestBody defines body for VerifySecondFactor for application/json ContentType.
 type VerifySecondFactorJSONRequestBody VerifySecondFactorJSONBody
 
@@ -383,6 +404,12 @@ type RenameMyPasskeyJSONRequestBody RenameMyPasskeyJSONBody
 
 // FinishRegisterPasskeyJSONRequestBody defines body for FinishRegisterPasskey for application/json ContentType.
 type FinishRegisterPasskeyJSONRequestBody FinishRegisterPasskeyJSONBody
+
+// RemoveMyPasswordJSONRequestBody defines body for RemoveMyPassword for application/json ContentType.
+type RemoveMyPasswordJSONRequestBody RemoveMyPasswordJSONBody
+
+// SetMyPasswordJSONRequestBody defines body for SetMyPassword for application/json ContentType.
+type SetMyPasswordJSONRequestBody SetMyPasswordJSONBody
 
 // ConfirmRegisterTOTPJSONRequestBody defines body for ConfirmRegisterTOTP for application/json ContentType.
 type ConfirmRegisterTOTPJSONRequestBody ConfirmRegisterTOTPJSONBody
@@ -416,6 +443,9 @@ type ServerInterface interface {
 	// StartPasskeyLogin passkey でのログインを始める
 	// (POST /v1/login/passkey:start)
 	StartPasskeyLogin(w http.ResponseWriter, r *http.Request)
+	// PasswordLogin メールとパスワードでログインする（フィーチャー password）
+	// (POST /v1/login/password)
+	PasswordLogin(w http.ResponseWriter, r *http.Request)
 	// StartSecondFactorPasskey 2要素目の passkey の確認を始める
 	// (POST /v1/login/second-factor/passkey:start)
 	StartSecondFactorPasskey(w http.ResponseWriter, r *http.Request)
@@ -446,7 +476,7 @@ type ServerInterface interface {
 	// CompleteLinkIdentity プロバイダからの戻りで連携を完了する
 	// (POST /v1/me/identities:complete)
 	CompleteLinkIdentity(w http.ResponseWriter, r *http.Request)
-	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP）の一覧
+	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(w http.ResponseWriter, r *http.Request)
 	// RenameMyPasskey passkey の名前を変える
@@ -461,6 +491,12 @@ type ServerInterface interface {
 	// StartRegisterPasskey passkey の登録を始める
 	// (POST /v1/me/passkeys:start)
 	StartRegisterPasskey(w http.ResponseWriter, r *http.Request)
+	// RemoveMyPassword パスワードを外す（フィーチャー password）
+	// (POST /v1/me/password:remove)
+	RemoveMyPassword(w http.ResponseWriter, r *http.Request)
+	// SetMyPassword パスワードを設定・変更する（フィーチャー password）
+	// (POST /v1/me/password:set)
+	SetMyPassword(w http.ResponseWriter, r *http.Request)
 	// ListMySessions 本人の有効なセッションの一覧
 	// (GET /v1/me/sessions)
 	ListMySessions(w http.ResponseWriter, r *http.Request)
@@ -616,6 +652,20 @@ func (siw *ServerInterfaceWrapper) StartPasskeyLogin(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartPasskeyLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PasswordLogin operation middleware
+func (siw *ServerInterfaceWrapper) PasswordLogin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PasswordLogin(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -907,6 +957,34 @@ func (siw *ServerInterfaceWrapper) StartRegisterPasskey(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// RemoveMyPassword operation middleware
+func (siw *ServerInterfaceWrapper) RemoveMyPassword(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveMyPassword(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetMyPassword operation middleware
+func (siw *ServerInterfaceWrapper) SetMyPassword(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetMyPassword(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListMySessions operation middleware
 func (siw *ServerInterfaceWrapper) ListMySessions(w http.ResponseWriter, r *http.Request) {
 
@@ -1130,6 +1208,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth:complete", wrapper.CompleteOAuthLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:start", wrapper.StartPasskeyLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:finish", wrapper.FinishPasskeyLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/password", wrapper.PasswordLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor/passkey:start", wrapper.StartSecondFactorPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor:verify", wrapper.VerifySecondFactor)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/logout", wrapper.Logout)
@@ -1147,6 +1226,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys:finish", wrapper.FinishRegisterPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys/{id}:rename", wrapper.RenameMyPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys/{id}:revoke", wrapper.RevokeMyPasskey)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/password:set", wrapper.SetMyPassword)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/password:remove", wrapper.RemoveMyPassword)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:start", wrapper.StartRegisterTOTP)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:confirm", wrapper.ConfirmRegisterTOTP)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp/{id}:revoke", wrapper.RevokeMyTOTP)
@@ -1695,6 +1776,85 @@ func (response StartPasskeyLogin404JSONResponse) VisitStartPasskeyLoginResponse(
 type StartPasskeyLogin429JSONResponse struct{ RateLimitedJSONResponse }
 
 func (response StartPasskeyLogin429JSONResponse) VisitStartPasskeyLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PasswordLoginRequestObject struct {
+	Body *PasswordLoginJSONRequestBody
+}
+
+type PasswordLoginResponseObject interface {
+	VisitPasswordLoginResponse(w http.ResponseWriter) error
+}
+
+type PasswordLogin200JSONResponse LoginResult
+
+func (response PasswordLogin200JSONResponse) VisitPasswordLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PasswordLogin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response PasswordLogin401JSONResponse) VisitPasswordLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PasswordLogin403JSONResponse struct{ DeniedJSONResponse }
+
+func (response PasswordLogin403JSONResponse) VisitPasswordLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PasswordLogin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PasswordLogin404JSONResponse) VisitPasswordLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PasswordLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response PasswordLogin429JSONResponse) VisitPasswordLoginResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -2280,7 +2440,12 @@ type ListMyMethods200JSONResponse struct {
 	Emails     []MyEmail    `json:"emails"`
 	Identities []MyIdentity `json:"identities"`
 	Passkeys   []MyPasskey  `json:"passkeys"`
-	Totp       []MyTOTP     `json:"totp"`
+
+	// Password 設定したパスワード（無ければ省略）
+	Password *struct {
+		CreatedAt time.Time `json:"created_at"`
+	} `json:"password,omitempty"`
+	Totp []MyTOTP `json:"totp"`
 }
 
 func (response ListMyMethods200JSONResponse) VisitListMyMethodsResponse(w http.ResponseWriter) error {
@@ -2541,6 +2706,166 @@ func (response StartRegisterPasskey404JSONResponse) VisitStartRegisterPasskeyRes
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyPasswordRequestObject struct {
+	Body *RemoveMyPasswordJSONRequestBody
+}
+
+type RemoveMyPasswordResponseObject interface {
+	VisitRemoveMyPasswordResponse(w http.ResponseWriter) error
+}
+
+type RemoveMyPassword204Response struct {
+}
+
+func (response RemoveMyPassword204Response) VisitRemoveMyPasswordResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveMyPassword401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RemoveMyPassword401JSONResponse) VisitRemoveMyPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyPassword404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RemoveMyPassword404JSONResponse) VisitRemoveMyPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyPassword409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RemoveMyPassword409JSONResponse) VisitRemoveMyPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyPassword429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response RemoveMyPassword429JSONResponse) VisitRemoveMyPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMyPasswordRequestObject struct {
+	Body *SetMyPasswordJSONRequestBody
+}
+
+type SetMyPasswordResponseObject interface {
+	VisitSetMyPasswordResponse(w http.ResponseWriter) error
+}
+
+type SetMyPassword204Response struct {
+}
+
+func (response SetMyPassword204Response) VisitSetMyPasswordResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type SetMyPassword400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetMyPassword400JSONResponse) VisitSetMyPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMyPassword401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetMyPassword401JSONResponse) VisitSetMyPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMyPassword404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetMyPassword404JSONResponse) VisitSetMyPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMyPassword409JSONResponse struct{ ConflictJSONResponse }
+
+func (response SetMyPassword409JSONResponse) VisitSetMyPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMyPassword429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response SetMyPassword429JSONResponse) VisitSetMyPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2816,6 +3141,9 @@ type StrictServerInterface interface {
 	// StartPasskeyLogin passkey でのログインを始める
 	// (POST /v1/login/passkey:start)
 	StartPasskeyLogin(ctx context.Context, request StartPasskeyLoginRequestObject) (StartPasskeyLoginResponseObject, error)
+	// PasswordLogin メールとパスワードでログインする（フィーチャー password）
+	// (POST /v1/login/password)
+	PasswordLogin(ctx context.Context, request PasswordLoginRequestObject) (PasswordLoginResponseObject, error)
 	// StartSecondFactorPasskey 2要素目の passkey の確認を始める
 	// (POST /v1/login/second-factor/passkey:start)
 	StartSecondFactorPasskey(ctx context.Context, request StartSecondFactorPasskeyRequestObject) (StartSecondFactorPasskeyResponseObject, error)
@@ -2846,7 +3174,7 @@ type StrictServerInterface interface {
 	// CompleteLinkIdentity プロバイダからの戻りで連携を完了する
 	// (POST /v1/me/identities:complete)
 	CompleteLinkIdentity(ctx context.Context, request CompleteLinkIdentityRequestObject) (CompleteLinkIdentityResponseObject, error)
-	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP）の一覧
+	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(ctx context.Context, request ListMyMethodsRequestObject) (ListMyMethodsResponseObject, error)
 	// RenameMyPasskey passkey の名前を変える
@@ -2861,6 +3189,12 @@ type StrictServerInterface interface {
 	// StartRegisterPasskey passkey の登録を始める
 	// (POST /v1/me/passkeys:start)
 	StartRegisterPasskey(ctx context.Context, request StartRegisterPasskeyRequestObject) (StartRegisterPasskeyResponseObject, error)
+	// RemoveMyPassword パスワードを外す（フィーチャー password）
+	// (POST /v1/me/password:remove)
+	RemoveMyPassword(ctx context.Context, request RemoveMyPasswordRequestObject) (RemoveMyPasswordResponseObject, error)
+	// SetMyPassword パスワードを設定・変更する（フィーチャー password）
+	// (POST /v1/me/password:set)
+	SetMyPassword(ctx context.Context, request SetMyPasswordRequestObject) (SetMyPasswordResponseObject, error)
 	// ListMySessions 本人の有効なセッションの一覧
 	// (GET /v1/me/sessions)
 	ListMySessions(ctx context.Context, request ListMySessionsRequestObject) (ListMySessionsResponseObject, error)
@@ -3173,6 +3507,37 @@ func (sh *strictHandler) StartPasskeyLogin(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StartPasskeyLoginResponseObject); ok {
 		if err := validResponse.VisitStartPasskeyLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PasswordLogin operation middleware
+func (sh *strictHandler) PasswordLogin(w http.ResponseWriter, r *http.Request) {
+	var request PasswordLoginRequestObject
+
+	var body PasswordLoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PasswordLogin(ctx, request.(PasswordLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PasswordLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PasswordLoginResponseObject); ok {
+		if err := validResponse.VisitPasswordLoginResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -3597,6 +3962,68 @@ func (sh *strictHandler) StartRegisterPasskey(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StartRegisterPasskeyResponseObject); ok {
 		if err := validResponse.VisitStartRegisterPasskeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveMyPassword operation middleware
+func (sh *strictHandler) RemoveMyPassword(w http.ResponseWriter, r *http.Request) {
+	var request RemoveMyPasswordRequestObject
+
+	var body RemoveMyPasswordJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveMyPassword(ctx, request.(RemoveMyPasswordRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveMyPassword")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveMyPasswordResponseObject); ok {
+		if err := validResponse.VisitRemoveMyPasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetMyPassword operation middleware
+func (sh *strictHandler) SetMyPassword(w http.ResponseWriter, r *http.Request) {
+	var request SetMyPasswordRequestObject
+
+	var body SetMyPasswordJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMyPassword(ctx, request.(SetMyPasswordRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMyPassword")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetMyPasswordResponseObject); ok {
+		if err := validResponse.VisitSetMyPasswordResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
