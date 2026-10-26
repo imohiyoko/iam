@@ -73,6 +73,54 @@ type LoginLink struct {
 	Token string `json:"token"`
 }
 
+// RevokedCredentials defines model for RevokedCredentials.
+type RevokedCredentials struct {
+	Identities int  `json:"identities"`
+	Passkeys   int  `json:"passkeys"`
+	Password   bool `json:"password"`
+
+	// Sessions 失効させたセッションの数
+	Sessions int `json:"sessions"`
+	Totp     int `json:"totp"`
+}
+
+// UserCredentials defines model for UserCredentials.
+type UserCredentials struct {
+	Identities []UserIdentity `json:"identities"`
+	Passkeys   []UserPasskey  `json:"passkeys"`
+
+	// Password 設定したパスワード（無ければ省略）
+	Password *UserPassword `json:"password,omitempty"`
+	Totp     []UserTOTP    `json:"totp"`
+}
+
+// UserIdentity defines model for UserIdentity.
+type UserIdentity struct {
+	// Connection connection の slug
+	Connection string    `json:"connection"`
+	CreatedAt  time.Time `json:"created_at"`
+	Id         string    `json:"id"`
+}
+
+// UserPasskey defines model for UserPasskey.
+type UserPasskey struct {
+	CreatedAt  time.Time  `json:"created_at"`
+	Id         string     `json:"id"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	Name       string     `json:"name"`
+}
+
+// UserPassword 設定したパスワード（無ければ省略）
+type UserPassword struct {
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// UserTOTP defines model for UserTOTP.
+type UserTOTP struct {
+	CreatedAt time.Time `json:"created_at"`
+	Id        string    `json:"id"`
+}
+
 // CreateConnectionJSONBody defines parameters for CreateConnection.
 type CreateConnectionJSONBody struct {
 	ClientId     string   `json:"client_id"`
@@ -118,6 +166,18 @@ type ServerInterface interface {
 	// CreateUser ユーザーを登録する（確認の経路 `admin`。4.1）
 	// (POST /v1/admin/users)
 	CreateUser(w http.ResponseWriter, r *http.Request)
+	// ListUserCredentials ユーザーの有効な認証情報の一覧（無効化の対象を選ぶため）
+	// (GET /v1/admin/users/{id}/credentials)
+	ListUserCredentials(w http.ResponseWriter, r *http.Request, id string)
+	// RevokeUserCredential ユーザーの passkey・外部 ID の紐付け・TOTP を無効化する（4.6）
+	// (POST /v1/admin/users/{id}/credentials/{credential_id}:revoke)
+	RevokeUserCredential(w http.ResponseWriter, r *http.Request, id string, credentialId string)
+	// RevokeAllUserCredentials 侵害時の初動として、ユーザーの全認証情報と全セッションを無効化する（4.6）
+	// (POST /v1/admin/users/{id}/credentials:revoke-all)
+	RevokeAllUserCredentials(w http.ResponseWriter, r *http.Request, id string)
+	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
+	// (POST /v1/admin/users/{id}/password:revoke)
+	RevokeUserPassword(w http.ResponseWriter, r *http.Request, id string)
 	// IssueLoginLink 1回限りのログイン用リンクのトークンを発行する
 	// (POST /v1/admin/users/{id}:login_link)
 	IssueLoginLink(w http.ResponseWriter, r *http.Request, id string)
@@ -217,6 +277,119 @@ func (siw *ServerInterfaceWrapper) CreateUser(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateUser(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUserCredentials operation middleware
+func (siw *ServerInterfaceWrapper) ListUserCredentials(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUserCredentials(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeUserCredential operation middleware
+func (siw *ServerInterfaceWrapper) RevokeUserCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "credential_id" -------------
+	var credentialId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "credential_id", r.PathValue("credential_id"), &credentialId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "credential_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeUserCredential(w, r, id, credentialId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeAllUserCredentials operation middleware
+func (siw *ServerInterfaceWrapper) RevokeAllUserCredentials(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeAllUserCredentials(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeUserPassword operation middleware
+func (siw *ServerInterfaceWrapper) RevokeUserPassword(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeUserPassword(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -376,6 +549,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/notifications/{id}:claim", wrapper.ClaimNotification)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users", wrapper.CreateUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:login_link", wrapper.IssueLoginLink)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/credentials", wrapper.ListUserCredentials)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials/{credential_id}:revoke", wrapper.RevokeUserCredential)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/password:revoke", wrapper.RevokeUserPassword)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials:revoke-all", wrapper.RevokeAllUserCredentials)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/sessions/{id}:revoke", wrapper.RevokeSession)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
 
@@ -703,6 +880,251 @@ func (response CreateUser409JSONResponse) VisitCreateUserResponse(w http.Respons
 	return err
 }
 
+type ListUserCredentialsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListUserCredentialsResponseObject interface {
+	VisitListUserCredentialsResponse(w http.ResponseWriter) error
+}
+
+type ListUserCredentials200JSONResponse UserCredentials
+
+func (response ListUserCredentials200JSONResponse) VisitListUserCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserCredentials401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListUserCredentials401JSONResponse) VisitListUserCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserCredentials403JSONResponse Error
+
+func (response ListUserCredentials403JSONResponse) VisitListUserCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserCredentials404JSONResponse Error
+
+func (response ListUserCredentials404JSONResponse) VisitListUserCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserCredentialRequestObject struct {
+	Id           string `json:"id"`
+	CredentialId string `json:"credential_id"`
+}
+
+type RevokeUserCredentialResponseObject interface {
+	VisitRevokeUserCredentialResponse(w http.ResponseWriter) error
+}
+
+type RevokeUserCredential204Response struct {
+}
+
+func (response RevokeUserCredential204Response) VisitRevokeUserCredentialResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeUserCredential401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RevokeUserCredential401JSONResponse) VisitRevokeUserCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserCredential403JSONResponse Error
+
+func (response RevokeUserCredential403JSONResponse) VisitRevokeUserCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserCredential404JSONResponse Error
+
+func (response RevokeUserCredential404JSONResponse) VisitRevokeUserCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAllUserCredentialsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RevokeAllUserCredentialsResponseObject interface {
+	VisitRevokeAllUserCredentialsResponse(w http.ResponseWriter) error
+}
+
+type RevokeAllUserCredentials200JSONResponse RevokedCredentials
+
+func (response RevokeAllUserCredentials200JSONResponse) VisitRevokeAllUserCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAllUserCredentials401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RevokeAllUserCredentials401JSONResponse) VisitRevokeAllUserCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAllUserCredentials403JSONResponse Error
+
+func (response RevokeAllUserCredentials403JSONResponse) VisitRevokeAllUserCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAllUserCredentials404JSONResponse Error
+
+func (response RevokeAllUserCredentials404JSONResponse) VisitRevokeAllUserCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserPasswordRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RevokeUserPasswordResponseObject interface {
+	VisitRevokeUserPasswordResponse(w http.ResponseWriter) error
+}
+
+type RevokeUserPassword204Response struct {
+}
+
+func (response RevokeUserPassword204Response) VisitRevokeUserPasswordResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeUserPassword401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RevokeUserPassword401JSONResponse) VisitRevokeUserPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserPassword403JSONResponse Error
+
+func (response RevokeUserPassword403JSONResponse) VisitRevokeUserPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserPassword404JSONResponse Error
+
+func (response RevokeUserPassword404JSONResponse) VisitRevokeUserPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type IssueLoginLinkRequestObject struct {
 	Id   string `json:"id"`
 	Body *IssueLoginLinkJSONRequestBody
@@ -799,6 +1221,18 @@ type StrictServerInterface interface {
 	// CreateUser ユーザーを登録する（確認の経路 `admin`。4.1）
 	// (POST /v1/admin/users)
 	CreateUser(ctx context.Context, request CreateUserRequestObject) (CreateUserResponseObject, error)
+	// ListUserCredentials ユーザーの有効な認証情報の一覧（無効化の対象を選ぶため）
+	// (GET /v1/admin/users/{id}/credentials)
+	ListUserCredentials(ctx context.Context, request ListUserCredentialsRequestObject) (ListUserCredentialsResponseObject, error)
+	// RevokeUserCredential ユーザーの passkey・外部 ID の紐付け・TOTP を無効化する（4.6）
+	// (POST /v1/admin/users/{id}/credentials/{credential_id}:revoke)
+	RevokeUserCredential(ctx context.Context, request RevokeUserCredentialRequestObject) (RevokeUserCredentialResponseObject, error)
+	// RevokeAllUserCredentials 侵害時の初動として、ユーザーの全認証情報と全セッションを無効化する（4.6）
+	// (POST /v1/admin/users/{id}/credentials:revoke-all)
+	RevokeAllUserCredentials(ctx context.Context, request RevokeAllUserCredentialsRequestObject) (RevokeAllUserCredentialsResponseObject, error)
+	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
+	// (POST /v1/admin/users/{id}/password:revoke)
+	RevokeUserPassword(ctx context.Context, request RevokeUserPasswordRequestObject) (RevokeUserPasswordResponseObject, error)
 	// IssueLoginLink 1回限りのログイン用リンクのトークンを発行する
 	// (POST /v1/admin/users/{id}:login_link)
 	IssueLoginLink(ctx context.Context, request IssueLoginLinkRequestObject) (IssueLoginLinkResponseObject, error)
@@ -974,6 +1408,111 @@ func (sh *strictHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateUserResponseObject); ok {
 		if err := validResponse.VisitCreateUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUserCredentials operation middleware
+func (sh *strictHandler) ListUserCredentials(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListUserCredentialsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUserCredentials(ctx, request.(ListUserCredentialsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUserCredentials")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUserCredentialsResponseObject); ok {
+		if err := validResponse.VisitListUserCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeUserCredential operation middleware
+func (sh *strictHandler) RevokeUserCredential(w http.ResponseWriter, r *http.Request, id string, credentialId string) {
+	var request RevokeUserCredentialRequestObject
+
+	request.Id = id
+	request.CredentialId = credentialId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeUserCredential(ctx, request.(RevokeUserCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeUserCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeUserCredentialResponseObject); ok {
+		if err := validResponse.VisitRevokeUserCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeAllUserCredentials operation middleware
+func (sh *strictHandler) RevokeAllUserCredentials(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevokeAllUserCredentialsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeAllUserCredentials(ctx, request.(RevokeAllUserCredentialsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeAllUserCredentials")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeAllUserCredentialsResponseObject); ok {
+		if err := validResponse.VisitRevokeAllUserCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeUserPassword operation middleware
+func (sh *strictHandler) RevokeUserPassword(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevokeUserPasswordRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeUserPassword(ctx, request.(RevokeUserPasswordRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeUserPassword")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeUserPasswordResponseObject); ok {
+		if err := validResponse.VisitRevokeUserPasswordResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

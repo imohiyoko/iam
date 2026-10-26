@@ -63,3 +63,4 @@
 | [0049](0049-passkey-details.md) | passkey の細部（Relying Party、本人確認、無効化と再登録の拒否） | 承認 |
 | [0050](0050-second-factor.md) | 2段階認証（制限つきのセッション、TOTP、2要素目の passkey） | 承認 |
 | [0051](0051-password.md) | メール + パスワード（フィーチャー password）の細部 | 承認 |
+| [0052](0052-admin-credential-revocation.md) | 運営者による認証情報の無効化 | 承認 |
