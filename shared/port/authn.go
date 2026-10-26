@@ -128,14 +128,16 @@ type Passkey struct {
 	Alg          int64  // COSE のアルゴリズム（ES256 = -7、EdDSA = -8）
 	SignCount    uint32
 	// Flags は認証器のフラグ（UP、UV、BE、BS など）。BE は登録の後に変わらないことを検証に使う。
-	Flags        uint8
-	AAGUID       []byte
-	Transports   []string
-	Name         string
-	CreatedAt    time.Time
-	LastUsedAt   *time.Time
-	RevokedAt    *time.Time
-	RevokeReason string
+	Flags      uint8
+	AAGUID     []byte
+	Transports []string
+	Name       string
+	// PreferredOrgID はこの passkey でログインしたときに入る Org（内部 ID。4.4）。空なら指定なし。
+	PreferredOrgID string
+	CreatedAt      time.Time
+	LastUsedAt     *time.Time
+	RevokedAt      *time.Time
+	RevokeReason   string
 }
 
 // PasskeyRepo は passkeys と revoked_passkey_credentials の Repository。
@@ -152,6 +154,8 @@ type PasskeyRepo interface {
 	Used(ctx context.Context, realmID, id string, signCount uint32, flags uint8, at time.Time) error
 	// Rename は名前を変える。無ければ errs.NotFound。
 	Rename(ctx context.Context, realmID, id, name string) error
+	// SetPreferredOrg はログインで入る Org（内部 ID。空なら指定なし）を変える。無ければ errs.NotFound。
+	SetPreferredOrg(ctx context.Context, realmID, id, orgID string) error
 	// Revoke は at に無効化し、credential_id を無効化済みに加える。既に無効化されていれば何もしない。
 	// 無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error

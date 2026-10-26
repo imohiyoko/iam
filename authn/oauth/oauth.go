@@ -599,7 +599,7 @@ func (s *Service) login(ctx context.Context, realmID string, conn port.Connectio
 			return err
 		}
 		is, err := s.Sessions.Issue(ctx, tx, session.Issue{
-			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"fed"}, Credentials: []string{ident.ID},
+			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"fed"}, Credentials: []string{ident.ID}, OrgEmail: verifiedEmail(c),
 			Evidence: warning.Evidence{OAuthEmailVerified: new(bool(c.EmailVerified))},
 			IP:       in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID, ReplaceToken: in.ReplaceToken,
 		})
@@ -666,4 +666,12 @@ func (s *Service) logger() *slog.Logger {
 		return slog.Default()
 	}
 	return s.Log
+}
+
+// verifiedEmail はプロバイダが確認済みとしたアドレス（Org の手がかり。4.4）。確認済みでなければ空。
+func verifiedEmail(c claims) string {
+	if !c.EmailVerified {
+		return ""
+	}
+	return c.Email
 }

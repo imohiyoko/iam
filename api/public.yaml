@@ -1208,6 +1208,65 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /v1/me/orgs/{id}:switch:
+    post:
+      operationId: switchMyOrg
+      summary: セッションの Org を切り替える（4.4）
+      description: |
+        active な Membership のある Org に切り替え、セッションの ID を入れ替える（古い ID はすぐ失効する）。
+        Cookie のセッションは Cookie を差し替える。入れない Org なら `403 no_available_org`、Org が無いか所属していなければ `404`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: 切り替えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/passkeys/{id}:set-org:
+    post:
+      operationId: setMyPasskeyOrg
+      summary: この passkey でログインしたときに入る Org を決める（4.4）
+      description: "`org_id` を省くと指定を外す。active な Membership のある Org だけ。"
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                org_id: { type: string }
+      responses:
+        "200":
+          description: 決めた
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  org_id: { type: string }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -1296,6 +1355,13 @@ components:
           type: array
           description: 認証の警告（design.md 10章）。コードで返し、表示の文言はクライアントで決める
           items: { $ref: "#/components/schemas/Warning" }
+        org_id: { type: string, description: セッションが入った Org（公開 ID。Org がオフなら無し。4.4） }
+        org_choices:
+          type: array
+          description: |
+            ログインの手がかりに結び付いた Org が複数あり、前回の Org がその中に無いときの候補（公開 ID）。
+            このときセッションは個人 Org に入っている。選んだ Org へは `/v1/me/orgs/{id}:switch` で切り替える
+          items: { type: string }
     Warning:
       type: object
       required: [code, severity, action]

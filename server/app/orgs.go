@@ -568,3 +568,85 @@ func errCodeOr(err error, fallback string) string {
 	}
 	return fallback
 }
+
+// ---------------------------------------------------------------------------
+// Org の切り替え（4.4）
+
+func (s publicServer) SwitchMyOrg(ctx context.Context, req publicapi.SwitchMyOrgRequestObject) (publicapi.SwitchMyOrgResponseObject, error) {
+	au, ok := authFrom(ctx)
+	if !ok {
+		return publicapi.SwitchMyOrg401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	if s.a.orgs == nil {
+		return publicapi.SwitchMyOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	var orgID string
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, req.Id)
+		orgID = o.ID
+		return err
+	})
+	if errors.Is(err, errs.NotFound) {
+		return publicapi.SwitchMyOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	is, err := s.a.sessions.SwitchOrg(ctx, s.a.realm.ID, au.SessionID, orgID, requestID(ctx))
+	switch {
+	case errors.Is(err, org.ErrNoAvailableOrg):
+		return publicapi.SwitchMyOrg403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errs.CodeNoAvailableOrg}}, nil
+	case errors.Is(err, errs.Unauthenticated), errors.Is(err, errs.NotFound):
+		return publicapi.SwitchMyOrg401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	case err != nil:
+		return nil, err
+	}
+	// Bearer のセッションは古いトークンがすぐ使えなくなるため、新しいトークンを必ず返す。
+	returnToken := !au.viaCookie
+	if req.Body != nil && deref(req.Body.ReturnToken) {
+		returnToken = true
+	}
+	return publicapi.SwitchMyOrg200JSONResponse(s.loginResult(ctx, is, au.PublicID, false, &returnToken)), nil
+}
+
+func (s publicServer) SetMyPasskeyOrg(ctx context.Context, req publicapi.SetMyPasskeyOrgRequestObject) (publicapi.SetMyPasskeyOrgResponseObject, error) {
+	if _, ok := authFrom(ctx); !ok {
+		return publicapi.SetMyPasskeyOrg401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	if s.a.orgs == nil {
+		return publicapi.SetMyPasskeyOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	var orgPublicID string
+	if req.Body != nil {
+		orgPublicID = deref(req.Body.OrgId)
+	}
+	nf, _, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
+		p, err := tx.Passkeys().GetByPublicID(ctx, s.a.realm.ID, req.Id)
+		if err == nil && (p.UserID != au.PrincipalID || p.RevokedAt != nil) {
+			err = errs.New(errs.KindNotFound, "passkey")
+		}
+		if err != nil {
+			return err
+		}
+		var orgID string
+		if orgPublicID != "" {
+			o, _, err := s.orgMember(ctx, tx, au, orgPublicID, "")
+			if err != nil {
+				return err
+			}
+			orgID = o.ID
+		}
+		return tx.Passkeys().SetPreferredOrg(ctx, s.a.realm.ID, p.ID, orgID)
+	})
+	switch {
+	case err != nil:
+		return nil, err
+	case nf:
+		return publicapi.SetMyPasskeyOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	out := publicapi.SetMyPasskeyOrg200JSONResponse{}
+	if orgPublicID != "" {
+		out.OrgId = &orgPublicID
+	}
+	return out, nil
+}

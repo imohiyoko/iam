@@ -40,6 +40,13 @@ func restrictionAllows(r port.SessionRestriction, method, path string) bool {
 func (s publicServer) loginResult(ctx context.Context, is session.Issued, userID string, created bool, returnToken *bool) publicapi.LoginResult {
 	out := publicapi.LoginResult{SessionId: is.Session.ID, ExpiresAt: is.Session.ExpiresAt, UserId: userID, Created: created,
 		Warnings: warningsOut(is.Warnings)}
+	if is.OrgPublicID != "" {
+		out.OrgId = &is.OrgPublicID
+	}
+	if len(is.OrgChoices) > 0 {
+		choices := slices.Clone(is.OrgChoices)
+		out.OrgChoices = &choices
+	}
 	switch is.Session.Restriction {
 	case port.RestrictionSecondFactor:
 		next, methods := publicapi.SecondFactor, slices.Clone(is.SecondFactorMethods)

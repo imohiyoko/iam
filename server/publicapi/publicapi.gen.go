@@ -286,6 +286,13 @@ type LoginResult struct {
 	// 決まった API にしか使えない（他は未ログインの扱い）。
 	Next *LoginResultNext `json:"next,omitempty"`
 
+	// OrgChoices ログインの手がかりに結び付いた Org が複数あり、前回の Org がその中に無いときの候補（公開 ID）。
+	// このときセッションは個人 Org に入っている。選んだ Org へは `/v1/me/orgs/{id}:switch` で切り替える
+	OrgChoices *[]string `json:"org_choices,omitempty"`
+
+	// OrgId セッションが入った Org（公開 ID。Org がオフなら無し。4.4）
+	OrgId *string `json:"org_id,omitempty"`
+
 	// SecondFactorMethods `next: second_factor` のとき使える2要素目（`passkey`、`totp`）
 	SecondFactorMethods *[]string `json:"second_factor_methods,omitempty"`
 	SessionId           string    `json:"session_id"`
@@ -610,9 +617,19 @@ type BindMyOrgEmailJSONBody struct {
 	EmailId *string `json:"email_id,omitempty"`
 }
 
+// SwitchMyOrgJSONBody defines parameters for SwitchMyOrg.
+type SwitchMyOrgJSONBody struct {
+	ReturnToken *bool `json:"return_token,omitempty"`
+}
+
 // RenameMyPasskeyJSONBody defines parameters for RenameMyPasskey.
 type RenameMyPasskeyJSONBody struct {
 	Name string `json:"name"`
+}
+
+// SetMyPasskeyOrgJSONBody defines parameters for SetMyPasskeyOrg.
+type SetMyPasskeyOrgJSONBody struct {
+	OrgId *string `json:"org_id,omitempty"`
 }
 
 // FinishRegisterPasskeyJSONBody defines parameters for FinishRegisterPasskey.
@@ -716,8 +733,14 @@ type InviteToOrgJSONRequestBody InviteToOrgJSONBody
 // BindMyOrgEmailJSONRequestBody defines body for BindMyOrgEmail for application/json ContentType.
 type BindMyOrgEmailJSONRequestBody BindMyOrgEmailJSONBody
 
+// SwitchMyOrgJSONRequestBody defines body for SwitchMyOrg for application/json ContentType.
+type SwitchMyOrgJSONRequestBody SwitchMyOrgJSONBody
+
 // RenameMyPasskeyJSONRequestBody defines body for RenameMyPasskey for application/json ContentType.
 type RenameMyPasskeyJSONRequestBody RenameMyPasskeyJSONBody
+
+// SetMyPasskeyOrgJSONRequestBody defines body for SetMyPasskeyOrg for application/json ContentType.
+type SetMyPasskeyOrgJSONRequestBody SetMyPasskeyOrgJSONBody
 
 // FinishRegisterPasskeyJSONRequestBody defines body for FinishRegisterPasskey for application/json ContentType.
 type FinishRegisterPasskeyJSONRequestBody FinishRegisterPasskeyJSONBody
@@ -832,12 +855,18 @@ type ServerInterface interface {
 	// BindMyOrgEmail この Org で使うメールを結び付ける（4.4）
 	// (POST /v1/me/orgs/{id}:bind-email)
 	BindMyOrgEmail(w http.ResponseWriter, r *http.Request, id string)
+	// SwitchMyOrg セッションの Org を切り替える（4.4）
+	// (POST /v1/me/orgs/{id}:switch)
+	SwitchMyOrg(w http.ResponseWriter, r *http.Request, id string)
 	// RenameMyPasskey passkey の名前を変える
 	// (POST /v1/me/passkeys/{id}:rename)
 	RenameMyPasskey(w http.ResponseWriter, r *http.Request, id string)
 	// RevokeMyPasskey passkey を無効化する
 	// (POST /v1/me/passkeys/{id}:revoke)
 	RevokeMyPasskey(w http.ResponseWriter, r *http.Request, id string)
+	// SetMyPasskeyOrg この passkey でログインしたときに入る Org を決める（4.4）
+	// (POST /v1/me/passkeys/{id}:set-org)
+	SetMyPasskeyOrg(w http.ResponseWriter, r *http.Request, id string)
 	// FinishRegisterPasskey passkey の登録を完了する
 	// (POST /v1/me/passkeys:finish)
 	FinishRegisterPasskey(w http.ResponseWriter, r *http.Request)
@@ -1458,6 +1487,32 @@ func (siw *ServerInterfaceWrapper) BindMyOrgEmail(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// SwitchMyOrg operation middleware
+func (siw *ServerInterfaceWrapper) SwitchMyOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SwitchMyOrg(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RenameMyPasskey operation middleware
 func (siw *ServerInterfaceWrapper) RenameMyPasskey(w http.ResponseWriter, r *http.Request) {
 
@@ -1501,6 +1556,32 @@ func (siw *ServerInterfaceWrapper) RevokeMyPasskey(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeMyPasskey(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetMyPasskeyOrg operation middleware
+func (siw *ServerInterfaceWrapper) SetMyPasskeyOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetMyPasskeyOrg(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1910,6 +1991,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/invitations/{invitation_id}:revoke", wrapper.RevokeOrgInvitation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:bind-email", wrapper.BindMyOrgEmail)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/invitations:accept", wrapper.AcceptInvitation)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:switch", wrapper.SwitchMyOrg)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys/{id}:set-org", wrapper.SetMyPasskeyOrg)
 
 	return m
 }
@@ -3733,6 +3816,71 @@ func (response BindMyOrgEmail409JSONResponse) VisitBindMyOrgEmailResponse(w http
 	return err
 }
 
+type SwitchMyOrgRequestObject struct {
+	Id   string `json:"id"`
+	Body *SwitchMyOrgJSONRequestBody
+}
+
+type SwitchMyOrgResponseObject interface {
+	VisitSwitchMyOrgResponse(w http.ResponseWriter) error
+}
+
+type SwitchMyOrg200JSONResponse LoginResult
+
+func (response SwitchMyOrg200JSONResponse) VisitSwitchMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SwitchMyOrg401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SwitchMyOrg401JSONResponse) VisitSwitchMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SwitchMyOrg403JSONResponse struct{ DeniedJSONResponse }
+
+func (response SwitchMyOrg403JSONResponse) VisitSwitchMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SwitchMyOrg404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SwitchMyOrg404JSONResponse) VisitSwitchMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RenameMyPasskeyRequestObject struct {
 	Id   string `json:"id"`
 	Body *RenameMyPasskeyJSONRequestBody
@@ -3852,6 +4000,59 @@ func (response RevokeMyPasskey409JSONResponse) VisitRevokeMyPasskeyResponse(w ht
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMyPasskeyOrgRequestObject struct {
+	Id   string `json:"id"`
+	Body *SetMyPasskeyOrgJSONRequestBody
+}
+
+type SetMyPasskeyOrgResponseObject interface {
+	VisitSetMyPasskeyOrgResponse(w http.ResponseWriter) error
+}
+
+type SetMyPasskeyOrg200JSONResponse struct {
+	OrgId *string `json:"org_id,omitempty"`
+}
+
+func (response SetMyPasskeyOrg200JSONResponse) VisitSetMyPasskeyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMyPasskeyOrg401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetMyPasskeyOrg401JSONResponse) VisitSetMyPasskeyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetMyPasskeyOrg404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetMyPasskeyOrg404JSONResponse) VisitSetMyPasskeyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -4858,12 +5059,18 @@ type StrictServerInterface interface {
 	// BindMyOrgEmail この Org で使うメールを結び付ける（4.4）
 	// (POST /v1/me/orgs/{id}:bind-email)
 	BindMyOrgEmail(ctx context.Context, request BindMyOrgEmailRequestObject) (BindMyOrgEmailResponseObject, error)
+	// SwitchMyOrg セッションの Org を切り替える（4.4）
+	// (POST /v1/me/orgs/{id}:switch)
+	SwitchMyOrg(ctx context.Context, request SwitchMyOrgRequestObject) (SwitchMyOrgResponseObject, error)
 	// RenameMyPasskey passkey の名前を変える
 	// (POST /v1/me/passkeys/{id}:rename)
 	RenameMyPasskey(ctx context.Context, request RenameMyPasskeyRequestObject) (RenameMyPasskeyResponseObject, error)
 	// RevokeMyPasskey passkey を無効化する
 	// (POST /v1/me/passkeys/{id}:revoke)
 	RevokeMyPasskey(ctx context.Context, request RevokeMyPasskeyRequestObject) (RevokeMyPasskeyResponseObject, error)
+	// SetMyPasskeyOrg この passkey でログインしたときに入る Org を決める（4.4）
+	// (POST /v1/me/passkeys/{id}:set-org)
+	SetMyPasskeyOrg(ctx context.Context, request SetMyPasskeyOrgRequestObject) (SetMyPasskeyOrgResponseObject, error)
 	// FinishRegisterPasskey passkey の登録を完了する
 	// (POST /v1/me/passkeys:finish)
 	FinishRegisterPasskey(ctx context.Context, request FinishRegisterPasskeyRequestObject) (FinishRegisterPasskeyResponseObject, error)
@@ -5786,6 +5993,42 @@ func (sh *strictHandler) BindMyOrgEmail(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+// SwitchMyOrg operation middleware
+func (sh *strictHandler) SwitchMyOrg(w http.ResponseWriter, r *http.Request, id string) {
+	var request SwitchMyOrgRequestObject
+
+	request.Id = id
+
+	var body SwitchMyOrgJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SwitchMyOrg(ctx, request.(SwitchMyOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SwitchMyOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SwitchMyOrgResponseObject); ok {
+		if err := validResponse.VisitSwitchMyOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RenameMyPasskey operation middleware
 func (sh *strictHandler) RenameMyPasskey(w http.ResponseWriter, r *http.Request, id string) {
 	var request RenameMyPasskeyRequestObject
@@ -5838,6 +6081,39 @@ func (sh *strictHandler) RevokeMyPasskey(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeMyPasskeyResponseObject); ok {
 		if err := validResponse.VisitRevokeMyPasskeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetMyPasskeyOrg operation middleware
+func (sh *strictHandler) SetMyPasskeyOrg(w http.ResponseWriter, r *http.Request, id string) {
+	var request SetMyPasskeyOrgRequestObject
+
+	request.Id = id
+
+	var body SetMyPasskeyOrgJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMyPasskeyOrg(ctx, request.(SetMyPasskeyOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMyPasskeyOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetMyPasskeyOrgResponseObject); ok {
+		if err := validResponse.VisitSetMyPasskeyOrgResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

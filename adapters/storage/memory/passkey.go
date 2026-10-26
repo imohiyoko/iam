@@ -87,6 +87,10 @@ func (r passkeys) Rename(_ context.Context, realmID, id, name string) error {
 	return r.update(realmID, id, func(p *port.Passkey) { p.Name = name })
 }
 
+func (r passkeys) SetPreferredOrg(_ context.Context, realmID, id, orgID string) error {
+	return r.update(realmID, id, func(p *port.Passkey) { p.PreferredOrgID = orgID })
+}
+
 func (r passkeys) Revoke(_ context.Context, realmID, id string, at time.Time, reason string) error {
 	p, err := get(r.t.s.passkeys, realmID, id, func(p port.Passkey) string { return p.RealmID }, "passkey")
 	if err != nil || p.RevokedAt != nil {

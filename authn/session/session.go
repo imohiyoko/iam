@@ -65,6 +65,8 @@ const (
 	ReasonSecondFactor = "second_factor_completed"
 	// ReasonRecovered はアカウントの復旧の完了で、全セッションを失効させたこと（4.12）。
 	ReasonRecovered = "account_recovered"
+	// ReasonOrgSwitched は Org の切り替えで ID を入れ替えたこと（4.4）。
+	ReasonOrgSwitched = "org_switched"
 )
 
 // 2要素目の種類（LoginResult の second_factor_methods）。
@@ -104,8 +106,24 @@ type Manager struct {
 
 // OrgPicker はログインで入る Org を決めるもの（authn/org）。
 type OrgPicker interface {
-	// Pick は Org の内部 ID を返す。explicit（内部 ID）が空でなければ、その Org に入る。
-	Pick(ctx context.Context, tx port.Tx, u port.User, explicit, requestID string) (string, error)
+	Pick(ctx context.Context, tx port.Tx, u port.User, in OrgPick) (PickedOrg, error)
+}
+
+// OrgPick は Org の決定に渡す手がかり（4.4）。
+type OrgPick struct {
+	// Explicit は明示的な指定（Org の内部 ID）。
+	Explicit string
+	// Credentials はログインに使った認証情報（メール・passkey の内部 ID）。結び付けたメールと passkey の既定の Org を手がかりにする。
+	Credentials []string
+	// Email は OAuth のプロバイダが返したアドレス。結び付けたメールと一致すれば手がかりにする。
+	Email     string
+	RequestID string
+}
+
+// PickedOrg は決めた Org と、選ばせるべき候補（手がかりに結び付いた Org が複数あり、前回の Org がその中に無いとき。公開 ID）。
+type PickedOrg struct {
+	OrgID   string
+	Choices []string
 }
 
 // Issue は新しいセッションの発行の内容。
@@ -129,8 +147,10 @@ type Issue struct {
 	AuthenticatedAt time.Time
 	// Recovery は復旧専用のセッション（新しい認証手段の登録と復旧の完了だけ。4.12）を発行する。2要素目は求めない。
 	Recovery bool
-	// OrgID は入る Org の内部 ID（明示的な指定、2要素目の前の段の Org）。空なら OrgPicker が決める。
+	// OrgID は入る Org の内部 ID（明示的な指定、2要素目の前の段の Org）。空なら OrgPicker が手がかりから決める。
 	OrgID string
+	// OrgEmail は OAuth のプロバイダが返したアドレス（Org の手がかり）。
+	OrgEmail string
 }
 
 // Issued は発行したセッションと、クライアントに渡すトークン。
@@ -143,6 +163,10 @@ type Issued struct {
 	Replaced string
 	// SecondFactorMethods は、制限つき（2要素目の確認待ち）のときに使える2要素目の種類。
 	SecondFactorMethods []string
+	// OrgChoices は選ばせるべき Org の候補（公開 ID。4.4）。空なら選ばせなくてよい。
+	OrgChoices []string
+	// OrgPublicID は active な Org の公開 ID（Org がオフなら空）。
+	OrgPublicID string
 }
 
 // Committed は Issue を呼んだトランザクションが確定した後に呼ぶ。入れ替えた古いセッションの
@@ -214,10 +238,13 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	actor := audit.Actor{Type: "user", ID: u.PublicID}
+	var choices []string
 	if m.Orgs != nil {
-		if s.ActiveOrgID, err = m.Orgs.Pick(ctx, tx, u, in.OrgID, in.RequestID); err != nil {
+		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: in.OrgID, Credentials: in.Credentials, Email: in.OrgEmail, RequestID: in.RequestID})
+		if err != nil {
 			return Issued{}, err
 		}
+		s.ActiveOrgID, choices = picked.OrgID, picked.Choices
 	}
 	if err := tx.Sessions().Create(ctx, s); err != nil {
 		return Issued{}, err
@@ -257,7 +284,8 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		Actor: actor, SessionID: s.ID, IP: in.IP, UserAgent: in.UserAgent,
 		RequestID: in.RequestID, Details: details,
 	})
-	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced, SecondFactorMethods: methods}, err
+	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced, SecondFactorMethods: methods, OrgChoices: choices,
+		OrgPublicID: orgPublicID}, err
 }
 
 func withoutSingleFactor(ws []warning.Warning, err error) ([]warning.Warning, error) {
@@ -699,6 +727,67 @@ func (m *Manager) Rotate(ctx context.Context, realmID, sessionID, requestID stri
 		return Issued{}, err
 	}
 	// 古い ID のキャッシュは猶予より長く残さない。
+	m.forget(ctx, realmID, sessionID)
+	return out, nil
+}
+
+// ErrNotSwitchable は Org を切り替えられないセッション（失効・期限切れ・制限つき）。
+var ErrNotSwitchable = errs.WithCode(errs.KindUnauthenticated, errs.CodeAuthenticationFailed, "session cannot switch org")
+
+// SwitchOrg はセッションの active な Org を orgID（内部 ID）に替え、ID を入れ替える（4.4、5.2）。
+// 古い ID はすぐに失効させる（別の Org の文脈で使われ続けないように）。入れる Org かは OrgPicker で確かめる。
+func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requestID string) (Issued, error) {
+	if m.Orgs == nil {
+		return Issued{}, errs.New(errs.KindNotFound, "org feature is off")
+	}
+	now := m.Clock.Now()
+	var out Issued
+	err := m.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		old, err := tx.Sessions().Get(ctx, realmID, sessionID)
+		if err != nil {
+			return err
+		}
+		if (old.RevokedAt != nil && !now.Before(*old.RevokedAt)) || !now.Before(old.ExpiresAt) || old.Restriction != port.RestrictionNone {
+			return ErrNotSwitchable
+		}
+		u, err := tx.Users().Get(ctx, realmID, old.PrincipalID)
+		if err != nil {
+			return err
+		}
+		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: orgID, RequestID: requestID})
+		if err != nil {
+			return err
+		}
+		o, err := tx.Orgs().Get(ctx, realmID, picked.OrgID)
+		if err != nil {
+			return err
+		}
+		s := old
+		s.ID, s.ActiveOrgID, s.CreatedAt, s.LastSeenAt, s.RevokedAt, s.RevokeReason = id.NewExternal(id.Session), picked.OrgID, now, now, nil, ""
+		token, hash, err := newToken(s.ID)
+		if err != nil {
+			return err
+		}
+		s.TokenHash = hash
+		if err := tx.Sessions().Create(ctx, s); err != nil {
+			return err
+		}
+		if err := tx.Sessions().Revoke(ctx, realmID, old.ID, now, ReasonOrgSwitched); err != nil {
+			return err
+		}
+		if _, err := eventlog.Record(ctx, tx, m.Clock, audit.Event{
+			Type: "session.org_switched", Result: audit.ResultSuccess, RealmID: realmID, OrgID: o.PublicID,
+			Actor: audit.Actor{Type: "user", ID: u.PublicID}, SessionID: s.ID, RequestID: requestID,
+			Details: map[string]any{"previous": old.ID},
+		}); err != nil {
+			return err
+		}
+		out = Issued{Session: s, Token: token, Replaced: old.ID, OrgPublicID: o.PublicID}
+		return nil
+	})
+	if err != nil {
+		return Issued{}, err
+	}
 	m.forget(ctx, realmID, sessionID)
 	return out, nil
 }

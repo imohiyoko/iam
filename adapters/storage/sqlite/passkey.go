@@ -25,7 +25,7 @@ func toPasskey(r db.AuthnPasskey) (port.Passkey, error) {
 	k := port.Passkey{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, UserID: r.UserID, CredentialID: r.CredentialID,
 		PublicKey: r.PublicKey, Alg: r.Alg, SignCount: uint32(r.SignCount), Flags: uint8(r.Flags), AAGUID: r.Aaguid,
 		Transports: transports, Name: r.Name, CreatedAt: p.at(r.CreatedAt), LastUsedAt: p.null(r.LastUsedAt),
-		RevokedAt: p.null(r.RevokedAt), RevokeReason: r.RevokeReason}
+		RevokedAt: p.null(r.RevokedAt), RevokeReason: r.RevokeReason, PreferredOrgID: r.PreferredOrgID}
 	return k, p.err
 }
 
@@ -48,7 +48,7 @@ func (r passkeys) Create(ctx context.Context, k port.Passkey) error {
 	return mapErr(r.q.CreatePasskey(ctx, db.CreatePasskeyParams{ID: k.ID, PublicID: k.PublicID, RealmID: k.RealmID, UserID: k.UserID,
 		CredentialID: k.CredentialID, PublicKey: k.PublicKey, Alg: k.Alg, SignCount: int64(k.SignCount), Flags: int64(k.Flags),
 		Aaguid: append([]byte{}, k.AAGUID...), Transports: string(tj), Name: k.Name, CreatedAt: formatTime(k.CreatedAt),
-		LastUsedAt: nullTime(k.LastUsedAt), RevokedAt: nullTime(k.RevokedAt), RevokeReason: k.RevokeReason}))
+		LastUsedAt: nullTime(k.LastUsedAt), RevokedAt: nullTime(k.RevokedAt), RevokeReason: k.RevokeReason, PreferredOrgID: k.PreferredOrgID}))
 }
 
 func (r passkeys) GetByCredentialID(ctx context.Context, realmID string, credentialID []byte) (port.Passkey, error) {
@@ -73,6 +73,11 @@ func (r passkeys) Used(ctx context.Context, realmID, id string, signCount uint32
 
 func (r passkeys) Rename(ctx context.Context, realmID, id, name string) error {
 	n, err := r.q.RenamePasskey(ctx, db.RenamePasskeyParams{Name: name, RealmID: realmID, ID: id})
+	return affected(n, err, "passkey")
+}
+
+func (r passkeys) SetPreferredOrg(ctx context.Context, realmID, id, orgID string) error {
+	n, err := r.q.SetPasskeyPreferredOrg(ctx, db.SetPasskeyPreferredOrgParams{PreferredOrgID: orgID, RealmID: realmID, ID: id})
 	return affected(n, err, "passkey")
 }
 

@@ -116,8 +116,8 @@ SELECT * FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY creat
 
 -- name: CreatePasskey :exec
 INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,
-    transports, name, created_at, last_used_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: IsPasskeyCredentialRevoked :one
 SELECT COUNT(*) FROM authn_revoked_passkey_credentials WHERE realm_id = ? AND credential_id = ?;
@@ -139,6 +139,9 @@ UPDATE authn_passkeys SET sign_count = ?, flags = ?, last_used_at = ? WHERE real
 
 -- name: RenamePasskey :execrows
 UPDATE authn_passkeys SET name = ? WHERE realm_id = ? AND id = ?;
+
+-- name: SetPasskeyPreferredOrg :execrows
+UPDATE authn_passkeys SET preferred_org_id = ? WHERE realm_id = ? AND id = ?;
 
 -- name: RevokePasskey :exec
 UPDATE authn_passkeys SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;

@@ -72,14 +72,20 @@ func testPasskeys(t *testing.T, h Harness) {
 		if err := repo.Rename(ctx, r, p.ID, "Laptop"); err != nil {
 			return err
 		}
+		org := id.New(id.Org)
+		if err := repo.SetPreferredOrg(ctx, r, p.ID, org); err != nil {
+			return err
+		}
 		got, err := repo.GetByPublicID(ctx, r, p.PublicID)
-		if err != nil || got.SignCount != 7 || got.Flags != 0x5d || got.LastUsedAt == nil || !got.LastUsedAt.Equal(at) || got.Name != "Laptop" {
+		if err != nil || got.SignCount != 7 || got.Flags != 0x5d || got.LastUsedAt == nil || !got.LastUsedAt.Equal(at) || got.Name != "Laptop" ||
+			got.PreferredOrgID != org {
 			return fmt.Errorf("after Used and Rename = %+v, %v", got, err)
 		}
 		other := id.New(id.Realm)
 		for name, err := range map[string]error{
 			"used in another realm":   repo.Used(ctx, other, p.ID, 8, 0, at),
 			"rename in another realm": repo.Rename(ctx, other, p.ID, "x"),
+			"org in another realm":    repo.SetPreferredOrg(ctx, other, p.ID, ""),
 			"revoke in another realm": repo.Revoke(ctx, other, p.ID, at, "x"),
 			"revoke missing":          repo.Revoke(ctx, r, id.New(id.Passkey), at, "x"),
 		} {

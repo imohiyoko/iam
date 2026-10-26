@@ -190,23 +190,3 @@ func (s *Service) ListForUser(ctx context.Context, tx port.Tx, realmID, userID s
 	}
 	return out, nil
 }
-
-// Pick はログインで入る Org（内部 ID）を決める（4.4）。explicit（内部 ID）があれば、その Org の active な
-// Membership が要る。無ければ個人 Org（無ければ作る）。手がかりと前回の Org による選択は Resolve で足す。
-func (s *Service) Pick(ctx context.Context, tx port.Tx, u port.User, explicit, requestID string) (string, error) {
-	if explicit != "" {
-		m, err := tx.Memberships().GetByUserOrg(ctx, u.RealmID, u.ID, explicit)
-		if errors.Is(err, errs.NotFound) || (err == nil && m.Status != port.MembershipActive) {
-			return "", ErrNoAvailableOrg
-		}
-		if err != nil {
-			return "", err
-		}
-		return explicit, nil
-	}
-	o, err := s.EnsurePersonal(ctx, tx, u, requestID)
-	if err != nil {
-		return "", err
-	}
-	return o.ID, nil
-}
