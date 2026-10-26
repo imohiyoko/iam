@@ -88,10 +88,10 @@ func (s adminServer) RevokeUserCredential(ctx context.Context, req adminapi.Revo
 	return adminapi.RevokeUserCredential204Response{}, nil
 }
 
-// revokeUserSessions はユーザーの全セッションを失効させ、その数を返す。
-func (s adminServer) revokeUserSessions(ctx context.Context, userID string, p adminPrincipal) (int, error) {
-	ids, err := s.a.sessions.RevokeAll(ctx, s.a.realm.ID, userID, "", session.ReasonAdmin, p.Actor, requestID(ctx))
-	return len(ids), err
+// revokeUserSessions は呼び出し側のトランザクションでユーザーの全セッションを失効させる。確定の後に
+// sessions.ForgetIDs で返した ID のキャッシュを消す。
+func (s adminServer) revokeUserSessions(ctx context.Context, tx port.Tx, userID string, p adminPrincipal) ([]string, error) {
+	return s.a.sessions.RevokeAllTx(ctx, tx, s.a.realm.ID, userID, "", session.ReasonAdmin, p.Actor, requestID(ctx))
 }
 
 func (s adminServer) RevokeUserPassword(ctx context.Context, req adminapi.RevokeUserPasswordRequestObject) (adminapi.RevokeUserPasswordResponseObject, error) {
@@ -104,13 +104,18 @@ func (s adminServer) RevokeUserPassword(ctx context.Context, req adminapi.Revoke
 	case d != nil:
 		return adminapi.RevokeUserPassword403JSONResponse(d.Body), nil
 	}
-	var u port.User
+	var revoked []string
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		var err error
-		if u, err = tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id); err != nil {
+		u, err := tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id)
+		if err != nil {
 			return err
 		}
-		return s.a.accounts.AdminRevokePassword(ctx, tx, s.a.realm.ID, u, p.Actor, requestID(ctx))
+		if err := s.a.accounts.AdminRevokePassword(ctx, tx, s.a.realm.ID, u, p.Actor, requestID(ctx)); err != nil {
+			return err
+		}
+		// パスワードはセッションの認証情報に入れないので、全セッションを同じトランザクションで失効させる（ADR 0051）。
+		revoked, err = s.revokeUserSessions(ctx, tx, u.ID, p)
+		return err
 	})
 	if errors.Is(err, errs.NotFound) {
 		return adminapi.RevokeUserPassword404JSONResponse(adminError("not_found", "")), nil
@@ -118,10 +123,7 @@ func (s adminServer) RevokeUserPassword(ctx context.Context, req adminapi.Revoke
 	if err != nil {
 		return nil, err
 	}
-	// パスワードはセッションの認証情報に入れないので、全セッションを失効させる（ADR 0051）。
-	if _, err := s.revokeUserSessions(ctx, u.ID, p); err != nil {
-		return nil, err
-	}
+	s.a.sessions.ForgetIDs(ctx, s.a.realm.ID, revoked)
 	return adminapi.RevokeUserPassword204Response{}, nil
 }
 
@@ -135,14 +137,17 @@ func (s adminServer) RevokeAllUserCredentials(ctx context.Context, req adminapi.
 	case d != nil:
 		return adminapi.RevokeAllUserCredentials403JSONResponse(d.Body), nil
 	}
-	var u port.User
 	var r account.Revoked
+	var revoked []string
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		var err error
-		if u, err = tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id); err != nil {
+		u, err := tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id)
+		if err != nil {
 			return err
 		}
-		r, err = s.a.accounts.RevokeAllCredentials(ctx, tx, s.a.realm.ID, u, p.Actor, requestID(ctx))
+		if r, err = s.a.accounts.RevokeAllCredentials(ctx, tx, s.a.realm.ID, u, p.Actor, requestID(ctx)); err != nil {
+			return err
+		}
+		revoked, err = s.revokeUserSessions(ctx, tx, u.ID, p)
 		return err
 	})
 	if errors.Is(err, errs.NotFound) {
@@ -151,10 +156,7 @@ func (s adminServer) RevokeAllUserCredentials(ctx context.Context, req adminapi.
 	if err != nil {
 		return nil, err
 	}
-	n, err := s.revokeUserSessions(ctx, u.ID, p)
-	if err != nil {
-		return nil, err
-	}
+	s.a.sessions.ForgetIDs(ctx, s.a.realm.ID, revoked)
 	return adminapi.RevokeAllUserCredentials200JSONResponse{Passkeys: r.Passkeys, Identities: r.Identities, Totp: r.TOTP,
-		Password: r.Password, Sessions: n}, nil
+		Password: r.Password, Sessions: len(revoked)}, nil
 }
