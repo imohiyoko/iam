@@ -9,7 +9,6 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/passkey"
-	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
@@ -93,7 +92,7 @@ func (s publicServer) FinishPasskeyLogin(ctx context.Context, req publicapi.Fini
 	res, err := s.a.passkeys.FinishLogin(ctx, s.a.realm.ID, in)
 	// 失敗でもフローは使い終わったので Cookie を消す。
 	setPasskeyCookie(ctx, "", -1)
-	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.FinishPasskeyLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	switch {

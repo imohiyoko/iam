@@ -25,7 +25,6 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/session"
-	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -305,7 +304,7 @@ func (s *Service) Verify(ctx context.Context, realmID string, in Verify) (Verifi
 	if err != nil {
 		s.recordFailure(ctx, realmID, in.Client, err)
 		// 警告による拒否は本人確認の後なので、理由を返す（4.9）。
-		if denied, ok := errors.AsType[*warning.DeniedError](err); ok {
+		if denied, ok := errors.AsType[errs.Denial](err); ok {
 			return Verified{}, denied
 		}
 		return Verified{}, ErrAuthFailed
@@ -397,8 +396,8 @@ func (s *Service) verify(ctx context.Context, realmID string, in Verify) (Verifi
 		if err != nil {
 			return err
 		}
-		if !account.CanLogin(u, now) {
-			return errors.New("user cannot log in")
+		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
+			return err
 		}
 		is, err := s.Sessions.Issue(ctx, tx, session.Issue{
 			RealmID: realmID, UserID: userID, AuthMethods: []string{"otp"}, Credentials: []string{emailID},

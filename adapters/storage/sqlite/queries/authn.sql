@@ -179,3 +179,35 @@ UPDATE authn_password_credentials SET hash = ? WHERE realm_id = ? AND id = ? AND
 
 -- name: RevokePassword :exec
 UPDATE authn_password_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
+
+-- name: SetUserValidity :execrows
+UPDATE authn_users SET valid_from = ?, valid_until = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
+
+-- name: CreateSuspension :exec
+INSERT INTO authn_suspensions (id, public_id, realm_id, target_type, target_id, category, reason, external_ref, starts_at, ends_at,
+    created_by, created_at, lifted_at, lifted_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetSuspensionByPublicID :one
+SELECT * FROM authn_suspensions WHERE realm_id = ? AND public_id = ?;
+
+-- name: GetSuspension :one
+SELECT * FROM authn_suspensions WHERE realm_id = ? AND id = ?;
+
+-- name: ListSuspensionsByTarget :many
+SELECT * FROM authn_suspensions WHERE realm_id = ? AND target_type = ? AND target_id = ? ORDER BY starts_at, id;
+
+-- name: LiftSuspension :exec
+UPDATE authn_suspensions SET lifted_at = ?, lifted_by = ? WHERE realm_id = ? AND id = ? AND lifted_at IS NULL;
+
+-- name: ScheduleEvent :exec
+INSERT INTO scheduled_events (id, realm_id, ref, event_type, payload, fire_at, fired_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: DueScheduledEvents :many
+SELECT * FROM scheduled_events WHERE fired_at IS NULL AND fire_at <= sqlc.arg(now) ORDER BY fire_at, id LIMIT sqlc.arg(lim);
+
+-- name: MarkScheduledEventFired :execrows
+UPDATE scheduled_events SET fired_at = ? WHERE realm_id = ? AND id = ? AND fired_at IS NULL;
+
+-- name: CancelScheduledEvents :exec
+DELETE FROM scheduled_events WHERE realm_id = ? AND ref = ? AND fired_at IS NULL;

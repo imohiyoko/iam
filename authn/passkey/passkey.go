@@ -29,7 +29,6 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/session"
-	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -431,7 +430,7 @@ func (s *Service) FinishLogin(ctx context.Context, realmID string, in Login) (Re
 	out, err := s.finishLogin(ctx, realmID, in)
 	if err != nil {
 		s.recordFailure(ctx, realmID, "login.failed", in.Client, err)
-		if denied, ok := errors.AsType[*warning.DeniedError](err); ok {
+		if denied, ok := errors.AsType[errs.Denial](err); ok {
 			return Result{}, denied
 		}
 		return Result{}, ErrAuthFailed
@@ -475,8 +474,8 @@ func (s *Service) finishLogin(ctx context.Context, realmID string, in Login) (Re
 		if err := s.used(ctx, tx, used, c, now); err != nil {
 			return err
 		}
-		if !account.CanLogin(u, now) {
-			return errors.New("user cannot log in")
+		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
+			return err
 		}
 		amr := []string{AMRKey}
 		if parsed.Response.AuthenticatorData.Flags.HasUserVerified() {

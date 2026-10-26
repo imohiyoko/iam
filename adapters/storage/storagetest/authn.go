@@ -31,6 +31,10 @@ var authnTests = []struct {
 	{"TOTPUseConcurrent", testTOTPUseConcurrent},
 	{"Passwords", testPasswords},
 	{"PasswordCreateConcurrent", testPasswordCreateConcurrent},
+	{"UserValidity", testUserValidity},
+	{"Suspensions", testSuspensions},
+	{"ScheduledEvents", testScheduledEvents},
+	{"ScheduledFireConcurrent", testScheduledFireConcurrent},
 	{"Connections", testConnections},
 	{"Sessions", testSessions},
 	{"SessionRevokeByPrincipal", testSessionRevokeByPrincipal},
@@ -650,4 +654,5 @@ var authnIsolationCases = []IsolationCase{
 	passkeyIsolationCase,
 	totpIsolationCase,
 	passwordIsolationCase,
+	suspensionIsolationCase,
 }

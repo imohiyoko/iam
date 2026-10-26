@@ -17,7 +17,9 @@
       msg.className = "";
       return;
     }
-    msg.textContent = messages[code] || messages.error || code;
+    // realm で足した停止の種別には、共通の文言を出す。
+    const fallback = code.startsWith("suspended.") ? messages.suspended : messages.error;
+    msg.textContent = messages[code] || fallback || code;
     msg.className = isError ? "error" : "";
   }
 

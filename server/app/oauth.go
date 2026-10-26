@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/oauth"
-	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 )
@@ -52,7 +51,7 @@ func (s publicServer) CompleteOAuthLogin(ctx context.Context, req publicapi.Comp
 	res, err := s.a.oauth.Complete(ctx, s.a.realm.ID, in)
 	// 失敗でもフローは使い終わったので Cookie を消す。
 	setCookie(ctx, &http.Cookie{Name: oauthCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
-	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.CompleteOAuthLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	switch {

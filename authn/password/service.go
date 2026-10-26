@@ -112,7 +112,7 @@ func (s *Service) dummyHash() string {
 }
 
 // Login はメールとパスワードで照合し、セッションを発行する。失敗は ErrAuthFailed（回数の上限を超えれば
-// *ratelimit.ExceededError、警告の deny なら *warning.DeniedError）。基盤の障害はそのまま返す。
+// *ratelimit.ExceededError、警告の deny・停止・有効期間の外なら errs.Denial）。基盤の障害はそのまま返す。
 func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, error) {
 	email, err := account.NormalizeEmail(in.Email)
 	if err != nil {
@@ -146,6 +146,14 @@ func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, 
 		if err != nil {
 			return err
 		}
+		// 停止と有効期間は照合が通った後に見る（本人確認の後なので理由を返す。4.9）。
+		if u, err = tx.Users().Get(ctx, realmID, u.ID); err != nil {
+			return err
+		}
+		now := s.Clock.Now()
+		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
+			return err
+		}
 		if cred.rehash {
 			h, err := Hash(pw, s.params())
 			if err != nil {
@@ -173,10 +181,10 @@ func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, 
 	})
 	if err != nil {
 		s.recordFailure(ctx, realmID, in.Client, err)
-		if errors.Is(err, errRejected) {
+		if errors.Is(err, errRejected) || errors.Is(err, account.ErrInactive) {
 			return Result{}, ErrAuthFailed
 		}
-		return Result{}, err // *warning.DeniedError と基盤の障害
+		return Result{}, err // errs.Denial と基盤の障害
 	}
 	s.Sessions.Committed(ctx, realmID, out.Session)
 	return out, nil
@@ -211,7 +219,7 @@ func (s *Service) check(ctx context.Context, realmID, email, pw string) (checked
 		if u, err = tx.Users().Get(ctx, realmID, e.UserID); err != nil {
 			return err
 		}
-		if !account.CanLogin(u, s.Clock.Now()) {
+		if u.Status != port.UserActive {
 			return errUnusable
 		}
 		emailID = e.ID

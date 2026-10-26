@@ -9,7 +9,6 @@ import (
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/totp"
-	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
@@ -124,7 +123,7 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.VerifySecondFactor429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
-	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.VerifySecondFactor403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	switch {

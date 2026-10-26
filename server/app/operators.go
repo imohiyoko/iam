@@ -165,7 +165,7 @@ func (s adminServer) IssueLoginLink(ctx context.Context, req adminapi.IssueLogin
 		if err != nil {
 			return err
 		}
-		if !account.CanLogin(u, s.a.deps.Clock.Now()) {
+		if u.Status != port.UserActive {
 			return errs.New(errs.KindNotFound, "user cannot log in")
 		}
 		return s.a.recordLoginLink(ctx, tx, p.Actor, u.PublicID, requestID(ctx))

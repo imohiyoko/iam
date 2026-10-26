@@ -26,6 +26,20 @@ func (q *Queries) AddRevokedPasskeyCredential(ctx context.Context, arg AddRevoke
 	return err
 }
 
+const cancelScheduledEvents = `-- name: CancelScheduledEvents :exec
+DELETE FROM scheduled_events WHERE realm_id = ? AND ref = ? AND fired_at IS NULL
+`
+
+type CancelScheduledEventsParams struct {
+	RealmID string
+	Ref     string
+}
+
+func (q *Queries) CancelScheduledEvents(ctx context.Context, arg CancelScheduledEventsParams) error {
+	_, err := q.db.ExecContext(ctx, cancelScheduledEvents, arg.RealmID, arg.Ref)
+	return err
+}
+
 const createConnection = `-- name: CreateConnection :exec
 INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at) VALUES (?, ?, ?, ?, ?, ?)
 `
@@ -325,6 +339,49 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 	return err
 }
 
+const createSuspension = `-- name: CreateSuspension :exec
+INSERT INTO authn_suspensions (id, public_id, realm_id, target_type, target_id, category, reason, external_ref, starts_at, ends_at,
+    created_by, created_at, lifted_at, lifted_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateSuspensionParams struct {
+	ID          string
+	PublicID    string
+	RealmID     string
+	TargetType  string
+	TargetID    string
+	Category    string
+	Reason      string
+	ExternalRef string
+	StartsAt    string
+	EndsAt      sql.NullString
+	CreatedBy   string
+	CreatedAt   string
+	LiftedAt    sql.NullString
+	LiftedBy    string
+}
+
+func (q *Queries) CreateSuspension(ctx context.Context, arg CreateSuspensionParams) error {
+	_, err := q.db.ExecContext(ctx, createSuspension,
+		arg.ID,
+		arg.PublicID,
+		arg.RealmID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.Category,
+		arg.Reason,
+		arg.ExternalRef,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.CreatedBy,
+		arg.CreatedAt,
+		arg.LiftedAt,
+		arg.LiftedBy,
+	)
+	return err
+}
+
 const createTOTP = `-- name: CreateTOTP :exec
 INSERT INTO authn_totp_credentials (id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -401,6 +458,47 @@ func (q *Queries) DeleteEmail(ctx context.Context, arg DeleteEmailParams) (int64
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const dueScheduledEvents = `-- name: DueScheduledEvents :many
+SELECT id, realm_id, ref, event_type, payload, fire_at, fired_at, created_at FROM scheduled_events WHERE fired_at IS NULL AND fire_at <= ?1 ORDER BY fire_at, id LIMIT ?2
+`
+
+type DueScheduledEventsParams struct {
+	Now string
+	Lim int64
+}
+
+func (q *Queries) DueScheduledEvents(ctx context.Context, arg DueScheduledEventsParams) ([]ScheduledEvent, error) {
+	rows, err := q.db.QueryContext(ctx, dueScheduledEvents, arg.Now, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ScheduledEvent
+	for rows.Next() {
+		var i ScheduledEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.RealmID,
+			&i.Ref,
+			&i.EventType,
+			&i.Payload,
+			&i.FireAt,
+			&i.FiredAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getActivePassword = `-- name: GetActivePassword :one
@@ -843,6 +941,68 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (AuthnSe
 	return i, err
 }
 
+const getSuspension = `-- name: GetSuspension :one
+SELECT id, public_id, realm_id, target_type, target_id, category, reason, external_ref, starts_at, ends_at, created_by, created_at, lifted_at, lifted_by FROM authn_suspensions WHERE realm_id = ? AND id = ?
+`
+
+type GetSuspensionParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetSuspension(ctx context.Context, arg GetSuspensionParams) (AuthnSuspension, error) {
+	row := q.db.QueryRowContext(ctx, getSuspension, arg.RealmID, arg.ID)
+	var i AuthnSuspension
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.TargetType,
+		&i.TargetID,
+		&i.Category,
+		&i.Reason,
+		&i.ExternalRef,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.LiftedAt,
+		&i.LiftedBy,
+	)
+	return i, err
+}
+
+const getSuspensionByPublicID = `-- name: GetSuspensionByPublicID :one
+SELECT id, public_id, realm_id, target_type, target_id, category, reason, external_ref, starts_at, ends_at, created_by, created_at, lifted_at, lifted_by FROM authn_suspensions WHERE realm_id = ? AND public_id = ?
+`
+
+type GetSuspensionByPublicIDParams struct {
+	RealmID  string
+	PublicID string
+}
+
+func (q *Queries) GetSuspensionByPublicID(ctx context.Context, arg GetSuspensionByPublicIDParams) (AuthnSuspension, error) {
+	row := q.db.QueryRowContext(ctx, getSuspensionByPublicID, arg.RealmID, arg.PublicID)
+	var i AuthnSuspension
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.TargetType,
+		&i.TargetID,
+		&i.Category,
+		&i.Reason,
+		&i.ExternalRef,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.LiftedAt,
+		&i.LiftedBy,
+	)
+	return i, err
+}
+
 const getTOTP = `-- name: GetTOTP :one
 SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials WHERE realm_id = ? AND id = ?
 `
@@ -959,6 +1119,27 @@ func (q *Queries) IsPasskeyCredentialRevoked(ctx context.Context, arg IsPasskeyC
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const liftSuspension = `-- name: LiftSuspension :exec
+UPDATE authn_suspensions SET lifted_at = ?, lifted_by = ? WHERE realm_id = ? AND id = ? AND lifted_at IS NULL
+`
+
+type LiftSuspensionParams struct {
+	LiftedAt sql.NullString
+	LiftedBy string
+	RealmID  string
+	ID       string
+}
+
+func (q *Queries) LiftSuspension(ctx context.Context, arg LiftSuspensionParams) error {
+	_, err := q.db.ExecContext(ctx, liftSuspension,
+		arg.LiftedAt,
+		arg.LiftedBy,
+		arg.RealmID,
+		arg.ID,
+	)
+	return err
 }
 
 const listConnections = `-- name: ListConnections :many
@@ -1264,6 +1445,54 @@ func (q *Queries) ListSessionsByPrincipal(ctx context.Context, arg ListSessionsB
 	return items, nil
 }
 
+const listSuspensionsByTarget = `-- name: ListSuspensionsByTarget :many
+SELECT id, public_id, realm_id, target_type, target_id, category, reason, external_ref, starts_at, ends_at, created_by, created_at, lifted_at, lifted_by FROM authn_suspensions WHERE realm_id = ? AND target_type = ? AND target_id = ? ORDER BY starts_at, id
+`
+
+type ListSuspensionsByTargetParams struct {
+	RealmID    string
+	TargetType string
+	TargetID   string
+}
+
+func (q *Queries) ListSuspensionsByTarget(ctx context.Context, arg ListSuspensionsByTargetParams) ([]AuthnSuspension, error) {
+	rows, err := q.db.QueryContext(ctx, listSuspensionsByTarget, arg.RealmID, arg.TargetType, arg.TargetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnSuspension
+	for rows.Next() {
+		var i AuthnSuspension
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.TargetType,
+			&i.TargetID,
+			&i.Category,
+			&i.Reason,
+			&i.ExternalRef,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.LiftedAt,
+			&i.LiftedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTOTPByUser = `-- name: ListTOTPByUser :many
 SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
 `
@@ -1304,6 +1533,24 @@ func (q *Queries) ListTOTPByUser(ctx context.Context, arg ListTOTPByUserParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const markScheduledEventFired = `-- name: MarkScheduledEventFired :execrows
+UPDATE scheduled_events SET fired_at = ? WHERE realm_id = ? AND id = ? AND fired_at IS NULL
+`
+
+type MarkScheduledEventFiredParams struct {
+	FiredAt sql.NullString
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) MarkScheduledEventFired(ctx context.Context, arg MarkScheduledEventFiredParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markScheduledEventFired, arg.FiredAt, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const renamePasskey = `-- name: RenamePasskey :execrows
@@ -1499,6 +1746,35 @@ func (q *Queries) RevokeTOTP(ctx context.Context, arg RevokeTOTPParams) error {
 	return err
 }
 
+const scheduleEvent = `-- name: ScheduleEvent :exec
+INSERT INTO scheduled_events (id, realm_id, ref, event_type, payload, fire_at, fired_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type ScheduleEventParams struct {
+	ID        string
+	RealmID   string
+	Ref       string
+	EventType string
+	Payload   []byte
+	FireAt    string
+	FiredAt   sql.NullString
+	CreatedAt string
+}
+
+func (q *Queries) ScheduleEvent(ctx context.Context, arg ScheduleEventParams) error {
+	_, err := q.db.ExecContext(ctx, scheduleEvent,
+		arg.ID,
+		arg.RealmID,
+		arg.Ref,
+		arg.EventType,
+		arg.Payload,
+		arg.FireAt,
+		arg.FiredAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const setPrimaryEmail = `-- name: SetPrimaryEmail :exec
 UPDATE authn_user_emails SET is_primary = (id = ?1) WHERE realm_id = ?2 AND user_id = ?3
 `
@@ -1512,6 +1788,32 @@ type SetPrimaryEmailParams struct {
 func (q *Queries) SetPrimaryEmail(ctx context.Context, arg SetPrimaryEmailParams) error {
 	_, err := q.db.ExecContext(ctx, setPrimaryEmail, arg.ID, arg.RealmID, arg.UserID)
 	return err
+}
+
+const setUserValidity = `-- name: SetUserValidity :execrows
+UPDATE authn_users SET valid_from = ?, valid_until = ?, updated_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type SetUserValidityParams struct {
+	ValidFrom  sql.NullString
+	ValidUntil sql.NullString
+	UpdatedAt  string
+	RealmID    string
+	ID         string
+}
+
+func (q *Queries) SetUserValidity(ctx context.Context, arg SetUserValidityParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setUserValidity,
+		arg.ValidFrom,
+		arg.ValidUntil,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const touchSession = `-- name: TouchSession :execrows

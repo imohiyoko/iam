@@ -38,6 +38,8 @@ type UserRepo interface {
 	Create(ctx context.Context, u User) error // ID か (realm, PublicID) が重複すれば errs.Conflict
 	Get(ctx context.Context, realmID, id string) (User, error)
 	GetByPublicID(ctx context.Context, realmID, publicID string) (User, error)
+	// SetValidity は有効期間（design.md 4.8）を置き換える。無ければ errs.NotFound。
+	SetValidity(ctx context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error
 }
 
 // VerifiedVia はメールを確認済みとみなした経路（design.md 4.1）。
@@ -207,6 +209,73 @@ type PasswordRepo interface {
 	UpdateHash(ctx context.Context, realmID, id, hash string) error
 	// Revoke は at に無効化する。既に無効化されていれば何もしない。無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+}
+
+// SuspensionTarget は停止の対象の種類（design.md 4.7）。
+type SuspensionTarget string
+
+const (
+	SuspensionTargetUser           SuspensionTarget = "user"
+	SuspensionTargetOrg            SuspensionTarget = "org"
+	SuspensionTargetServiceAccount SuspensionTarget = "service_account"
+	SuspensionTargetMembership     SuspensionTarget = "membership"
+)
+
+// Suspension は suspensions の1行。停止中かは時刻から計算する（StartsAt ≤ 今 < min(EndsAt, LiftedAt)）。
+// 解除は削除ではなく LiftedAt を記録する。ID は内部 ID で、API に出すのは PublicID。
+type Suspension struct {
+	ID         string
+	PublicID   string
+	RealmID    string
+	TargetType SuspensionTarget
+	TargetID   string // 対象の内部 ID
+	Category   string // tos_violation / customer_request / security_risk / billing / realm で足したもの
+	// Reason は内部向けの理由（本人には見せない）。
+	Reason string
+	// ExternalRef は外部のシステム（課金など）の参照。空でなければ、対象と種別ごとに一意（冪等な停止）。
+	ExternalRef string
+	StartsAt    time.Time
+	EndsAt      *time.Time // nil は無期限
+	CreatedBy   string     // 操作した主体の公開 ID
+	CreatedAt   time.Time
+	LiftedAt    *time.Time
+	LiftedBy    string
+}
+
+// SuspensionRepo は suspensions の Repository。
+type SuspensionRepo interface {
+	// Create は (realm, PublicID) か、空でない (対象, Category, ExternalRef) が重複すれば errs.Conflict を返す。
+	Create(ctx context.Context, s Suspension) error
+	GetByPublicID(ctx context.Context, realmID, publicID string) (Suspension, error)
+	// ListByTarget は対象の停止を StartsAt の順（同時刻は ID の順）に返す（解除・終了したものも含む）。
+	ListByTarget(ctx context.Context, realmID string, t SuspensionTarget, targetID string) ([]Suspension, error)
+	// Lift は at に解除する。既に解除されていれば何もしない。無ければ errs.NotFound。
+	Lift(ctx context.Context, realmID, id string, at time.Time, by string) error
+}
+
+// ScheduledEvent は scheduled_events の1行（design.md 4.8）。時刻の境界（停止の開始・終了、有効期間の始まり・終わり）の
+// 出来事を予約し、時刻を過ぎたら outbox に出す。アクセスの可否はこの処理の遅れに左右されない（判定は時刻から計算する）。
+type ScheduledEvent struct {
+	ID      string
+	RealmID string
+	// Ref は取り消しの単位（停止の公開 ID、ユーザーの有効期間など）。
+	Ref       string
+	Type      string
+	Payload   []byte // 監査ログの details に入れる JSON
+	FireAt    time.Time
+	FiredAt   *time.Time
+	CreatedAt time.Time
+}
+
+// ScheduledEventRepo は scheduled_events の Repository。
+type ScheduledEventRepo interface {
+	Schedule(ctx context.Context, e ScheduledEvent) error
+	// Due は FireAt が now 以前で未発火のものを、全 realm から FireAt の順（同時刻は ID の順）に最大 limit 件返す。
+	Due(ctx context.Context, now time.Time, limit int) ([]ScheduledEvent, error)
+	// MarkFired は未発火なら at に発火済みにして true を返す。発火済み・取り消し済みなら false（同時の処理で二重に出さない）。
+	MarkFired(ctx context.Context, realmID, id string, at time.Time) (bool, error)
+	// CancelByRef は ref の未発火のものを取り消す（消す）。
+	CancelByRef(ctx context.Context, realmID, ref string) error
 }
 
 // Connection は connections の1行（外部の IdP との接続）。秘密を含む設定はコアが暗号化してから渡す。

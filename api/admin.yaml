@@ -173,6 +173,105 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/users/{id}:
+    patch:
+      operationId: updateUser
+      summary: ユーザーの有効期間を変更する（4.8）
+      description: |
+        権限 `users:update`。`valid_from`・`valid_until` の両方を置き換える（省略か null は制限なし）。期間の外では
+        ログインできず、既存のセッションも境界の時刻ちょうどに使えなくなる。境界の時刻に `user.validity_started`・
+        `user.validity_ended` を監査ログに出す（判定はこの処理の遅れに左右されない）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateUser" }
+      responses:
+        "200":
+          description: 変更した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUser" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/suspensions:
+    post:
+      operationId: suspendUser
+      summary: ユーザーを停止する（4.7）
+      description: |
+        権限は種別ごと（`suspensions:<category>`。realm で足した種別は `realm:owner` だけ）。`starts_at` を省略か過去なら
+        今から、未来なら予約。`ends_at` を省略で無期限。重ねられ、1つでも有効なら停止中。停止中はログインできず、
+        既存のセッションも使えない（遅くとも `validity_max_delay` の後。予約は開始の時刻ちょうど）。本人には
+        `suspended.<category>` だけを返し、`reason` は見せない。`external_ref` が同じ停止（対象と種別も同じ）が
+        あれば、新しく作らず 200 でそれを返す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SuspendRequest" }
+      responses:
+        "200":
+          description: 同じ external_ref の停止が既にある
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspension" }
+        "201":
+          description: 停止した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspension" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listUserSuspensions
+      summary: ユーザーの停止の一覧（解除・終了したものも含む）
+      description: 権限 `suspensions:read`。開始の時刻の順。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspensions" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/suspensions/{id}:lift:
+    post:
+      operationId: liftSuspension
+      summary: 停止を解除する
+      description: |
+        権限は停止と同じ種別ごと。本人は自分の停止を解除できない。既に解除・終了していれば何もせず 200。
+        停止をまたいだセッション（停止の前に認証したもの）は戻らない（再ログインが要る）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LiftRequest" }
+      responses:
+        "200":
+          description: 解除した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspension" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/sessions/{id}:revoke:
     post:
       operationId: revokeSession
@@ -314,3 +413,53 @@ components:
         totp: { type: integer }
         password: { type: boolean }
         sessions: { type: integer, description: 失効させたセッションの数 }
+    UpdateUser:
+      type: object
+      properties:
+        valid_from: { type: string, format: date-time, nullable: true }
+        valid_until: { type: string, format: date-time, nullable: true }
+    AdminUser:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [active, deleted, merged] }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+    SuspendRequest:
+      type: object
+      required: [category, reason]
+      properties:
+        category: { type: string, description: "tos_violation / customer_request / security_risk / billing / realm で足したもの" }
+        reason: { type: string, minLength: 1, maxLength: 1000, description: 内部向けの理由（監査ログに出し、本人には見せない） }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        external_ref: { type: string, maxLength: 200, description: 外部のシステム（課金など）の参照。冪等にする }
+    LiftRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+    Suspension:
+      type: object
+      required: [id, user_id, category, reason, starts_at, active, created_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        category: { type: string }
+        reason: { type: string }
+        external_ref: { type: string }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        active: { type: boolean, description: 今停止中か }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        lifted_at: { type: string, format: date-time }
+        lifted_by: { type: string }
+    Suspensions:
+      type: object
+      required: [suspensions]
+      properties:
+        suspensions:
+          type: array
+          items: { $ref: "#/components/schemas/Suspension" }

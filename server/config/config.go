@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -130,6 +131,9 @@ type Security struct {
 	SecondFactor SecondFactor `yaml:"second_factor"`
 	// Password はフィーチャー password（design.md 4.1）。
 	Password Password `yaml:"password"`
+	// SuspensionCategories は realm で足す停止の種別（design.md 4.7）。組み込みの種別は書かない。
+	// 停止・解除できるのは realm:owner だけ。
+	SuspensionCategories []string `yaml:"suspension_categories"`
 	// Warnings は警告のコードごとのアクション（ignore / warn / deny。design.md 10章）。無いコードは既定に従う。
 	Warnings map[string]string `yaml:"warnings"`
 }
@@ -210,6 +214,12 @@ func (d DurationRule) Rule(key string) settings.Duration {
 		Direction: settings.LowerIsStricter, OrgMayRelax: d.OrgMayRelax,
 	}
 }
+
+// 組み込みの停止の種別（authn/account と同じ）。
+var (
+	builtinCategories = []string{"tos_violation", "customer_request", "security_risk", "billing"}
+	categoryRE        = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
+)
 
 // Outbox は outbox の送出の設定。
 type Outbox struct {
@@ -384,6 +394,11 @@ func (c Config) Validate() error {
 	}
 	if sf := c.Security.SecondFactor; sf.TTL.D() <= 0 || sf.TTL.D() > time.Hour || sf.MaxAttempts < 1 || sf.MaxAttempts > 10 {
 		problems = append(problems, "security.second_factor: ttl must be within (0, 1h] and max_attempts within [1, 10]")
+	}
+	for _, c := range c.Security.SuspensionCategories {
+		if !categoryRE.MatchString(c) || slices.Contains(builtinCategories, c) {
+			problems = append(problems, fmt.Sprintf("security.suspension_categories: %q must match %s and not be built in %v", c, categoryRE, builtinCategories))
+		}
 	}
 	// OWASP の下限（m=19MiB, t=2）。開発用の構成では、テストのために軽くできる。
 	if a := c.Security.Password.Argon2; a.MemoryKiB > 1<<21 || a.Iterations > 16 || a.Parallelism < 1 || a.Parallelism > 16 ||

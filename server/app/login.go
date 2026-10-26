@@ -9,7 +9,6 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/emailflow"
 	"github.com/imohiyoko/iam/authn/loginlink"
-	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/ratelimit"
@@ -59,7 +58,7 @@ func (s publicServer) VerifyEmailLogin(ctx context.Context, req publicapi.Verify
 	if errors.Is(err, errs.AuthenticationFailed) {
 		return fail, nil
 	}
-	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.VerifyEmailLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	if err != nil {
@@ -88,7 +87,7 @@ func (s publicServer) RedeemLoginLink(ctx context.Context, req publicapi.RedeemL
 		replace = tok
 	}
 	is, uid, err := s.a.links.Redeem(ctx, s.a.realm.ID, req.Body.Token, loginlink.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}, replace)
-	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.RedeemLoginLink403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	if errors.Is(err, errs.AuthenticationFailed) {

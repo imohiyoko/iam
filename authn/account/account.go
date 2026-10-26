@@ -27,6 +27,8 @@ type Service struct {
 	Clock   clock.Clock
 	// VerifiedVia は realm が「確認済み」とみなす経路（4.1）。含まれない経路ではユーザーを作らない。
 	VerifiedVia []port.VerifiedVia
+	// ExtraCategories は realm で足した停止の種別（4.7）。
+	ExtraCategories []string
 }
 
 // ErrEmailInvalid はメールアドレスの形式の誤り。
@@ -146,16 +148,4 @@ func (s *Service) EmailAddress(ctx context.Context, tx port.Tx, e port.UserEmail
 	}
 	b, err := s.Crypter.Decrypt(ctx, tx.DataKeys(), e.UserID, e.Ciphertext, "email")
 	return string(b), err
-}
-
-// CanLogin はユーザーが now の時点で認証できる状態かを返す（削除・統合済みでなく、有効期間内。4.7、4.8）。
-// 停止（suspensions）は停止のフィーチャーで足す。
-func CanLogin(u port.User, now time.Time) bool {
-	if u.Status != port.UserActive {
-		return false
-	}
-	if u.ValidFrom != nil && now.Before(*u.ValidFrom) {
-		return false
-	}
-	return u.ValidUntil == nil || now.Before(*u.ValidUntil)
 }
