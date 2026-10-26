@@ -181,6 +181,7 @@ type tx struct{ q *db.Queries }
 func (t *tx) Realms() port.RealmRepo       { return realms{t.q} }
 func (t *tx) Features() port.FeatureLedger { return features{t.q} }
 func (t *tx) DataKeys() port.DataKeyRepo   { return dataKeys{t.q} }
+func (t *tx) AuditKeys() port.DataKeyRepo  { return auditKeys{t.q} }
 func (t *tx) Audit() port.AuditRepo        { return auditRepo{t.q} }
 func (t *tx) Outbox() port.OutboxRepo      { return outbox{t.q} }
 
@@ -293,6 +294,25 @@ func (d dataKeys) Get(ctx context.Context, userID string) (port.DataKey, error) 
 
 func (d dataKeys) Delete(ctx context.Context, userID string) error {
 	return mapErr(d.q.DeleteDataKey(ctx, userID))
+}
+
+type auditKeys struct{ q *db.Queries }
+
+func (d auditKeys) Create(ctx context.Context, k port.DataKey) error {
+	return mapErr(d.q.CreateAuditKey(ctx, db.CreateAuditKeyParams{Owner: k.UserID, WrappedKey: k.WrappedKey, KeyID: k.KeyID, CreatedAt: formatTime(k.CreatedAt)}))
+}
+
+func (d auditKeys) Get(ctx context.Context, owner string) (port.DataKey, error) {
+	row, err := d.q.GetAuditKey(ctx, owner)
+	if err != nil {
+		return port.DataKey{}, mapErr(err)
+	}
+	t, err := parseTime(row.CreatedAt)
+	return port.DataKey{UserID: row.Owner, WrappedKey: row.WrappedKey, KeyID: row.KeyID, CreatedAt: t}, err
+}
+
+func (d auditKeys) Delete(ctx context.Context, owner string) error {
+	return mapErr(d.q.DeleteAuditKey(ctx, owner))
 }
 
 // ---------------------------------------------------------------------------

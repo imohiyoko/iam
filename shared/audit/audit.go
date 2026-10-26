@@ -33,20 +33,23 @@ type Actor struct {
 
 // Event は監査ログの1件（design.md 6.2）。
 //
-// IP と UserAgent は個人情報として扱い、外部出力（External）には含めない。
+// IP と UserAgent は個人情報として扱い、外部出力（External）には含めない。記録するときは保持期間の後も残してよい形
+// （TruncateIP、ClassifyUA）にし、全文は Client に暗号化して置く（ADR 0063）。
 // Details には個人情報を入れない（必要なら ID で参照する）。
 type Event struct {
-	Version   int            `json:"v"`
-	ID        string         `json:"id"`
-	Time      time.Time      `json:"time"`
-	Type      string         `json:"type"`
-	Result    Result         `json:"result"`
-	Actor     Actor          `json:"actor"`
-	RealmID   string         `json:"realm_id,omitempty"`
-	OrgID     string         `json:"org_id,omitempty"`
-	SessionID string         `json:"session_id,omitempty"` // 公開のセッション ID のみ
-	IP        string         `json:"ip,omitempty"`
-	UserAgent string         `json:"user_agent,omitempty"`
+	Version   int       `json:"v"`
+	ID        string    `json:"id"`
+	Time      time.Time `json:"time"`
+	Type      string    `json:"type"`
+	Result    Result    `json:"result"`
+	Actor     Actor     `json:"actor"`
+	RealmID   string    `json:"realm_id,omitempty"`
+	OrgID     string    `json:"org_id,omitempty"`
+	SessionID string    `json:"session_id,omitempty"` // 公開のセッション ID のみ
+	IP        string    `json:"ip,omitempty"`
+	UserAgent string    `json:"user_agent,omitempty"`
+	// Client は IP と User-Agent の全文の暗号文（shared/eventlog が書く）。外部出力には含めない。
+	Client    string         `json:"client,omitempty"`
 	RequestID string         `json:"request_id,omitempty"`
 	Details   map[string]any `json:"details,omitempty"`
 	// Chain は外部出力にだけ付ける、チェーン上の位置（ハッシュの対象外）。
@@ -151,5 +154,6 @@ func Verify(prev []byte, firstSeq int64, records []Record) ([]byte, error) {
 func External(e Event) Event {
 	e.IP = ""
 	e.UserAgent = ""
+	e.Client = ""
 	return e
 }

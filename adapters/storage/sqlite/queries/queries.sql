@@ -29,6 +29,15 @@ SELECT user_id, wrapped_key, key_id, created_at FROM authn_user_data_keys WHERE 
 -- name: DeleteDataKey :exec
 DELETE FROM authn_user_data_keys WHERE user_id = ?;
 
+-- name: CreateAuditKey :exec
+INSERT INTO shared_audit_client_keys (owner, wrapped_key, key_id, created_at) VALUES (?, ?, ?, ?);
+
+-- name: GetAuditKey :one
+SELECT owner, wrapped_key, key_id, created_at FROM shared_audit_client_keys WHERE owner = ?;
+
+-- name: DeleteAuditKey :exec
+DELETE FROM shared_audit_client_keys WHERE owner = ?;
+
 -- name: LastAuditEvent :one
 SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events ORDER BY seq DESC LIMIT 1;
 

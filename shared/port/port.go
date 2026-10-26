@@ -35,6 +35,8 @@ type Tx interface {
 	Realms() RealmRepo
 	Features() FeatureLedger
 	DataKeys() DataKeyRepo
+	// AuditKeys は監査ログの IP と User-Agent を暗号化する、realm と日ごとの鍵（UserID に持ち主の名前。design.md 9.6、ADR 0063）。
+	AuditKeys() DataKeyRepo
 	Audit() AuditRepo
 	Outbox() OutboxRepo
 

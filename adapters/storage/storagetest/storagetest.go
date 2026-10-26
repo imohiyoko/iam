@@ -43,6 +43,7 @@ func Run(t *testing.T, h Harness) {
 		{"Rollback", testRollback},
 		{"Features", testFeatures},
 		{"DataKeys", testDataKeys},
+		{"AuditKeys", testAuditKeys},
 		{"DataKeysUniqueConcurrent", testDataKeysUniqueConcurrent},
 		{"AuditChain", testAuditChain},
 		{"AuditTamperDetected", testAuditTamperDetected},
@@ -229,11 +230,29 @@ func testFeatures(t *testing.T, h Harness) {
 }
 
 func testDataKeys(t *testing.T, h Harness) {
+	testKeyRepo(t, h, id.New(id.User), port.Tx.DataKeys)
+}
+
+// testAuditKeys は監査ログの日ごとの鍵。データ鍵と同じ契約で、別の表に置く。
+func testAuditKeys(t *testing.T, h Harness) {
+	testKeyRepo(t, h, "rlm_x:2026-10-26", port.Tx.AuditKeys)
 	s, _ := open(t, h)
-	u := id.New(id.User)
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		if err := tx.AuditKeys().Create(ctx, port.DataKey{UserID: "o", WrappedKey: []byte{1}, KeyID: "k", CreatedAt: T0}); err != nil {
+			return err
+		}
+		if _, err := tx.DataKeys().Get(ctx, "o"); !errors.Is(err, errs.NotFound) {
+			return fmt.Errorf("audit key visible as a data key: %v", err)
+		}
+		return nil
+	})
+}
+
+func testKeyRepo(t *testing.T, h Harness, u string, repo func(port.Tx) port.DataKeyRepo) {
+	s, _ := open(t, h)
 	k := port.DataKey{UserID: u, WrappedKey: []byte{1, 2, 3}, KeyID: "mk_1", CreatedAt: T0}
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
-		r := tx.DataKeys()
+		r := repo(tx)
 		if err := r.Create(ctx, k); err != nil {
 			return err
 		}

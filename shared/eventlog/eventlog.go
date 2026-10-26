@@ -20,6 +20,7 @@ const TopicAudit = "audit"
 
 // Record は監査ログに1件を追記し、外部出力用に outbox へ積む。
 // 呼び出し側の操作と同じトランザクションで呼ぶ（操作とログが必ず揃う）。
+// IP と User-Agent は切り詰めて残し、全文は ClientSealer を通した Storage なら暗号化して残す（ADR 0063）。
 func Record(ctx context.Context, tx port.Tx, clk clock.Clock, e audit.Event) (audit.Event, error) {
 	if e.ID == "" {
 		e.ID = id.NewExternal(id.Event)
@@ -29,6 +30,9 @@ func Record(ctx context.Context, tx port.Tx, clk clock.Clock, e audit.Event) (au
 	}
 	if e.Version == 0 {
 		e.Version = audit.SchemaVersion
+	}
+	if err := protectClient(ctx, tx, &e); err != nil {
+		return e, err
 	}
 	last, err := tx.Audit().Last(ctx)
 	if err != nil {

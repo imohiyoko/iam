@@ -41,9 +41,11 @@ type state struct {
 	realms   map[string]port.Realm
 	features map[string]port.FeatureRecord
 	dataKeys map[string]port.DataKey
-	audit    []auditRow
-	outbox   []port.OutboxMessage
-	outboxIx map[string]int
+	// auditKeys は監査ログの IP と UA の日ごとの鍵。
+	auditKeys map[string]port.DataKey
+	audit     []auditRow
+	outbox    []port.OutboxMessage
+	outboxIx  map[string]int
 
 	users      map[string]port.User
 	emails     map[string]port.UserEmail
@@ -80,7 +82,7 @@ func New(clk clock.Clock) *Storage {
 	}
 	return &Storage{clock: clk, s: state{
 		realms: map[string]port.Realm{}, features: map[string]port.FeatureRecord{},
-		dataKeys: map[string]port.DataKey{}, outboxIx: map[string]int{},
+		dataKeys: map[string]port.DataKey{}, auditKeys: map[string]port.DataKey{}, outboxIx: map[string]int{},
 		users: map[string]port.User{}, emails: map[string]port.UserEmail{}, identities: map[string]port.Identity{},
 		passkeys: map[string]port.Passkey{}, revokedPasskeys: map[string]time.Time{}, totps: map[string]port.TOTPCredential{},
 		passwords: map[string]port.PasswordCredential{}, suspensions: map[string]port.Suspension{},
@@ -129,7 +131,8 @@ func (t *tx) rollback() {
 
 func (t *tx) Realms() port.RealmRepo       { return realms{t} }
 func (t *tx) Features() port.FeatureLedger { return features{t} }
-func (t *tx) DataKeys() port.DataKeyRepo   { return dataKeys{t} }
+func (t *tx) DataKeys() port.DataKeyRepo   { return dataKeys{t, t.s.dataKeys} }
+func (t *tx) AuditKeys() port.DataKeyRepo  { return dataKeys{t, t.s.auditKeys} }
 func (t *tx) Audit() port.AuditRepo        { return auditRepo{t} }
 func (t *tx) Outbox() port.OutboxRepo      { return outbox{t} }
 
@@ -243,19 +246,22 @@ func (f features) Delete(_ context.Context, name string) error {
 
 // ---------------------------------------------------------------------------
 
-type dataKeys struct{ t *tx }
+type dataKeys struct {
+	t *tx
+	m map[string]port.DataKey
+}
 
 func (d dataKeys) Create(_ context.Context, k port.DataKey) error {
-	if _, ok := d.t.s.dataKeys[k.UserID]; ok {
+	if _, ok := d.m[k.UserID]; ok {
 		return errs.New(errs.KindConflict, "data key for %s exists", k.UserID)
 	}
 	k.WrappedKey = bytes.Clone(k.WrappedKey)
-	setKey(d.t, d.t.s.dataKeys, k.UserID, k)
+	setKey(d.t, d.m, k.UserID, k)
 	return nil
 }
 
 func (d dataKeys) Get(_ context.Context, userID string) (port.DataKey, error) {
-	k, ok := d.t.s.dataKeys[userID]
+	k, ok := d.m[userID]
 	if !ok {
 		return port.DataKey{}, errs.New(errs.KindNotFound, "data key for %s", userID)
 	}
@@ -264,7 +270,7 @@ func (d dataKeys) Get(_ context.Context, userID string) (port.DataKey, error) {
 }
 
 func (d dataKeys) Delete(_ context.Context, userID string) error {
-	deleteKey(d.t, d.t.s.dataKeys, userID)
+	deleteKey(d.t, d.m, userID)
 	return nil
 }
 

@@ -35,6 +35,7 @@ realm:
   org_creation: anyone  # 共有 Org を作れる人：anyone / operators_only / invite_only（運営者はいつでも作れる）
   org_deletion_grace: 30d  # Org の削除の猶予期間（その間は取り消せる。0 で猶予なし）
   user_deletion_grace: 30d  # アカウントの削除の猶予期間（その間はログインしても取り消しだけができる）
+  client_data_retention: 30d  # 監査ログの IP と User-Agent の全文を読める期間（後は IP /24・/48 と UA の大分類だけが残る）
 
 security:
   session:
