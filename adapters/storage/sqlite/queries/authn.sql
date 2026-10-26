@@ -194,6 +194,39 @@ UPDATE authn_password_credentials SET revoked_at = ?, revoke_reason = ? WHERE re
 -- name: SetUserValidity :execrows
 UPDATE authn_users SET valid_from = ?, valid_until = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
 
+-- name: SetUserDeletion :execrows
+UPDATE authn_users SET deletion_scheduled_at = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
+
+-- name: SetUserLegalHold :execrows
+UPDATE authn_users SET legal_hold = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
+
+-- name: MarkUserDeleted :execrows
+UPDATE authn_users SET status = 'deleted', deletion_scheduled_at = NULL, updated_at = ? WHERE realm_id = ? AND id = ?;
+
+-- name: EraseUserEmails :exec
+DELETE FROM authn_user_emails WHERE realm_id = ? AND user_id = ?;
+
+-- name: EraseUserIdentities :exec
+DELETE FROM authn_user_identities WHERE realm_id = ? AND user_id = ?;
+
+-- name: EraseUserPasskeys :exec
+DELETE FROM authn_passkeys WHERE realm_id = ? AND user_id = ?;
+
+-- name: EraseUserTOTP :exec
+DELETE FROM authn_totp_credentials WHERE realm_id = ? AND user_id = ?;
+
+-- name: EraseUserPasswords :exec
+DELETE FROM authn_password_credentials WHERE realm_id = ? AND user_id = ?;
+
+-- name: EraseUserRecoveryCodes :exec
+DELETE FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ?;
+
+-- name: EraseUserSessions :exec
+DELETE FROM authn_sessions WHERE realm_id = ? AND principal_type = 'user' AND principal_id = ?;
+
+-- name: EraseUserRoleBindings :exec
+DELETE FROM authz_role_bindings WHERE realm_id = ? AND principal_type = 'user' AND principal_id = ?;
+
 -- name: CreateSuspension :exec
 INSERT INTO authn_suspensions (id, public_id, realm_id, target_type, target_id, category, reason, external_ref, starts_at, ends_at,
     created_by, created_at, lifted_at, lifted_by)

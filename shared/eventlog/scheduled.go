@@ -30,6 +30,9 @@ func Schedule(ctx context.Context, tx port.Tx, clk clock.Clock, realmID, ref, ty
 // details は予約したときの詳細で、Handler が足した鍵も監査ログに載る。
 type Handler func(ctx context.Context, tx port.Tx, e port.ScheduledEvent, details map[string]any) error
 
+// ErrSkip を Handler が返すと、発火済みにするだけで監査ログに出さない（取り消された予定、保留など。出来事は起きていない）。
+var ErrSkip = errors.New("eventlog: skip")
+
 // Scheduler は予約の時刻を過ぎた出来事を監査ログに出す。出るのは時刻の後（Interval の分は遅れうる）だが、
 // アクセスの可否はこの処理に依らず時刻から計算する（4.8）。発火済みの記録と監査ログは同じトランザクションで書くので、
 // 複数のインスタンスで動かしても1回だけ出る。
@@ -89,7 +92,9 @@ func (s *Scheduler) Fire(ctx context.Context) (int, error) {
 			}
 			details["scheduled_at"] = e.FireAt.UTC().Format(time.RFC3339Nano)
 			if h := s.Handlers[e.Type]; h != nil {
-				if err := h(ctx, tx, e, details); err != nil {
+				if err := h(ctx, tx, e, details); errors.Is(err, ErrSkip) {
+					return nil
+				} else if err != nil {
 					return err
 				}
 			}

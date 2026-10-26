@@ -505,6 +505,59 @@ paths:
           headers:
             Set-Cookie: { schema: { type: string } }
 
+  /v1/me/account:delete:
+    post:
+      operationId: deleteMyAccount
+      summary: アカウントを削除する（4.10）
+      description: |
+        直近の本人確認が要る（`max_auth_age` を過ぎていれば `401 reauthentication_required`）。realm の
+        `user_deletion_grace`（既定30日）の後に消し、その間はログインしても取り消し（`next: cancel_deletion`）だけができる。
+        既存のセッションはすべて失効する。共有 Org の最後のオーナーの間はできない（`409 last_owner`）。
+        消去では、所属を終えて個人 Org を削除し、認証情報・セッション・メールのインデックスを消し、データ鍵を消す
+        （個人情報は復号できなくなる）。ID は墓標として残る。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 削除を予約した（猶予が無ければ削除した）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deletes_at: { type: string, format: date-time, description: 予約したとき }
+                  deleted: { type: boolean, description: もう削除したか }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/account:cancel-deletion:
+    post:
+      operationId: cancelMyAccountDeletion
+      summary: アカウントの削除の予定を取り消す
+      description: |
+        猶予期間の間のログインで得た取り消し専用のセッション（`next: cancel_deletion`）で呼ぶ。取り消しの後、
+        セッションは制限なしに入れ替わる（新しいセッションを返す）。予定が無ければ `409 deletion_not_scheduled`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                return_token: { type: boolean, default: false }
+      responses:
+        "200":
+          description: 取り消した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /v1/me/sessions:
     get:
       operationId: listMySessions
@@ -1581,7 +1634,7 @@ components:
         token: { type: string, description: "`return_token: true` のときだけ。Bearer で使う" }
         next:
           type: string
-          enum: [second_factor, enroll, recovery]
+          enum: [second_factor, enroll, recovery, cancel_deletion]
           description: |
             セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
             登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、

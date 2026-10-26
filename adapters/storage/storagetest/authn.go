@@ -43,6 +43,7 @@ var authnTests = []struct {
 	{"Sessions", testSessions},
 	{"SessionRevokeByPrincipal", testSessionRevokeByPrincipal},
 	{"SessionMoveOrg", testSessionMoveOrg},
+	{"UserDeletion", testUserDeletion},
 	{"ServiceAccounts", testServiceAccounts},
 	{"RoleBindings", testRoleBindings},
 	{"Orgs", testOrgs},
@@ -513,6 +514,83 @@ func testSessionMoveOrg(t *testing.T, h Harness) {
 			return fmt.Errorf("another realm moved %v, %v", ids, err)
 		}
 		return nil
+	})
+}
+
+func testUserDeletion(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r := id.New(id.Realm)
+	u, other := newUser(r), newUser(r)
+	e, oe := newEmail(r, u.ID, "u"), newEmail(r, other.ID, "o")
+	ses, os := newSession(r, u.ID, T0), newSession(r, other.ID, T0)
+	pk, pw, tp, rc := newPasskey(r, u.ID, "cred-u"), newPassword(r, u.ID), newTOTP(r, u.ID), newRecoveryCode(r, u.ID, "l1")
+	rb := port.RoleBinding{ID: id.New(id.RoleBinding), RealmID: r, Role: "realm:admin", PrincipalType: port.PrincipalUser, PrincipalID: u.ID, CreatedAt: T0}
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		for _, x := range []port.User{u, other} {
+			if err := tx.Users().Create(ctx, x); err != nil {
+				return err
+			}
+		}
+		for _, err := range []error{tx.Emails().Create(ctx, e), tx.Emails().Create(ctx, oe), tx.Sessions().Create(ctx, ses), tx.Sessions().Create(ctx, os),
+			tx.Passkeys().Create(ctx, pk), tx.Passwords().Create(ctx, pw), tx.TOTP().Create(ctx, tp), tx.RecoveryCodes().Replace(ctx, r, u.ID, []port.RecoveryCode{rc}),
+			tx.RoleBindings().Create(ctx, rb)} {
+			if err != nil {
+				return err
+			}
+		}
+		at := T0.Add(30 * 24 * time.Hour)
+		if err := tx.Users().SetDeletion(ctx, r, u.ID, &at, T0); err != nil {
+			return err
+		}
+		if err := tx.Users().SetLegalHold(ctx, r, u.ID, true, T0); err != nil {
+			return err
+		}
+		if got, _ := tx.Users().Get(ctx, r, u.ID); got.DeletionScheduledAt == nil || !got.DeletionScheduledAt.Equal(at) || !got.LegalHold {
+			return fmt.Errorf("after scheduling = %+v", got)
+		}
+		if err := tx.Users().SetLegalHold(ctx, r, u.ID, false, T0); err != nil {
+			return err
+		}
+		if err := tx.Users().Erase(ctx, r, u.ID, at); err != nil {
+			return err
+		}
+		got, err := tx.Users().Get(ctx, r, u.ID)
+		if err != nil || got.Status != port.UserDeleted || got.DeletionScheduledAt != nil || got.LegalHold || !got.UpdatedAt.Equal(at) {
+			return fmt.Errorf("tombstone = %+v, %v", got, err)
+		}
+		// メールのインデックスは消え、同じアドレスで登録し直せる。
+		if err := notFound("erased email", second(tx.Emails().GetByIndex(ctx, r, e.Index))); err != nil {
+			return err
+		}
+		if err := notFound("erased session", second(tx.Sessions().Get(ctx, r, ses.ID))); err != nil {
+			return err
+		}
+		if err := notFound("erased passkey", second(tx.Passkeys().GetByPublicID(ctx, r, pk.PublicID))); err != nil {
+			return err
+		}
+		if err := notFound("erased password", second(tx.Passwords().Get(ctx, r, pw.ID))); err != nil {
+			return err
+		}
+		for name, n := range map[string]func() (int, error){
+			"totp":     func() (int, error) { return count(tx.TOTP().ListByUser(ctx, r, u.ID)) },
+			"recovery": func() (int, error) { return count(tx.RecoveryCodes().ListByUser(ctx, r, u.ID)) },
+			"roles":    func() (int, error) { return count(tx.RoleBindings().ListByPrincipal(ctx, r, port.PrincipalUser, u.ID)) },
+		} {
+			if got, err := n(); err != nil || got != 0 {
+				return fmt.Errorf("%s after erase = %d, %v", name, got, err)
+			}
+		}
+		// 別のユーザーのものは残る。
+		if _, err := tx.Emails().GetByIndex(ctx, r, oe.Index); err != nil {
+			return fmt.Errorf("other email: %v", err)
+		}
+		if _, err := tx.Sessions().Get(ctx, r, os.ID); err != nil {
+			return fmt.Errorf("other session: %v", err)
+		}
+		if err := notFound("erase in another realm", tx.Users().Erase(ctx, id.New(id.Realm), other.ID, at)); err != nil {
+			return err
+		}
+		return notFound("set deletion in another realm", tx.Users().SetDeletion(ctx, id.New(id.Realm), other.ID, nil, at))
 	})
 }
 

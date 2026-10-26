@@ -230,6 +230,80 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/users/{id}:delete:
+    post:
+      operationId: deleteUser
+      summary: ユーザーを削除する（4.10）
+      description: |
+        権限 `users:delete`。既定は realm の `user_deletion_grace` の後に消す（その間は取り消せる）。`immediate` なら今消す
+        （`legal_hold` が立っていれば予約にする）。共有 Org の最後のオーナーの間は `409 last_owner`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                immediate: { type: boolean, default: false }
+      responses:
+        "200":
+          description: 削除を予約した（か、削除した）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUser" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}:cancel-deletion:
+    post:
+      operationId: cancelUserDeletion
+      summary: ユーザーの削除の予定を取り消す
+      description: 権限 `users:delete`。予定が無ければ `409 deletion_not_scheduled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 取り消した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUser" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}:legal-hold:
+    post:
+      operationId: setUserLegalHold
+      summary: ユーザーの消去を保留する・保留を解く（4.10）
+      description: |
+        権限 `users:legal_hold`。保留の間は猶予期間が終わっても消さない（`user.deletion_held` を残す）。保留を解いたときに
+        猶予が終わっていれば、次の回に消す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hold]
+              properties:
+                hold: { type: boolean }
+      responses:
+        "200":
+          description: 変更した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUser" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/users/{id}/suspensions:
     post:
       operationId: suspendUser
@@ -748,6 +822,8 @@ components:
         status: { type: string, enum: [active, deleted, merged] }
         valid_from: { type: string, format: date-time }
         valid_until: { type: string, format: date-time }
+        deletion_scheduled_at: { type: string, format: date-time, description: 削除の予定（猶予期間の終わり） }
+        legal_hold: { type: boolean }
     SuspendRequest:
       type: object
       required: [category, reason]

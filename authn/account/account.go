@@ -29,13 +29,20 @@ type Service struct {
 	VerifiedVia []port.VerifiedVia
 	// ExtraCategories は realm で足した停止の種別（4.7）。
 	ExtraCategories []string
-	// Orgs はユーザーと同じトランザクションで個人 Org を作る（11.13）。nil ならフィーチャー org が動いていない。
-	Orgs PersonalOrgs
+	// Orgs はユーザーと同じトランザクションで個人 Org を作り、削除で所属を片付ける（11.13、4.10）。
+	// nil ならフィーチャー org が動いていない。
+	Orgs UserOrgs
+	// DeletionGrace はアカウントの削除の猶予期間（4.10）。0 なら猶予なし。
+	DeletionGrace time.Duration
 }
 
-// PersonalOrgs は個人 Org を作るもの（authn/org）。
-type PersonalOrgs interface {
+// UserOrgs はユーザーの Org を扱うもの（authn/org）。
+type UserOrgs interface {
 	CreatePersonal(ctx context.Context, tx port.Tx, u port.User, actor audit.Actor, requestID string) (port.Org, error)
+	// Deletable はユーザーを削除できるかを確かめる。共有 Org の最後のオーナーの間はできない。
+	Deletable(ctx context.Context, tx port.Tx, u port.User) error
+	// Release は削除するユーザーの所属をすべて終え、個人 Org を削除する。
+	Release(ctx context.Context, tx port.Tx, u port.User, actor audit.Actor, requestID string) error
 }
 
 // ErrEmailInvalid はメールアドレスの形式の誤り。

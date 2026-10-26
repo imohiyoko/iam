@@ -206,17 +206,17 @@ func (s *Service) ExpireDue(ctx context.Context, tx port.Tx, e port.ScheduledEve
 	publicID, _ := details["invitation_id"].(string)
 	inv, err := tx.Invitations().GetByPublicID(ctx, e.RealmID, publicID)
 	if errors.Is(err, errs.NotFound) {
-		return nil
+		return eventlog.ErrSkip
 	}
 	if err != nil {
 		return err
 	}
 	if inv.Status != port.InvitationPending {
-		return nil
+		return eventlog.ErrSkip
 	}
 	err = s.close(ctx, tx, inv, port.InvitationExpired, "")
 	if errors.Is(err, ErrInvitationInvalid) {
-		return nil
+		return eventlog.ErrSkip
 	}
 	return err
 }

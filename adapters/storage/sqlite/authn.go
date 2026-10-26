@@ -87,7 +87,8 @@ type users struct{ q *db.Queries }
 func toUser(r db.AuthnUser) (port.User, error) {
 	var p times
 	u := port.User{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Status: port.UserStatus(r.Status),
-		ValidFrom: p.null(r.ValidFrom), ValidUntil: p.null(r.ValidUntil), CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		ValidFrom: p.null(r.ValidFrom), ValidUntil: p.null(r.ValidUntil), DeletionScheduledAt: p.null(r.DeletionScheduledAt),
+		LegalHold: r.LegalHold != 0, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	return u, p.err
 }
 
@@ -371,6 +372,44 @@ func (r users) SetValidity(ctx context.Context, realmID, id string, from, until 
 	}
 	if n == 0 {
 		return errs.New(errs.KindNotFound, "user")
+	}
+	return nil
+}
+
+func (r users) SetDeletion(ctx context.Context, realmID, id string, scheduledAt *time.Time, updatedAt time.Time) error {
+	n, err := r.q.SetUserDeletion(ctx, db.SetUserDeletionParams{DeletionScheduledAt: nullTime(scheduledAt), UpdatedAt: formatTime(updatedAt),
+		RealmID: realmID, ID: id})
+	return affected(n, err, "user")
+}
+
+func (r users) SetLegalHold(ctx context.Context, realmID, id string, hold bool, updatedAt time.Time) error {
+	var v int64
+	if hold {
+		v = 1
+	}
+	n, err := r.q.SetUserLegalHold(ctx, db.SetUserLegalHoldParams{LegalHold: v, UpdatedAt: formatTime(updatedAt), RealmID: realmID, ID: id})
+	return affected(n, err, "user")
+}
+
+func (r users) Erase(ctx context.Context, realmID, id string, at time.Time) error {
+	n, err := r.q.MarkUserDeleted(ctx, db.MarkUserDeletedParams{UpdatedAt: formatTime(at), RealmID: realmID, ID: id})
+	if err := affected(n, err, "user"); err != nil {
+		return err
+	}
+	q := r.q
+	for _, err := range []error{
+		q.EraseUserEmails(ctx, db.EraseUserEmailsParams{RealmID: realmID, UserID: id}),
+		q.EraseUserIdentities(ctx, db.EraseUserIdentitiesParams{RealmID: realmID, UserID: id}),
+		q.EraseUserPasskeys(ctx, db.EraseUserPasskeysParams{RealmID: realmID, UserID: id}),
+		q.EraseUserTOTP(ctx, db.EraseUserTOTPParams{RealmID: realmID, UserID: id}),
+		q.EraseUserPasswords(ctx, db.EraseUserPasswordsParams{RealmID: realmID, UserID: id}),
+		q.EraseUserRecoveryCodes(ctx, db.EraseUserRecoveryCodesParams{RealmID: realmID, UserID: id}),
+		q.EraseUserSessions(ctx, db.EraseUserSessionsParams{RealmID: realmID, PrincipalID: id}),
+		q.EraseUserRoleBindings(ctx, db.EraseUserRoleBindingsParams{RealmID: realmID, PrincipalID: id}),
+	} {
+		if err != nil {
+			return mapErr(err)
+		}
 	}
 	return nil
 }

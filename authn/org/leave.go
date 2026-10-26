@@ -16,6 +16,8 @@ const (
 	EndedLeft       = "left"
 	EndedRemoved    = "removed"
 	EndedOrgDeleted = "org_deleted"
+	// EndedAccountDeleted はユーザーの削除で終えたこと（4.10）。
+	EndedAccountDeleted = "account_deleted"
 )
 
 var (
@@ -54,7 +56,7 @@ func (s *Service) end(ctx context.Context, tx port.Tx, o port.Org, m port.Member
 	if m.Status == port.MembershipEnded {
 		return Ended{}, errs.New(errs.KindNotFound, "membership")
 	}
-	if m.Role == port.OrgOwner && m.Status == port.MembershipActive && reason != EndedOrgDeleted {
+	if m.Role == port.OrgOwner && m.Status == port.MembershipActive && reason != EndedOrgDeleted && reason != EndedAccountDeleted {
 		n, err := tx.Memberships().CountActive(ctx, o.RealmID, o.ID, port.OrgOwner)
 		if err != nil {
 			return Ended{}, err
@@ -75,13 +77,15 @@ func (s *Service) end(ctx context.Context, tx port.Tx, o port.Org, m port.Member
 	if err != nil {
 		return Ended{}, err
 	}
-	p, err := s.EnsurePersonal(ctx, tx, u, requestID)
-	if err != nil {
-		return Ended{}, err
-	}
-	moved, err := tx.Sessions().MoveOrg(ctx, o.RealmID, u.ID, o.ID, p.ID)
-	if err != nil {
-		return Ended{}, err
+	var moved []string
+	if reason != EndedAccountDeleted { // 削除するユーザーのセッションは消える
+		p, err := s.EnsurePersonal(ctx, tx, u, requestID)
+		if err != nil {
+			return Ended{}, err
+		}
+		if moved, err = tx.Sessions().MoveOrg(ctx, o.RealmID, u.ID, o.ID, p.ID); err != nil {
+			return Ended{}, err
+		}
 	}
 	_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
 		Type: "membership.ended", Result: audit.ResultSuccess, RealmID: o.RealmID, OrgID: o.PublicID, Actor: actor, RequestID: requestID,
@@ -119,4 +123,65 @@ func (s *Service) Transfer(ctx context.Context, tx port.Tx, o port.Org, from, to
 		Details: map[string]any{"from_membership_id": from.PublicID, "to_membership_id": to.PublicID},
 	})
 	return from, to, err
+}
+
+// Deletable はユーザーを削除できるかを確かめる（account.UserOrgs）。共有 Org の最後のオーナーの間は ErrLastOwner（4.10）。
+func (s *Service) Deletable(ctx context.Context, tx port.Tx, u port.User) error {
+	ms, err := tx.Memberships().ListByUser(ctx, u.RealmID, u.ID)
+	if err != nil {
+		return err
+	}
+	for _, m := range ms {
+		if m.Status != port.MembershipActive || m.Role != port.OrgOwner {
+			continue
+		}
+		o, err := tx.Orgs().Get(ctx, u.RealmID, m.OrgID)
+		if err != nil {
+			return err
+		}
+		if o.Kind == port.OrgPersonal || o.DeletedAt != nil {
+			continue
+		}
+		n, err := tx.Memberships().CountActive(ctx, u.RealmID, o.ID, port.OrgOwner)
+		if err != nil {
+			return err
+		}
+		if n <= 1 {
+			return ErrLastOwner
+		}
+	}
+	return nil
+}
+
+// Release は削除するユーザーの共有 Org の所属を account_deleted で終え、個人 Org を削除する（account.UserOrgs）。
+// 猶予期間の間に最後のオーナーになっていても終える（Org は運営者が引き継ぐ）。
+func (s *Service) Release(ctx context.Context, tx port.Tx, u port.User, actor audit.Actor, requestID string) error {
+	ms, err := tx.Memberships().ListByUser(ctx, u.RealmID, u.ID)
+	if err != nil {
+		return err
+	}
+	now := s.Clock.Now()
+	for _, m := range ms {
+		if m.Status == port.MembershipEnded {
+			continue
+		}
+		o, err := tx.Orgs().Get(ctx, u.RealmID, m.OrgID)
+		if err != nil {
+			return err
+		}
+		if o.Kind == port.OrgShared {
+			if _, err := s.end(ctx, tx, o, m, EndedAccountDeleted, actor, requestID); err != nil {
+				return err
+			}
+			continue
+		}
+		m.Status, m.EndedReason, m.EmailID, m.ValidUntil, m.UpdatedAt = port.MembershipEnded, EndedAccountDeleted, "", new(now), now
+		if err := tx.Memberships().Update(ctx, m); err != nil {
+			return err
+		}
+		if err := tx.Orgs().SetDeletion(ctx, o.RealmID, o.ID, new(now), new(now), now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
