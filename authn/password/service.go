@@ -268,6 +268,10 @@ func (s *Service) breached(ctx context.Context, pw string) *bool {
 // 直近の認証（recentAuth）を求める。同じトランザクションで keepSession 以外のセッションを失効させる（5.2）。
 // 長さと漏洩の確認で拒否すれば ErrTooShort・ErrTooLong・ErrBreached。
 func (s *Service) Set(ctx context.Context, realmID, userID, newPassword, current string, recentAuth bool, keepSession string, actor audit.Actor, requestID string) (port.PasswordCredential, error) {
+	if len(newPassword) > MaxInputBytes {
+		// 正規化で縮む入力も、ログインで受け取れる大きさに揃える。
+		return port.PasswordCredential{}, ErrTooLong
+	}
 	pw := Normalize(newPassword)
 	if err := checkLength(pw, s.minLength()); err != nil {
 		return port.PasswordCredential{}, err

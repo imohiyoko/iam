@@ -217,6 +217,11 @@ func TestLoginDoesNotHideInfrastructureErrors(t *testing.T) {
 	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", true, "", audit.Actor{}, ""); err != nil {
 		t.Fatal(err)
 	}
+	// 正規化で 128 文字に縮んでも、入力が上限を超えれば設定できない（ログインで受け取れないため）。
+	decomposed := strings.Repeat("\u1100\u1161\u11A8", password.MaxLength)
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, decomposed, good, true, "", audit.Actor{}, ""); !errors.Is(err, password.ErrTooLong) {
+		t.Fatalf("set oversized input = %v", err)
+	}
 	// 上限を超える入力は照合せずに認証の失敗にする。
 	long := strings.Repeat("a", password.MaxInputBytes+1)
 	if _, err := e.svc.Login(ctx, e.k.RealmID, password.Login{Email: "dave@example.com", Password: long}); !errors.Is(err, errs.AuthenticationFailed) {
