@@ -7,13 +7,14 @@ import (
 	"slices"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
-// ユーザーの停止と有効期間（design.md 4.7、4.8、ADR 0053）。
+// 停止と有効期間（design.md 4.7、4.8、ADR 0053、0058）。
 
 // suspensionPerm は種別を停止・解除する権限。realm で足した種別は realm:owner（suspensions:*）だけ。
 func suspensionPerm(category string) string {
@@ -23,15 +24,90 @@ func suspensionPerm(category string) string {
 	return role.PermSuspensionsAny
 }
 
-func (s adminServer) suspensionView(sp port.Suspension, userPublicID string) adminapi.Suspension {
+// subject は停止・有効期間の対象と、ユーザーか Membership なら本人。
+type subject struct {
+	target       account.Target
+	userID       string // 本人の内部 ID（セッションの検証結果を消す）
+	userPublicID string
+}
+
+// resolveFunc はトランザクションの中で対象を引く。止められない対象（個人 Org など）ならエラーを返す。
+type resolveFunc func(ctx context.Context, tx port.Tx) (subject, error)
+
+func (s adminServer) userSubject(publicID string) resolveFunc {
+	return func(ctx context.Context, tx port.Tx) (subject, error) {
+		u, err := tx.Users().GetByPublicID(ctx, s.a.realm.ID, publicID)
+		return subject{target: account.UserTarget(u), userID: u.ID, userPublicID: u.PublicID}, err
+	}
+}
+
+func (s adminServer) orgSubject(publicID string) resolveFunc {
+	return func(ctx context.Context, tx port.Tx) (subject, error) {
+		o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, publicID)
+		if err != nil {
+			return subject{}, err
+		}
+		return subject{target: org.OrgTarget(o)}, org.Suspendable(o)
+	}
+}
+
+func (s adminServer) membershipSubject(publicID string) resolveFunc {
+	return func(ctx context.Context, tx port.Tx) (subject, error) {
+		m, err := tx.Memberships().GetByPublicID(ctx, s.a.realm.ID, publicID)
+		if err != nil {
+			return subject{}, err
+		}
+		return s.membershipOf(ctx, tx, m)
+	}
+}
+
+func (s adminServer) membershipOf(ctx context.Context, tx port.Tx, m port.Membership) (subject, error) {
+	o, err := tx.Orgs().Get(ctx, s.a.realm.ID, m.OrgID)
+	if err != nil {
+		return subject{}, err
+	}
+	u, err := tx.Users().Get(ctx, s.a.realm.ID, m.UserID)
+	if err != nil {
+		return subject{}, err
+	}
+	return subject{target: org.MembershipTarget(m), userID: u.ID, userPublicID: u.PublicID}, org.Suspendable(o)
+}
+
+// subjectOf は停止の対象を引く。
+func (s adminServer) subjectOf(ctx context.Context, tx port.Tx, sp port.Suspension) (subject, error) {
+	switch sp.TargetType {
+	case port.SuspensionTargetUser:
+		u, err := tx.Users().Get(ctx, s.a.realm.ID, sp.TargetID)
+		return subject{target: account.UserTarget(u), userID: u.ID, userPublicID: u.PublicID}, err
+	case port.SuspensionTargetOrg:
+		o, err := tx.Orgs().Get(ctx, s.a.realm.ID, sp.TargetID)
+		return subject{target: org.OrgTarget(o)}, err
+	case port.SuspensionTargetMembership:
+		m, err := tx.Memberships().Get(ctx, s.a.realm.ID, sp.TargetID)
+		if err != nil {
+			return subject{}, err
+		}
+		sub, err := s.membershipOf(ctx, tx, m)
+		if errors.Is(err, org.ErrPersonalOrg) {
+			err = nil
+		}
+		return sub, err
+	}
+	return subject{}, errs.New(errs.KindNotFound, "suspension")
+}
+
+func (s adminServer) suspensionView(sp port.Suspension, sub subject) adminapi.Suspension {
 	now := s.a.deps.Clock.Now()
 	end := sp.EndsAt
 	if sp.LiftedAt != nil && (end == nil || sp.LiftedAt.Before(*end)) {
 		end = sp.LiftedAt
 	}
-	v := adminapi.Suspension{Id: sp.PublicID, UserId: userPublicID, Category: sp.Category, Reason: sp.Reason,
-		StartsAt: sp.StartsAt, EndsAt: sp.EndsAt, CreatedAt: sp.CreatedAt, LiftedAt: sp.LiftedAt,
+	v := adminapi.Suspension{Id: sp.PublicID, TargetType: adminapi.SuspensionTargetType(sp.TargetType), TargetId: sub.target.PublicID,
+		Category: sp.Category, Reason: sp.Reason, StartsAt: sp.StartsAt, EndsAt: sp.EndsAt, CreatedAt: sp.CreatedAt, LiftedAt: sp.LiftedAt,
 		Active: !sp.StartsAt.After(now) && (end == nil || end.After(now))}
+	if sub.userPublicID != "" {
+		v.UserId = &sub.userPublicID
+	}
 	if sp.ExternalRef != "" {
 		v.ExternalRef = &sp.ExternalRef
 	}
@@ -44,82 +120,234 @@ func (s adminServer) suspensionView(sp port.Suspension, userPublicID string) adm
 	return v
 }
 
-func (s adminServer) SuspendUser(ctx context.Context, req adminapi.SuspendUserRequestObject) (adminapi.SuspendUserResponseObject, error) {
-	if req.Body == nil {
-		return adminapi.SuspendUser400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", ""))}, nil
+// outcome は管理 API の応答の状態と、エラーの本文。
+type outcome struct {
+	status int
+	body   adminapi.Error
+}
+
+func failed(status int, code string) outcome {
+	return outcome{status: status, body: adminError(code, "")}
+}
+
+// outcomeOf は認可の拒否とエラーを応答の状態にする。ok は成功（status は呼び出し側が決める）。
+func outcomeOf(d *denial, err error) (outcome, bool, error) {
+	if d != nil {
+		return outcome{status: d.Status, body: d.Body}, false, nil
 	}
-	p, d, err := s.a.authorize(ctx, suspensionPerm(req.Body.Category))
+	if code, ok := stateCode(err); ok {
+		return failed(http.StatusConflict, code), false, nil
+	}
 	switch {
+	case errors.Is(err, errs.NotFound):
+		return failed(http.StatusNotFound, "not_found"), false, nil
+	case errors.Is(err, errs.Invalid):
+		return failed(http.StatusBadRequest, errCode(err)), false, nil
 	case err != nil:
-		return nil, err
-	case d != nil && d.Status == http.StatusUnauthorized:
-		return adminapi.SuspendUser401JSONResponse(d.Body), nil
-	case d != nil:
-		return adminapi.SuspendUser403JSONResponse(d.Body), nil
+		return outcome{}, false, err
 	}
-	in := account.Suspend{Category: req.Body.Category, Reason: req.Body.Reason, StartsAt: req.Body.StartsAt, EndsAt: req.Body.EndsAt}
-	if req.Body.ExternalRef != nil {
-		in.ExternalRef = *req.Body.ExternalRef
+	return outcome{}, true, nil
+}
+
+// orgsOff はフィーチャー org が動いていなければ 404 org_disabled を返す。
+func (s adminServer) orgsOff(needOrg bool) (outcome, bool) {
+	if needOrg && s.a.orgs == nil {
+		return failed(http.StatusNotFound, "org_disabled"), true
 	}
-	var u port.User
+	return outcome{}, false
+}
+
+// suspend は運営者による停止（4.7）。成功なら 201（同じ external_ref の停止があれば 200）。
+func (s adminServer) suspend(ctx context.Context, body *adminapi.SuspendRequest, needOrg bool, resolve resolveFunc) (adminapi.Suspension, outcome, error) {
+	if body == nil {
+		return adminapi.Suspension{}, failed(http.StatusBadRequest, "invalid_request"), nil
+	}
+	p, d, err := s.a.authorize(ctx, suspensionPerm(body.Category))
+	if o, ok, err := outcomeOf(d, err); !ok {
+		return adminapi.Suspension{}, o, err
+	}
+	if o, off := s.orgsOff(needOrg); off {
+		return adminapi.Suspension{}, o, nil
+	}
+	in := account.Suspend{Category: body.Category, Reason: body.Reason, StartsAt: body.StartsAt, EndsAt: body.EndsAt}
+	if body.ExternalRef != nil {
+		in.ExternalRef = *body.ExternalRef
+	}
+	var sub subject
 	var out adminapi.Suspension
 	var created bool
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		if u, err = tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id); err != nil {
+		if sub, err = resolve(ctx, tx); err != nil {
 			return err
 		}
 		var sp port.Suspension
-		if sp, created, err = s.a.accounts.SuspendUser(ctx, tx, s.a.realm.ID, u, in, p.Actor, requestID(ctx)); err != nil {
+		if sp, created, err = s.a.accounts.Suspend(ctx, tx, s.a.realm.ID, sub.target, in, p.Actor, requestID(ctx)); err != nil {
 			return err
 		}
-		out = s.suspensionView(sp, u.PublicID)
+		out = s.suspensionView(sp, sub)
 		return nil
 	})
-	switch {
-	case errors.Is(err, errs.NotFound):
-		return adminapi.SuspendUser404JSONResponse(adminError("not_found", "")), nil
-	case errors.Is(err, errs.Invalid):
-		return adminapi.SuspendUser400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError(errCode(err), ""))}, nil
-	case err != nil:
-		return nil, err
+	if o, ok, err := outcomeOf(nil, err); !ok {
+		return adminapi.Suspension{}, o, err
 	}
 	if !created {
-		return adminapi.SuspendUser200JSONResponse(out), nil
+		return out, outcome{status: http.StatusOK}, nil
 	}
-	s.a.sessions.Forget(ctx, s.a.realm.ID, u.ID)
-	return adminapi.SuspendUser201JSONResponse(out), nil
+	if sub.userID != "" {
+		s.a.sessions.Forget(ctx, s.a.realm.ID, sub.userID)
+	}
+	return out, outcome{status: http.StatusCreated}, nil
 }
 
-func (s adminServer) ListUserSuspensions(ctx context.Context, req adminapi.ListUserSuspensionsRequestObject) (adminapi.ListUserSuspensionsResponseObject, error) {
+// listSuspensions は対象の停止の一覧（解除・終了したものも含む）。
+func (s adminServer) listSuspensions(ctx context.Context, needOrg bool, resolve resolveFunc) (adminapi.Suspensions, outcome, error) {
 	_, d, err := s.a.authorize(ctx, role.PermSuspensionsRead)
-	switch {
-	case err != nil:
-		return nil, err
-	case d != nil && d.Status == http.StatusUnauthorized:
-		return adminapi.ListUserSuspensions401JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(d.Body)}, nil
-	case d != nil:
-		return adminapi.ListUserSuspensions403JSONResponse(d.Body), nil
+	if o, ok, err := outcomeOf(d, err); !ok {
+		return adminapi.Suspensions{}, o, err
+	}
+	if o, off := s.orgsOff(needOrg); off {
+		return adminapi.Suspensions{}, o, nil
 	}
 	out := adminapi.Suspensions{Suspensions: []adminapi.Suspension{}}
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		u, err := tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id)
-		if err != nil {
+		sub, err := resolve(ctx, tx)
+		if err != nil && !errors.Is(err, org.ErrPersonalOrg) {
 			return err
 		}
-		ss, err := tx.Suspensions().ListByTarget(ctx, s.a.realm.ID, port.SuspensionTargetUser, u.ID)
+		ss, err := tx.Suspensions().ListByTarget(ctx, s.a.realm.ID, sub.target.Type, sub.target.ID)
 		for _, sp := range ss {
-			out.Suspensions = append(out.Suspensions, s.suspensionView(sp, u.PublicID))
+			out.Suspensions = append(out.Suspensions, s.suspensionView(sp, sub))
 		}
 		return err
 	})
-	if errors.Is(err, errs.NotFound) {
-		return adminapi.ListUserSuspensions404JSONResponse(adminError("not_found", "")), nil
+	if o, ok, err := outcomeOf(nil, err); !ok {
+		return adminapi.Suspensions{}, o, err
 	}
-	if err != nil {
+	return out, outcome{status: http.StatusOK}, nil
+}
+
+func (s adminServer) SuspendUser(ctx context.Context, req adminapi.SuspendUserRequestObject) (adminapi.SuspendUserResponseObject, error) {
+	out, o, err := s.suspend(ctx, req.Body, false, s.userSubject(req.Id))
+	switch {
+	case err != nil:
 		return nil, err
+	case o.status == http.StatusOK:
+		return adminapi.SuspendUser200JSONResponse(out), nil
+	case o.status == http.StatusCreated:
+		return adminapi.SuspendUser201JSONResponse(out), nil
+	case o.status == http.StatusBadRequest:
+		return adminapi.SuspendUser400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(o.body)}, nil
+	case o.status == http.StatusUnauthorized:
+		return adminapi.SuspendUser401JSONResponse(o.body), nil
+	case o.status == http.StatusForbidden:
+		return adminapi.SuspendUser403JSONResponse(o.body), nil
+	case o.status == http.StatusNotFound:
+		return adminapi.SuspendUser404JSONResponse(o.body), nil
 	}
-	return adminapi.ListUserSuspensions200JSONResponse(out), nil
+	return nil, errUnexpected(o)
+}
+
+func (s adminServer) SuspendOrg(ctx context.Context, req adminapi.SuspendOrgRequestObject) (adminapi.SuspendOrgResponseObject, error) {
+	out, o, err := s.suspend(ctx, req.Body, true, s.orgSubject(req.Id))
+	switch {
+	case err != nil:
+		return nil, err
+	case o.status == http.StatusOK:
+		return adminapi.SuspendOrg200JSONResponse(out), nil
+	case o.status == http.StatusCreated:
+		return adminapi.SuspendOrg201JSONResponse(out), nil
+	case o.status == http.StatusBadRequest:
+		return adminapi.SuspendOrg400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(o.body)}, nil
+	case o.status == http.StatusUnauthorized:
+		return adminapi.SuspendOrg401JSONResponse(o.body), nil
+	case o.status == http.StatusForbidden:
+		return adminapi.SuspendOrg403JSONResponse(o.body), nil
+	case o.status == http.StatusNotFound:
+		return adminapi.SuspendOrg404JSONResponse(o.body), nil
+	case o.status == http.StatusConflict:
+		return adminapi.SuspendOrg409JSONResponse(o.body), nil
+	}
+	return nil, errUnexpected(o)
+}
+
+func (s adminServer) SuspendMembership(ctx context.Context, req adminapi.SuspendMembershipRequestObject) (adminapi.SuspendMembershipResponseObject, error) {
+	out, o, err := s.suspend(ctx, req.Body, true, s.membershipSubject(req.Id))
+	switch {
+	case err != nil:
+		return nil, err
+	case o.status == http.StatusOK:
+		return adminapi.SuspendMembership200JSONResponse(out), nil
+	case o.status == http.StatusCreated:
+		return adminapi.SuspendMembership201JSONResponse(out), nil
+	case o.status == http.StatusBadRequest:
+		return adminapi.SuspendMembership400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(o.body)}, nil
+	case o.status == http.StatusUnauthorized:
+		return adminapi.SuspendMembership401JSONResponse(o.body), nil
+	case o.status == http.StatusForbidden:
+		return adminapi.SuspendMembership403JSONResponse(o.body), nil
+	case o.status == http.StatusNotFound:
+		return adminapi.SuspendMembership404JSONResponse(o.body), nil
+	case o.status == http.StatusConflict:
+		return adminapi.SuspendMembership409JSONResponse(o.body), nil
+	}
+	return nil, errUnexpected(o)
+}
+
+func (s adminServer) ListUserSuspensions(ctx context.Context, req adminapi.ListUserSuspensionsRequestObject) (adminapi.ListUserSuspensionsResponseObject, error) {
+	out, o, err := s.listSuspensions(ctx, false, s.userSubject(req.Id))
+	switch {
+	case err != nil:
+		return nil, err
+	case o.status == http.StatusOK:
+		return adminapi.ListUserSuspensions200JSONResponse(out), nil
+	case o.status == http.StatusUnauthorized:
+		return adminapi.ListUserSuspensions401JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(o.body)}, nil
+	case o.status == http.StatusForbidden:
+		return adminapi.ListUserSuspensions403JSONResponse(o.body), nil
+	case o.status == http.StatusNotFound:
+		return adminapi.ListUserSuspensions404JSONResponse(o.body), nil
+	}
+	return nil, errUnexpected(o)
+}
+
+func (s adminServer) ListOrgSuspensions(ctx context.Context, req adminapi.ListOrgSuspensionsRequestObject) (adminapi.ListOrgSuspensionsResponseObject, error) {
+	out, o, err := s.listSuspensions(ctx, true, s.orgSubject(req.Id))
+	switch {
+	case err != nil:
+		return nil, err
+	case o.status == http.StatusOK:
+		return adminapi.ListOrgSuspensions200JSONResponse(out), nil
+	case o.status == http.StatusUnauthorized:
+		return adminapi.ListOrgSuspensions401JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(o.body)}, nil
+	case o.status == http.StatusForbidden:
+		return adminapi.ListOrgSuspensions403JSONResponse(o.body), nil
+	case o.status == http.StatusNotFound:
+		return adminapi.ListOrgSuspensions404JSONResponse(o.body), nil
+	}
+	return nil, errUnexpected(o)
+}
+
+func (s adminServer) ListMembershipSuspensions(ctx context.Context, req adminapi.ListMembershipSuspensionsRequestObject) (adminapi.ListMembershipSuspensionsResponseObject, error) {
+	out, o, err := s.listSuspensions(ctx, true, s.membershipSubject(req.Id))
+	switch {
+	case err != nil:
+		return nil, err
+	case o.status == http.StatusOK:
+		return adminapi.ListMembershipSuspensions200JSONResponse(out), nil
+	case o.status == http.StatusUnauthorized:
+		return adminapi.ListMembershipSuspensions401JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(o.body)}, nil
+	case o.status == http.StatusForbidden:
+		return adminapi.ListMembershipSuspensions403JSONResponse(o.body), nil
+	case o.status == http.StatusNotFound:
+		return adminapi.ListMembershipSuspensions404JSONResponse(o.body), nil
+	}
+	return nil, errUnexpected(o)
+}
+
+// errUnexpected は応答の型に無い状態（実装の誤り）。
+func errUnexpected(o outcome) error {
+	return errs.New(errs.KindInternal, "unexpected admin outcome %d (%s)", o.status, o.body.Error)
 }
 
 func (s adminServer) LiftSuspension(ctx context.Context, req adminapi.LiftSuspensionRequestObject) (adminapi.LiftSuspensionResponseObject, error) {
@@ -136,16 +364,13 @@ func (s adminServer) LiftSuspension(ctx context.Context, req adminapi.LiftSuspen
 		return adminapi.LiftSuspension400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", ""))}, nil
 	}
 	var sp port.Suspension
-	var u port.User
+	var sub subject
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
 		if sp, err = tx.Suspensions().GetByPublicID(ctx, s.a.realm.ID, req.Id); err != nil {
 			return err
 		}
-		if sp.TargetType != port.SuspensionTargetUser {
-			return errs.New(errs.KindNotFound, "suspension")
-		}
-		u, err = tx.Users().Get(ctx, s.a.realm.ID, sp.TargetID)
+		sub, err = s.subjectOf(ctx, tx, sp)
 		return err
 	})
 	if errors.Is(err, errs.NotFound) {
@@ -159,8 +384,8 @@ func (s adminServer) LiftSuspension(ctx context.Context, req adminapi.LiftSuspen
 	} else if d != nil {
 		return adminapi.LiftSuspension403JSONResponse(d.Body), nil
 	}
-	// 本人は自分の停止を解除できない（4.7）。
-	if p.Type == port.PrincipalUser && p.ID == u.ID {
+	// 本人は自分の停止（ユーザーと Membership）を解除できない（4.7）。
+	if p.Type == port.PrincipalUser && sub.userID != "" && p.ID == sub.userID {
 		return adminapi.LiftSuspension403JSONResponse(adminError(errs.CodePermissionDenied, "cannot lift own suspension")), nil
 	}
 	var out adminapi.Suspension
@@ -172,7 +397,7 @@ func (s adminServer) LiftSuspension(ctx context.Context, req adminapi.LiftSuspen
 		if cur, err = s.a.accounts.LiftSuspension(ctx, tx, s.a.realm.ID, cur, req.Body.Reason, p.Actor, requestID(ctx)); err != nil {
 			return err
 		}
-		out = s.suspensionView(cur, u.PublicID)
+		out = s.suspensionView(cur, sub)
 		return nil
 	})
 	switch {
@@ -182,6 +407,9 @@ func (s adminServer) LiftSuspension(ctx context.Context, req adminapi.LiftSuspen
 		return adminapi.LiftSuspension400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError(errCode(err), ""))}, nil
 	case err != nil:
 		return nil, err
+	}
+	if sub.userID != "" {
+		s.a.sessions.Forget(ctx, s.a.realm.ID, sub.userID)
 	}
 	return adminapi.LiftSuspension200JSONResponse(out), nil
 }

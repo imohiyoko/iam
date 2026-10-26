@@ -15,8 +15,8 @@ import (
 
 // Pick はログインで入る Org を決める（design.md 4.4、ADR 0057）。
 //
-//  1. 候補：active な Membership を持つ Org（停止・有効期間・ログインポリシーは #51 以降で足す）
-//  2. 明示的な指定があれば、それが候補にあること（無ければ ErrNoAvailableOrg）
+//  1. 候補：active な Membership を持ち、Org と Membership が停止中でも有効期間の外でもない Org（Check。ログインポリシーは後で足す）
+//  2. 明示的な指定があれば、それが候補にあること（所属が無ければ ErrNoAvailableOrg、使えなければ理由つきの *account.UnavailableError）
 //  3. ログインの手がかり（使ったメールや OAuth のアドレスを結び付けた Membership、passkey の既定の Org）に結び付いた候補。
 //     1つならそれ。複数なら前回の Org がその中にあればそれ、無ければ選ばせる（Choices を返し、4 へ進む）
 //  4. 前回の Org（最後に発行したセッションの Org）が候補にあればそれ
@@ -26,11 +26,27 @@ func (s *Service) Pick(ctx context.Context, tx port.Tx, u port.User, in session.
 	if err != nil {
 		return session.PickedOrg{}, err
 	}
+	now := s.Clock.Now()
 	var candidates []port.Membership
 	for _, m := range ms {
-		if m.Status == port.MembershipActive {
-			candidates = append(candidates, m)
+		if m.Status != port.MembershipActive {
+			continue
 		}
+		o, err := tx.Orgs().Get(ctx, u.RealmID, m.OrgID)
+		if err != nil {
+			return session.PickedOrg{}, err
+		}
+		_, err = Check(ctx, tx, o, m, now)
+		if m.OrgID == in.Explicit && err != nil {
+			return session.PickedOrg{}, err
+		}
+		if _, ok := errors.AsType[*account.UnavailableError](err); ok {
+			continue
+		}
+		if err != nil {
+			return session.PickedOrg{}, err
+		}
+		candidates = append(candidates, m)
 	}
 	has := func(orgID string) bool {
 		return slices.ContainsFunc(candidates, func(m port.Membership) bool { return m.OrgID == orgID })

@@ -107,6 +107,9 @@ type Manager struct {
 // OrgPicker はログインで入る Org を決めるもの（authn/org）。
 type OrgPicker interface {
 	Pick(ctx context.Context, tx port.Tx, u port.User, in OrgPick) (PickedOrg, error)
+	// CheckActive はセッションの active な Org が本人にとって now に使えるかを返す（5.3）。使えなければ errs.Denial か
+	// errs.PermissionDenied のエラー、next は可否が次に変わりうる時刻。
+	CheckActive(ctx context.Context, tx port.Tx, realmID, userID, orgID string, now time.Time) (*time.Time, error)
 }
 
 // OrgPick は Org の決定に渡す手がかり（4.4）。
@@ -476,7 +479,10 @@ type Validated struct {
 	// PublicID は主体の公開 ID。API の応答や監査ログにはこちらを使う。
 	PublicID string
 	// ActiveOrgID は active な Org の内部 ID。フィーチャー org が動いていなければ空。
-	ActiveOrgID     string
+	ActiveOrgID string
+	// OrgUnavailable は active な Org が使えない理由のコード（Org・Membership の停止や有効期間の外、所属の終わり。4.7）。
+	// 空なら使える。使えないセッションは失効させず、Org の操作だけを止める（個人 Org への切り替えはできる）。
+	OrgUnavailable  []string
 	AuthMethods     []string
 	AuthenticatedAt time.Time
 	// Restriction は使える操作の制限（2要素目の確認待ちなど）。空なら制限なし。
@@ -492,6 +498,7 @@ type cached struct {
 	PrincipalID     string                  `json:"p"`
 	PublicID        string                  `json:"u"`
 	ActiveOrgID     string                  `json:"o,omitempty"`
+	OrgUnavailable  []string                `json:"ou,omitempty"`
 	AuthMethods     []string                `json:"amr"`
 	AuthenticatedAt time.Time               `json:"at"`
 	CreatedAt       time.Time               `json:"c"`
@@ -542,8 +549,21 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 		if m.Config.IdleTimeout > 0 {
 			next = earliest(next, now.Add(m.Config.IdleTimeout))
 		}
+		var orgUnavailable []string
+		if s.ActiveOrgID != "" && m.Orgs != nil {
+			at, err := m.Orgs.CheckActive(ctx, tx, realmID, s.PrincipalID, s.ActiveOrgID, now)
+			if d, ok := errors.AsType[errs.Denial](err); ok {
+				orgUnavailable = d.Reasons()
+			} else if errors.Is(err, errs.PermissionDenied) {
+				orgUnavailable = []string{errs.CodeNoAvailableOrg}
+			} else if err != nil {
+				return err
+			} else if at != nil {
+				next = earliest(next, *at)
+			}
+		}
 		c = cached{Hash: s.TokenHash, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
-			ActiveOrgID: s.ActiveOrgID, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
+			ActiveOrgID: s.ActiveOrgID, OrgUnavailable: orgUnavailable, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
 		return nil
 	})
 	if errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) {
@@ -565,7 +585,8 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 
 func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Validated {
 	v := Validated{SessionID: sid, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
-		PublicID: c.PublicID, ActiveOrgID: c.ActiveOrgID, AuthMethods: c.AuthMethods, AuthenticatedAt: c.AuthenticatedAt, Restriction: c.Restriction}
+		PublicID: c.PublicID, ActiveOrgID: c.ActiveOrgID, OrgUnavailable: c.OrgUnavailable, AuthMethods: c.AuthMethods,
+		AuthenticatedAt: c.AuthenticatedAt, Restriction: c.Restriction}
 	if m.Config.RotationInterval > 0 && !now.Before(c.CreatedAt.Add(m.Config.RotationInterval)) {
 		v.RotateDue = true
 	}

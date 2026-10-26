@@ -13,7 +13,7 @@ design.md 4.4 は、ログインで入る Org を「明示的な指定 → ロ�
 ## 決定
 
 - 決定はセッションの発行の中で `session.OrgPicker`（`org.Service.Pick`）が行う。候補は active な Membership のある Org
-  （停止・有効期間・ログインポリシーは #51 以降で候補から外す）
+  （停止・有効期間は [0058](0058-org-and-membership-suspension.md) で候補から外す。ログインポリシーは後で）
 - 手がかり
   - ログインに使ったメール（メールのコード・パスワード。セッションの認証情報に載るメールの ID）を結び付けた Membership
   - OAuth のプロバイダが確認済みとして返したアドレス：その場で HMAC を計算し、本人のメールと一致すればそのメールを結び付けた Membership

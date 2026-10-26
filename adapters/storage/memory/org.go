@@ -59,6 +59,17 @@ func (r orgs) GetPersonal(_ context.Context, realmID, userID string) (port.Org, 
 	return port.Org{}, errs.New(errs.KindNotFound, "personal org")
 }
 
+func (r orgs) SetValidity(_ context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error {
+	o, err := get(r.t.s.orgs, realmID, id, func(o port.Org) string { return o.RealmID }, "org")
+	if err != nil {
+		return err
+	}
+	o = cloneOrg(o)
+	o.ValidFrom, o.ValidUntil, o.UpdatedAt = cloneTime(from), cloneTime(until), updatedAt
+	setKey(r.t, r.t.s.orgs, id, o)
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 
 type memberships struct{ t *tx }
@@ -85,6 +96,11 @@ func (r memberships) Create(_ context.Context, m port.Membership) error {
 	}
 	setKey(r.t, r.t.s.memberships, m.ID, cloneMembership(m))
 	return nil
+}
+
+func (r memberships) Get(_ context.Context, realmID, id string) (port.Membership, error) {
+	m, err := get(r.t.s.memberships, realmID, id, func(m port.Membership) string { return m.RealmID }, "membership")
+	return cloneMembership(m), err
 }
 
 func (r memberships) GetByPublicID(_ context.Context, realmID, publicID string) (port.Membership, error) {

@@ -14,12 +14,13 @@ import (
 )
 
 type myOrgRow struct {
-	ID           string `json:"id"`
-	Kind         string `json:"kind"`
-	Name         string `json:"name"`
-	Role         string `json:"role"`
-	MembershipID string `json:"membership_id"`
-	Active       bool   `json:"active"`
+	ID           string   `json:"id"`
+	Kind         string   `json:"kind"`
+	Name         string   `json:"name"`
+	Role         string   `json:"role"`
+	MembershipID string   `json:"membership_id"`
+	Active       bool     `json:"active"`
+	Unavailable  []string `json:"unavailable"`
 }
 
 type myOrgs struct {
