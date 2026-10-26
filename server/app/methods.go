@@ -76,6 +76,9 @@ func (s publicServer) ListMyMethods(ctx context.Context, _ publicapi.ListMyMetho
 		for _, t := range m.TOTP {
 			out.Totp = append(out.Totp, myTOTP(t))
 		}
+		if m.Password != nil {
+			out.Password = myPassword(m.Password.CreatedAt)
+		}
 		return nil
 	})
 	if err != nil {

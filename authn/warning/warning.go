@@ -22,6 +22,7 @@ func init() {
 const (
 	CodeSingleFactor         = "single_factor"
 	CodeOAuthEmailUnverified = "oauth_email_unverified"
+	CodePasswordBreached     = "password_breached"
 )
 
 // Action は警告への対応。
@@ -47,6 +48,8 @@ type Evidence struct {
 	AMR []string // RFC 8176 の値
 	// OAuthEmailVerified はプロバイダがメールを確認済みとしたか。OAuth 以外では nil。
 	OAuthEmailVerified *bool
+	// PasswordBreached はログインに使ったパスワードが漏洩済みか。パスワード以外か、確かめられなければ nil。
+	PasswordBreached *bool
 }
 
 // Warning は評価の結果の1件。sessions.warnings と監査ログに残し、本人に返す。
@@ -70,6 +73,7 @@ type Rule struct {
 var Rules = []Rule{
 	{Code: CodeSingleFactor, Severity: Low, Default: Ignore, Check: singleFactor},
 	{Code: CodeOAuthEmailUnverified, Severity: Medium, Default: Warn, Check: oauthEmailUnverified},
+	{Code: CodePasswordBreached, Severity: High, Default: Warn, Check: passwordBreached},
 }
 
 // factorOf は amr の値を要素の種類に分ける（RFC 8176）。分からない値は数えない。
@@ -96,6 +100,10 @@ func singleFactor(ev Evidence) (map[string]any, bool) {
 
 func oauthEmailUnverified(ev Evidence) (map[string]any, bool) {
 	return nil, ev.OAuthEmailVerified != nil && !*ev.OAuthEmailVerified
+}
+
+func passwordBreached(ev Evidence) (map[string]any, bool) {
+	return nil, ev.PasswordBreached != nil && *ev.PasswordBreached
 }
 
 // Evaluator はルールを評価し、アクションを決める。

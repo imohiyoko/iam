@@ -26,6 +26,7 @@ import (
 	"github.com/imohiyoko/iam/shared/plugin"
 
 	// アダプタ（全部入りの構成）。
+	_ "github.com/imohiyoko/iam/adapters/breachcheck/hibp"
 	_ "github.com/imohiyoko/iam/adapters/ephemeral/memory"
 	_ "github.com/imohiyoko/iam/adapters/eventsink/stdout"
 	_ "github.com/imohiyoko/iam/adapters/keystore/env"
@@ -155,6 +156,15 @@ func build(ctx context.Context, cfg config.Config, log *slog.Logger, stdout io.W
 	}
 	if d.Notifier, err = nf(ctx, pc(cfg.Notifier)); err != nil {
 		return fail(err)
+	}
+	if cfg.BreachCheck.Driver != "" {
+		bf, err := plugin.BreachCheck(cfg.BreachCheck.Driver)
+		if err != nil {
+			return fail(err)
+		}
+		if d.BreachCheck, err = bf(ctx, pc(cfg.BreachCheck)); err != nil {
+			return fail(err)
+		}
 	}
 	return d, closeFn, nil
 }

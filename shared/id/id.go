@@ -94,6 +94,7 @@ const (
 	Client         Prefix = "cli"
 	Passkey        Prefix = "psk"
 	TOTP           Prefix = "otp"
+	Password       Prefix = "pwd"
 	Notification   Prefix = "ntf"
 	Event          Prefix = "evt"
 	Outbox         Prefix = "obx"

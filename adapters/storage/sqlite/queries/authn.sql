@@ -163,3 +163,19 @@ WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id) AND last_used_step < s
 
 -- name: RevokeTOTP :exec
 UPDATE authn_totp_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
+
+-- name: CreatePassword :exec
+INSERT INTO authn_password_credentials (id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetPassword :one
+SELECT * FROM authn_password_credentials WHERE realm_id = ? AND id = ?;
+
+-- name: GetActivePassword :one
+SELECT * FROM authn_password_credentials WHERE realm_id = ? AND user_id = ? AND revoked_at IS NULL;
+
+-- name: UpdatePasswordHash :execrows
+UPDATE authn_password_credentials SET hash = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
+
+-- name: RevokePassword :exec
+UPDATE authn_password_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;

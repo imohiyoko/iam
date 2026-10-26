@@ -182,6 +182,33 @@ type TOTPRepo interface {
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
 }
 
+// PasswordCredential は password_credentials の1行（design.md 3.1、4.1）。有効なものはユーザーに1つまで。
+// 変更・削除は無効化（RevokedAt）で表し、新しい行を作る（4.6）。
+type PasswordCredential struct {
+	ID      string
+	RealmID string
+	UserID  string
+	// Hash は argon2id の PHC 文字列（`$argon2id$v=19$m=…,t=…,p=…$salt$hash`）。
+	Hash         string
+	CreatedAt    time.Time
+	RevokedAt    *time.Time
+	RevokeReason string
+}
+
+// PasswordRepo は password_credentials の Repository。
+type PasswordRepo interface {
+	// Create はユーザーに有効なパスワードがあれば errs.Conflict を返す（原子的に判定する）。
+	Create(ctx context.Context, c PasswordCredential) error
+	// Get は ID で返す（無効化したものも含む）。無ければ errs.NotFound。
+	Get(ctx context.Context, realmID, id string) (PasswordCredential, error)
+	// GetActive はユーザーの有効なパスワードを返す。無ければ errs.NotFound。
+	GetActive(ctx context.Context, realmID, userID string) (PasswordCredential, error)
+	// UpdateHash は有効なパスワードのハッシュを置き換える（同じパスワードの、パラメータの更新）。無ければ errs.NotFound。
+	UpdateHash(ctx context.Context, realmID, id, hash string) error
+	// Revoke は at に無効化する。既に無効化されていれば何もしない。無ければ errs.NotFound。
+	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+}
+
 // Connection は connections の1行（外部の IdP との接続）。秘密を含む設定はコアが暗号化してから渡す。
 type Connection struct {
 	ID        string

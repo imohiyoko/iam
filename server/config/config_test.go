@@ -136,3 +136,22 @@ func TestPasskeyRelyingParty(t *testing.T) {
 		}
 	}
 }
+
+func TestSecondFactorAndPasswordRules(t *testing.T) {
+	for _, y := range []string{
+		"dev: true\nsecurity: {second_factor: {ttl: 2h}}\n",
+		"dev: true\nsecurity: {second_factor: {max_attempts: 0}}\n",
+		"dev: true\nsecurity: {password: {argon2: {memory_kib: 4}}}\n",
+		"dev: true\nsecurity: {password: {argon2: {parallelism: 0}}}\n",
+		// 本番では OWASP の下限より軽くできない。
+		"security: {password: {argon2: {memory_kib: 8192}}}\n",
+		"security: {password: {argon2: {iterations: 1}}}\n",
+	} {
+		if _, err := Parse([]byte(y)); err == nil || !strings.Contains(err.Error(), "security.") {
+			t.Errorf("%s: want a security error, got %v", y, err)
+		}
+	}
+	if _, err := Parse([]byte("dev: true\nsecurity: {password: {argon2: {memory_kib: 8, iterations: 1}}}\n")); err != nil {
+		t.Errorf("light params in dev: %v", err)
+	}
+}

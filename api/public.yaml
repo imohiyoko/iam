@@ -248,6 +248,35 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/login/password:
+    post:
+      operationId: passwordLogin
+      summary: メールとパスワードでログインする（フィーチャー password）
+      description: |
+        失敗の理由（アカウントの有無、メールの未確認、パスワードの違い）は返さない（4.9）。アドレスと接続元ごとに
+        回数を制限する。漏洩済みのパスワードなら警告 `password_breached` を返す。フィーチャーが動いていなければ 404。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, maxLength: 254 }
+                password: { type: string, maxLength: 1024 }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: ログインした（`next` があれば2要素目へ）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   /v1/login/second-factor/passkey:start:
     post:
       operationId: startSecondFactorPasskey
@@ -348,7 +377,7 @@ paths:
   /v1/me/methods:
     get:
       operationId: listMyMethods
-      summary: 本人の認証手段（メール、連携した外部 ID、passkey、TOTP）の一覧
+      summary: 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -373,6 +402,12 @@ paths:
                   totp:
                     type: array
                     items: { $ref: "#/components/schemas/MyTOTP" }
+                  password:
+                    type: object
+                    description: 設定したパスワード（無ければ省略）
+                    required: [created_at]
+                    properties:
+                      created_at: { type: string, format: date-time }
         "401": { $ref: "#/components/responses/Unauthenticated" }
 
   /v1/me/emails:start:
@@ -651,6 +686,61 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/password:set:
+    post:
+      operationId: setMyPassword
+      summary: パスワードを設定・変更する（フィーチャー password）
+      description: |
+        変更には今のパスワード（`current_password`）が要る。初めての設定には直近の認証（`max_auth_age` の内）が要る
+        （`401 reauthentication_required`）。最低長は 15 文字（2段階認証が必須なら 8 文字）、文字種は問わない。
+        漏洩済みなら `400 password_breached`。成功すると、このセッションの他のセッションを失効させる（5.2）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, maxLength: 1024 }
+                current_password: { type: string, maxLength: 1024 }
+      responses:
+        "204": { description: 設定した }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/me/password:remove:
+    post:
+      operationId: removeMyPassword
+      summary: パスワードを外す（フィーチャー password）
+      description: |
+        今のパスワードが要る。最後のログインの手段なら `409 last_method`。成功すると、このセッションの他のセッションを
+        失効させる。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password]
+              properties:
+                current_password: { type: string, maxLength: 1024 }
+      responses:
+        "204": { description: 外した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/me/totp:start:
     post:

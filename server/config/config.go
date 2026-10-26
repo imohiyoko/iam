@@ -33,6 +33,8 @@ type Config struct {
 	KeyStore  Adapter `yaml:"keystore"`
 	EventSink Adapter `yaml:"event_sink"`
 	Notifier  Adapter `yaml:"notifier"`
+	// BreachCheck は漏洩済みパスワードの確認（フィーチャー password。design.md 4.1）。driver が空なら確認しない。
+	BreachCheck Adapter `yaml:"breach_check"`
 
 	// Features は有効にするフィーチャー名。省略すると各フィーチャーの既定に従う。
 	Features *[]string `yaml:"features"`
@@ -126,6 +128,8 @@ type Security struct {
 	Login     Login        `yaml:"login"`
 	// SecondFactor は2段階認証（design.md 2.8、4.1）。
 	SecondFactor SecondFactor `yaml:"second_factor"`
+	// Password はフィーチャー password（design.md 4.1）。
+	Password Password `yaml:"password"`
 	// Warnings は警告のコードごとのアクション（ignore / warn / deny。design.md 10章）。無いコードは既定に従う。
 	Warnings map[string]string `yaml:"warnings"`
 }
@@ -157,6 +161,19 @@ type SecondFactor struct {
 	MaxAttempts int `yaml:"max_attempts"`
 	// Issuer は認証器アプリに表示する発行者の名前。空なら passkey.rp_name か realm.slug。
 	Issuer string `yaml:"issuer"`
+}
+
+// Password はパスワードの設定。最低長は2段階認証の要否で決まる（必須なら 8 文字、そうでなければ 15 文字）。
+type Password struct {
+	// Argon2 は新しく作るハッシュのパラメータ。変えると、既存のハッシュはログインの成功時に作り直す。
+	Argon2 Argon2 `yaml:"argon2"`
+}
+
+// Argon2 は argon2id のパラメータ（RFC 9106）。
+type Argon2 struct {
+	MemoryKiB   uint32 `yaml:"memory_kib"`
+	Iterations  uint32 `yaml:"iterations"`
+	Parallelism uint8  `yaml:"parallelism"`
 }
 
 // EmailFlow はメールのコード・マジックリンクの設定（design.md 4.1）。
@@ -239,13 +256,14 @@ func ParseDuration(s string) (time.Duration, error) {
 func Default() Config {
 	day := 24 * time.Hour
 	return Config{
-		Server:    Server{PublicAddr: ":8080", AdminAddr: "127.0.0.1:8081", ClockSkewWarn: Duration(time.Second)},
-		Storage:   Adapter{Driver: "sqlite", Options: map[string]string{"path": "iam.db", "auto_migrate": "true"}},
-		Ephemeral: Adapter{Driver: "memory"},
-		KeyStore:  Adapter{Driver: "file", Options: map[string]string{"path": "keys.json"}},
-		EventSink: Adapter{Driver: "stdout"},
-		Notifier:  Adapter{Driver: "dev"},
-		Realm:     Realm{Slug: "default", Timezone: "UTC", VerifiedVia: []string{"code", "oauth_provider", "sso", "admin"}},
+		Server:      Server{PublicAddr: ":8080", AdminAddr: "127.0.0.1:8081", ClockSkewWarn: Duration(time.Second)},
+		Storage:     Adapter{Driver: "sqlite", Options: map[string]string{"path": "iam.db", "auto_migrate": "true"}},
+		Ephemeral:   Adapter{Driver: "memory"},
+		KeyStore:    Adapter{Driver: "file", Options: map[string]string{"path": "keys.json"}},
+		EventSink:   Adapter{Driver: "stdout"},
+		Notifier:    Adapter{Driver: "dev"},
+		BreachCheck: Adapter{Driver: "hibp"},
+		Realm:       Realm{Slug: "default", Timezone: "UTC", VerifiedVia: []string{"code", "oauth_provider", "sso", "admin"}},
 		Security: Security{Session: SessionRules{
 			AbsoluteLifetime: DurationRule{Default: Duration(30 * day), Min: Duration(time.Hour), Max: Duration(90 * day)},
 			IdleTimeout:      DurationRule{Default: Duration(7 * day), Min: Duration(5 * time.Minute), Max: Duration(30 * day)},
@@ -255,6 +273,7 @@ func Default() Config {
 			RotationGrace:    Duration(time.Minute),
 		}, EmailFlow: EmailFlow{TTL: Duration(10 * time.Minute), MaxAttempts: 5},
 			SecondFactor: SecondFactor{TTL: Duration(10 * time.Minute), MaxAttempts: 5},
+			Password:     Password{Argon2: Argon2{MemoryKiB: 64 * 1024, Iterations: 2, Parallelism: 1}},
 			Login: Login{MinResponseTime: Duration(300 * time.Millisecond),
 				RateLimit: RateLimit{Window: Duration(10 * time.Minute), PerIP: 100, PerAccount: 5}},
 		},
@@ -365,6 +384,11 @@ func (c Config) Validate() error {
 	}
 	if sf := c.Security.SecondFactor; sf.TTL.D() <= 0 || sf.TTL.D() > time.Hour || sf.MaxAttempts < 1 || sf.MaxAttempts > 10 {
 		problems = append(problems, "security.second_factor: ttl must be within (0, 1h] and max_attempts within [1, 10]")
+	}
+	// OWASP の下限（m=19MiB, t=2）。開発用の構成では、テストのために軽くできる。
+	if a := c.Security.Password.Argon2; a.MemoryKiB > 1<<21 || a.Iterations > 16 || a.Parallelism < 1 || a.Parallelism > 16 ||
+		a.MemoryKiB < 8 || a.Iterations < 1 || (!c.Dev && (a.MemoryKiB < 19*1024 || a.Iterations < 2)) {
+		problems = append(problems, "security.password.argon2: memory_kib must be within [19456, 2097152], iterations within [2, 16] and parallelism within [1, 16]")
 	}
 	if l := c.Security.Login; l.MinResponseTime.D() < 0 || l.MinResponseTime.D() > 5*time.Second {
 		problems = append(problems, "security.login.min_response_time must be within [0, 5s]")

@@ -24,6 +24,7 @@ import (
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/passkey"
+	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/totp"
 	"github.com/imohiyoko/iam/authn/warning"
@@ -46,8 +47,10 @@ type Deps struct {
 	Notifier  port.Notifier
 	KeyStore  port.KeyStore
 	EventSink port.EventSink
-	Clock     clock.Clock
-	Logger    *slog.Logger
+	// BreachCheck は漏洩済みパスワードの確認。nil なら確認しない。
+	BreachCheck port.BreachChecker
+	Clock       clock.Clock
+	Logger      *slog.Logger
 }
 
 // App は組み立て済みの IAM。
@@ -67,7 +70,9 @@ type App struct {
 	// passkeys は passkey の登録とログイン。Relying Party が決まらない構成（public_url も rp_id も無い）では nil。
 	passkeys *passkey.Service
 	// totp は TOTP の登録と照合（2要素目）。
-	totp     *totp.Service
+	totp *totp.Service
+	// password はメール + パスワード。フィーチャー password が動いていなければ nil。
+	password *password.Service
 	perIP    *ratelimit.Limiter
 	links    *loginlink.Service
 	notifier *eventlog.Relay
@@ -181,6 +186,21 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Issuer: issuer,
 		TTL: cfg.Security.SecondFactor.TTL.D(), MaxAttempts: cfg.Security.SecondFactor.MaxAttempts,
 		PerUser: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
+	}
+	if plan.IsActive(feature.Password) {
+		minLength := password.MinLength
+		if cfg.Security.SecondFactor.Required {
+			minLength = password.MinLengthWithSecondFactor
+		}
+		ar := cfg.Security.Password.Argon2
+		a.password = &password.Service{
+			Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Breach: d.BreachCheck,
+			Params:    password.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
+			MinLength: minLength, PerAccount: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
+		}
+		if d.BreachCheck == nil {
+			d.Logger.Warn("password breach check is disabled: set breach_check.driver")
+		}
 	}
 	// 開発用の Notifier には、秘密の取り出し方を渡す（配信用のアプリ無しでメールのログインを試せるように）。
 	if dc, ok := d.Notifier.(devClaimer); ok && cfg.Dev {

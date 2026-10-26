@@ -67,12 +67,21 @@ func newLoginEnv(t *testing.T) *loginEnv {
 // newLoginEnvWith は設定を変え、binary のフィーチャーを含めて組み立てる。
 func newLoginEnvWith(t *testing.T, edit func(*config.Config), binary []feature.Feature) *loginEnv {
 	t.Helper()
+	return newLoginEnvDeps(t, edit, binary, nil)
+}
+
+// newLoginEnvDeps は newLoginEnvWith に加え、アダプタも差し替える。
+func newLoginEnvDeps(t *testing.T, edit func(*config.Config), binary []feature.Feature, editDeps func(*Deps)) *loginEnv {
+	t.Helper()
 	e := newEnv(t)
 	if edit != nil {
 		edit(&e.cfg)
 	}
 	notes := &recorder{}
 	e.deps.Notifier = notes
+	if editDeps != nil {
+		editDeps(&e.deps)
+	}
 	a, err := New(context.Background(), e.cfg, e.deps, binary)
 	if err != nil {
 		t.Fatal(err)

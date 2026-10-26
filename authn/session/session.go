@@ -57,6 +57,8 @@ const (
 	ReasonReplacedByLogin = "replaced_by_login"
 	ReasonUser            = "revoked_by_user"
 	ReasonAdmin           = "revoked_by_admin"
+	// ReasonCredentialChanged は本人がパスワードを変えた・外したこと（他のセッションを失効させる。5.2）。
+	ReasonCredentialChanged = "credential_changed" // #nosec G101 -- 失効の理由で、秘密ではない
 	// ReasonSecondFactor は2要素目の確認で、制限つきのセッションを通常のセッションに替えたこと。
 	ReasonSecondFactor = "second_factor_completed"
 )
