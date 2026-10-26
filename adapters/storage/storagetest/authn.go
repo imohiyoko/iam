@@ -42,6 +42,7 @@ var authnTests = []struct {
 	{"Connections", testConnections},
 	{"Sessions", testSessions},
 	{"SessionRevokeByPrincipal", testSessionRevokeByPrincipal},
+	{"SessionMoveOrg", testSessionMoveOrg},
 	{"ServiceAccounts", testServiceAccounts},
 	{"RoleBindings", testRoleBindings},
 	{"Orgs", testOrgs},
@@ -49,6 +50,7 @@ var authnTests = []struct {
 	{"Memberships", testMemberships},
 	{"MembershipUniqueConcurrent", testMembershipUniqueConcurrent},
 	{"MembershipUpdate", testMembershipUpdate},
+	{"MembershipCountActive", testMembershipCountActive},
 	{"Invitations", testInvitations},
 	{"InvitationAcceptConcurrent", testInvitationAcceptConcurrent},
 }
@@ -475,6 +477,40 @@ func testSessionRevokeByPrincipal(t *testing.T, h Harness) {
 		ids, err = repo.RevokeByPrincipal(ctx, id.New(id.Realm), port.PrincipalUser, v, "", T0, "x")
 		if err != nil || len(ids) != 0 {
 			return fmt.Errorf("another realm revoked %v, %v", ids, err)
+		}
+		return nil
+	})
+}
+
+func testSessionMoveOrg(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, u, v := id.New(id.Realm), id.New(id.User), id.New(id.User)
+	from, to, other := id.New(id.Org), id.New(id.Org), id.New(id.Org)
+	a, b, elsewhere, otherUser := newSession(r, u, T0), newSession(r, u, T0), newSession(r, u, T0), newSession(r, v, T0)
+	a.ActiveOrgID, b.ActiveOrgID, elsewhere.ActiveOrgID, otherUser.ActiveOrgID = from, from, other, from
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.Sessions()
+		for _, x := range []port.Session{a, b, elsewhere, otherUser} {
+			if err := repo.Create(ctx, x); err != nil {
+				return err
+			}
+		}
+		ids, err := repo.MoveOrg(ctx, r, u, from, to)
+		if err != nil {
+			return err
+		}
+		want := []string{a.ID, b.ID}
+		slices.Sort(want)
+		if !slices.Equal(ids, want) {
+			return fmt.Errorf("moved %v, want %v", ids, want)
+		}
+		for x, org := range map[string]string{a.ID: to, b.ID: to, elsewhere.ID: other, otherUser.ID: from} {
+			if got, _ := repo.Get(ctx, r, x); got.ActiveOrgID != org {
+				return fmt.Errorf("%s org = %s, want %s", x, got.ActiveOrgID, org)
+			}
+		}
+		if ids, err := repo.MoveOrg(ctx, id.New(id.Realm), v, from, to); err != nil || len(ids) != 0 {
+			return fmt.Errorf("another realm moved %v, %v", ids, err)
 		}
 		return nil
 	})

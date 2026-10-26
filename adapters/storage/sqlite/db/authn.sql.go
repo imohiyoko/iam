@@ -1682,6 +1682,47 @@ func (q *Queries) MarkScheduledEventFired(ctx context.Context, arg MarkScheduled
 	return result.RowsAffected()
 }
 
+const moveSessionsOrg = `-- name: MoveSessionsOrg :many
+UPDATE authn_sessions SET active_org_id = ?1
+WHERE realm_id = ?2 AND principal_type = 'user' AND principal_id = ?3 AND active_org_id = ?4
+RETURNING id
+`
+
+type MoveSessionsOrgParams struct {
+	ToOrgID   string
+	RealmID   string
+	UserID    string
+	FromOrgID string
+}
+
+func (q *Queries) MoveSessionsOrg(ctx context.Context, arg MoveSessionsOrgParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, moveSessionsOrg,
+		arg.ToOrgID,
+		arg.RealmID,
+		arg.UserID,
+		arg.FromOrgID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const renamePasskey = `-- name: RenamePasskey :execrows
 UPDATE authn_passkeys SET name = ? WHERE realm_id = ? AND id = ?
 `

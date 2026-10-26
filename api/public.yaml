@@ -1066,6 +1066,72 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}:leave:
+    post:
+      operationId: leaveMyOrg
+      summary: 共有 Org から退会する（4.10）
+      description: |
+        個人ユーザーには常に許す（停止中・有効期間の外でも）。最後のオーナーは、譲るか Org を削除するまで抜けられない
+        （`409 last_owner`）。個人 Org は `409 personal_org`。その Org を active にしているセッションは個人 Org に移る。
+        再参加は新しい招待で。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 退会した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}:transfer:
+    post:
+      operationId: transferMyOrg
+      summary: オーナーを譲る（Org の owner。4.10）
+      description: 譲り先は active なメンバーで、owner になる。譲った本人は admin になる。譲り先がメンバーでなければ `409 not_member`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [membership_id]
+              properties:
+                membership_id: { type: string }
+      responses:
+        "204": { description: 譲った }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/members/{membership_id}:remove:
+    post:
+      operationId: removeOrgMember
+      summary: メンバーを除名する（Org の owner と admin。4.10）
+      description: |
+        退会と同じ処理で、`ended_reason = removed`。自分は対象にできず（`403 self_target`。退会を使う）、owner を
+        対象にできるのは owner だけ。最後のオーナーは `409 last_owner`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: membership_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 除名した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /v1/me/orgs/{id}/members/{membership_id}:
     patch:
       operationId: updateOrgMember

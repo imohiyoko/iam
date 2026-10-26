@@ -659,6 +659,11 @@ type SwitchMyOrgJSONBody struct {
 	ReturnToken *bool `json:"return_token,omitempty"`
 }
 
+// TransferMyOrgJSONBody defines parameters for TransferMyOrg.
+type TransferMyOrgJSONBody struct {
+	MembershipId string `json:"membership_id"`
+}
+
 // RenameMyPasskeyJSONBody defines parameters for RenameMyPasskey.
 type RenameMyPasskeyJSONBody struct {
 	Name string `json:"name"`
@@ -781,6 +786,9 @@ type BindMyOrgEmailJSONRequestBody BindMyOrgEmailJSONBody
 
 // SwitchMyOrgJSONRequestBody defines body for SwitchMyOrg for application/json ContentType.
 type SwitchMyOrgJSONRequestBody SwitchMyOrgJSONBody
+
+// TransferMyOrgJSONRequestBody defines body for TransferMyOrg for application/json ContentType.
+type TransferMyOrgJSONRequestBody TransferMyOrgJSONBody
 
 // RenameMyPasskeyJSONRequestBody defines body for RenameMyPasskey for application/json ContentType.
 type RenameMyPasskeyJSONRequestBody RenameMyPasskeyJSONBody
@@ -907,15 +915,24 @@ type ServerInterface interface {
 	// SuspendOrgMember メンバーを停止する（Org の owner と admin。種別は customer_request。4.7）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}/suspensions)
 	SuspendOrgMember(w http.ResponseWriter, r *http.Request, id string, membershipId string)
+	// RemoveOrgMember メンバーを除名する（Org の owner と admin。4.10）
+	// (POST /v1/me/orgs/{id}/members/{membership_id}:remove)
+	RemoveOrgMember(w http.ResponseWriter, r *http.Request, id string, membershipId string)
 	// LiftOrgSuspension メンバーの停止を解除する（Org の owner と admin。customer_request だけ）
 	// (POST /v1/me/orgs/{id}/suspensions/{suspension_id}:lift)
 	LiftOrgSuspension(w http.ResponseWriter, r *http.Request, id string, suspensionId string)
 	// BindMyOrgEmail この Org で使うメールを結び付ける（4.4）
 	// (POST /v1/me/orgs/{id}:bind-email)
 	BindMyOrgEmail(w http.ResponseWriter, r *http.Request, id string)
+	// LeaveMyOrg 共有 Org から退会する（4.10）
+	// (POST /v1/me/orgs/{id}:leave)
+	LeaveMyOrg(w http.ResponseWriter, r *http.Request, id string)
 	// SwitchMyOrg セッションの Org を切り替える（4.4）
 	// (POST /v1/me/orgs/{id}:switch)
 	SwitchMyOrg(w http.ResponseWriter, r *http.Request, id string)
+	// TransferMyOrg オーナーを譲る（Org の owner。4.10）
+	// (POST /v1/me/orgs/{id}:transfer)
+	TransferMyOrg(w http.ResponseWriter, r *http.Request, id string)
 	// RenameMyPasskey passkey の名前を変える
 	// (POST /v1/me/passkeys/{id}:rename)
 	RenameMyPasskey(w http.ResponseWriter, r *http.Request, id string)
@@ -1624,6 +1641,41 @@ func (siw *ServerInterfaceWrapper) SuspendOrgMember(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// RemoveOrgMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveOrgMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "membership_id" -------------
+	var membershipId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "membership_id", r.PathValue("membership_id"), &membershipId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "membership_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveOrgMember(w, r, id, membershipId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // LiftOrgSuspension operation middleware
 func (siw *ServerInterfaceWrapper) LiftOrgSuspension(w http.ResponseWriter, r *http.Request) {
 
@@ -1685,6 +1737,32 @@ func (siw *ServerInterfaceWrapper) BindMyOrgEmail(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// LeaveMyOrg operation middleware
+func (siw *ServerInterfaceWrapper) LeaveMyOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LeaveMyOrg(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SwitchMyOrg operation middleware
 func (siw *ServerInterfaceWrapper) SwitchMyOrg(w http.ResponseWriter, r *http.Request) {
 
@@ -1702,6 +1780,32 @@ func (siw *ServerInterfaceWrapper) SwitchMyOrg(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SwitchMyOrg(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TransferMyOrg operation middleware
+func (siw *ServerInterfaceWrapper) TransferMyOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TransferMyOrg(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2184,6 +2288,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs", wrapper.ListMyOrgs)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs", wrapper.CreateMyOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/members", wrapper.ListOrgMembers)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:leave", wrapper.LeaveMyOrg)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:transfer", wrapper.TransferMyOrg)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:remove", wrapper.RemoveOrgMember)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}", wrapper.UpdateOrgMember)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}/suspensions", wrapper.ListOrgMemberSuspensions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}/suspensions", wrapper.SuspendOrgMember)
@@ -4208,6 +4315,79 @@ func (response SuspendOrgMember409JSONResponse) VisitSuspendOrgMemberResponse(w 
 	return err
 }
 
+type RemoveOrgMemberRequestObject struct {
+	Id           string `json:"id"`
+	MembershipId string `json:"membership_id"`
+}
+
+type RemoveOrgMemberResponseObject interface {
+	VisitRemoveOrgMemberResponse(w http.ResponseWriter) error
+}
+
+type RemoveOrgMember204Response struct {
+}
+
+func (response RemoveOrgMember204Response) VisitRemoveOrgMemberResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveOrgMember401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RemoveOrgMember401JSONResponse) VisitRemoveOrgMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveOrgMember403JSONResponse struct{ DeniedJSONResponse }
+
+func (response RemoveOrgMember403JSONResponse) VisitRemoveOrgMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveOrgMember404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RemoveOrgMember404JSONResponse) VisitRemoveOrgMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveOrgMember409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RemoveOrgMember409JSONResponse) VisitRemoveOrgMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type LiftOrgSuspensionRequestObject struct {
 	Id           string `json:"id"`
 	SuspensionId string `json:"suspension_id"`
@@ -4353,6 +4533,64 @@ func (response BindMyOrgEmail409JSONResponse) VisitBindMyOrgEmailResponse(w http
 	return err
 }
 
+type LeaveMyOrgRequestObject struct {
+	Id string `json:"id"`
+}
+
+type LeaveMyOrgResponseObject interface {
+	VisitLeaveMyOrgResponse(w http.ResponseWriter) error
+}
+
+type LeaveMyOrg204Response struct {
+}
+
+func (response LeaveMyOrg204Response) VisitLeaveMyOrgResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type LeaveMyOrg401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response LeaveMyOrg401JSONResponse) VisitLeaveMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LeaveMyOrg404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response LeaveMyOrg404JSONResponse) VisitLeaveMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LeaveMyOrg409JSONResponse struct{ ConflictJSONResponse }
+
+func (response LeaveMyOrg409JSONResponse) VisitLeaveMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SwitchMyOrgRequestObject struct {
 	Id   string `json:"id"`
 	Body *SwitchMyOrgJSONRequestBody
@@ -4414,6 +4652,93 @@ func (response SwitchMyOrg404JSONResponse) VisitSwitchMyOrgResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TransferMyOrgRequestObject struct {
+	Id   string `json:"id"`
+	Body *TransferMyOrgJSONRequestBody
+}
+
+type TransferMyOrgResponseObject interface {
+	VisitTransferMyOrgResponse(w http.ResponseWriter) error
+}
+
+type TransferMyOrg204Response struct {
+}
+
+func (response TransferMyOrg204Response) VisitTransferMyOrgResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type TransferMyOrg400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response TransferMyOrg400JSONResponse) VisitTransferMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TransferMyOrg401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response TransferMyOrg401JSONResponse) VisitTransferMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TransferMyOrg403JSONResponse struct{ DeniedJSONResponse }
+
+func (response TransferMyOrg403JSONResponse) VisitTransferMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TransferMyOrg404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response TransferMyOrg404JSONResponse) VisitTransferMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TransferMyOrg409JSONResponse struct{ ConflictJSONResponse }
+
+func (response TransferMyOrg409JSONResponse) VisitTransferMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -5602,15 +5927,24 @@ type StrictServerInterface interface {
 	// SuspendOrgMember メンバーを停止する（Org の owner と admin。種別は customer_request。4.7）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}/suspensions)
 	SuspendOrgMember(ctx context.Context, request SuspendOrgMemberRequestObject) (SuspendOrgMemberResponseObject, error)
+	// RemoveOrgMember メンバーを除名する（Org の owner と admin。4.10）
+	// (POST /v1/me/orgs/{id}/members/{membership_id}:remove)
+	RemoveOrgMember(ctx context.Context, request RemoveOrgMemberRequestObject) (RemoveOrgMemberResponseObject, error)
 	// LiftOrgSuspension メンバーの停止を解除する（Org の owner と admin。customer_request だけ）
 	// (POST /v1/me/orgs/{id}/suspensions/{suspension_id}:lift)
 	LiftOrgSuspension(ctx context.Context, request LiftOrgSuspensionRequestObject) (LiftOrgSuspensionResponseObject, error)
 	// BindMyOrgEmail この Org で使うメールを結び付ける（4.4）
 	// (POST /v1/me/orgs/{id}:bind-email)
 	BindMyOrgEmail(ctx context.Context, request BindMyOrgEmailRequestObject) (BindMyOrgEmailResponseObject, error)
+	// LeaveMyOrg 共有 Org から退会する（4.10）
+	// (POST /v1/me/orgs/{id}:leave)
+	LeaveMyOrg(ctx context.Context, request LeaveMyOrgRequestObject) (LeaveMyOrgResponseObject, error)
 	// SwitchMyOrg セッションの Org を切り替える（4.4）
 	// (POST /v1/me/orgs/{id}:switch)
 	SwitchMyOrg(ctx context.Context, request SwitchMyOrgRequestObject) (SwitchMyOrgResponseObject, error)
+	// TransferMyOrg オーナーを譲る（Org の owner。4.10）
+	// (POST /v1/me/orgs/{id}:transfer)
+	TransferMyOrg(ctx context.Context, request TransferMyOrgRequestObject) (TransferMyOrgResponseObject, error)
 	// RenameMyPasskey passkey の名前を変える
 	// (POST /v1/me/passkeys/{id}:rename)
 	RenameMyPasskey(ctx context.Context, request RenameMyPasskeyRequestObject) (RenameMyPasskeyResponseObject, error)
@@ -6604,6 +6938,33 @@ func (sh *strictHandler) SuspendOrgMember(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// RemoveOrgMember operation middleware
+func (sh *strictHandler) RemoveOrgMember(w http.ResponseWriter, r *http.Request, id string, membershipId string) {
+	var request RemoveOrgMemberRequestObject
+
+	request.Id = id
+	request.MembershipId = membershipId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveOrgMember(ctx, request.(RemoveOrgMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveOrgMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveOrgMemberResponseObject); ok {
+		if err := validResponse.VisitRemoveOrgMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // LiftOrgSuspension operation middleware
 func (sh *strictHandler) LiftOrgSuspension(w http.ResponseWriter, r *http.Request, id string, suspensionId string) {
 	var request LiftOrgSuspensionRequestObject
@@ -6671,6 +7032,32 @@ func (sh *strictHandler) BindMyOrgEmail(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+// LeaveMyOrg operation middleware
+func (sh *strictHandler) LeaveMyOrg(w http.ResponseWriter, r *http.Request, id string) {
+	var request LeaveMyOrgRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.LeaveMyOrg(ctx, request.(LeaveMyOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "LeaveMyOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LeaveMyOrgResponseObject); ok {
+		if err := validResponse.VisitLeaveMyOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // SwitchMyOrg operation middleware
 func (sh *strictHandler) SwitchMyOrg(w http.ResponseWriter, r *http.Request, id string) {
 	var request SwitchMyOrgRequestObject
@@ -6700,6 +7087,39 @@ func (sh *strictHandler) SwitchMyOrg(w http.ResponseWriter, r *http.Request, id 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SwitchMyOrgResponseObject); ok {
 		if err := validResponse.VisitSwitchMyOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TransferMyOrg operation middleware
+func (sh *strictHandler) TransferMyOrg(w http.ResponseWriter, r *http.Request, id string) {
+	var request TransferMyOrgRequestObject
+
+	request.Id = id
+
+	var body TransferMyOrgJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TransferMyOrg(ctx, request.(TransferMyOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TransferMyOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TransferMyOrgResponseObject); ok {
+		if err := validResponse.VisitTransferMyOrgResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
