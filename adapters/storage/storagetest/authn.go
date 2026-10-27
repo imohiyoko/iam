@@ -59,6 +59,8 @@ var authnTests = []struct {
 	{"InvitationAcceptConcurrent", testInvitationAcceptConcurrent},
 	{"Clients", testClients},
 	{"SigningKeys", testSigningKeys},
+	{"Grants", testGrants},
+	{"SessionLineage", testSessionLineage},
 }
 
 func notFound(what string, err error) error {
@@ -88,7 +90,8 @@ func newEmail(realmID, userID string, index string) port.UserEmail {
 }
 
 func newSession(realmID, userID string, created time.Time) port.Session {
-	return port.Session{ID: id.NewExternal(id.Session), RealmID: realmID, PrincipalType: port.PrincipalUser, PrincipalID: userID,
+	sid := id.NewExternal(id.Session)
+	return port.Session{ID: sid, SID: sid, RealmID: realmID, PrincipalType: port.PrincipalUser, PrincipalID: userID,
 		TokenHash: []byte("hash"), AuthMethods: []string{"otp"}, AuthCredentialIDs: []string{"eml_x"}, Warnings: []byte(`[]`),
 		IP: []byte("ip-ct"), UserAgent: []byte("ua-ct"), AuthenticatedAt: created.Add(-time.Second), CreatedAt: created, LastSeenAt: created, ExpiresAt: created.Add(24 * time.Hour)}
 }

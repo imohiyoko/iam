@@ -303,6 +303,22 @@ func (r sessions) ListByPrincipal(_ context.Context, realmID string, t port.Prin
 	return out, nil
 }
 
+func (r sessions) GetCurrentBySID(_ context.Context, realmID, sid string) (port.Session, error) {
+	var cur *port.Session
+	for _, s := range r.t.s.sessions {
+		if s.RealmID != realmID || s.SID != sid {
+			continue
+		}
+		if cur == nil || s.CreatedAt.After(cur.CreatedAt) || (s.CreatedAt.Equal(cur.CreatedAt) && s.ID > cur.ID) {
+			cur = &s
+		}
+	}
+	if cur == nil {
+		return port.Session{}, errs.New(errs.KindNotFound, "session lineage %s", sid)
+	}
+	return cloneSession(*cur), nil
+}
+
 func (r sessions) update(realmID, id string, fn func(*port.Session)) error {
 	s, err := get(r.t.s.sessions, realmID, id, func(s port.Session) string { return s.RealmID }, "session")
 	if err != nil {
@@ -473,6 +489,7 @@ func (r users) Erase(_ context.Context, realmID, id string, at time.Time) error 
 	eraseWhere(r.t, s.roleBindings, func(x port.RoleBinding) bool {
 		return x.RealmID == realmID && x.PrincipalType == port.PrincipalUser && x.PrincipalID == id
 	})
+	eraseGrants(r.t, func(g port.Grant) bool { return g.RealmID == realmID && g.UserID == id })
 	eraseWhere(r.t, s.groupMembers, func(x port.GroupMember) bool {
 		g, ok := s.groups[x.GroupID]
 		return ok && g.RealmID == realmID && x.MemberType == port.PrincipalUser && x.MemberID == id

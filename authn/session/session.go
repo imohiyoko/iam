@@ -315,6 +315,19 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	}
 	// 入った Org で deny にならないことは Pick が確かめている。本人に返すのは Org の段を当てはめた警告。
 	warnings, _ := m.Warnings.Apply(hits, lim.Warnings)
+	// 同じブラウザの古いセッション。同じ本人の通常のセッションなら、ログインの系列（sid）を引き継ぐ（連携先の認可が続く。5.1）。
+	var old *port.Session
+	if sid, secret, ok := SplitToken(in.ReplaceToken); ok {
+		o, err := tx.Sessions().Get(ctx, in.RealmID, sid)
+		if err == nil && (o.RevokedAt == nil || now.Before(*o.RevokedAt)) && subtle.ConstantTimeCompare(o.TokenHash, hashSecret(secret)) == 1 {
+			old = &o
+		}
+	}
+	s.SID = s.ID
+	if old != nil && old.PrincipalType == port.PrincipalUser && old.PrincipalID == s.PrincipalID && old.Restriction == port.RestrictionNone &&
+		restriction == port.RestrictionNone && old.SID != "" {
+		s.SID = old.SID
+	}
 	if err := tx.Sessions().Create(ctx, s); err != nil {
 		return Issued{}, err
 	}
@@ -326,19 +339,16 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	if len(warnings) > 0 {
 		details["warnings"] = warnings
 	}
-	if sid, secret, ok := SplitToken(in.ReplaceToken); ok {
-		old, err := tx.Sessions().Get(ctx, in.RealmID, sid)
-		if err == nil && (old.RevokedAt == nil || now.Before(*old.RevokedAt)) && subtle.ConstantTimeCompare(old.TokenHash, hashSecret(secret)) == 1 {
-			oldActor, err := userActor(ctx, tx, in.RealmID, old.PrincipalID)
-			if err != nil {
-				return Issued{}, err
-			}
-			if err := m.revokeInTx(ctx, tx, old, ReasonReplacedByLogin, oldActor, in.RequestID); err != nil {
-				return Issued{}, err
-			}
-			details["replaced"] = old.ID
-			replaced = old.ID
+	if old != nil {
+		oldActor, err := userActor(ctx, tx, in.RealmID, old.PrincipalID)
+		if err != nil {
+			return Issued{}, err
 		}
+		if err := m.revokeInTx(ctx, tx, *old, ReasonReplacedByLogin, oldActor, in.RequestID); err != nil {
+			return Issued{}, err
+		}
+		details["replaced"] = old.ID
+		replaced = old.ID
 	}
 	var orgPublicID string
 	if s.ActiveOrgID != "" {
@@ -579,7 +589,9 @@ func SplitToken(token string) (sessionID, secret string, ok bool) {
 
 // Validated は検証済みのセッション。
 type Validated struct {
-	SessionID     string
+	SessionID string
+	// SID はログインの系列の ID（ID を入れ替えても変わらない。OIDC の sid）。
+	SID           string
 	RealmID       string
 	PrincipalType port.PrincipalType
 	PrincipalID   string // 内部 ID。外に出さない（ADR 0045）
@@ -603,6 +615,7 @@ type Validated struct {
 // cached はキャッシュに置く検証の結果。秘密は置かない。
 type cached struct {
 	Hash            []byte                  `json:"h"`
+	SID             string                  `json:"s,omitempty"`
 	PrincipalType   port.PrincipalType      `json:"pt"`
 	PrincipalID     string                  `json:"p"`
 	PublicID        string                  `json:"u"`
@@ -679,7 +692,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 			}
 		}
 		slices.Sort(orgUnavailable)
-		c = cached{Hash: s.TokenHash, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
+		c = cached{Hash: s.TokenHash, SID: s.SID, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
 			ActiveOrgID: s.ActiveOrgID, OrgUnavailable: slices.Compact(orgUnavailable), MaxAuthAge: lim.MaxAuthAge, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
 		return nil
 	})
@@ -701,7 +714,11 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 }
 
 func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Validated {
-	v := Validated{SessionID: sid, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
+	lineage := c.SID
+	if lineage == "" {
+		lineage = sid
+	}
+	v := Validated{SessionID: sid, SID: lineage, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
 		PublicID: c.PublicID, ActiveOrgID: c.ActiveOrgID, OrgUnavailable: c.OrgUnavailable, MaxAuthAge: c.MaxAuthAge, AuthMethods: c.AuthMethods,
 		AuthenticatedAt: c.AuthenticatedAt, Restriction: c.Restriction}
 	if m.Config.RotationInterval > 0 && !now.Before(c.CreatedAt.Add(m.Config.RotationInterval)) {
@@ -838,6 +855,34 @@ func earliest(a, b time.Time) time.Time {
 	return a
 }
 
+// CheckLineage はログインの系列（sid）の今のセッションが使えるかを、Validate と同じ規則で確かめる（OIDC の認可の検証。5.3）。
+// 使えれば今のセッションと、次に状態が変わる時刻（再検証の期限）を返す。使えない系列は ErrInvalid。
+// 連携先からの利用は無操作の期限を延ばさない（延ばすのはリフレッシュ。Touch）。
+func (m *Manager) CheckLineage(ctx context.Context, tx port.Tx, realmID, sid string, now time.Time) (port.Session, time.Time, error) {
+	s, err := tx.Sessions().GetCurrentBySID(ctx, realmID, sid)
+	if errors.Is(err, errs.NotFound) {
+		return port.Session{}, time.Time{}, ErrInvalid
+	}
+	if err != nil {
+		return port.Session{}, time.Time{}, err
+	}
+	if s.Restriction != port.RestrictionNone {
+		return port.Session{}, time.Time{}, ErrInvalid
+	}
+	next, _, lim, err := m.check(ctx, tx, s, now)
+	if errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) {
+		m.logger().DebugContext(ctx, "session lineage rejected", "sid", sid, "reason", err.Error())
+		return port.Session{}, time.Time{}, ErrInvalid
+	}
+	if err != nil {
+		return port.Session{}, time.Time{}, err
+	}
+	if lim.IdleTimeout > 0 {
+		next = earliest(next, s.LastSeenAt.Add(lim.IdleTimeout))
+	}
+	return s, next, nil
+}
+
 // ---------------------------------------------------------------------------
 
 // Rotate はセッションの ID を入れ替え、新しいトークンを返す（5.2）。
@@ -856,6 +901,9 @@ func (m *Manager) Rotate(ctx context.Context, realmID, sessionID, requestID stri
 		}
 		s := old
 		s.ID, s.CreatedAt, s.LastSeenAt = id.NewExternal(id.Session), now, now
+		if s.SID == "" {
+			s.SID = old.ID
+		}
 		token, hash, err := newToken(s.ID)
 		if err != nil {
 			return err
@@ -936,6 +984,9 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requ
 		}
 		s := old
 		s.ID, s.ActiveOrgID, s.CreatedAt, s.LastSeenAt, s.RevokedAt, s.RevokeReason = id.NewExternal(id.Session), picked.OrgID, now, now, nil, ""
+		if s.SID == "" {
+			s.SID = old.ID
+		}
 		s.ExpiresAt = old.AuthenticatedAt.Add(lim.AbsoluteLifetime)
 		token, hash, err := newToken(s.ID)
 		if err != nil {

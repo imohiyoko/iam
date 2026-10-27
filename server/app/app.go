@@ -92,6 +92,10 @@ type App struct {
 	// clients と keys は OIDC Provider の連携先と ID トークンの署名鍵（5.5、9.3）。
 	clients *provider.Clients
 	keys    *provider.Keys
+	// issuer は OIDC の iss（server.public_url）。空なら OIDC Provider のエンドポイントを出さない。
+	issuer string
+	flow   *provider.Flow
+	tokens *provider.Tokens
 	// authz は認可の判定（ADR 0064）。manage はロール・付与・Group の管理。
 	authz  *check.Checker
 	manage *manage.Service
@@ -203,6 +207,13 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, a.realm.ID) }); err != nil {
 		return nil, err
 	}
+	a.issuer = strings.TrimSuffix(cfg.Server.PublicURL, "/")
+	if a.issuer == "" {
+		d.Logger.Info("the OIDC provider is disabled: set server.public_url")
+	}
+	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D()}
+	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Issuer: a.issuer,
+		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D()}
 	a.email = &emailflow.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Notify: a.notify, Log: d.Logger,

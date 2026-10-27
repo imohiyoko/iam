@@ -33,19 +33,32 @@ func (s publicServer) GetHealth(ctx context.Context, _ publicapi.GetHealthReques
 }
 
 // newPublicHandler は公開 API。ブラウザからの別オリジンの書き込み（CSRF）は CrossOriginProtection で拒否する（2.5）。
+// OIDC Provider のエンドポイントは別のオリジンの連携先から呼ばれる（token は連携先のサーバー、authorize はトップレベルの遷移）ので、
+// CrossOriginProtection の外に置く。
 func newPublicHandler(a *App, login http.Handler) http.Handler {
 	h := publicapi.HandlerWithOptions(publicapi.NewStrictHandlerWithOptions(publicServer{a}, nil, publicapi.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.responseError,
 	}), publicapi.StdHTTPServerOptions{BaseRouter: newColonMux(), ErrorHandlerFunc: a.requestError})
 	api := a.withLoginGuard(a.withSession(h))
-	return http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	protected := http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isHosted(r.URL.Path) {
 			login.ServeHTTP(w, r)
 			return
 		}
 		api.ServeHTTP(w, r)
 	}))
+	provider := newOIDCHandler(a)
+	if provider == nil {
+		return protected
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isOIDC(r.URL.Path) {
+			provider.ServeHTTP(w, r)
+			return
+		}
+		protected.ServeHTTP(w, r)
+	})
 }
 
 func (s publicServer) Logout(ctx context.Context, _ publicapi.LogoutRequestObject) (publicapi.LogoutResponseObject, error) {
@@ -139,9 +152,13 @@ func (a *App) unavailable(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {
+	writeJSON(w, status, map[string]string{"error": code})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // maxBodyBytes はリクエスト本文の上限。超えると本文の読み取りが失敗し、400 invalid_request になる。

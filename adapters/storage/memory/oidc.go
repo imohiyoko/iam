@@ -74,6 +74,7 @@ func (r clients) Delete(_ context.Context, realmID, id string) error {
 		return err
 	}
 	deleteKey(r.t, r.t.s.clients, id)
+	eraseGrants(r.t, func(g port.Grant) bool { return g.RealmID == realmID && g.ClientID == id })
 	return nil
 }
 
@@ -125,4 +126,100 @@ func (r signingKeys) Delete(_ context.Context, realmID, id string) error {
 	}
 	deleteKey(r.t, r.t.s.signingKeys, id)
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+
+type grants struct{ t *tx }
+
+func cloneGrant(g port.Grant) port.Grant {
+	g.Scopes, g.AuthMethods = slices.Clone(g.Scopes), slices.Clone(g.AuthMethods)
+	g.RevokedAt = cloneTime(g.RevokedAt)
+	return g
+}
+
+// eraseGrants は一致する認可とそのトークンを消す。
+func eraseGrants(t *tx, match func(port.Grant) bool) {
+	ids := map[string]bool{}
+	for _, g := range t.s.grants {
+		if match(g) {
+			ids[g.ID] = true
+		}
+	}
+	eraseWhere(t, t.s.oidcTokens, func(x port.OIDCToken) bool { return ids[x.GrantID] })
+	eraseWhere(t, t.s.grants, func(g port.Grant) bool { return ids[g.ID] })
+}
+
+func (r grants) Create(_ context.Context, g port.Grant) error {
+	if _, ok := r.t.s.grants[g.ID]; ok {
+		return errs.New(errs.KindConflict, "grant %s exists", g.ID)
+	}
+	setKey(r.t, r.t.s.grants, g.ID, cloneGrant(g))
+	return nil
+}
+
+func (r grants) Get(_ context.Context, realmID, id string) (port.Grant, error) {
+	g, err := get(r.t.s.grants, realmID, id, func(g port.Grant) string { return g.RealmID }, "grant")
+	return cloneGrant(g), err
+}
+
+func (r grants) ListBySID(_ context.Context, realmID, sid string) ([]port.Grant, error) {
+	var out []port.Grant
+	for _, g := range r.t.s.grants {
+		if g.RealmID == realmID && g.SID == sid {
+			out = append(out, cloneGrant(g))
+		}
+	}
+	sortByCreated(out, func(g port.Grant) (time.Time, string) { return g.CreatedAt, g.ID })
+	return out, nil
+}
+
+func (r grants) Revoke(_ context.Context, realmID, id string, at time.Time, reason string) error {
+	g, err := get(r.t.s.grants, realmID, id, func(g port.Grant) string { return g.RealmID }, "grant")
+	if err != nil {
+		return err
+	}
+	if g.RevokedAt == nil || at.Before(*g.RevokedAt) {
+		g = cloneGrant(g)
+		g.RevokedAt, g.RevokeReason = &at, reason
+		setKey(r.t, r.t.s.grants, id, g)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+
+type oidcTokens struct{ t *tx }
+
+func cloneOIDCToken(t port.OIDCToken) port.OIDCToken {
+	t.Hash = slices.Clone(t.Hash)
+	t.UsedAt = cloneTime(t.UsedAt)
+	return t
+}
+
+func (r oidcTokens) Create(_ context.Context, t port.OIDCToken) error {
+	if _, ok := r.t.s.oidcTokens[t.ID]; ok {
+		return errs.New(errs.KindConflict, "token %s exists", t.ID)
+	}
+	setKey(r.t, r.t.s.oidcTokens, t.ID, cloneOIDCToken(t))
+	return nil
+}
+
+func (r oidcTokens) Get(_ context.Context, realmID, id string) (port.OIDCToken, error) {
+	t, err := get(r.t.s.oidcTokens, realmID, id, func(t port.OIDCToken) string { return t.RealmID }, "token")
+	return cloneOIDCToken(t), err
+}
+
+func (r oidcTokens) Use(_ context.Context, realmID, id string, at time.Time) (bool, error) {
+	t, err := get(r.t.s.oidcTokens, realmID, id, func(t port.OIDCToken) string { return t.RealmID }, "token")
+	if err != nil {
+		return false, err
+	}
+	if t.UsedAt != nil {
+		return false, nil
+	}
+	t = cloneOIDCToken(t)
+	t.UsedAt = &at
+	setKey(r.t, r.t.s.oidcTokens, id, t)
+	return true, nil
 }

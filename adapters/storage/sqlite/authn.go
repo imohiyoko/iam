@@ -238,7 +238,7 @@ func toSession(r db.AuthnSession) (port.Session, error) {
 	s := port.Session{ID: r.ID, RealmID: r.RealmID, PrincipalType: port.PrincipalType(r.PrincipalType), PrincipalID: r.PrincipalID,
 		ActiveOrgID: r.ActiveOrgID, TokenHash: r.TokenHash, Warnings: r.Warnings, IP: r.Ip, UserAgent: r.UserAgent,
 		AuthenticatedAt: p.at(r.AuthenticatedAt), CreatedAt: p.at(r.CreatedAt), LastSeenAt: p.at(r.LastSeenAt), ExpiresAt: p.at(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt),
-		RevokeReason: r.RevokeReason, Restriction: port.SessionRestriction(r.Restriction)}
+		RevokeReason: r.RevokeReason, Restriction: port.SessionRestriction(r.Restriction), SID: r.Sid}
 	if p.err != nil {
 		return s, p.err
 	}
@@ -261,11 +261,16 @@ func (r sessions) Create(ctx context.Context, s port.Session) error {
 		PrincipalID: s.PrincipalID, ActiveOrgID: s.ActiveOrgID, TokenHash: nonNil(s.TokenHash), AuthMethods: jsonList(s.AuthMethods),
 		AuthCredentialIds: jsonList(s.AuthCredentialIDs), Warnings: nonNil(s.Warnings), Ip: nonNil(s.IP), UserAgent: nonNil(s.UserAgent),
 		AuthenticatedAt: formatTime(s.AuthenticatedAt), CreatedAt: formatTime(s.CreatedAt), LastSeenAt: formatTime(s.LastSeenAt), ExpiresAt: formatTime(s.ExpiresAt),
-		RevokedAt: nullTime(s.RevokedAt), RevokeReason: s.RevokeReason, Restriction: string(s.Restriction)}))
+		RevokedAt: nullTime(s.RevokedAt), RevokeReason: s.RevokeReason, Restriction: string(s.Restriction), Sid: s.SID}))
 }
 
 func (r sessions) Get(ctx context.Context, realmID, id string) (port.Session, error) {
 	row, err := r.q.GetSession(ctx, db.GetSessionParams{RealmID: realmID, ID: id})
+	return one(row, err, toSession)
+}
+
+func (r sessions) GetCurrentBySID(ctx context.Context, realmID, sid string) (port.Session, error) {
+	row, err := r.q.GetCurrentSessionBySID(ctx, db.GetCurrentSessionBySIDParams{RealmID: realmID, Sid: sid})
 	return one(row, err, toSession)
 }
 
@@ -384,6 +389,8 @@ func (r users) Erase(ctx context.Context, realmID, id string, at time.Time) erro
 		q.EraseUserSessions(ctx, db.EraseUserSessionsParams{RealmID: realmID, PrincipalID: id}),
 		q.EraseUserRoleBindings(ctx, db.EraseUserRoleBindingsParams{RealmID: realmID, PrincipalID: id}),
 		q.EraseUserGroupMembers(ctx, db.EraseUserGroupMembersParams{RealmID: realmID, UserID: id}),
+		q.EraseUserGrantTokens(ctx, db.EraseUserGrantTokensParams{RealmID: realmID, UserID: id}),
+		q.EraseUserGrants(ctx, db.EraseUserGrantsParams{RealmID: realmID, UserID: id}),
 	} {
 		if err != nil {
 			return mapErr(err)
