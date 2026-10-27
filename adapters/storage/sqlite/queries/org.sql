@@ -25,8 +25,8 @@ SELECT * FROM memberships WHERE realm_id = ? AND id = ?;
 
 -- name: CreateMembership :exec
 INSERT INTO memberships (id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason,
-    created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    management_requested_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetMembershipByPublicID :one
 SELECT * FROM memberships WHERE realm_id = ? AND public_id = ?;
@@ -44,7 +44,8 @@ SELECT * FROM memberships WHERE realm_id = ? AND org_id = ? AND public_id > sqlc
 SELECT count(*) FROM memberships WHERE realm_id = ? AND org_id = ? AND status = 'active' AND org_role = ?;
 
 -- name: UpdateMembership :execrows
-UPDATE memberships SET status = ?, org_role = ?, email_id = ?, valid_from = ?, valid_until = ?, ended_reason = ?, updated_at = ?
+UPDATE memberships SET status = ?, org_role = ?, email_id = ?, valid_from = ?, valid_until = ?, ended_reason = ?,
+    management_requested_at = ?, updated_at = ?
 WHERE realm_id = ? AND id = ?;
 
 -- name: CreateInvitation :exec

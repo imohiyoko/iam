@@ -304,3 +304,16 @@ SELECT count(*) FROM authn_password_credentials;
 
 -- name: PurgePasswords :execrows
 DELETE FROM authn_password_credentials WHERE id IN (SELECT p.id FROM authn_password_credentials p LIMIT sqlc.arg(lim)::bigint);
+
+-- name: SetUserManagedOrg :execrows
+UPDATE authn_users SET managed_org_id = $1, managed_at = $2, updated_at = $3 WHERE realm_id = $4 AND id = $5;
+
+-- name: ListUsersManagedByOrg :many
+SELECT * FROM authn_users WHERE realm_id = sqlc.arg(realm_id) AND managed_org_id = sqlc.arg(managed_org_id) AND id > sqlc.arg(after) ORDER BY id LIMIT sqlc.arg(lim)::bigint;
+
+-- name: CountManagedUsers :one
+SELECT count(*) FROM authn_users WHERE managed_org_id IS NOT NULL;
+
+-- name: ReleaseManagedUsers :execrows
+UPDATE authn_users SET managed_org_id = NULL, managed_at = NULL, updated_at = sqlc.arg(updated_at)
+WHERE id IN (SELECT u.id FROM authn_users u WHERE u.managed_org_id IS NOT NULL LIMIT sqlc.arg(lim)::bigint);

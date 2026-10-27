@@ -221,6 +221,8 @@ type AuthnUser struct {
 	UpdatedAt           string
 	DeletionScheduledAt sql.NullString
 	LegalHold           int64
+	ManagedOrgID        sql.NullString
+	ManagedAt           sql.NullString
 }
 
 type AuthnUserDataKey struct {
@@ -319,19 +321,20 @@ type Invitation struct {
 }
 
 type Membership struct {
-	ID          string
-	PublicID    string
-	RealmID     string
-	UserID      string
-	OrgID       string
-	Status      string
-	OrgRole     string
-	EmailID     string
-	ValidFrom   sql.NullString
-	ValidUntil  sql.NullString
-	EndedReason string
-	CreatedAt   string
-	UpdatedAt   string
+	ID                    string
+	PublicID              string
+	RealmID               string
+	UserID                string
+	OrgID                 string
+	Status                string
+	OrgRole               string
+	EmailID               string
+	ValidFrom             sql.NullString
+	ValidUntil            sql.NullString
+	EndedReason           string
+	CreatedAt             string
+	UpdatedAt             string
+	ManagementRequestedAt sql.NullString
 }
 
 type Org struct {

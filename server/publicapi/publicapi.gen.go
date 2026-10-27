@@ -470,9 +470,15 @@ type MyOrg struct {
 	EmailId *string `json:"email_id,omitempty"`
 
 	// Id 公開の Org ID
-	Id           string    `json:"id"`
-	Kind         MyOrgKind `json:"kind"`
-	MembershipId string    `json:"membership_id"`
+	Id   string    `json:"id"`
+	Kind MyOrgKind `json:"kind"`
+
+	// Managed この Org が本人のアカウントを管理している（ADR 0076）
+	Managed *bool `json:"managed,omitempty"`
+
+	// ManagementRequested この Org が管理を求めている（本人の同意を待つ）
+	ManagementRequested *bool  `json:"management_requested,omitempty"`
+	MembershipId        string `json:"membership_id"`
 
 	// Name 共有 Org の名前（個人 Org には無い）
 	Name   *string      `json:"name,omitempty"`
@@ -567,10 +573,16 @@ type OrgLoginPolicy struct {
 // OrgMember defines model for OrgMember.
 type OrgMember struct {
 	// Email この Org に結び付けたメール（未設定なら primary）
-	Email        *string         `json:"email,omitempty"`
-	MembershipId string          `json:"membership_id"`
-	Role         OrgMemberRole   `json:"role"`
-	Status       OrgMemberStatus `json:"status"`
+	Email *string `json:"email,omitempty"`
+
+	// Managed この Org の管理ユーザー（ADR 0076）
+	Managed *bool `json:"managed,omitempty"`
+
+	// ManagementRequested 管理を求めて本人の同意を待っている
+	ManagementRequested *bool           `json:"management_requested,omitempty"`
+	MembershipId        string          `json:"membership_id"`
+	Role                OrgMemberRole   `json:"role"`
+	Status              OrgMemberStatus `json:"status"`
 
 	// UserId 公開のユーザー ID
 	UserId     string     `json:"user_id"`
@@ -1258,9 +1270,15 @@ type ServerInterface interface {
 	// SuspendOrgMember メンバーを停止する（Org の owner と admin。種別は customer_request。4.7）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}/suspensions)
 	SuspendOrgMember(w http.ResponseWriter, r *http.Request, id string, membershipId string)
+	// ReleaseOrgManagement 管理ユーザーを手放す（個人ユーザーに戻す）か、管理の求めを取り消す（Org の owner）
+	// (POST /v1/me/orgs/{id}/members/{membership_id}:release-management)
+	ReleaseOrgManagement(w http.ResponseWriter, r *http.Request, id string, membershipId string)
 	// RemoveOrgMember メンバーを除名する（Org の owner と admin。4.10）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}:remove)
 	RemoveOrgMember(w http.ResponseWriter, r *http.Request, id string, membershipId string)
+	// RequestOrgManagement メンバーに、Org による管理を求める（Org の owner。11.3、ADR 0076）
+	// (POST /v1/me/orgs/{id}/members/{membership_id}:request-management)
+	RequestOrgManagement(w http.ResponseWriter, r *http.Request, id string, membershipId string)
 	// ListMyOrgRoleBindings この Org の範囲のロールの付与の一覧
 	// (GET /v1/me/orgs/{id}/role-bindings)
 	ListMyOrgRoleBindings(w http.ResponseWriter, r *http.Request, id string)
@@ -1291,12 +1309,18 @@ type ServerInterface interface {
 	// LiftOrgSuspension メンバーの停止を解除する（Org の owner と admin。customer_request だけ）
 	// (POST /v1/me/orgs/{id}/suspensions/{suspension_id}:lift)
 	LiftOrgSuspension(w http.ResponseWriter, r *http.Request, id string, suspensionId string)
+	// AcceptOrgManagement Org による管理を受け入れる（本人。11.3）
+	// (POST /v1/me/orgs/{id}:accept-management)
+	AcceptOrgManagement(w http.ResponseWriter, r *http.Request, id string)
 	// BindMyOrgEmail この Org で使うメールを結び付ける（4.4）
 	// (POST /v1/me/orgs/{id}:bind-email)
 	BindMyOrgEmail(w http.ResponseWriter, r *http.Request, id string)
 	// CancelMyOrgDeletion Org の削除の予定を取り消す（Org の owner。猶予期間の間だけ）
 	// (POST /v1/me/orgs/{id}:cancel-deletion)
 	CancelMyOrgDeletion(w http.ResponseWriter, r *http.Request, id string)
+	// DeclineOrgManagement Org による管理の求めを断る（本人）
+	// (POST /v1/me/orgs/{id}:decline-management)
+	DeclineOrgManagement(w http.ResponseWriter, r *http.Request, id string)
 	// DeleteMyOrg 共有 Org を削除する（Org の owner。4.10）
 	// (POST /v1/me/orgs/{id}:delete)
 	DeleteMyOrg(w http.ResponseWriter, r *http.Request, id string)
@@ -2397,6 +2421,41 @@ func (siw *ServerInterfaceWrapper) SuspendOrgMember(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ReleaseOrgManagement operation middleware
+func (siw *ServerInterfaceWrapper) ReleaseOrgManagement(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "membership_id" -------------
+	var membershipId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "membership_id", r.PathValue("membership_id"), &membershipId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "membership_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleaseOrgManagement(w, r, id, membershipId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RemoveOrgMember operation middleware
 func (siw *ServerInterfaceWrapper) RemoveOrgMember(w http.ResponseWriter, r *http.Request) {
 
@@ -2423,6 +2482,41 @@ func (siw *ServerInterfaceWrapper) RemoveOrgMember(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RemoveOrgMember(w, r, id, membershipId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestOrgManagement operation middleware
+func (siw *ServerInterfaceWrapper) RequestOrgManagement(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "membership_id" -------------
+	var membershipId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "membership_id", r.PathValue("membership_id"), &membershipId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "membership_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestOrgManagement(w, r, id, membershipId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2728,6 +2822,32 @@ func (siw *ServerInterfaceWrapper) LiftOrgSuspension(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// AcceptOrgManagement operation middleware
+func (siw *ServerInterfaceWrapper) AcceptOrgManagement(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptOrgManagement(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // BindMyOrgEmail operation middleware
 func (siw *ServerInterfaceWrapper) BindMyOrgEmail(w http.ResponseWriter, r *http.Request) {
 
@@ -2771,6 +2891,32 @@ func (siw *ServerInterfaceWrapper) CancelMyOrgDeletion(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CancelMyOrgDeletion(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeclineOrgManagement operation middleware
+func (siw *ServerInterfaceWrapper) DeclineOrgManagement(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeclineOrgManagement(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3391,6 +3537,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains", wrapper.AddOrgDomain)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains/{domain_id}:verify", wrapper.VerifyOrgDomain)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains/{domain_id}:delete", wrapper.DeleteOrgDomain)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:request-management", wrapper.RequestOrgManagement)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:release-management", wrapper.ReleaseOrgManagement)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:accept-management", wrapper.AcceptOrgManagement)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:decline-management", wrapper.DeclineOrgManagement)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:bind-email", wrapper.BindMyOrgEmail)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/invitations:accept", wrapper.AcceptInvitation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:switch", wrapper.SwitchMyOrg)
@@ -6376,6 +6526,79 @@ func (response SuspendOrgMember409JSONResponse) VisitSuspendOrgMemberResponse(w 
 	return err
 }
 
+type ReleaseOrgManagementRequestObject struct {
+	Id           string `json:"id"`
+	MembershipId string `json:"membership_id"`
+}
+
+type ReleaseOrgManagementResponseObject interface {
+	VisitReleaseOrgManagementResponse(w http.ResponseWriter) error
+}
+
+type ReleaseOrgManagement204Response struct {
+}
+
+func (response ReleaseOrgManagement204Response) VisitReleaseOrgManagementResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ReleaseOrgManagement401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReleaseOrgManagement401JSONResponse) VisitReleaseOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseOrgManagement403JSONResponse struct{ DeniedJSONResponse }
+
+func (response ReleaseOrgManagement403JSONResponse) VisitReleaseOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseOrgManagement404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReleaseOrgManagement404JSONResponse) VisitReleaseOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseOrgManagement409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ReleaseOrgManagement409JSONResponse) VisitReleaseOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RemoveOrgMemberRequestObject struct {
 	Id           string `json:"id"`
 	MembershipId string `json:"membership_id"`
@@ -6438,6 +6661,79 @@ func (response RemoveOrgMember404JSONResponse) VisitRemoveOrgMemberResponse(w ht
 type RemoveOrgMember409JSONResponse struct{ ConflictJSONResponse }
 
 func (response RemoveOrgMember409JSONResponse) VisitRemoveOrgMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestOrgManagementRequestObject struct {
+	Id           string `json:"id"`
+	MembershipId string `json:"membership_id"`
+}
+
+type RequestOrgManagementResponseObject interface {
+	VisitRequestOrgManagementResponse(w http.ResponseWriter) error
+}
+
+type RequestOrgManagement204Response struct {
+}
+
+func (response RequestOrgManagement204Response) VisitRequestOrgManagementResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RequestOrgManagement401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RequestOrgManagement401JSONResponse) VisitRequestOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestOrgManagement403JSONResponse struct{ DeniedJSONResponse }
+
+func (response RequestOrgManagement403JSONResponse) VisitRequestOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestOrgManagement404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RequestOrgManagement404JSONResponse) VisitRequestOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestOrgManagement409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RequestOrgManagement409JSONResponse) VisitRequestOrgManagementResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -7226,6 +7522,64 @@ func (response LiftOrgSuspension404JSONResponse) VisitLiftOrgSuspensionResponse(
 	return err
 }
 
+type AcceptOrgManagementRequestObject struct {
+	Id string `json:"id"`
+}
+
+type AcceptOrgManagementResponseObject interface {
+	VisitAcceptOrgManagementResponse(w http.ResponseWriter) error
+}
+
+type AcceptOrgManagement204Response struct {
+}
+
+func (response AcceptOrgManagement204Response) VisitAcceptOrgManagementResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type AcceptOrgManagement401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AcceptOrgManagement401JSONResponse) VisitAcceptOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptOrgManagement404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AcceptOrgManagement404JSONResponse) VisitAcceptOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcceptOrgManagement409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AcceptOrgManagement409JSONResponse) VisitAcceptOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type BindMyOrgEmailRequestObject struct {
 	Id   string `json:"id"`
 	Body *BindMyOrgEmailJSONRequestBody
@@ -7352,6 +7706,64 @@ func (response CancelMyOrgDeletion404JSONResponse) VisitCancelMyOrgDeletionRespo
 type CancelMyOrgDeletion409JSONResponse struct{ ConflictJSONResponse }
 
 func (response CancelMyOrgDeletion409JSONResponse) VisitCancelMyOrgDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeclineOrgManagementRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeclineOrgManagementResponseObject interface {
+	VisitDeclineOrgManagementResponse(w http.ResponseWriter) error
+}
+
+type DeclineOrgManagement204Response struct {
+}
+
+func (response DeclineOrgManagement204Response) VisitDeclineOrgManagementResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeclineOrgManagement401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeclineOrgManagement401JSONResponse) VisitDeclineOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeclineOrgManagement404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeclineOrgManagement404JSONResponse) VisitDeclineOrgManagementResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeclineOrgManagement409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeclineOrgManagement409JSONResponse) VisitDeclineOrgManagementResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -8928,9 +9340,15 @@ type StrictServerInterface interface {
 	// SuspendOrgMember メンバーを停止する（Org の owner と admin。種別は customer_request。4.7）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}/suspensions)
 	SuspendOrgMember(ctx context.Context, request SuspendOrgMemberRequestObject) (SuspendOrgMemberResponseObject, error)
+	// ReleaseOrgManagement 管理ユーザーを手放す（個人ユーザーに戻す）か、管理の求めを取り消す（Org の owner）
+	// (POST /v1/me/orgs/{id}/members/{membership_id}:release-management)
+	ReleaseOrgManagement(ctx context.Context, request ReleaseOrgManagementRequestObject) (ReleaseOrgManagementResponseObject, error)
 	// RemoveOrgMember メンバーを除名する（Org の owner と admin。4.10）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}:remove)
 	RemoveOrgMember(ctx context.Context, request RemoveOrgMemberRequestObject) (RemoveOrgMemberResponseObject, error)
+	// RequestOrgManagement メンバーに、Org による管理を求める（Org の owner。11.3、ADR 0076）
+	// (POST /v1/me/orgs/{id}/members/{membership_id}:request-management)
+	RequestOrgManagement(ctx context.Context, request RequestOrgManagementRequestObject) (RequestOrgManagementResponseObject, error)
 	// ListMyOrgRoleBindings この Org の範囲のロールの付与の一覧
 	// (GET /v1/me/orgs/{id}/role-bindings)
 	ListMyOrgRoleBindings(ctx context.Context, request ListMyOrgRoleBindingsRequestObject) (ListMyOrgRoleBindingsResponseObject, error)
@@ -8961,12 +9379,18 @@ type StrictServerInterface interface {
 	// LiftOrgSuspension メンバーの停止を解除する（Org の owner と admin。customer_request だけ）
 	// (POST /v1/me/orgs/{id}/suspensions/{suspension_id}:lift)
 	LiftOrgSuspension(ctx context.Context, request LiftOrgSuspensionRequestObject) (LiftOrgSuspensionResponseObject, error)
+	// AcceptOrgManagement Org による管理を受け入れる（本人。11.3）
+	// (POST /v1/me/orgs/{id}:accept-management)
+	AcceptOrgManagement(ctx context.Context, request AcceptOrgManagementRequestObject) (AcceptOrgManagementResponseObject, error)
 	// BindMyOrgEmail この Org で使うメールを結び付ける（4.4）
 	// (POST /v1/me/orgs/{id}:bind-email)
 	BindMyOrgEmail(ctx context.Context, request BindMyOrgEmailRequestObject) (BindMyOrgEmailResponseObject, error)
 	// CancelMyOrgDeletion Org の削除の予定を取り消す（Org の owner。猶予期間の間だけ）
 	// (POST /v1/me/orgs/{id}:cancel-deletion)
 	CancelMyOrgDeletion(ctx context.Context, request CancelMyOrgDeletionRequestObject) (CancelMyOrgDeletionResponseObject, error)
+	// DeclineOrgManagement Org による管理の求めを断る（本人）
+	// (POST /v1/me/orgs/{id}:decline-management)
+	DeclineOrgManagement(ctx context.Context, request DeclineOrgManagementRequestObject) (DeclineOrgManagementResponseObject, error)
 	// DeleteMyOrg 共有 Org を削除する（Org の owner。4.10）
 	// (POST /v1/me/orgs/{id}:delete)
 	DeleteMyOrg(ctx context.Context, request DeleteMyOrgRequestObject) (DeleteMyOrgResponseObject, error)
@@ -10361,6 +10785,33 @@ func (sh *strictHandler) SuspendOrgMember(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// ReleaseOrgManagement operation middleware
+func (sh *strictHandler) ReleaseOrgManagement(w http.ResponseWriter, r *http.Request, id string, membershipId string) {
+	var request ReleaseOrgManagementRequestObject
+
+	request.Id = id
+	request.MembershipId = membershipId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReleaseOrgManagement(ctx, request.(ReleaseOrgManagementRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReleaseOrgManagement")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReleaseOrgManagementResponseObject); ok {
+		if err := validResponse.VisitReleaseOrgManagementResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RemoveOrgMember operation middleware
 func (sh *strictHandler) RemoveOrgMember(w http.ResponseWriter, r *http.Request, id string, membershipId string) {
 	var request RemoveOrgMemberRequestObject
@@ -10381,6 +10832,33 @@ func (sh *strictHandler) RemoveOrgMember(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RemoveOrgMemberResponseObject); ok {
 		if err := validResponse.VisitRemoveOrgMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RequestOrgManagement operation middleware
+func (sh *strictHandler) RequestOrgManagement(w http.ResponseWriter, r *http.Request, id string, membershipId string) {
+	var request RequestOrgManagementRequestObject
+
+	request.Id = id
+	request.MembershipId = membershipId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RequestOrgManagement(ctx, request.(RequestOrgManagementRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RequestOrgManagement")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RequestOrgManagementResponseObject); ok {
+		if err := validResponse.VisitRequestOrgManagementResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -10687,6 +11165,32 @@ func (sh *strictHandler) LiftOrgSuspension(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// AcceptOrgManagement operation middleware
+func (sh *strictHandler) AcceptOrgManagement(w http.ResponseWriter, r *http.Request, id string) {
+	var request AcceptOrgManagementRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AcceptOrgManagement(ctx, request.(AcceptOrgManagementRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AcceptOrgManagement")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AcceptOrgManagementResponseObject); ok {
+		if err := validResponse.VisitAcceptOrgManagementResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // BindMyOrgEmail operation middleware
 func (sh *strictHandler) BindMyOrgEmail(w http.ResponseWriter, r *http.Request, id string) {
 	var request BindMyOrgEmailRequestObject
@@ -10739,6 +11243,32 @@ func (sh *strictHandler) CancelMyOrgDeletion(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CancelMyOrgDeletionResponseObject); ok {
 		if err := validResponse.VisitCancelMyOrgDeletionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeclineOrgManagement operation middleware
+func (sh *strictHandler) DeclineOrgManagement(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeclineOrgManagementRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeclineOrgManagement(ctx, request.(DeclineOrgManagementRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeclineOrgManagement")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeclineOrgManagementResponseObject); ok {
+		if err := validResponse.VisitDeclineOrgManagementResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

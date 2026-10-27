@@ -1588,6 +1588,78 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}/members/{membership_id}:request-management:
+    post:
+      operationId: requestOrgManagement
+      summary: メンバーに、Org による管理を求める（Org の owner。11.3、ADR 0076）
+      description: |
+        本人が `:accept-management` で受け入れると管理ユーザーになる。対象は、この Org で使うメールが確認済みで、
+        そのドメインを Org が証明済みのメンバー（`409 email_domain_not_verified`）。既に管理ユーザーなら `409 already_managed`、
+        別の Org の管理ユーザーなら `409 managed_by_another_org`。求め済みなら何もしない。フィーチャー `org_managed_users` が要る。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: membership_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 求めた }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/members/{membership_id}:release-management:
+    post:
+      operationId: releaseOrgManagement
+      summary: 管理ユーザーを手放す（個人ユーザーに戻す）か、管理の求めを取り消す（Org の owner）
+      description: どちらでもなければ `409 not_managed`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: membership_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 手放した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}:accept-management:
+    post:
+      operationId: acceptOrgManagement
+      summary: Org による管理を受け入れる（本人。11.3）
+      description: |
+        以後は Org がアカウントを所有し、本人はその Org を抜けられず、自分でアカウントを消せない（`409 managed_user`）。
+        求めが無ければ `409 no_management_request`。受け入れの時点でメールとドメインを確かめ直す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 管理ユーザーになった }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}:decline-management:
+    post:
+      operationId: declineOrgManagement
+      summary: Org による管理の求めを断る（本人）
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 断った }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /v1/me/orgs/{id}:bind-email:
     post:
       operationId: bindMyOrgEmail
@@ -2209,6 +2281,8 @@ components:
         status: { type: string, enum: [invited, active] }
         active: { type: boolean, description: このセッションが入っている Org か }
         email_id: { type: string, description: この Org に結び付けたメール。未設定（primary を使う）なら無し }
+        managed: { type: boolean, description: この Org が本人のアカウントを管理している（ADR 0076） }
+        management_requested: { type: boolean, description: この Org が管理を求めている（本人の同意を待つ） }
         unavailable:
           type: array
           items: { type: string }
@@ -2224,6 +2298,8 @@ components:
         email: { type: string, description: この Org に結び付けたメール（未設定なら primary） }
         valid_from: { type: string, format: date-time }
         valid_until: { type: string, format: date-time }
+        managed: { type: boolean, description: この Org の管理ユーザー（ADR 0076） }
+        management_requested: { type: boolean, description: 管理を求めて本人の同意を待っている }
     OrgSettings:
       type: object
       description: Org の段の設定。省いた項目は realm に従う

@@ -126,24 +126,25 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 
 const createMembership = `-- name: CreateMembership :exec
 INSERT INTO memberships (id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason,
-    created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    management_requested_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateMembershipParams struct {
-	ID          string
-	PublicID    string
-	RealmID     string
-	UserID      string
-	OrgID       string
-	Status      string
-	OrgRole     string
-	EmailID     string
-	ValidFrom   sql.NullString
-	ValidUntil  sql.NullString
-	EndedReason string
-	CreatedAt   string
-	UpdatedAt   string
+	ID                    string
+	PublicID              string
+	RealmID               string
+	UserID                string
+	OrgID                 string
+	Status                string
+	OrgRole               string
+	EmailID               string
+	ValidFrom             sql.NullString
+	ValidUntil            sql.NullString
+	EndedReason           string
+	ManagementRequestedAt sql.NullString
+	CreatedAt             string
+	UpdatedAt             string
 }
 
 func (q *Queries) CreateMembership(ctx context.Context, arg CreateMembershipParams) error {
@@ -159,6 +160,7 @@ func (q *Queries) CreateMembership(ctx context.Context, arg CreateMembershipPara
 		arg.ValidFrom,
 		arg.ValidUntil,
 		arg.EndedReason,
+		arg.ManagementRequestedAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -379,7 +381,7 @@ func (q *Queries) GetInvitationByPublicID(ctx context.Context, arg GetInvitation
 }
 
 const getMembership = `-- name: GetMembership :one
-SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at, management_requested_at FROM memberships WHERE realm_id = ? AND id = ?
 `
 
 type GetMembershipParams struct {
@@ -404,12 +406,13 @@ func (q *Queries) GetMembership(ctx context.Context, arg GetMembershipParams) (M
 		&i.EndedReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ManagementRequestedAt,
 	)
 	return i, err
 }
 
 const getMembershipByPublicID = `-- name: GetMembershipByPublicID :one
-SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at, management_requested_at FROM memberships WHERE realm_id = ? AND public_id = ?
 `
 
 type GetMembershipByPublicIDParams struct {
@@ -434,12 +437,13 @@ func (q *Queries) GetMembershipByPublicID(ctx context.Context, arg GetMembership
 		&i.EndedReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ManagementRequestedAt,
 	)
 	return i, err
 }
 
 const getMembershipByUserOrg = `-- name: GetMembershipByUserOrg :one
-SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND user_id = ? AND org_id = ?
+SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at, management_requested_at FROM memberships WHERE realm_id = ? AND user_id = ? AND org_id = ?
 `
 
 type GetMembershipByUserOrgParams struct {
@@ -465,6 +469,7 @@ func (q *Queries) GetMembershipByUserOrg(ctx context.Context, arg GetMembershipB
 		&i.EndedReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ManagementRequestedAt,
 	)
 	return i, err
 }
@@ -733,7 +738,7 @@ func (q *Queries) ListInvitationsByOrg(ctx context.Context, arg ListInvitationsB
 }
 
 const listMembershipsByOrg = `-- name: ListMembershipsByOrg :many
-SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND org_id = ? AND public_id > ?3 ORDER BY public_id LIMIT ?4
+SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at, management_requested_at FROM memberships WHERE realm_id = ? AND org_id = ? AND public_id > ?3 ORDER BY public_id LIMIT ?4
 `
 
 type ListMembershipsByOrgParams struct {
@@ -771,6 +776,7 @@ func (q *Queries) ListMembershipsByOrg(ctx context.Context, arg ListMembershipsB
 			&i.EndedReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ManagementRequestedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -786,7 +792,7 @@ func (q *Queries) ListMembershipsByOrg(ctx context.Context, arg ListMembershipsB
 }
 
 const listMembershipsByUser = `-- name: ListMembershipsByUser :many
-SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at, management_requested_at FROM memberships WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
 `
 
 type ListMembershipsByUserParams struct {
@@ -817,6 +823,7 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, arg ListMemberships
 			&i.EndedReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ManagementRequestedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1070,20 +1077,22 @@ func (q *Queries) SetOrgValidity(ctx context.Context, arg SetOrgValidityParams) 
 }
 
 const updateMembership = `-- name: UpdateMembership :execrows
-UPDATE memberships SET status = ?, org_role = ?, email_id = ?, valid_from = ?, valid_until = ?, ended_reason = ?, updated_at = ?
+UPDATE memberships SET status = ?, org_role = ?, email_id = ?, valid_from = ?, valid_until = ?, ended_reason = ?,
+    management_requested_at = ?, updated_at = ?
 WHERE realm_id = ? AND id = ?
 `
 
 type UpdateMembershipParams struct {
-	Status      string
-	OrgRole     string
-	EmailID     string
-	ValidFrom   sql.NullString
-	ValidUntil  sql.NullString
-	EndedReason string
-	UpdatedAt   string
-	RealmID     string
-	ID          string
+	Status                string
+	OrgRole               string
+	EmailID               string
+	ValidFrom             sql.NullString
+	ValidUntil            sql.NullString
+	EndedReason           string
+	ManagementRequestedAt sql.NullString
+	UpdatedAt             string
+	RealmID               string
+	ID                    string
 }
 
 func (q *Queries) UpdateMembership(ctx context.Context, arg UpdateMembershipParams) (int64, error) {
@@ -1094,6 +1103,7 @@ func (q *Queries) UpdateMembership(ctx context.Context, arg UpdateMembershipPara
 		arg.ValidFrom,
 		arg.ValidUntil,
 		arg.EndedReason,
+		arg.ManagementRequestedAt,
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.ID,

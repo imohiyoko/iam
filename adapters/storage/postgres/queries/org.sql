@@ -27,8 +27,8 @@ SELECT * FROM memberships WHERE realm_id = $1 AND id = $2;
 
 -- name: CreateMembership :exec
 INSERT INTO memberships (id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason,
-    created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
+    management_requested_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
 
 -- name: GetMembershipByPublicID :one
 SELECT * FROM memberships WHERE realm_id = $1 AND public_id = $2;
@@ -46,8 +46,9 @@ SELECT * FROM memberships WHERE realm_id = sqlc.arg(realm_id) AND org_id = sqlc.
 SELECT count(*) FROM memberships WHERE realm_id = $1 AND org_id = $2 AND status = 'active' AND org_role = $3;
 
 -- name: UpdateMembership :execrows
-UPDATE memberships SET status = $1, org_role = $2, email_id = $3, valid_from = $4, valid_until = $5, ended_reason = $6, updated_at = $7
-WHERE realm_id = $8 AND id = $9;
+UPDATE memberships SET status = $1, org_role = $2, email_id = $3, valid_from = $4, valid_until = $5, ended_reason = $6,
+    management_requested_at = $7, updated_at = $8
+WHERE realm_id = $9 AND id = $10;
 
 -- name: CreateInvitation :exec
 INSERT INTO invitations (id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash,

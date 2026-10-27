@@ -619,3 +619,79 @@ var orgDomainIsolationCase = IsolationCase{
 		return a + b + c, err
 	},
 }
+
+func testManagedUsers(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, o := id.New(id.Realm), id.New(id.Org)
+	a, b, c := newUser(r), newUser(r), newUser(r)
+	m := newMembership(r, a.ID, o)
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		for _, u := range []port.User{a, b, c} {
+			if err := tx.Users().Create(ctx, u); err != nil {
+				return err
+			}
+		}
+		if err := tx.Memberships().Create(ctx, m); err != nil {
+			return err
+		}
+		m.ManagementRequestedAt, m.UpdatedAt = ptr(T0.Add(time.Minute)), T0.Add(time.Minute)
+		if err := tx.Memberships().Update(ctx, m); err != nil {
+			return err
+		}
+		if got, err := tx.Memberships().Get(ctx, r, m.ID); err != nil || !reflect.DeepEqual(got, m) {
+			return fmt.Errorf("membership after Update = %+v, %v", got, err)
+		}
+		at := T0.Add(time.Hour)
+		for _, u := range []port.User{a, b} {
+			if err := tx.Users().SetManagedOrg(ctx, r, u.ID, o, at); err != nil {
+				return err
+			}
+		}
+		got, err := tx.Users().Get(ctx, r, a.ID)
+		if err != nil || got.ManagedOrgID != o || got.ManagedAt == nil || !got.ManagedAt.Equal(at) || !got.UpdatedAt.Equal(at) {
+			return fmt.Errorf("managed user = %+v, %v", got, err)
+		}
+		want := []string{a.ID, b.ID}
+		slices.Sort(want)
+		list, err := tx.Users().ListManagedByOrg(ctx, r, o, "", 10)
+		if err != nil || len(list) != 2 || list[0].ID != want[0] || list[1].ID != want[1] {
+			return fmt.Errorf("ListManagedByOrg = %+v, %v", list, err)
+		}
+		if list, err := tx.Users().ListManagedByOrg(ctx, r, o, want[0], 10); err != nil || len(list) != 1 || list[0].ID != want[1] {
+			return fmt.Errorf("ListManagedByOrg after = %+v, %v", list, err)
+		}
+		if err := tx.Users().SetManagedOrg(ctx, r, b.ID, "", at.Add(time.Hour)); err != nil {
+			return err
+		}
+		if got, err := tx.Users().Get(ctx, r, b.ID); err != nil || got.ManagedOrgID != "" || got.ManagedAt != nil {
+			return fmt.Errorf("released user = %+v, %v", got, err)
+		}
+		if err := notFound("set managed in another realm", tx.Users().SetManagedOrg(ctx, id.New(id.Realm), a.ID, o, at)); err != nil {
+			return err
+		}
+		if n, err := tx.Users().CountManaged(ctx); err != nil || n != 1 {
+			return fmt.Errorf("CountManaged = %d, %v", n, err)
+		}
+		if n, err := tx.Users().ReleaseManaged(ctx, 10, at.Add(2*time.Hour)); err != nil || n != 1 {
+			return fmt.Errorf("ReleaseManaged = %d, %v", n, err)
+		}
+		if n, err := tx.Users().CountManaged(ctx); err != nil || n != 0 {
+			return fmt.Errorf("CountManaged after release = %d, %v", n, err)
+		}
+		return nil
+	})
+}
+
+var managedUserIsolationCase = IsolationCase{
+	Name: "Users.ListManagedByOrg",
+	Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
+		u := newUser(r)
+		if err := tx.Users().Create(ctx, u); err != nil {
+			return err
+		}
+		return tx.Users().SetManagedOrg(ctx, r, u.ID, isoOrg, T0)
+	},
+	Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {
+		return count(tx.Users().ListManagedByOrg(ctx, r, isoOrg, "", 10))
+	},
+}

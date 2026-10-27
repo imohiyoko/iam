@@ -36,6 +36,7 @@ type users struct{ t *tx }
 
 func cloneUser(u port.User) port.User {
 	u.ValidFrom, u.ValidUntil, u.DeletionScheduledAt = cloneTime(u.ValidFrom), cloneTime(u.ValidUntil), cloneTime(u.DeletionScheduledAt)
+	u.ManagedAt = cloneTime(u.ManagedAt)
 	return u
 }
 
@@ -549,6 +550,56 @@ func (r users) SetDeletion(_ context.Context, realmID, id string, scheduledAt *t
 
 func (r users) SetLegalHold(_ context.Context, realmID, id string, hold bool, updatedAt time.Time) error {
 	return r.change(realmID, id, func(u *port.User) { u.LegalHold, u.UpdatedAt = hold, updatedAt })
+}
+
+func (r users) SetManagedOrg(_ context.Context, realmID, id, orgID string, at time.Time) error {
+	return r.change(realmID, id, func(u *port.User) {
+		u.ManagedOrgID, u.ManagedAt, u.UpdatedAt = orgID, nil, at
+		if orgID != "" {
+			u.ManagedAt = cloneTime(&at)
+		}
+	})
+}
+
+func (r users) ListManagedByOrg(_ context.Context, realmID, orgID, afterID string, limit int) ([]port.User, error) {
+	var out []port.User
+	for _, u := range r.t.s.users {
+		if u.RealmID == realmID && orgID != "" && u.ManagedOrgID == orgID && u.ID > afterID {
+			out = append(out, cloneUser(u))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (r users) CountManaged(context.Context) (int, error) {
+	n := 0
+	for _, u := range r.t.s.users {
+		if u.ManagedOrgID != "" {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r users) ReleaseManaged(_ context.Context, limit int, at time.Time) (int, error) {
+	n := 0
+	for id, u := range r.t.s.users {
+		if n >= limit {
+			break
+		}
+		if u.ManagedOrgID == "" {
+			continue
+		}
+		u = cloneUser(u)
+		u.ManagedOrgID, u.ManagedAt, u.UpdatedAt = "", nil, at
+		setKey(r.t, r.t.s.users, id, u)
+		n++
+	}
+	return n, nil
 }
 
 func (r users) change(realmID, id string, fn func(*port.User)) error {

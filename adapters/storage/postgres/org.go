@@ -78,7 +78,8 @@ func toMembership(r db.Membership) (port.Membership, error) {
 	var p times
 	m := port.Membership{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, UserID: r.UserID, OrgID: r.OrgID,
 		Status: port.MembershipStatus(r.Status), Role: port.OrgRole(r.OrgRole), EmailID: r.EmailID, ValidFrom: p.null(r.ValidFrom),
-		ValidUntil: p.null(r.ValidUntil), EndedReason: r.EndedReason, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		ValidUntil: p.null(r.ValidUntil), EndedReason: r.EndedReason, ManagementRequestedAt: p.null(r.ManagementRequestedAt),
+		CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	return m, p.err
 }
 
@@ -86,7 +87,7 @@ func (r memberships) Create(ctx context.Context, m port.Membership) error {
 	return mapErr(r.q.CreateMembership(ctx, db.CreateMembershipParams{ID: m.ID, PublicID: m.PublicID, RealmID: m.RealmID,
 		UserID: m.UserID, OrgID: m.OrgID, Status: string(m.Status), OrgRole: string(m.Role), EmailID: m.EmailID,
 		ValidFrom: nullTime(m.ValidFrom), ValidUntil: nullTime(m.ValidUntil), EndedReason: m.EndedReason,
-		CreatedAt: formatTime(m.CreatedAt), UpdatedAt: formatTime(m.UpdatedAt)}))
+		ManagementRequestedAt: nullTime(m.ManagementRequestedAt), CreatedAt: formatTime(m.CreatedAt), UpdatedAt: formatTime(m.UpdatedAt)}))
 }
 
 func (r memberships) Get(ctx context.Context, realmID, id string) (port.Membership, error) {
@@ -121,8 +122,8 @@ func (r memberships) CountActive(ctx context.Context, realmID, orgID string, rol
 
 func (r memberships) Update(ctx context.Context, m port.Membership) error {
 	n, err := r.q.UpdateMembership(ctx, db.UpdateMembershipParams{Status: string(m.Status), OrgRole: string(m.Role), EmailID: m.EmailID,
-		ValidFrom: nullTime(m.ValidFrom), ValidUntil: nullTime(m.ValidUntil), EndedReason: m.EndedReason, UpdatedAt: formatTime(m.UpdatedAt),
-		RealmID: m.RealmID, ID: m.ID})
+		ValidFrom: nullTime(m.ValidFrom), ValidUntil: nullTime(m.ValidUntil), EndedReason: m.EndedReason,
+		ManagementRequestedAt: nullTime(m.ManagementRequestedAt), UpdatedAt: formatTime(m.UpdatedAt), RealmID: m.RealmID, ID: m.ID})
 	if err != nil {
 		return mapErr(err)
 	}
