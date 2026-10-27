@@ -313,3 +313,69 @@ func TestManagedUsers(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedUsersPowers(t *testing.T) {
+	l, dns := newDomainEnv(t, true)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	l.verifiedDomain(t, dns, owner, acme, "acme.example")
+
+	// 管理ユーザーとして招けるのは、証明済みドメインのアドレスだけ。
+	if code, out := l.mePost(t, owner, "/v1/me/orgs/"+acme+"/invitations", map[string]any{"email": "x@other.example", "role": "member", "managed": true}); code != 409 || out["error"] != "email_domain_not_verified" {
+		t.Fatalf("managed invite outside domain: %d %v", code, out)
+	}
+	// 新しく登録した人は、受け入れでそのまま管理ユーザーになる。
+	code, out := l.mePost(t, owner, "/v1/me/orgs/"+acme+"/invitations", map[string]any{"email": "new@acme.example", "role": "member", "managed": true})
+	if code != 201 || out["managed"] != true {
+		t.Fatalf("managed invite: %d %v", code, out)
+	}
+	_, token := l.claimToken(t)
+	if code, out := l.accept(t, "", token); code != 200 {
+		t.Fatalf("accept as new user: %d %v", code, out)
+	}
+	_, newbie := l.login(t, "new@acme.example")
+	if e := l.myOrgEntry(t, newbie, acme); e["managed"] != true {
+		t.Fatalf("new user not managed: %v", e)
+	}
+	// 既存のユーザーには、管理を求める（本人の同意を待つ）。
+	_, old := l.login(t, "old@acme.example")
+	if code, out := l.mePost(t, owner, "/v1/me/orgs/"+acme+"/invitations", map[string]any{"email": "old@acme.example", "role": "member", "managed": true}); code != 201 {
+		t.Fatalf("managed invite existing: %d %v", code, out)
+	}
+	_, token = l.claimToken(t)
+	if code, out := l.accept(t, old, token); code != 200 {
+		t.Fatalf("accept as existing user: %d %v", code, out)
+	}
+	if e := l.myOrgEntry(t, old, acme); e["managed"] != nil || e["management_requested"] != true {
+		t.Fatalf("existing user after managed invite: %v", e)
+	}
+
+	// 管理する Org のメンバーを停止すると、ログインそのものができない。
+	newbieMember := l.myOrgEntry(t, newbie, acme)["membership_id"].(string)
+	member := func(id string) string { return "/v1/me/orgs/" + acme + "/members/" + id }
+	if code, out := l.mePost(t, owner, member(newbieMember)+"/suspensions", map[string]string{"reason": "left the company"}); code != 201 {
+		t.Fatalf("suspend membership: %d %v", code, out)
+	}
+	if w := l.loginVerify(t, "new@acme.example"); w.Code != 403 {
+		t.Fatalf("managed user logged in while suspended: %d %s", w.Code, w.Body.String())
+	}
+	// 管理していないユーザーは、停止された Org の外（個人 Org）でログインできる。
+	oldMember := l.myOrgEntry(t, old, acme)["membership_id"].(string)
+	if code, out := l.mePost(t, owner, member(oldMember)+"/suspensions", map[string]string{"reason": "left the company"}); code != 201 {
+		t.Fatalf("suspend old: %d %v", code, out)
+	}
+	if w := l.loginVerify(t, "old@acme.example"); w.Code != 200 {
+		t.Fatalf("personal user login: %d %s", w.Code, w.Body.String())
+	}
+
+	// Org の owner は管理ユーザーのアカウントを消せる。管理していない人は消せない。
+	if code, out := l.mePost(t, owner, member(oldMember)+":delete-account", nil); code != 409 || out["error"] != "not_managed" {
+		t.Fatalf("delete unmanaged: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, owner, member(newbieMember)+":delete-account", nil); code != 200 {
+		t.Fatalf("delete managed: %d %v", code, out)
+	}
+	if code, out := l.meDo(t, "GET", newbie, "/v1/me/orgs", nil); code != 401 {
+		t.Fatalf("session of deleted managed user: %d %v", code, out)
+	}
+}

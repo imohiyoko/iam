@@ -18,6 +18,7 @@ import (
 //
 //  1. 候補：active な Membership を持ち、Org と Membership が停止中でも有効期間の外でもなく、Org の段で deny にした警告に当たらない Org
 //     （Check、warningsDenied。ログインポリシーは後で足す）
+//     管理ユーザー（ADR 0076）は、管理する Org がこの条件を満たさなければログインそのものが失敗する
 //  2. 明示的な指定があれば、それが候補にあること（所属が無ければ ErrNoAvailableOrg、使えなければ理由つきの *account.UnavailableError）
 //  3. ログインの手がかり（使ったメールや OAuth のアドレスを結び付けた Membership、passkey の既定の Org）に結び付いた候補。
 //     1つならそれ。複数なら前回の Org がその中にあればそれ、無ければ選ばせる（Choices を返し、4 へ進む）
@@ -47,7 +48,8 @@ func (s *Service) Pick(ctx context.Context, tx port.Tx, u port.User, in session.
 			// ログインポリシーを満たさなければ、その Org に入れない（ログインは成功する。4.4）。
 			err = s.policyDenied(ctx, tx, o, m, in)
 		}
-		if m.OrgID == in.Explicit && err != nil {
+		// 管理ユーザーは、管理する Org に入れなければログインそのものができない（停止・ログインポリシー。ADR 0076）。
+		if (m.OrgID == in.Explicit || IsManaged(u, o)) && err != nil {
 			return session.PickedOrg{}, err
 		}
 		if _, ok := errors.AsType[*account.UnavailableError](err); ok {

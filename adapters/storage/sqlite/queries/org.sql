@@ -50,8 +50,8 @@ WHERE realm_id = ? AND id = ?;
 
 -- name: CreateInvitation :exec
 INSERT INTO invitations (id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash,
-    valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by, managed)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetInvitation :one
 SELECT * FROM invitations WHERE realm_id = ? AND id = ?;

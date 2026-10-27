@@ -52,8 +52,8 @@ WHERE realm_id = $9 AND id = $10;
 
 -- name: CreateInvitation :exec
 INSERT INTO invitations (id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash,
-    valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17);
+    valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by, managed)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);
 
 -- name: GetInvitation :one
 SELECT * FROM invitations WHERE realm_id = $1 AND id = $2;

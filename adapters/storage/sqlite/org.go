@@ -140,7 +140,8 @@ func toInvitation(r db.Invitation) (port.Invitation, error) {
 	i := port.Invitation{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, OrgID: r.OrgID, EmailIndex: r.EmailIndex,
 		EmailCiphertext: r.EmailCiphertext, IndexKeyID: r.IndexKeyID, Role: port.OrgRole(r.OrgRole), TokenHash: r.TokenHash,
 		ValidFrom: p.null(r.ValidFrom), ValidUntil: p.null(r.ValidUntil), InvitedBy: r.InvitedBy, ExpiresAt: p.at(r.ExpiresAt),
-		Status: port.InvitationStatus(r.Status), CreatedAt: p.at(r.CreatedAt), ClosedAt: p.null(r.ClosedAt), ClosedBy: r.ClosedBy}
+		Status: port.InvitationStatus(r.Status), CreatedAt: p.at(r.CreatedAt), ClosedAt: p.null(r.ClosedAt), ClosedBy: r.ClosedBy,
+		Managed: r.Managed != 0}
 	return i, p.err
 }
 
@@ -149,7 +150,7 @@ func (r invitations) Create(ctx context.Context, i port.Invitation) error {
 		EmailIndex: nonNil(i.EmailIndex), EmailCiphertext: nonNil(i.EmailCiphertext), IndexKeyID: i.IndexKeyID, OrgRole: string(i.Role),
 		TokenHash: nonNil(i.TokenHash), ValidFrom: nullTime(i.ValidFrom), ValidUntil: nullTime(i.ValidUntil), InvitedBy: i.InvitedBy,
 		ExpiresAt: formatTime(i.ExpiresAt), Status: string(i.Status), CreatedAt: formatTime(i.CreatedAt), ClosedAt: nullTime(i.ClosedAt),
-		ClosedBy: i.ClosedBy}))
+		ClosedBy: i.ClosedBy, Managed: boolInt(i.Managed)}))
 }
 
 func (r invitations) GetByPublicID(ctx context.Context, realmID, publicID string) (port.Invitation, error) {

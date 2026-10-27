@@ -75,6 +75,9 @@ func (s publicServer) CancelMyAccountDeletion(ctx context.Context, req publicapi
 		if err != nil {
 			return err
 		}
+		if u.ManagedOrgID != "" {
+			return org.ErrManagedUser // 管理ユーザーの削除は Org が決める（ADR 0076）
+		}
 		if _, err := s.a.accounts.CancelDeletion(ctx, tx, u, au.Actor(), requestID(ctx)); err != nil {
 			return err
 		}

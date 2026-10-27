@@ -715,6 +715,8 @@ type Invitation struct {
 	// ClosedAt は受け入れ・取り消しの時刻。ClosedBy は受け入れたユーザーか、取り消した主体の公開 ID。
 	ClosedAt *time.Time
 	ClosedBy string
+	// Managed は管理ユーザーとして招く（ADR 0076）。受け入れで新しく登録した人は管理ユーザーになり、既存のユーザーには管理を求める。
+	Managed bool
 }
 
 // InvitationRepo は invitations の Repository。

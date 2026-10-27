@@ -545,11 +545,14 @@ type OrgInvitation struct {
 	CreatedAt time.Time `json:"created_at"`
 
 	// Email pending の招待だけ
-	Email     *string             `json:"email,omitempty"`
-	ExpiresAt time.Time           `json:"expires_at"`
-	Id        string              `json:"id"`
-	Role      OrgInvitationRole   `json:"role"`
-	Status    OrgInvitationStatus `json:"status"`
+	Email     *string   `json:"email,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Id        string    `json:"id"`
+
+	// Managed 管理ユーザーとして招いた
+	Managed *bool               `json:"managed,omitempty"`
+	Role    OrgInvitationRole   `json:"role"`
+	Status  OrgInvitationStatus `json:"status"`
 }
 
 // OrgInvitationRole defines model for OrgInvitation.Role.
@@ -899,7 +902,11 @@ type AddOrgDomainJSONBody struct {
 
 // InviteToOrgJSONBody defines parameters for InviteToOrg.
 type InviteToOrgJSONBody struct {
-	Email      string                  `json:"email"`
+	Email string `json:"email"`
+
+	// Managed 管理ユーザーとして招く（ADR 0076）。アドレスのドメインを Org が証明済みであること（`409 email_domain_not_verified`）。
+	// 受け入れで新しく登録した人は管理ユーザーになり、既存のユーザーには管理を求める（本人の同意を待つ）
+	Managed    *bool                   `json:"managed,omitempty"`
 	Role       InviteToOrgJSONBodyRole `json:"role"`
 	ValidFrom  *time.Time              `json:"valid_from,omitempty"`
 	ValidUntil *time.Time              `json:"valid_until,omitempty"`
@@ -1270,6 +1277,9 @@ type ServerInterface interface {
 	// SuspendOrgMember メンバーを停止する（Org の owner と admin。種別は customer_request。4.7）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}/suspensions)
 	SuspendOrgMember(w http.ResponseWriter, r *http.Request, id string, membershipId string)
+	// DeleteManagedAccount 管理ユーザーのアカウントを削除する（Org の owner。11.3、ADR 0076）
+	// (POST /v1/me/orgs/{id}/members/{membership_id}:delete-account)
+	DeleteManagedAccount(w http.ResponseWriter, r *http.Request, id string, membershipId string)
 	// ReleaseOrgManagement 管理ユーザーを手放す（個人ユーザーに戻す）か、管理の求めを取り消す（Org の owner）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}:release-management)
 	ReleaseOrgManagement(w http.ResponseWriter, r *http.Request, id string, membershipId string)
@@ -2421,6 +2431,41 @@ func (siw *ServerInterfaceWrapper) SuspendOrgMember(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteManagedAccount operation middleware
+func (siw *ServerInterfaceWrapper) DeleteManagedAccount(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "membership_id" -------------
+	var membershipId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "membership_id", r.PathValue("membership_id"), &membershipId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "membership_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteManagedAccount(w, r, id, membershipId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReleaseOrgManagement operation middleware
 func (siw *ServerInterfaceWrapper) ReleaseOrgManagement(w http.ResponseWriter, r *http.Request) {
 
@@ -3539,6 +3584,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains/{domain_id}:delete", wrapper.DeleteOrgDomain)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:request-management", wrapper.RequestOrgManagement)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:release-management", wrapper.ReleaseOrgManagement)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:delete-account", wrapper.DeleteManagedAccount)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:accept-management", wrapper.AcceptOrgManagement)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:decline-management", wrapper.DeclineOrgManagement)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:bind-email", wrapper.BindMyOrgEmail)
@@ -6526,6 +6572,91 @@ func (response SuspendOrgMember409JSONResponse) VisitSuspendOrgMemberResponse(w 
 	return err
 }
 
+type DeleteManagedAccountRequestObject struct {
+	Id           string `json:"id"`
+	MembershipId string `json:"membership_id"`
+}
+
+type DeleteManagedAccountResponseObject interface {
+	VisitDeleteManagedAccountResponse(w http.ResponseWriter) error
+}
+
+type DeleteManagedAccount200JSONResponse struct {
+	// Deleted もう削除したか
+	Deleted bool `json:"deleted"`
+
+	// DeletesAt 予約したとき
+	DeletesAt *time.Time `json:"deletes_at,omitempty"`
+}
+
+func (response DeleteManagedAccount200JSONResponse) VisitDeleteManagedAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteManagedAccount401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteManagedAccount401JSONResponse) VisitDeleteManagedAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteManagedAccount403JSONResponse struct{ DeniedJSONResponse }
+
+func (response DeleteManagedAccount403JSONResponse) VisitDeleteManagedAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteManagedAccount404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteManagedAccount404JSONResponse) VisitDeleteManagedAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteManagedAccount409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteManagedAccount409JSONResponse) VisitDeleteManagedAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ReleaseOrgManagementRequestObject struct {
 	Id           string `json:"id"`
 	MembershipId string `json:"membership_id"`
@@ -9340,6 +9471,9 @@ type StrictServerInterface interface {
 	// SuspendOrgMember メンバーを停止する（Org の owner と admin。種別は customer_request。4.7）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}/suspensions)
 	SuspendOrgMember(ctx context.Context, request SuspendOrgMemberRequestObject) (SuspendOrgMemberResponseObject, error)
+	// DeleteManagedAccount 管理ユーザーのアカウントを削除する（Org の owner。11.3、ADR 0076）
+	// (POST /v1/me/orgs/{id}/members/{membership_id}:delete-account)
+	DeleteManagedAccount(ctx context.Context, request DeleteManagedAccountRequestObject) (DeleteManagedAccountResponseObject, error)
 	// ReleaseOrgManagement 管理ユーザーを手放す（個人ユーザーに戻す）か、管理の求めを取り消す（Org の owner）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}:release-management)
 	ReleaseOrgManagement(ctx context.Context, request ReleaseOrgManagementRequestObject) (ReleaseOrgManagementResponseObject, error)
@@ -10778,6 +10912,33 @@ func (sh *strictHandler) SuspendOrgMember(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SuspendOrgMemberResponseObject); ok {
 		if err := validResponse.VisitSuspendOrgMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteManagedAccount operation middleware
+func (sh *strictHandler) DeleteManagedAccount(w http.ResponseWriter, r *http.Request, id string, membershipId string) {
+	var request DeleteManagedAccountRequestObject
+
+	request.Id = id
+	request.MembershipId = membershipId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteManagedAccount(ctx, request.(DeleteManagedAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteManagedAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteManagedAccountResponseObject); ok {
+		if err := validResponse.VisitDeleteManagedAccountResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -52,6 +52,8 @@ type Invite struct {
 	Role       port.OrgRole
 	ValidFrom  *time.Time
 	ValidUntil *time.Time
+	// Managed は管理ユーザーとして招く（ADR 0076）。アドレスのドメインを Org が証明済みであること。
+	Managed bool
 }
 
 // Invited は作った招待と、宛先（正規化したアドレス）。
@@ -86,6 +88,11 @@ func (s *Service) Invite(ctx context.Context, tx port.Tx, o port.Org, in Invite,
 	if err != nil {
 		return Invited{}, err
 	}
+	if in.Managed {
+		if err := s.managedAddress(ctx, tx, o, email); err != nil {
+			return Invited{}, err
+		}
+	}
 	ix, err := s.Crypter.EmailIndex(ctx, email)
 	if err != nil {
 		return Invited{}, err
@@ -117,7 +124,7 @@ func (s *Service) Invite(ctx context.Context, tx port.Tx, o port.Org, in Invite,
 	now := s.Clock.Now()
 	inv := port.Invitation{ID: id.New(id.Invitation), PublicID: id.NewExternal(id.Invitation), RealmID: o.RealmID, OrgID: o.ID,
 		EmailIndex: ix.Value, IndexKeyID: ix.KeyID, Role: in.Role, ValidFrom: in.ValidFrom, ValidUntil: in.ValidUntil,
-		InvitedBy: actor.ID, ExpiresAt: now.Add(s.invitationTTL()), Status: port.InvitationPending, CreatedAt: now}
+		InvitedBy: actor.ID, ExpiresAt: now.Add(s.invitationTTL()), Status: port.InvitationPending, CreatedAt: now, Managed: in.Managed}
 	// アドレスは招待ごとのデータ鍵で暗号化し、招待が終わったら鍵を消す（crypto-shredding）。
 	if err := s.Crypter.CreateDataKey(ctx, tx.DataKeys(), inv.ID, now); err != nil {
 		return Invited{}, err
@@ -289,6 +296,11 @@ func (s *Service) Accept(ctx context.Context, tx port.Tx, realmID, token string,
 	}
 	if err := s.close(ctx, tx, inv, port.InvitationAccepted, user.PublicID); err != nil {
 		return Accepted{}, err
+	}
+	if inv.Managed {
+		if m, err = s.acceptManaged(ctx, tx, o, m, user, out.Created != nil, actor, requestID); err != nil {
+			return Accepted{}, err
+		}
 	}
 	_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
 		Type: "org.invitation.accepted", Result: audit.ResultSuccess, RealmID: realmID, OrgID: o.PublicID, Actor: actor, RequestID: requestID,

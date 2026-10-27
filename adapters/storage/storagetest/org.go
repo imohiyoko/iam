@@ -311,6 +311,7 @@ func testInvitations(t *testing.T, h Harness) {
 	r, o := id.New(id.Realm), id.New(id.Org)
 	a := newInvitation(r, o)
 	a.ValidUntil = ptr(T0.Add(time.Hour))
+	a.Managed = true
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Invitations()
 		if err := repo.Create(ctx, a); err != nil {

@@ -2,6 +2,8 @@ package org
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -36,6 +38,8 @@ var (
 		"the member's email is not in a domain verified by the org")
 	// ErrNoManagementRequest は管理の求めが無いこと。
 	ErrNoManagementRequest = errs.WithCode(errs.KindFailedPrecondition, "no_management_request", "no management request")
+	// ErrManagedUsersDisabled はフィーチャー org_managed_users が動いていないこと。
+	ErrManagedUsersDisabled = errs.WithCode(errs.KindInvalid, "managed_users_disabled", "the org_managed_users feature is not enabled")
 	// ErrNotManaged は対象がこの Org の管理ユーザーでも、求めの途中でもないこと。
 	ErrNotManaged = errs.WithCode(errs.KindFailedPrecondition, "not_managed", "not managed by the org")
 )
@@ -180,4 +184,42 @@ func (s *Service) recordManaged(ctx context.Context, tx port.Tx, o port.Org, typ
 	_, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{Type: typ, Result: audit.ResultSuccess, RealmID: o.RealmID, OrgID: o.PublicID,
 		Actor: actor, RequestID: requestID, Details: map[string]any{"membership_id": m.PublicID, "user_id": u.PublicID}})
 	return err
+}
+
+// managedAddress は、管理ユーザーとして招くアドレス（正規化済み）のドメインを o が証明済みかを確かめる。
+func (s *Service) managedAddress(ctx context.Context, tx port.Tx, o port.Org, email string) error {
+	if !s.ManagedUsers {
+		return ErrManagedUsersDisabled
+	}
+	_, domain, _ := strings.Cut(email, "@")
+	d, err := tx.OrgDomains().GetVerified(ctx, o.RealmID, domain)
+	if errors.Is(err, errs.NotFound) || (err == nil && d.OrgID != o.ID) {
+		return ErrEmailDomainNotVerified
+	}
+	return err
+}
+
+// acceptManaged は管理ユーザーとしての招待を受け入れたときの処理。受け入れで新しく登録した人は管理ユーザーにし、
+// 既存のユーザーには管理を求める（本人の同意を待つ）。招待の後にドメインの証明が外れていたら何もしない。
+func (s *Service) acceptManaged(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, u port.User, created bool, actor audit.Actor, requestID string) (port.Membership, error) {
+	if !s.ManagedUsers || u.ManagedOrgID != "" {
+		return m, nil
+	}
+	if err := s.managedDomain(ctx, tx, o, m); errors.Is(err, ErrEmailDomainNotVerified) {
+		return m, nil
+	} else if err != nil {
+		return port.Membership{}, err
+	}
+	now := s.Clock.Now()
+	if created {
+		if err := tx.Users().SetManagedOrg(ctx, o.RealmID, u.ID, o.ID, now); err != nil {
+			return port.Membership{}, err
+		}
+		return m, s.recordManaged(ctx, tx, o, EventUserManaged, m, u, actor, requestID)
+	}
+	m.ManagementRequestedAt, m.UpdatedAt = &now, now
+	if err := tx.Memberships().Update(ctx, m); err != nil {
+		return port.Membership{}, err
+	}
+	return m, s.recordManaged(ctx, tx, o, EventManagementRequested, m, u, actor, requestID)
 }
