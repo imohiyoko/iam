@@ -509,6 +509,18 @@ type OrgInvitationRole string
 // OrgInvitationStatus defines model for OrgInvitation.Status.
 type OrgInvitationStatus string
 
+// OrgLoginPolicy Org のログインポリシー（フィーチャー org_login_policy）。ログインと Org の切り替えで判定し、満たさなければその Org に入れない （理由は policy.<種類>）。空の項目は判定しない
+type OrgLoginPolicy struct {
+	// IpAllowlist 要求の IP がこのどれか（CIDR）に入ること
+	IpAllowlist *[]string `json:"ip_allowlist,omitempty"`
+
+	// MembershipEmailDomains Membership に結び付けたメール（無ければ primary、確認済み）のドメインがこのどれかであること
+	MembershipEmailDomains *[]string `json:"membership_email_domains,omitempty"`
+
+	// RequirePasskey passkey で本人確認したセッションだけを入れる
+	RequirePasskey *bool `json:"require_passkey,omitempty"`
+}
+
 // OrgMember defines model for OrgMember.
 type OrgMember struct {
 	// Email この Org に結び付けたメール（未設定なら primary）
@@ -534,6 +546,9 @@ type OrgSettings struct {
 	// AbsoluteLifetimeSeconds 認証の時刻からのセッションの寿命
 	AbsoluteLifetimeSeconds *int64 `json:"absolute_lifetime_seconds,omitempty"`
 	IdleTimeoutSeconds      *int64 `json:"idle_timeout_seconds,omitempty"`
+
+	// LoginPolicy Org のログインポリシー（フィーチャー org_login_policy）。ログインと Org の切り替えで判定し、満たさなければその Org に入れない （理由は policy.<種類>）。空の項目は判定しない
+	LoginPolicy *OrgLoginPolicy `json:"login_policy,omitempty"`
 
 	// MaxAuthAgeSeconds 重要な操作に求める直近の認証の期限
 	MaxAuthAgeSeconds *int64 `json:"max_auth_age_seconds,omitempty"`

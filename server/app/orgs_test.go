@@ -177,7 +177,7 @@ func TestOrgOffHasNoOrgs(t *testing.T) {
 func TestEnableOrgPreparesPersonalOrgs(t *testing.T) {
 	without := []feature.Feature{}
 	for _, f := range feature.Registered() {
-		if f.Name != feature.Org {
+		if f.Name != feature.Org && !slices.Contains(f.Requires, feature.Org) {
 			without = append(without, f)
 		}
 	}

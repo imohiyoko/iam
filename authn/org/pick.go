@@ -43,6 +43,10 @@ func (s *Service) Pick(ctx context.Context, tx port.Tx, u port.User, in session.
 			// Org の段で deny にした警告に当たる認証では、その Org に入れない（ログインは成功する。10章）。
 			err = s.warningsDenied(o, in.Warnings)
 		}
+		if err == nil {
+			// ログインポリシーを満たさなければ、その Org に入れない（ログインは成功する。4.4）。
+			err = s.policyDenied(ctx, tx, o, m, in)
+		}
 		if m.OrgID == in.Explicit && err != nil {
 			return session.PickedOrg{}, err
 		}

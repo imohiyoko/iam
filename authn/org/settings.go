@@ -40,10 +40,12 @@ type Settings struct {
 	IdleTimeout      *time.Duration            `json:"idle_timeout,omitempty"`
 	MaxAuthAge       *time.Duration            `json:"max_auth_age,omitempty"`
 	Warnings         map[string]warning.Action `json:"warnings,omitempty"`
+	// LoginPolicy は入場の条件（フィーチャー org_login_policy。policy.go）。
+	LoginPolicy *LoginPolicy `json:"login_policy,omitempty"`
 }
 
 func (st Settings) empty() bool {
-	return st.AbsoluteLifetime == nil && st.IdleTimeout == nil && st.MaxAuthAge == nil && len(st.Warnings) == 0
+	return st.AbsoluteLifetime == nil && st.IdleTimeout == nil && st.MaxAuthAge == nil && len(st.Warnings) == 0 && st.LoginPolicy.empty()
 }
 
 // Rules はホスト先が決める、Org の段の設定の規則。
@@ -145,6 +147,9 @@ func (s *Service) CheckSettings(st Settings) error {
 		check(r.MaxAuthAge, st.MaxAuthAge)); err != nil {
 		return err
 	}
+	if _, err := s.checkPolicy(st.LoginPolicy); err != nil {
+		return err
+	}
 	if len(st.Warnings) == 0 {
 		return nil
 	}
@@ -171,6 +176,7 @@ func (s *Service) UpdateSettings(ctx context.Context, tx port.Tx, o port.Org, st
 	if err := s.CheckSettings(st); err != nil {
 		return port.Org{}, err
 	}
+	st.LoginPolicy, _ = s.checkPolicy(st.LoginPolicy) // 正規化した形で保存する（確かめは CheckSettings で済んでいる）
 	before, err := SettingsOf(o)
 	if err != nil {
 		return port.Org{}, err
@@ -206,6 +212,9 @@ func auditSettings(st Settings) map[string]any {
 	put("max_auth_age", st.MaxAuthAge)
 	if len(st.Warnings) > 0 {
 		out["warnings"] = st.Warnings
+	}
+	if !st.LoginPolicy.empty() {
+		out["login_policy"] = st.LoginPolicy
 	}
 	return out
 }
