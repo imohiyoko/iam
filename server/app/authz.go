@@ -47,6 +47,6 @@ func (authzMembers) OrgRole(ctx context.Context, tx port.Tx, realmID string, p c
 // authzRoles は account.UserRoles の実装。最後の realm:owner は削除できない（ADR 0064）。
 type authzRoles struct{}
 
-func (authzRoles) IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string) (bool, error) {
-	return manage.IsLastOwner(ctx, tx, realmID, userID)
+func (authzRoles) IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string, now time.Time) (bool, error) {
+	return manage.IsLastOwner(ctx, tx, realmID, userID, now)
 }

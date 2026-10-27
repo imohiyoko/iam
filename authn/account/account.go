@@ -40,8 +40,8 @@ type Service struct {
 
 // UserRoles はユーザーのロールを確かめるもの（authz。authn は authz を import しない）。
 type UserRoles interface {
-	// IsLastOwner はユーザーが realm の最後の realm:owner かを返す。
-	IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string) (bool, error)
+	// IsLastOwner はユーザーが now に realm の最後の使える realm:owner かを返す。
+	IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string, now time.Time) (bool, error)
 }
 
 // UserOrgs はユーザーの Org を扱うもの（authn/org）。

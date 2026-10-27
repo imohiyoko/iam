@@ -162,5 +162,5 @@ func (s *Service) lastOwner(ctx context.Context, tx port.Tx, u port.User) (bool,
 	if s.Roles == nil {
 		return false, nil
 	}
-	return s.Roles.IsLastOwner(ctx, tx, u.RealmID, u.ID)
+	return s.Roles.IsLastOwner(ctx, tx, u.RealmID, u.ID, s.Clock.Now())
 }

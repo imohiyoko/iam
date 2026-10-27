@@ -180,6 +180,27 @@ func TestLastOwner(t *testing.T) {
 		return e.s.Unbind(ctx, tx, e.realm(), actor("owner"), b, "pub_owner")
 	})
 	wantCode(t, err, "last_owner")
+	// 有効期間の外と停止中の owner は使えないので数えない。
+	e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		now := e.k.Clock.Now()
+		past := now.Add(-time.Hour)
+		if err := tx.Users().Create(ctx, port.User{ID: "expired", PublicID: "pub_expired", RealmID: e.k.RealmID, Status: port.UserActive,
+			ValidUntil: &past, CreatedAt: now, UpdatedAt: now}); err != nil {
+			return err
+		}
+		if err := tx.Users().Create(ctx, port.User{ID: "stopped", PublicID: "pub_stopped", RealmID: e.k.RealmID, Status: port.UserActive,
+			CreatedAt: now, UpdatedAt: now}); err != nil {
+			return err
+		}
+		return tx.Suspensions().Create(ctx, port.Suspension{ID: "sp1", PublicID: "sus_1", RealmID: e.k.RealmID, TargetType: port.SuspensionTargetUser,
+			TargetID: "stopped", Category: "tos_violation", StartsAt: past, CreatedBy: "pub_owner", CreatedAt: now})
+	})
+	e.grant(role.RealmOwner, "expired")
+	e.grant(role.RealmOwner, "stopped")
+	err = e.run(func(ctx context.Context, tx port.Tx) error {
+		return e.s.Unbind(ctx, tx, e.realm(), actor("owner"), b, "pub_owner")
+	})
+	wantCode(t, err, "last_owner")
 	e.grant(role.RealmOwner, "owner2")
 	if err := e.run(func(ctx context.Context, tx port.Tx) error {
 		return e.s.Unbind(ctx, tx, e.realm(), actor("owner2"), b, "pub_owner")

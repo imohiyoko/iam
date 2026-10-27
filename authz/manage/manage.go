@@ -10,6 +10,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -315,7 +316,7 @@ func (s *Service) Unbind(ctx context.Context, tx port.Tx, sc Scope, a Actor, b p
 		return err
 	}
 	if b.Role == role.RealmOwner && b.ResourceType == "" && b.OrgID == "" && b.PrincipalType == port.PrincipalUser {
-		others, err := otherOwners(ctx, tx, sc.RealmID, b.PrincipalID)
+		others, err := otherOwners(ctx, tx, sc.RealmID, b.PrincipalID, s.Clock.Now())
 		if err != nil {
 			return err
 		}
@@ -461,8 +462,8 @@ func (s *Service) RemoveMember(ctx context.Context, tx port.Tx, sc Scope, a Acto
 }
 
 // otherOwners は userID 以外で、realm 全体の realm:owner を直接持ち、使えるユーザーの数を返す（Group 経由は数えない）。
-// 削除済み・削除の予約中のユーザーは realm を管理できないので数えない。
-func otherOwners(ctx context.Context, tx port.Tx, realmID, userID string) (int, error) {
+// 削除済み・削除の予約中、now に有効期間の外か停止中のユーザーは realm を管理できないので数えない。
+func otherOwners(ctx context.Context, tx port.Tx, realmID, userID string, now time.Time) (int, error) {
 	bs, err := tx.RoleBindings().ListByRole(ctx, realmID, role.RealmOwner)
 	if err != nil {
 		return 0, err
@@ -481,16 +482,44 @@ func otherOwners(ctx context.Context, tx port.Tx, realmID, userID string) (int, 
 		if err != nil {
 			return 0, err
 		}
-		if u.Status == port.UserActive && u.DeletionScheduledAt == nil {
+		if u.Status != port.UserActive || u.DeletionScheduledAt != nil {
+			continue
+		}
+		ok, err := usableAt(ctx, tx, u, now)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
 			n++
 		}
 	}
 	return n, nil
 }
 
+// usableAt はユーザーが now に有効期間の内で、停止中でないかを返す（account.Check と同じ規則。authz は authn を import しない）。
+func usableAt(ctx context.Context, tx port.Tx, u port.User, now time.Time) (bool, error) {
+	if (u.ValidFrom != nil && now.Before(*u.ValidFrom)) || (u.ValidUntil != nil && !now.Before(*u.ValidUntil)) {
+		return false, nil
+	}
+	ss, err := tx.Suspensions().ListByTarget(ctx, u.RealmID, port.SuspensionTargetUser, u.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, sp := range ss {
+		end := sp.EndsAt
+		if sp.LiftedAt != nil && (end == nil || sp.LiftedAt.Before(*end)) {
+			end = sp.LiftedAt
+		}
+		if !sp.StartsAt.After(now) && (end == nil || end.After(now)) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // IsLastOwner はユーザーが realm 全体の realm:owner を持ち、ほかに使える realm:owner がいないかを返す。
 // 消すと realm を管理できる人がいなくなる。
-func IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string) (bool, error) {
+func IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string, now time.Time) (bool, error) {
 	bs, err := tx.RoleBindings().ListByPrincipal(ctx, realmID, port.PrincipalUser, userID)
 	if err != nil {
 		return false, err
@@ -504,6 +533,6 @@ func IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string) (bool,
 	if !owner {
 		return false, nil
 	}
-	others, err := otherOwners(ctx, tx, realmID, userID)
+	others, err := otherOwners(ctx, tx, realmID, userID, now)
 	return others == 0, err
 }
