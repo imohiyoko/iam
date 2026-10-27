@@ -313,6 +313,9 @@ type Error struct {
 	// Error 公開の契約のコード（design.md 4.9、11.10）
 	Error string `json:"error"`
 
+	// Quota Quota の不足（`quota_exceeded`。11.14）。`from` から `until`（無ければ無期限）の間、上限 `limit` に `count` 人がいる
+	Quota *QuotaShortage `json:"quota,omitempty"`
+
 	// Reasons 拒否理由のコードの一覧（複数該当すればすべて。4.9）
 	Reasons *[]string `json:"reasons,omitempty"`
 }
@@ -599,6 +602,17 @@ type PasskeyCeremony struct {
 
 	// Options `{"publicKey": …}`。WebAuthn の options の JSON の形
 	Options map[string]interface{} `json:"options"`
+}
+
+// QuotaShortage Quota の不足（`quota_exceeded`。11.14）。`from` から `until`（無ければ無期限）の間、上限 `limit` に `count` 人がいる
+type QuotaShortage struct {
+	Count int64     `json:"count"`
+	From  time.Time `json:"from"`
+	Limit int64     `json:"limit"`
+
+	// Shortage 足りない人数
+	Shortage int64      `json:"shortage"`
+	Until    *time.Time `json:"until,omitempty"`
 }
 
 // RegisteredPasskey defines model for RegisteredPasskey.

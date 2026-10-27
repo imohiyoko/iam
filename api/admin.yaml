@@ -541,6 +541,99 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/orgs/{id}/quota:
+    get:
+      operationId: getOrgQuota
+      summary: Org の Quota（今の上限と人数、付与の一覧）を返す（11.14）
+      description: |
+        権限 `orgs:read`。フィーチャー `quota` が必要（無ければ `404 quota_disabled`）。`limit` が無ければ無制限。
+        数えるのは active な Membership と、realm の `quota_count` で選んだもの（招待中・将来有効・停止中）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Quota
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgQuota" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/orgs/{id}/quota/grants:
+    post:
+      operationId: createOrgQuotaGrant
+      summary: Quota の付与を登録する（11.14）
+      description: |
+        権限 `orgs:update`。上限は期間つきの付与の合算で、時刻 t の上限 = 有効な `override`（新しいもの）、無ければ有効な `base`（新しいもの）+ Σ `addon`。
+        有効な付与が無ければ無制限。`external_ref` を付けると外部（課金など）の付与で、同じ `external_ref` があれば上書きする（`200`）。
+        手動の付与で既存の人数（予約を含む）が上限を超える時点ができれば `409 quota_exceeded`（`quota` に不足する期間と人数）。
+        外部の付与は拒否せず、超えれば `org.quota.exceeded` を監査ログに残す（既存のメンバーは外さず、新規を止める）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuotaGrantInput" }
+      responses:
+        "200":
+          description: 外部の付与を上書きした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuotaGrant" }
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuotaGrant" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/orgs/{id}/quota/grants/{grant_id}:
+    put:
+      operationId: updateOrgQuotaGrant
+      summary: 手動の Quota の付与を変える（11.14）
+      description: |
+        権限 `orgs:update`。外部の付与は `409 quota_grant_external`（`external_ref` で上書きする）。`external_ref` は無視する。
+        既存の人数が上限を超える時点ができれば `409 quota_exceeded`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: grant_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuotaGrantInput" }
+      responses:
+        "200":
+          description: 変えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuotaGrant" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteOrgQuotaGrant
+      summary: Quota の付与を消す（11.14）
+      description: 権限 `orgs:update`。手動の付与で既存の人数が上限を超える時点ができれば `409 quota_exceeded`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: grant_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 消した }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
   /v1/admin/orgs/{id}:delete:
     post:
       operationId: deleteOrg
@@ -1273,6 +1366,50 @@ components:
       properties:
         error: { type: string }
         message: { type: string, description: 運営者向けの説明（秘密や個人情報は含めない） }
+        quota: { $ref: "#/components/schemas/QuotaShortage" }
+    QuotaShortage:
+      type: object
+      description: Quota の不足（`quota_exceeded`）。`from` から `until`（無ければ無期限）の間、上限 `limit` に `count` 人がいる
+      required: [from, limit, count, shortage]
+      properties:
+        from: { type: string, format: date-time }
+        until: { type: string, format: date-time }
+        limit: { type: integer, format: int64 }
+        count: { type: integer, format: int64 }
+        shortage: { type: integer, format: int64, description: 足りない人数 }
+    OrgQuota:
+      type: object
+      required: [quota_key, count, grants]
+      properties:
+        quota_key: { type: string, enum: [members] }
+        limit: { type: integer, format: int64, description: 今の上限（無ければ無制限） }
+        count: { type: integer, format: int64, description: 今数えている人数 }
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/QuotaGrant" }
+    QuotaGrantInput:
+      type: object
+      required: [kind, quantity]
+      properties:
+        kind: { type: string, enum: [base, addon, override] }
+        quantity: { type: integer, format: int64, minimum: 0 }
+        starts_at: { type: string, format: date-time, description: 省けば今（変更では今の値） }
+        ends_at: { type: string, format: date-time, description: 省けば無期限 }
+        external_ref: { type: string, maxLength: 200, description: 外部（課金など）の付与の参照。同じものがあれば上書きする }
+    QuotaGrant:
+      type: object
+      required: [id, quota_key, kind, quantity, starts_at, source, created_at, updated_at]
+      properties:
+        id: { type: string }
+        quota_key: { type: string, enum: [members] }
+        kind: { type: string, enum: [base, addon, override] }
+        quantity: { type: integer, format: int64 }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        source: { type: string, enum: [manual, external] }
+        external_ref: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     ClaimedNotification:
       type: object
       required: [to, expires_at]

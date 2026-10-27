@@ -539,6 +539,56 @@ type MembershipRepo interface {
 	Update(ctx context.Context, m Membership) error
 }
 
+// QuotaGrantKind は Quota の付与の種類（design.md 11.14）。
+type QuotaGrantKind string
+
+const (
+	QuotaBase     QuotaGrantKind = "base"     // 基本の上限。同時に有効なのは1つ（新しい方が優先）
+	QuotaAddon    QuotaGrantKind = "addon"    // 足し算
+	QuotaOverride QuotaGrantKind = "override" // 有効な間は base と addon を無視
+)
+
+// QuotaGrantSource は付与の出どころ。外部（課金など）の付与は ExternalRef で冪等に上書きし、手動の付与には触れない。
+type QuotaGrantSource string
+
+const (
+	QuotaSourceManual   QuotaGrantSource = "manual"
+	QuotaSourceExternal QuotaGrantSource = "external"
+)
+
+// QuotaGrant は org_quota_grants の1行。有効なのは StartsAt ≤ t < EndsAt（nil は無期限）。ID は内部 ID で、API に出すのは PublicID。
+type QuotaGrant struct {
+	ID          string
+	PublicID    string
+	RealmID     string
+	OrgID       string
+	QuotaKey    string // members など
+	Kind        QuotaGrantKind
+	Quantity    int64
+	StartsAt    time.Time
+	EndsAt      *time.Time
+	Source      QuotaGrantSource
+	ExternalRef string // 外部の付与の参照。空でなければ (Org, QuotaKey) ごとに一意
+	CreatedBy   string // 登録した主体の公開 ID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// QuotaGrantRepo は org_quota_grants の Repository。
+type QuotaGrantRepo interface {
+	// Create は ID・(realm, PublicID)・空でない (Org, QuotaKey, ExternalRef) が重複すれば errs.Conflict を返す。
+	Create(ctx context.Context, g QuotaGrant) error
+	GetByPublicID(ctx context.Context, realmID, publicID string) (QuotaGrant, error)
+	// GetByExternalRef は (Org, QuotaKey, ExternalRef) の付与を返す。無ければ errs.NotFound。
+	GetByExternalRef(ctx context.Context, realmID, orgID, quotaKey, ref string) (QuotaGrant, error)
+	// ListByOrg は Org の quotaKey の付与を作成時刻の順（同時刻は ID の順）に返す。
+	ListByOrg(ctx context.Context, realmID, orgID, quotaKey string) ([]QuotaGrant, error)
+	// Update は ID の付与の種類・量・期間・更新時刻を g の値に置き換える。無ければ errs.NotFound。
+	Update(ctx context.Context, g QuotaGrant) error
+	// Delete は付与を消す。無ければ errs.NotFound。
+	Delete(ctx context.Context, realmID, id string) error
+}
+
 // InvitationStatus は招待の状態。期限切れは ExpiresAt から計算し、行は pending のまま残してよい。
 type InvitationStatus string
 

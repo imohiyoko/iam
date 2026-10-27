@@ -43,6 +43,10 @@ realm:
   org_deletion_grace: 30d  # Org の削除の猶予期間（その間は取り消せる。0 で猶予なし）
   user_deletion_grace: 30d  # アカウントの削除の猶予期間（その間はログインしても取り消しだけができる）
   client_data_retention: 30d  # 監査ログの IP と User-Agent の全文を読める期間（後は IP /24・/48 と UA の大分類だけが残る）
+  quota_count:                 # Quota（フィーチャー quota）で数えるもの。active な Membership は必ず数える
+    invited: true              # 受け入れ待ちの招待
+    future: true               # 有効期間がまだ始まっていない Membership
+    suspended: true            # 停止中の Membership
 
 security:
   session:

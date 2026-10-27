@@ -179,6 +179,66 @@ func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) error {
 	return err
 }
 
+const createQuotaGrant = `-- name: CreateQuotaGrant :exec
+INSERT INTO org_quota_grants (id, public_id, realm_id, org_id, quota_key, kind, quantity, starts_at, ends_at, source, external_ref,
+    created_by, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+`
+
+type CreateQuotaGrantParams struct {
+	ID          string
+	PublicID    string
+	RealmID     string
+	OrgID       string
+	QuotaKey    string
+	Kind        string
+	Quantity    int64
+	StartsAt    string
+	EndsAt      sql.NullString
+	Source      string
+	ExternalRef string
+	CreatedBy   string
+	CreatedAt   string
+	UpdatedAt   string
+}
+
+func (q *Queries) CreateQuotaGrant(ctx context.Context, arg CreateQuotaGrantParams) error {
+	_, err := q.db.ExecContext(ctx, createQuotaGrant,
+		arg.ID,
+		arg.PublicID,
+		arg.RealmID,
+		arg.OrgID,
+		arg.QuotaKey,
+		arg.Kind,
+		arg.Quantity,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.Source,
+		arg.ExternalRef,
+		arg.CreatedBy,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const deleteQuotaGrant = `-- name: DeleteQuotaGrant :execrows
+DELETE FROM org_quota_grants WHERE realm_id = $1 AND id = $2
+`
+
+type DeleteQuotaGrantParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) DeleteQuotaGrant(ctx context.Context, arg DeleteQuotaGrantParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteQuotaGrant, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getInvitation = `-- name: GetInvitation :one
 SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by FROM invitations WHERE realm_id = $1 AND id = $2
 `
@@ -428,6 +488,75 @@ func (q *Queries) GetPersonalOrg(ctx context.Context, arg GetPersonalOrgParams) 
 	return i, err
 }
 
+const getQuotaGrantByExternalRef = `-- name: GetQuotaGrantByExternalRef :one
+SELECT id, public_id, realm_id, org_id, quota_key, kind, quantity, starts_at, ends_at, source, external_ref, created_by, created_at, updated_at FROM org_quota_grants WHERE realm_id = $1 AND org_id = $2 AND quota_key = $3 AND external_ref = $4 AND external_ref <> ''
+`
+
+type GetQuotaGrantByExternalRefParams struct {
+	RealmID     string
+	OrgID       string
+	QuotaKey    string
+	ExternalRef string
+}
+
+func (q *Queries) GetQuotaGrantByExternalRef(ctx context.Context, arg GetQuotaGrantByExternalRefParams) (OrgQuotaGrant, error) {
+	row := q.db.QueryRowContext(ctx, getQuotaGrantByExternalRef,
+		arg.RealmID,
+		arg.OrgID,
+		arg.QuotaKey,
+		arg.ExternalRef,
+	)
+	var i OrgQuotaGrant
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.OrgID,
+		&i.QuotaKey,
+		&i.Kind,
+		&i.Quantity,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.Source,
+		&i.ExternalRef,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getQuotaGrantByPublicID = `-- name: GetQuotaGrantByPublicID :one
+SELECT id, public_id, realm_id, org_id, quota_key, kind, quantity, starts_at, ends_at, source, external_ref, created_by, created_at, updated_at FROM org_quota_grants WHERE realm_id = $1 AND public_id = $2
+`
+
+type GetQuotaGrantByPublicIDParams struct {
+	RealmID  string
+	PublicID string
+}
+
+func (q *Queries) GetQuotaGrantByPublicID(ctx context.Context, arg GetQuotaGrantByPublicIDParams) (OrgQuotaGrant, error) {
+	row := q.db.QueryRowContext(ctx, getQuotaGrantByPublicID, arg.RealmID, arg.PublicID)
+	var i OrgQuotaGrant
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.OrgID,
+		&i.QuotaKey,
+		&i.Kind,
+		&i.Quantity,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.Source,
+		&i.ExternalRef,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listInvitationsByOrg = `-- name: ListInvitationsByOrg :many
 SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by FROM invitations WHERE realm_id = $1 AND org_id = $2 ORDER BY created_at, id
 `
@@ -577,6 +706,54 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, arg ListMemberships
 	return items, nil
 }
 
+const listQuotaGrantsByOrg = `-- name: ListQuotaGrantsByOrg :many
+SELECT id, public_id, realm_id, org_id, quota_key, kind, quantity, starts_at, ends_at, source, external_ref, created_by, created_at, updated_at FROM org_quota_grants WHERE realm_id = $1 AND org_id = $2 AND quota_key = $3 ORDER BY created_at, id
+`
+
+type ListQuotaGrantsByOrgParams struct {
+	RealmID  string
+	OrgID    string
+	QuotaKey string
+}
+
+func (q *Queries) ListQuotaGrantsByOrg(ctx context.Context, arg ListQuotaGrantsByOrgParams) ([]OrgQuotaGrant, error) {
+	rows, err := q.db.QueryContext(ctx, listQuotaGrantsByOrg, arg.RealmID, arg.OrgID, arg.QuotaKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrgQuotaGrant
+	for rows.Next() {
+		var i OrgQuotaGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.OrgID,
+			&i.QuotaKey,
+			&i.Kind,
+			&i.Quantity,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.Source,
+			&i.ExternalRef,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setOrgDeletion = `-- name: SetOrgDeletion :execrows
 UPDATE orgs SET deletion_scheduled_at = $1, deleted_at = $2, updated_at = $3 WHERE realm_id = $4 AND id = $5
 `
@@ -678,6 +855,36 @@ func (q *Queries) UpdateMembership(ctx context.Context, arg UpdateMembershipPara
 		arg.ValidFrom,
 		arg.ValidUntil,
 		arg.EndedReason,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateQuotaGrant = `-- name: UpdateQuotaGrant :execrows
+UPDATE org_quota_grants SET kind = $1, quantity = $2, starts_at = $3, ends_at = $4, updated_at = $5 WHERE realm_id = $6 AND id = $7
+`
+
+type UpdateQuotaGrantParams struct {
+	Kind      string
+	Quantity  int64
+	StartsAt  string
+	EndsAt    sql.NullString
+	UpdatedAt string
+	RealmID   string
+	ID        string
+}
+
+func (q *Queries) UpdateQuotaGrant(ctx context.Context, arg UpdateQuotaGrantParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateQuotaGrant,
+		arg.Kind,
+		arg.Quantity,
+		arg.StartsAt,
+		arg.EndsAt,
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.ID,

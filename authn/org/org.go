@@ -69,6 +69,9 @@ type Service struct {
 	Rules Rules
 	// LoginPolicies は Org のログインポリシー（フィーチャー org_login_policy）が active か。
 	LoginPolicies bool
+	// Quotas は Quota（フィーチャー quota）が active か。QuotaCount は数えるもの（11.14）。
+	Quotas     bool
+	QuotaCount QuotaCount
 }
 
 // NormalizeName は名前の前後の空白を除き、形式を確かめる。

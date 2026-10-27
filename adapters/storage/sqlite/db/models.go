@@ -333,6 +333,23 @@ type Org struct {
 	Settings            []byte
 }
 
+type OrgQuotaGrant struct {
+	ID          string
+	PublicID    string
+	RealmID     string
+	OrgID       string
+	QuotaKey    string
+	Kind        string
+	Quantity    int64
+	StartsAt    string
+	EndsAt      sql.NullString
+	Source      string
+	ExternalRef string
+	CreatedBy   string
+	CreatedAt   string
+	UpdatedAt   string
+}
+
 type ScheduledEvent struct {
 	ID        string
 	RealmID   string

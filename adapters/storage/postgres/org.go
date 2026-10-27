@@ -165,3 +165,55 @@ func (r invitations) Close(ctx context.Context, realmID, id string, status port.
 	n, err := r.q.CloseInvitation(ctx, db.CloseInvitationParams{Status: string(status), ClosedAt: nullTime(&at), ClosedBy: by, RealmID: realmID, ID: id})
 	return n > 0, mapErr(err)
 }
+
+// ---------------------------------------------------------------------------
+
+type quotaGrants struct{ q *db.Queries }
+
+func toQuotaGrant(r db.OrgQuotaGrant) (port.QuotaGrant, error) {
+	var p times
+	g := port.QuotaGrant{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, OrgID: r.OrgID, QuotaKey: r.QuotaKey, Kind: port.QuotaGrantKind(r.Kind),
+		Quantity: r.Quantity, StartsAt: p.at(r.StartsAt), EndsAt: p.null(r.EndsAt), Source: port.QuotaGrantSource(r.Source),
+		ExternalRef: r.ExternalRef, CreatedBy: r.CreatedBy, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+	return g, p.err
+}
+
+func (r quotaGrants) Create(ctx context.Context, g port.QuotaGrant) error {
+	return mapErr(r.q.CreateQuotaGrant(ctx, db.CreateQuotaGrantParams{ID: g.ID, PublicID: g.PublicID, RealmID: g.RealmID, OrgID: g.OrgID,
+		QuotaKey: g.QuotaKey, Kind: string(g.Kind), Quantity: g.Quantity, StartsAt: formatTime(g.StartsAt), EndsAt: nullTime(g.EndsAt),
+		Source: string(g.Source), ExternalRef: g.ExternalRef, CreatedBy: g.CreatedBy, CreatedAt: formatTime(g.CreatedAt),
+		UpdatedAt: formatTime(g.UpdatedAt)}))
+}
+
+func (r quotaGrants) GetByPublicID(ctx context.Context, realmID, publicID string) (port.QuotaGrant, error) {
+	row, err := r.q.GetQuotaGrantByPublicID(ctx, db.GetQuotaGrantByPublicIDParams{RealmID: realmID, PublicID: publicID})
+	return one(row, err, toQuotaGrant)
+}
+
+func (r quotaGrants) GetByExternalRef(ctx context.Context, realmID, orgID, quotaKey, ref string) (port.QuotaGrant, error) {
+	row, err := r.q.GetQuotaGrantByExternalRef(ctx, db.GetQuotaGrantByExternalRefParams{RealmID: realmID, OrgID: orgID, QuotaKey: quotaKey,
+		ExternalRef: ref})
+	return one(row, err, toQuotaGrant)
+}
+
+func (r quotaGrants) ListByOrg(ctx context.Context, realmID, orgID, quotaKey string) ([]port.QuotaGrant, error) {
+	rs, err := r.q.ListQuotaGrantsByOrg(ctx, db.ListQuotaGrantsByOrgParams{RealmID: realmID, OrgID: orgID, QuotaKey: quotaKey})
+	return rows(rs, err, toQuotaGrant)
+}
+
+func (r quotaGrants) Update(ctx context.Context, g port.QuotaGrant) error {
+	n, err := r.q.UpdateQuotaGrant(ctx, db.UpdateQuotaGrantParams{Kind: string(g.Kind), Quantity: g.Quantity, StartsAt: formatTime(g.StartsAt),
+		EndsAt: nullTime(g.EndsAt), UpdatedAt: formatTime(g.UpdatedAt), RealmID: g.RealmID, ID: g.ID})
+	if err == nil && n == 0 {
+		return errs.New(errs.KindNotFound, "quota grant %s", g.ID)
+	}
+	return mapErr(err)
+}
+
+func (r quotaGrants) Delete(ctx context.Context, realmID, id string) error {
+	n, err := r.q.DeleteQuotaGrant(ctx, db.DeleteQuotaGrantParams{RealmID: realmID, ID: id})
+	if err == nil && n == 0 {
+		return errs.New(errs.KindNotFound, "quota grant %s", id)
+	}
+	return mapErr(err)
+}
