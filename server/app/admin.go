@@ -47,7 +47,8 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 				a.unavailable(w, r, err)
 				return
 			}
-			if err != nil || v.PrincipalType != port.PrincipalUser {
+			// 制限つき（2要素目の確認待ち・登録待ち・復旧中）のセッションは管理 API では未認証として扱う（4.1）。
+			if err != nil || v.PrincipalType != port.PrincipalUser || v.Restriction != port.RestrictionNone {
 				next.ServeHTTP(w, r)
 				return
 			}
