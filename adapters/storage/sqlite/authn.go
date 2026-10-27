@@ -341,29 +341,6 @@ func (r accounts) RevokeCredential(ctx context.Context, realmID, id string, at t
 
 // ---------------------------------------------------------------------------
 
-type roleBindings struct{ q *db.Queries }
-
-func toRoleBinding(r db.AuthzRoleBinding) (port.RoleBinding, error) {
-	t, err := parseTime(r.CreatedAt)
-	return port.RoleBinding{ID: r.ID, RealmID: r.RealmID, Role: r.Role, PrincipalType: port.PrincipalType(r.PrincipalType),
-		PrincipalID: r.PrincipalID, OrgID: r.OrgID, CreatedAt: t}, err
-}
-
-func (r roleBindings) Create(ctx context.Context, b port.RoleBinding) error {
-	return mapErr(r.q.CreateRoleBinding(ctx, db.CreateRoleBindingParams{ID: b.ID, RealmID: b.RealmID, Role: b.Role,
-		PrincipalType: string(b.PrincipalType), PrincipalID: b.PrincipalID, OrgID: b.OrgID, CreatedAt: formatTime(b.CreatedAt)}))
-}
-
-func (r roleBindings) ListByPrincipal(ctx context.Context, realmID string, t port.PrincipalType, principalID string) ([]port.RoleBinding, error) {
-	rs, err := r.q.ListRoleBindingsByPrincipal(ctx, db.ListRoleBindingsByPrincipalParams{RealmID: realmID, PrincipalType: string(t), PrincipalID: principalID})
-	return rows(rs, err, toRoleBinding)
-}
-
-func (r roleBindings) ListByRole(ctx context.Context, realmID, role string) ([]port.RoleBinding, error) {
-	rs, err := r.q.ListRoleBindingsByRole(ctx, db.ListRoleBindingsByRoleParams{RealmID: realmID, Role: role})
-	return rows(rs, err, toRoleBinding)
-}
-
 func (r users) SetValidity(ctx context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error {
 	n, err := r.q.SetUserValidity(ctx, db.SetUserValidityParams{ValidFrom: nullTime(from), ValidUntil: nullTime(until),
 		UpdatedAt: formatTime(updatedAt), RealmID: realmID, ID: id})
@@ -406,6 +383,7 @@ func (r users) Erase(ctx context.Context, realmID, id string, at time.Time) erro
 		q.EraseUserRecoveryCodes(ctx, db.EraseUserRecoveryCodesParams{RealmID: realmID, UserID: id}),
 		q.EraseUserSessions(ctx, db.EraseUserSessionsParams{RealmID: realmID, PrincipalID: id}),
 		q.EraseUserRoleBindings(ctx, db.EraseUserRoleBindingsParams{RealmID: realmID, PrincipalID: id}),
+		q.EraseUserGroupMembers(ctx, db.EraseUserGroupMembersParams{RealmID: realmID, UserID: id}),
 	} {
 		if err != nil {
 			return mapErr(err)

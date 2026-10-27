@@ -239,33 +239,6 @@ func (q *Queries) CreateRecoveryCode(ctx context.Context, arg CreateRecoveryCode
 	return err
 }
 
-const createRoleBinding = `-- name: CreateRoleBinding :exec
-INSERT INTO authz_role_bindings (id, realm_id, role, principal_type, principal_id, org_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreateRoleBindingParams struct {
-	ID            string
-	RealmID       string
-	Role          string
-	PrincipalType string
-	PrincipalID   string
-	OrgID         string
-	CreatedAt     string
-}
-
-func (q *Queries) CreateRoleBinding(ctx context.Context, arg CreateRoleBindingParams) error {
-	_, err := q.db.ExecContext(ctx, createRoleBinding,
-		arg.ID,
-		arg.RealmID,
-		arg.Role,
-		arg.PrincipalType,
-		arg.PrincipalID,
-		arg.OrgID,
-		arg.CreatedAt,
-	)
-	return err
-}
-
 const createServiceAccount = `-- name: CreateServiceAccount :exec
 INSERT INTO authn_service_accounts (id, realm_id, name, created_at) VALUES (?, ?, ?, ?)
 `
@@ -555,6 +528,21 @@ type EraseUserEmailsParams struct {
 
 func (q *Queries) EraseUserEmails(ctx context.Context, arg EraseUserEmailsParams) error {
 	_, err := q.db.ExecContext(ctx, eraseUserEmails, arg.RealmID, arg.UserID)
+	return err
+}
+
+const eraseUserGroupMembers = `-- name: EraseUserGroupMembers :exec
+DELETE FROM authz_group_members WHERE member_type = 'user' AND member_id = ?1
+    AND group_id IN (SELECT id FROM authz_groups WHERE realm_id = ?2)
+`
+
+type EraseUserGroupMembersParams struct {
+	UserID  string
+	RealmID string
+}
+
+func (q *Queries) EraseUserGroupMembers(ctx context.Context, arg EraseUserGroupMembersParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserGroupMembers, arg.UserID, arg.RealmID)
 	return err
 }
 
@@ -1501,87 +1489,6 @@ func (q *Queries) ListRecoveryCodes(ctx context.Context, arg ListRecoveryCodesPa
 			&i.Hash,
 			&i.CreatedAt,
 			&i.UsedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRoleBindingsByPrincipal = `-- name: ListRoleBindingsByPrincipal :many
-SELECT id, realm_id, role, principal_type, principal_id, org_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at, id
-`
-
-type ListRoleBindingsByPrincipalParams struct {
-	RealmID       string
-	PrincipalType string
-	PrincipalID   string
-}
-
-func (q *Queries) ListRoleBindingsByPrincipal(ctx context.Context, arg ListRoleBindingsByPrincipalParams) ([]AuthzRoleBinding, error) {
-	rows, err := q.db.QueryContext(ctx, listRoleBindingsByPrincipal, arg.RealmID, arg.PrincipalType, arg.PrincipalID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuthzRoleBinding
-	for rows.Next() {
-		var i AuthzRoleBinding
-		if err := rows.Scan(
-			&i.ID,
-			&i.RealmID,
-			&i.Role,
-			&i.PrincipalType,
-			&i.PrincipalID,
-			&i.OrgID,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRoleBindingsByRole = `-- name: ListRoleBindingsByRole :many
-SELECT id, realm_id, role, principal_type, principal_id, org_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY created_at, id
-`
-
-type ListRoleBindingsByRoleParams struct {
-	RealmID string
-	Role    string
-}
-
-func (q *Queries) ListRoleBindingsByRole(ctx context.Context, arg ListRoleBindingsByRoleParams) ([]AuthzRoleBinding, error) {
-	rows, err := q.db.QueryContext(ctx, listRoleBindingsByRole, arg.RealmID, arg.Role)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuthzRoleBinding
-	for rows.Next() {
-		var i AuthzRoleBinding
-		if err := rows.Scan(
-			&i.ID,
-			&i.RealmID,
-			&i.Role,
-			&i.PrincipalType,
-			&i.PrincipalID,
-			&i.OrgID,
-			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

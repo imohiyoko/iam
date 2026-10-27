@@ -56,6 +56,8 @@ type Tx interface {
 	Invitations() InvitationRepo
 	ServiceAccounts() ServiceAccountRepo
 	RoleBindings() RoleBindingRepo
+	Roles() RoleRepo
+	Groups() GroupRepo
 }
 
 // Realm はユーザー集合の単位（design.md 3.1）。

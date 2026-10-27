@@ -15,11 +15,15 @@ const (
 	PermOrgSettings = "org:settings"
 	PermOrgTransfer = "org:transfer"
 	PermOrgDelete   = "org:delete"
+	// PermOrgRoles は Org の独自のロールと、Org の範囲のロールの付与の管理（M4。4.11）。
+	PermOrgRoles = "org:roles"
+	// PermOrgGroups は Org の Group と所属の管理（M4）。
+	PermOrgGroups = "org:groups"
 )
 
 var orgBuiltin = map[port.OrgRole][]string{
-	port.OrgOwner:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgSettings, PermOrgTransfer, PermOrgDelete},
-	port.OrgAdmin:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend},
+	port.OrgOwner:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgSettings, PermOrgTransfer, PermOrgDelete, PermOrgRoles, PermOrgGroups},
+	port.OrgAdmin:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgRoles, PermOrgGroups},
 	port.OrgMember: {PermOrgRead},
 }
 

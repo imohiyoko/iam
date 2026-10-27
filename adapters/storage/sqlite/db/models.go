@@ -185,13 +185,44 @@ type AuthnUserIdentity struct {
 	RevokeReason    string
 }
 
+type AuthzGroup struct {
+	ID        string
+	PublicID  string
+	RealmID   string
+	OrgID     string
+	Name      string
+	CreatedAt string
+	UpdatedAt string
+}
+
+type AuthzGroupMember struct {
+	GroupID    string
+	MemberType string
+	MemberID   string
+	CreatedAt  string
+}
+
+type AuthzRole struct {
+	ID          string
+	PublicID    string
+	RealmID     string
+	OrgID       string
+	Name        string
+	Permissions string
+	CreatedAt   string
+	UpdatedAt   string
+}
+
 type AuthzRoleBinding struct {
 	ID            string
+	PublicID      string
 	RealmID       string
 	Role          string
 	PrincipalType string
 	PrincipalID   string
 	OrgID         string
+	ResourceType  string
+	ResourceID    string
 	CreatedAt     string
 }
 

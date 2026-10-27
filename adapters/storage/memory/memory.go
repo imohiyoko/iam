@@ -63,9 +63,13 @@ type state struct {
 	accounts        map[string]port.ServiceAccount
 	credentials     map[string]port.ServiceAccountCredential
 	roleBindings    map[string]port.RoleBinding
-	orgs            map[string]port.Org
-	memberships     map[string]port.Membership
-	invitations     map[string]port.Invitation
+	roles           map[string]port.Role
+	groups          map[string]port.Group
+	// groupMembers のキーは group_id + member_type + member_id。
+	groupMembers map[string]port.GroupMember
+	orgs         map[string]port.Org
+	memberships  map[string]port.Membership
+	invitations  map[string]port.Invitation
 }
 
 // Storage はインメモリの Storage。
@@ -89,7 +93,8 @@ func New(clk clock.Clock) *Storage {
 		scheduled: map[string]port.ScheduledEvent{}, recoveryCodes: map[string]port.RecoveryCode{},
 		connections: map[string]port.Connection{}, sessions: map[string]port.Session{},
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
-		roleBindings: map[string]port.RoleBinding{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
+		roleBindings: map[string]port.RoleBinding{}, roles: map[string]port.Role{}, groups: map[string]port.Group{},
+		groupMembers: map[string]port.GroupMember{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 		invitations: map[string]port.Invitation{},
 	}}
 }
@@ -152,6 +157,8 @@ func (t *tx) Memberships() port.MembershipRepo         { return memberships{t} }
 func (t *tx) Invitations() port.InvitationRepo         { return invitations{t} }
 func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t} }
 func (t *tx) RoleBindings() port.RoleBindingRepo       { return roleBindings{t} }
+func (t *tx) Roles() port.RoleRepo                     { return roles{t} }
+func (t *tx) Groups() port.GroupRepo                   { return groups{t} }
 
 // setKey は map の値を設定し、取り消し方を記録する。
 func setKey[K comparable, V any](t *tx, m map[K]V, k K, v V) {

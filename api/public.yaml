@@ -512,7 +512,7 @@ paths:
       description: |
         直近の本人確認が要る（`max_auth_age` を過ぎていれば `401 reauthentication_required`）。realm の
         `user_deletion_grace`（既定30日）の後に消し、その間はログインしても取り消し（`next: cancel_deletion`）だけができる。
-        既存のセッションはすべて失効する。共有 Org の最後のオーナーの間はできない（`409 last_owner`）。
+        既存のセッションはすべて失効する。共有 Org の最後のオーナーと、realm の最後の `realm:owner` の間はできない（`409 last_owner`）。
         消去では、所属を終えて個人 Org を削除し、認証情報・セッション・メールのインデックスを消し、データ鍵を消す
         （個人情報は復号できなくなる）。ID は墓標として残る。
       security:

@@ -30,6 +30,8 @@ import (
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/totp"
 	"github.com/imohiyoko/iam/authn/warning"
+	"github.com/imohiyoko/iam/authz/check"
+	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -86,6 +88,9 @@ type App struct {
 	// recovery はリカバリーコードと復旧の完了（4.12）。
 	recovery *recovery.Service
 	notifier *eventlog.Relay
+	// authz は認可の判定（ADR 0064）。manage はロール・付与・Group の管理。
+	authz  *check.Checker
+	manage *manage.Service
 	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
 	scheduler *eventlog.Scheduler
 	public    http.Handler
@@ -172,7 +177,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		d.Logger.Warn("realm.verified_via does not include code: email codes and links are disabled, and email recovery is unavailable")
 	}
 	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via, ExtraCategories: cfg.Security.SuspensionCategories,
-		DeletionGrace: cfg.Realm.UserDeletionGrace.D()}
+		DeletionGrace: cfg.Realm.UserDeletionGrace.D(), Roles: authzRoles{}}
 	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
 	if plan.IsActive(feature.Org) {
 		a.orgs = &org.Service{Clock: d.Clock, Crypter: a.pii, Accounts: a.accounts, Notify: a.notify, Policy: org.CreationPolicy(cfg.Realm.OrgCreation),
@@ -182,6 +187,12 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 			}}
 		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
 	}
+	// 判定の材料のキャッシュは、セッションの検証と同じ反映の遅れの上限（5.3）まで。
+	a.authz = &check.Checker{Storage: d.Storage, Clock: d.Clock, TTL: ss.ValidityMaxDelay.D()}
+	if a.orgs != nil {
+		a.authz.Members = authzMembers{}
+	}
+	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock}
 	a.email = &emailflow.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Notify: a.notify, Log: d.Logger,
