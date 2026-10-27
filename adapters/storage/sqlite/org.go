@@ -96,6 +96,11 @@ func (r memberships) ListByOrg(ctx context.Context, realmID, orgID, afterPublicI
 	return rows(rs, err, toMembership)
 }
 
+func (r memberships) CountActive(ctx context.Context, realmID, orgID string, role port.OrgRole) (int, error) {
+	n, err := r.q.CountActiveMemberships(ctx, db.CountActiveMembershipsParams{RealmID: realmID, OrgID: orgID, OrgRole: string(role)})
+	return int(n), mapErr(err)
+}
+
 func (r memberships) Update(ctx context.Context, m port.Membership) error {
 	n, err := r.q.UpdateMembership(ctx, db.UpdateMembershipParams{Status: string(m.Status), OrgRole: string(m.Role), EmailID: m.EmailID,
 		ValidFrom: nullTime(m.ValidFrom), ValidUntil: nullTime(m.ValidUntil), EndedReason: m.EndedReason, UpdatedAt: formatTime(m.UpdatedAt),

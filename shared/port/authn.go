@@ -384,6 +384,8 @@ type SessionRepo interface {
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
 	// RevokeByPrincipal は主体の、at の時点で失効していないセッションを exceptID 以外すべて at に失効させ、その ID を返す。
 	RevokeByPrincipal(ctx context.Context, realmID string, t PrincipalType, principalID, exceptID string, at time.Time, reason string) ([]string, error)
+	// MoveOrg はユーザーの、active な Org が fromOrgID のセッションを toOrgID に移し、その ID を返す（退会。4.10）。
+	MoveOrg(ctx context.Context, realmID, userID, fromOrgID, toOrgID string) ([]string, error)
 }
 
 // ServiceAccount は service_accounts の1行（design.md 11.2）。
@@ -484,7 +486,7 @@ type Membership struct {
 	EmailID     string
 	ValidFrom   *time.Time
 	ValidUntil  *time.Time
-	EndedReason string // self_leave / removed / expired / org_deleted / user_deleted
+	EndedReason string // left / removed / expired / org_deleted / user_deleted
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -502,6 +504,8 @@ type MembershipRepo interface {
 	// ListByOrg は公開 ID の順に、afterPublicID より後を最大 limit 件返す（終了したものも含む）。
 	// Org のメンバーは多くなりうるため、ページングで取る（カーソルは外に出してよい公開 ID）。
 	ListByOrg(ctx context.Context, realmID, orgID, afterPublicID string, limit int) ([]Membership, error)
+	// CountActive は Org の active な Membership のうち、役割が role のものの数を返す（最後のオーナー。4.10）。
+	CountActive(ctx context.Context, realmID, orgID string, role OrgRole) (int, error)
 	// Update は ID の Membership の状態・役割・メール・有効期間・終了の理由・更新時刻を m の値に置き換える。
 	// ユーザー・Org・作成時刻は変えない。無ければ errs.NotFound。
 	Update(ctx context.Context, m Membership) error

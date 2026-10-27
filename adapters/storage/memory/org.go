@@ -147,6 +147,12 @@ func (r memberships) ListByOrg(_ context.Context, realmID, orgID, afterPublicID 
 	return out, nil
 }
 
+func (r memberships) CountActive(_ context.Context, realmID, orgID string, role port.OrgRole) (int, error) {
+	return len(r.list(func(x port.Membership) bool {
+		return x.RealmID == realmID && x.OrgID == orgID && x.Status == port.MembershipActive && x.Role == role
+	})), nil
+}
+
 func (r memberships) Update(_ context.Context, m port.Membership) error {
 	old, err := get(r.t.s.memberships, m.RealmID, m.ID, func(m port.Membership) string { return m.RealmID }, "membership")
 	if err != nil {

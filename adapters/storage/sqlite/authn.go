@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/imohiyoko/iam/adapters/storage/sqlite/db"
@@ -285,6 +286,12 @@ func (r sessions) Revoke(ctx context.Context, realmID, id string, at time.Time, 
 func (r sessions) RevokeByPrincipal(ctx context.Context, realmID string, t port.PrincipalType, principalID, exceptID string, at time.Time, reason string) ([]string, error) {
 	ids, err := r.q.RevokeSessionsByPrincipal(ctx, db.RevokeSessionsByPrincipalParams{At: nullTime(&at), Reason: reason, RealmID: realmID,
 		PrincipalType: string(t), PrincipalID: principalID, ExceptID: exceptID})
+	return ids, mapErr(err)
+}
+
+func (r sessions) MoveOrg(ctx context.Context, realmID, userID, fromOrgID, toOrgID string) ([]string, error) {
+	ids, err := r.q.MoveSessionsOrg(ctx, db.MoveSessionsOrgParams{ToOrgID: toOrgID, RealmID: realmID, UserID: userID, FromOrgID: fromOrgID})
+	slices.Sort(ids)
 	return ids, mapErr(err)
 }
 

@@ -70,3 +70,4 @@
 | [0056](0056-invitations-and-membership-email.md) | 招待と Membership ごとのメール | 承認 |
 | [0057](0057-org-selection-and-switching.md) | Org の決定と切り替え | 承認 |
 | [0058](0058-org-and-membership-suspension.md) | Org と Membership の停止と有効期間 | 承認 |
+| [0059](0059-leaving-removal-and-transfer.md) | 退会・除名・オーナーの譲渡 | 承認 |

@@ -34,6 +34,9 @@ SELECT * FROM memberships WHERE realm_id = ? AND user_id = ? ORDER BY created_at
 -- name: ListMembershipsByOrg :many
 SELECT * FROM memberships WHERE realm_id = ? AND org_id = ? AND public_id > sqlc.arg(after) ORDER BY public_id LIMIT sqlc.arg(lim);
 
+-- name: CountActiveMemberships :one
+SELECT count(*) FROM memberships WHERE realm_id = ? AND org_id = ? AND status = 'active' AND org_role = ?;
+
 -- name: UpdateMembership :execrows
 UPDATE memberships SET status = ?, org_role = ?, email_id = ?, valid_from = ?, valid_until = ?, ended_reason = ?, updated_at = ?
 WHERE realm_id = ? AND id = ?;

@@ -346,6 +346,22 @@ func (r sessions) RevokeByPrincipal(_ context.Context, realmID string, t port.Pr
 	return ids, nil
 }
 
+func (r sessions) MoveOrg(_ context.Context, realmID, userID, fromOrgID, toOrgID string) ([]string, error) {
+	var ids []string
+	for _, s := range r.t.s.sessions {
+		if s.RealmID == realmID && s.PrincipalType == port.PrincipalUser && s.PrincipalID == userID && s.ActiveOrgID == fromOrgID {
+			ids = append(ids, s.ID)
+		}
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		if err := r.update(realmID, id, func(s *port.Session) { s.ActiveOrgID = toOrgID }); err != nil {
+			return nil, err
+		}
+	}
+	return ids, nil
+}
+
 // ---------------------------------------------------------------------------
 
 type accounts struct{ t *tx }

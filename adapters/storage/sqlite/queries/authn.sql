@@ -89,6 +89,11 @@ WHERE realm_id = sqlc.arg(realm_id) AND principal_type = sqlc.arg(principal_type
     AND id <> sqlc.arg(except_id) AND (revoked_at IS NULL OR revoked_at > sqlc.arg(at))
 RETURNING id;
 
+-- name: MoveSessionsOrg :many
+UPDATE authn_sessions SET active_org_id = sqlc.arg(to_org_id)
+WHERE realm_id = sqlc.arg(realm_id) AND principal_type = 'user' AND principal_id = sqlc.arg(user_id) AND active_org_id = sqlc.arg(from_org_id)
+RETURNING id;
+
 -- name: CreateServiceAccount :exec
 INSERT INTO authn_service_accounts (id, realm_id, name, created_at) VALUES (?, ?, ?, ?);
 

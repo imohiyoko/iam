@@ -240,6 +240,34 @@ func testMembershipUpdate(t *testing.T, h Harness) {
 	})
 }
 
+func testMembershipCountActive(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, o := id.New(id.Realm), id.New(id.Org)
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		for _, c := range []struct {
+			role   port.OrgRole
+			status port.MembershipStatus
+			org    string
+		}{{port.OrgOwner, port.MembershipActive, o}, {port.OrgOwner, port.MembershipActive, o}, {port.OrgOwner, port.MembershipEnded, o},
+			{port.OrgOwner, port.MembershipInvited, o}, {port.OrgAdmin, port.MembershipActive, o}, {port.OrgOwner, port.MembershipActive, id.New(id.Org)}} {
+			m := newMembership(r, id.New(id.User), c.org)
+			m.Role, m.Status = c.role, c.status
+			if err := tx.Memberships().Create(ctx, m); err != nil {
+				return err
+			}
+		}
+		for role, want := range map[port.OrgRole]int{port.OrgOwner: 2, port.OrgAdmin: 1, port.OrgMember: 0} {
+			if n, err := tx.Memberships().CountActive(ctx, r, o, role); err != nil || n != want {
+				return fmt.Errorf("CountActive(%s) = %d, %v (want %d)", role, n, err, want)
+			}
+		}
+		if n, err := tx.Memberships().CountActive(ctx, id.New(id.Realm), o, port.OrgOwner); err != nil || n != 0 {
+			return fmt.Errorf("another realm = %d, %v", n, err)
+		}
+		return nil
+	})
+}
+
 func newInvitation(realmID, orgID string) port.Invitation {
 	return port.Invitation{ID: id.New(id.Invitation), PublicID: id.NewExternal(id.Invitation), RealmID: realmID, OrgID: orgID,
 		EmailIndex: []byte("ix"), EmailCiphertext: []byte("ct"), IndexKeyID: "ik_1", Role: port.OrgMember, TokenHash: []byte("hash"),

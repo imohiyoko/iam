@@ -36,6 +36,23 @@ func (q *Queries) CloseInvitation(ctx context.Context, arg CloseInvitationParams
 	return result.RowsAffected()
 }
 
+const countActiveMemberships = `-- name: CountActiveMemberships :one
+SELECT count(*) FROM memberships WHERE realm_id = ? AND org_id = ? AND status = 'active' AND org_role = ?
+`
+
+type CountActiveMembershipsParams struct {
+	RealmID string
+	OrgID   string
+	OrgRole string
+}
+
+func (q *Queries) CountActiveMemberships(ctx context.Context, arg CountActiveMembershipsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveMemberships, arg.RealmID, arg.OrgID, arg.OrgRole)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createInvitation = `-- name: CreateInvitation :exec
 INSERT INTO invitations (id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash,
     valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by)
