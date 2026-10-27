@@ -315,11 +315,11 @@ func (s *Service) Unbind(ctx context.Context, tx port.Tx, sc Scope, a Actor, b p
 		return err
 	}
 	if b.Role == role.RealmOwner && b.ResourceType == "" && b.OrgID == "" && b.PrincipalType == port.PrincipalUser {
-		owners, err := realmOwners(ctx, tx, sc.RealmID)
+		others, err := otherOwners(ctx, tx, sc.RealmID, b.PrincipalID)
 		if err != nil {
 			return err
 		}
-		if len(owners) <= 1 {
+		if others == 0 {
 			return ErrLastOwner
 		}
 	}
@@ -460,26 +460,50 @@ func (s *Service) RemoveMember(ctx context.Context, tx port.Tx, sc Scope, a Acto
 		"member_id": t.PublicID})
 }
 
-// realmOwners は realm 全体の realm:owner を直接持つユーザーの内部 ID を返す（Group 経由は数えない）。
-func realmOwners(ctx context.Context, tx port.Tx, realmID string) (map[string]bool, error) {
+// otherOwners は userID 以外で、realm 全体の realm:owner を直接持ち、使えるユーザーの数を返す（Group 経由は数えない）。
+// 削除済み・削除の予約中のユーザーは realm を管理できないので数えない。
+func otherOwners(ctx context.Context, tx port.Tx, realmID, userID string) (int, error) {
 	bs, err := tx.RoleBindings().ListByRole(ctx, realmID, role.RealmOwner)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	owners := map[string]bool{}
+	seen := map[string]bool{}
+	n := 0
 	for _, b := range bs {
-		if b.OrgID == "" && b.ResourceType == "" && b.PrincipalType == port.PrincipalUser {
-			owners[b.PrincipalID] = true
+		if b.OrgID != "" || b.ResourceType != "" || b.PrincipalType != port.PrincipalUser || b.PrincipalID == userID || seen[b.PrincipalID] {
+			continue
+		}
+		seen[b.PrincipalID] = true
+		u, err := tx.Users().Get(ctx, realmID, b.PrincipalID)
+		if errors.Is(err, errs.NotFound) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if u.Status == port.UserActive && u.DeletionScheduledAt == nil {
+			n++
 		}
 	}
-	return owners, nil
+	return n, nil
 }
 
-// IsLastOwner はユーザーが realm の最後の realm:owner かを返す。消すと realm を管理できる人がいなくなる。
+// IsLastOwner はユーザーが realm 全体の realm:owner を持ち、ほかに使える realm:owner がいないかを返す。
+// 消すと realm を管理できる人がいなくなる。
 func IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string) (bool, error) {
-	owners, err := realmOwners(ctx, tx, realmID)
+	bs, err := tx.RoleBindings().ListByPrincipal(ctx, realmID, port.PrincipalUser, userID)
 	if err != nil {
 		return false, err
 	}
-	return len(owners) == 1 && owners[userID], nil
+	owner := false
+	for _, b := range bs {
+		if b.Role == role.RealmOwner && b.OrgID == "" && b.ResourceType == "" {
+			owner = true
+		}
+	}
+	if !owner {
+		return false, nil
+	}
+	others, err := otherOwners(ctx, tx, realmID, userID)
+	return others == 0, err
 }

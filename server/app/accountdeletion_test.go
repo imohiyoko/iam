@@ -164,6 +164,10 @@ func TestLastRealmOwnerDeletion(t *testing.T) {
 	if status, out := l.admin(t, "/v1/admin/users/"+rootID+":delete", admin, nil); status != 200 {
 		t.Fatalf("schedule owner deletion: %d %v", status, out)
 	}
+	// 削除の予約中の owner は数えない：root2 が最後の使える owner になる。
+	if status, out := l.admin(t, "/v1/admin/users/"+root2ID+":delete", admin, map[string]bool{"immediate": true}); status != 409 || out["error"] != "last_owner" {
+		t.Fatalf("delete the last available owner: %d %v", status, out)
+	}
 	// 猶予の間に別の owner の付与が消えると、root が最後の owner になる。
 	if err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
 		u, err := tx.Users().GetByPublicID(ctx, l.a.realm.ID, root2ID)

@@ -58,6 +58,13 @@ func (e *env) run(fn func(ctx context.Context, tx port.Tx) error) error {
 
 func (e *env) grant(name, uid string) {
 	e.k.Tx(e.t, func(ctx context.Context, tx port.Tx) error {
+		// 最後の realm:owner の判定はユーザーが使えるかを見るので、ユーザーも作る。
+		if _, err := tx.Users().Get(ctx, e.k.RealmID, uid); errors.Is(err, errs.NotFound) {
+			now := e.k.Clock.Now()
+			if err := tx.Users().Create(ctx, port.User{ID: uid, PublicID: "pub_" + uid, RealmID: e.k.RealmID, Status: port.UserActive, CreatedAt: now, UpdatedAt: now}); err != nil {
+				return err
+			}
+		}
 		return role.Grant(ctx, tx, e.k.RealmID, name, port.PrincipalUser, uid, e.k.Clock.Now())
 	})
 }

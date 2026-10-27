@@ -40,7 +40,7 @@ M4 で認可を組み込む。design.md は次を求める。
   - Org の範囲のロールには、IAM 自身の realm の管理の権限（`users:`・`orgs:`・`roles:` など）は入れられない
   - Org の範囲の付与と Org の Group への所属は、その Org の使える所属を持つ主体だけ
   - 最後の `realm:owner` のユーザーの付与は消せない
-  - 同じ理由で、最後の `realm:owner` のユーザーは削除できない（`409 last_owner`）。猶予の間に最後になったら、猶予が終わっても消さず `user.deletion_held` を残す
+  - 同じ理由で、最後の `realm:owner` のユーザーは削除できない（`409 last_owner`）。猶予の間に最後になったら、猶予が終わっても消さず `user.deletion_held` を残す。数えるのは使える owner だけ（削除済み・削除の予約中は数えない）
   - 変更は監査ログに残す（`role.*`・`group.*`）。応答と監査ログには公開 ID だけを出す（0045）
 
 ## 理由
