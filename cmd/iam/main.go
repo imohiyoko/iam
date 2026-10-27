@@ -28,6 +28,7 @@ import (
 	// アダプタ（全部入りの構成）。
 	_ "github.com/imohiyoko/iam/adapters/breachcheck/hibp"
 	_ "github.com/imohiyoko/iam/adapters/ephemeral/memory"
+	_ "github.com/imohiyoko/iam/adapters/ephemeral/redis"
 	_ "github.com/imohiyoko/iam/adapters/eventsink/stdout"
 	_ "github.com/imohiyoko/iam/adapters/keystore/env"
 	_ "github.com/imohiyoko/iam/adapters/notifier/dev"

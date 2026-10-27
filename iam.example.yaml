@@ -19,6 +19,10 @@ storage:
 
 ephemeral:
   driver: memory
+  # Redis（複数のインスタンスで共有する）:
+  # driver: redis
+  # url: rediss://:secret@cache.example.com:6379/0
+  # prefix: "iam:"
 
 keystore:
   driver: file
