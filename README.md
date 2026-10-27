@@ -5,6 +5,7 @@
 - 設計: [docs/design.md](docs/design.md)
 - ロードマップ: [docs/roadmap.md](docs/roadmap.md)
 - 設計判断の記録（ADR）: [docs/adr/](docs/adr/README.md)
+- 運用: [docs/operations.md](docs/operations.md)
 - セキュリティ: [SECURITY.md](SECURITY.md)
 - ライセンス: [Apache-2.0](LICENSE)
 
