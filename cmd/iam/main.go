@@ -32,6 +32,7 @@ import (
 	_ "github.com/imohiyoko/iam/adapters/keystore/env"
 	_ "github.com/imohiyoko/iam/adapters/notifier/dev"
 	_ "github.com/imohiyoko/iam/adapters/storage/memory"
+	_ "github.com/imohiyoko/iam/adapters/storage/postgres"
 	_ "github.com/imohiyoko/iam/adapters/storage/sqlite"
 )
 

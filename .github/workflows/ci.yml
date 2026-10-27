@@ -14,6 +14,19 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: iam
+          POSTGRES_PASSWORD: iam
+          POSTGRES_DB: iam
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U iam" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # PostgreSQL のアダプタの契約テスト（未設定ならスキップする）。
+      IAM_TEST_POSTGRES: postgres://iam:iam@127.0.0.1:5432/iam?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -39,6 +52,11 @@ jobs:
       - name: sqlc
         working-directory: adapters/storage/sqlite
         run: go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+      - name: pgport + sqlc (postgres)
+        working-directory: adapters/storage/postgres
+        run: |
+          GOWORK=off go run ./cmd/pgport
+          go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
       - name: oapi-codegen
         working-directory: api
         run: |

@@ -13,6 +13,9 @@ storage:
   driver: sqlite
   path: iam.db
   auto_migrate: "true" # false なら `iam migrate` を明示的に実行する
+  # PostgreSQL（複数のインスタンスから使う）:
+  # driver: postgres
+  # dsn: postgres://iam:secret@db.example.com:5432/iam?sslmode=verify-full
 
 ephemeral:
   driver: memory
