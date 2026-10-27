@@ -149,3 +149,54 @@ func TestOperatorDeletesUserImmediately(t *testing.T) {
 		t.Fatalf("delete twice: %d", status)
 	}
 }
+
+// realm の最後の realm:owner は削除できない。猶予の間に最後になったら、猶予が終わっても消さない（ADR 0064）。
+func TestLastRealmOwnerDeletion(t *testing.T) {
+	l := newLoginEnvWith(t, nil, nil)
+	rootID, _ := l.operator(t, "root@example.com", role.RealmOwner)
+	_, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
+	for _, body := range []any{map[string]bool{"immediate": true}, nil} {
+		if status, out := l.admin(t, "/v1/admin/users/"+rootID+":delete", admin, body); status != 409 || out["error"] != "last_owner" {
+			t.Fatalf("delete last owner %v: %d %v", body, status, out)
+		}
+	}
+	root2ID, _ := l.operator(t, "root2@example.com", role.RealmOwner)
+	if status, out := l.admin(t, "/v1/admin/users/"+rootID+":delete", admin, nil); status != 200 {
+		t.Fatalf("schedule owner deletion: %d %v", status, out)
+	}
+	// 猶予の間に別の owner の付与が消えると、root が最後の owner になる。
+	if err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+		u, err := tx.Users().GetByPublicID(ctx, l.a.realm.ID, root2ID)
+		if err != nil {
+			return err
+		}
+		bs, err := tx.RoleBindings().ListByPrincipal(ctx, l.a.realm.ID, port.PrincipalUser, u.ID)
+		if err != nil {
+			return err
+		}
+		for _, b := range bs {
+			if err := tx.RoleBindings().Delete(ctx, l.a.realm.ID, b.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	l.advance(31 * 24 * time.Hour)
+	if _, err := l.a.scheduler.Fire(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if u, hasKey := l.storedUser(t, rootID); u.Status != port.UserActive || !hasKey {
+		t.Fatalf("last owner purged: %+v, key %v", u, hasKey)
+	}
+	held := false
+	for _, e := range l.auditTypes(t) {
+		if e.Type == "user.deletion_held" && e.Details["reason"] == "last_owner" {
+			held = true
+		}
+	}
+	if !held {
+		t.Fatal("no user.deletion_held for the last owner")
+	}
+}

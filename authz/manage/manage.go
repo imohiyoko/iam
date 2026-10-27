@@ -314,18 +314,12 @@ func (s *Service) Unbind(ctx context.Context, tx port.Tx, sc Scope, a Actor, b p
 	if err := s.authorize(ctx, tx, sc, a, role.PermRolesManage, role.PermOrgRoles, perms); err != nil {
 		return err
 	}
-	if b.Role == role.RealmOwner && b.ResourceType == "" {
-		bs, err := tx.RoleBindings().ListByRole(ctx, sc.RealmID, role.RealmOwner)
+	if b.Role == role.RealmOwner && b.ResourceType == "" && b.OrgID == "" && b.PrincipalType == port.PrincipalUser {
+		owners, err := realmOwners(ctx, tx, sc.RealmID)
 		if err != nil {
 			return err
 		}
-		n := 0
-		for _, x := range bs {
-			if x.OrgID == "" && x.ResourceType == "" && x.PrincipalType == port.PrincipalUser {
-				n++
-			}
-		}
-		if n <= 1 && b.PrincipalType == port.PrincipalUser {
+		if len(owners) <= 1 {
 			return ErrLastOwner
 		}
 	}
@@ -464,4 +458,28 @@ func (s *Service) RemoveMember(ctx context.Context, tx port.Tx, sc Scope, a Acto
 	}
 	return s.record(ctx, tx, sc, a, "group.member_removed", map[string]any{"group_id": g.PublicID, "member_type": string(t.Principal.Type),
 		"member_id": t.PublicID})
+}
+
+// realmOwners は realm 全体の realm:owner を直接持つユーザーの内部 ID を返す（Group 経由は数えない）。
+func realmOwners(ctx context.Context, tx port.Tx, realmID string) (map[string]bool, error) {
+	bs, err := tx.RoleBindings().ListByRole(ctx, realmID, role.RealmOwner)
+	if err != nil {
+		return nil, err
+	}
+	owners := map[string]bool{}
+	for _, b := range bs {
+		if b.OrgID == "" && b.ResourceType == "" && b.PrincipalType == port.PrincipalUser {
+			owners[b.PrincipalID] = true
+		}
+	}
+	return owners, nil
+}
+
+// IsLastOwner はユーザーが realm の最後の realm:owner かを返す。消すと realm を管理できる人がいなくなる。
+func IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string) (bool, error) {
+	owners, err := realmOwners(ctx, tx, realmID)
+	if err != nil {
+		return false, err
+	}
+	return len(owners) == 1 && owners[userID], nil
 }

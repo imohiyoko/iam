@@ -236,7 +236,7 @@ paths:
       summary: ユーザーを削除する（4.10）
       description: |
         権限 `users:delete`。既定は realm の `user_deletion_grace` の後に消す（その間は取り消せる）。`immediate` なら今消す
-        （`legal_hold` が立っていれば予約にする）。共有 Org の最後のオーナーの間は `409 last_owner`。
+        （`legal_hold` が立っていれば予約にする）。共有 Org の最後のオーナーと、realm の最後の `realm:owner` の間は `409 last_owner`。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:

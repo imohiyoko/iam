@@ -8,6 +8,7 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authz/check"
+	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
 )
@@ -41,4 +42,11 @@ func (authzMembers) OrgRole(ctx context.Context, tx port.Tx, realmID string, p c
 		return "", false, err
 	}
 	return m.Role, true, nil
+}
+
+// authzRoles は account.UserRoles の実装。最後の realm:owner は削除できない（ADR 0064）。
+type authzRoles struct{}
+
+func (authzRoles) IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string) (bool, error) {
+	return manage.IsLastOwner(ctx, tx, realmID, userID)
 }
