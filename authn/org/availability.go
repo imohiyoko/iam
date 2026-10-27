@@ -12,7 +12,8 @@ import (
 )
 
 // Check は Membership m とその Org o が now に使えるかを時刻から計算する（design.md 4.7、4.8、ADR 0058）。
-// 使えなければ *account.UnavailableError（Org と Membership の理由を合わせる）、active でない Membership は ErrNoAvailableOrg。
+// 使えなければ *account.UnavailableError（Org と Membership の理由と、削除の予定。合わせて返す）、active でない Membership と
+// 削除した Org は ErrNoAvailableOrg。
 // 個人 Org は個別に止められず、有効期間も持たない（本人の可否はユーザーの検証で見る）。
 // Org の停止は措置の間だけ Org の操作を止めるもので、解除すれば戻る（セッションを失効させるユーザーの停止とは違い、since は now）。
 // next は now より後で可否が次に変わりうる最も早い時刻で、無ければ nil。
@@ -23,7 +24,13 @@ func Check(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, now t
 	if o.Kind == port.OrgPersonal {
 		return nil, nil
 	}
+	if o.DeletedAt != nil {
+		return nil, ErrNoAvailableOrg
+	}
 	var codes []string
+	if o.DeletionScheduledAt != nil {
+		codes = append(codes, CodeDeletionScheduled)
+	}
 	collect := func(next *time.Time, err error) (*time.Time, error) {
 		if ue, ok := errors.AsType[*account.UnavailableError](err); ok {
 			codes = append(codes, ue.Codes...)

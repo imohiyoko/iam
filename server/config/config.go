@@ -120,6 +120,8 @@ type Realm struct {
 	// OrgCreation は共有 Org を作れる人（design.md 4.11）：anyone / operators_only / invite_only。
 	// 運営者は管理 API からいつでも作れる。
 	OrgCreation string `yaml:"org_creation"`
+	// OrgDeletionGrace は Org の削除の猶予期間（design.md 4.10）。0 は猶予なし（今削除する）。
+	OrgDeletionGrace Duration `yaml:"org_deletion_grace"`
 }
 
 // KnownOrgCreation は realm.org_creation の値。
@@ -296,7 +298,7 @@ func Default() Config {
 		Notifier:    Adapter{Driver: "dev"},
 		BreachCheck: Adapter{Driver: "hibp"},
 		Realm: Realm{Slug: "default", Timezone: "UTC", VerifiedVia: []string{"code", "oauth_provider", "sso", "admin"},
-			OrgCreation: "anyone"},
+			OrgCreation: "anyone", OrgDeletionGrace: Duration(30 * day)},
 		Security: Security{Session: SessionRules{
 			AbsoluteLifetime: DurationRule{Default: Duration(30 * day), Min: Duration(time.Hour), Max: Duration(90 * day)},
 			IdleTimeout:      DurationRule{Default: Duration(7 * day), Min: Duration(5 * time.Minute), Max: Duration(30 * day)},
@@ -407,6 +409,9 @@ func (c Config) Validate() error {
 	}
 	if c.Realm.Slug == "" {
 		problems = append(problems, "realm.slug is required")
+	}
+	if c.Realm.OrgDeletionGrace < 0 {
+		problems = append(problems, "realm.org_deletion_grace must not be negative")
 	}
 	if !slices.Contains(KnownOrgCreation, c.Realm.OrgCreation) {
 		problems = append(problems, fmt.Sprintf("realm.org_creation: unknown %q (known: %v)", c.Realm.OrgCreation, KnownOrgCreation))

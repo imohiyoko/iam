@@ -63,6 +63,8 @@ type Service struct {
 	Policy   CreationPolicy
 	// InvitationTTL は招待の有効期限。0 なら DefaultInvitationTTL。
 	InvitationTTL time.Duration
+	// DeletionGrace は本人（owner）による Org の削除の猶予期間。0 なら猶予なし。
+	DeletionGrace time.Duration
 }
 
 // NormalizeName は名前の前後の空白を除き、形式を確かめる。

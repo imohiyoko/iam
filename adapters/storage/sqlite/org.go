@@ -15,7 +15,7 @@ func toOrg(r db.Org) (port.Org, error) {
 	var p times
 	o := port.Org{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Kind: port.OrgKind(r.Kind), Name: r.Name,
 		PersonalOwnerID: r.PersonalOwnerID, ValidFrom: p.null(r.ValidFrom), ValidUntil: p.null(r.ValidUntil),
-		CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		DeletionScheduledAt: p.null(r.DeletionScheduledAt), DeletedAt: p.null(r.DeletedAt), CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	return o, p.err
 }
 
@@ -50,6 +50,12 @@ func (r orgs) SetValidity(ctx context.Context, realmID, id string, from, until *
 		return errs.New(errs.KindNotFound, "org")
 	}
 	return nil
+}
+
+func (r orgs) SetDeletion(ctx context.Context, realmID, id string, scheduledAt, deletedAt *time.Time, updatedAt time.Time) error {
+	n, err := r.q.SetOrgDeletion(ctx, db.SetOrgDeletionParams{DeletionScheduledAt: nullTime(scheduledAt), DeletedAt: nullTime(deletedAt),
+		UpdatedAt: formatTime(updatedAt), RealmID: realmID, ID: id})
+	return affected(n, err, "org")
 }
 
 // ---------------------------------------------------------------------------

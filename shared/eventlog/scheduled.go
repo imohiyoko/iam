@@ -25,6 +25,11 @@ func Schedule(ctx context.Context, tx port.Tx, clk clock.Clock, realmID, ref, ty
 	})
 }
 
+// Handler は予約の時刻を過ぎた出来事の後始末（Org の削除、期限の過ぎた招待の鍵の削除など。4.10）。
+// 発火の記録と監査ログと同じトランザクションで呼ぶ。エラーを返せば全体を取り消し、次の回にやり直す。
+// details は予約したときの詳細で、Handler が足した鍵も監査ログに載る。
+type Handler func(ctx context.Context, tx port.Tx, e port.ScheduledEvent, details map[string]any) error
+
 // Scheduler は予約の時刻を過ぎた出来事を監査ログに出す。出るのは時刻の後（Interval の分は遅れうる）だが、
 // アクセスの可否はこの処理に依らず時刻から計算する（4.8）。発火済みの記録と監査ログは同じトランザクションで書くので、
 // 複数のインスタンスで動かしても1回だけ出る。
@@ -34,6 +39,8 @@ type Scheduler struct {
 	Interval time.Duration
 	Batch    int
 	Log      *slog.Logger
+	// Handlers は出来事の種類ごとの後始末。無い種類は監査ログに出すだけ。
+	Handlers map[string]Handler
 }
 
 // Run は ctx が終わるまで発火を繰り返す。
@@ -81,6 +88,11 @@ func (s *Scheduler) Fire(ctx context.Context) (int, error) {
 				details = map[string]any{}
 			}
 			details["scheduled_at"] = e.FireAt.UTC().Format(time.RFC3339Nano)
+			if h := s.Handlers[e.Type]; h != nil {
+				if err := h(ctx, tx, e, details); err != nil {
+					return err
+				}
+			}
 			_, err = Record(ctx, tx, s.Clock, audit.Event{
 				Type: e.Type, Result: audit.ResultSuccess, RealmID: e.RealmID, Actor: audit.Actor{Type: "system"}, Details: details,
 			})

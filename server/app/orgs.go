@@ -98,7 +98,8 @@ func (s publicServer) CreateMyOrg(ctx context.Context, req publicapi.CreateMyOrg
 // ---------------------------------------------------------------------------
 
 func orgView(o port.Org, ownerPublicID string) adminapi.Org {
-	v := adminapi.Org{Id: o.PublicID, Kind: adminapi.OrgKind(o.Kind), CreatedAt: o.CreatedAt, ValidFrom: o.ValidFrom, ValidUntil: o.ValidUntil}
+	v := adminapi.Org{Id: o.PublicID, Kind: adminapi.OrgKind(o.Kind), CreatedAt: o.CreatedAt, ValidFrom: o.ValidFrom, ValidUntil: o.ValidUntil,
+		DeletionScheduledAt: o.DeletionScheduledAt, DeletedAt: o.DeletedAt}
 	if o.Name != "" {
 		v.Name = &o.Name
 	}

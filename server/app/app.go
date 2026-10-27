@@ -168,7 +168,8 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via, ExtraCategories: cfg.Security.SuspensionCategories}
 	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
 	if plan.IsActive(feature.Org) {
-		a.orgs = &org.Service{Clock: d.Clock, Crypter: a.pii, Accounts: a.accounts, Notify: a.notify, Policy: org.CreationPolicy(cfg.Realm.OrgCreation)}
+		a.orgs = &org.Service{Clock: d.Clock, Crypter: a.pii, Accounts: a.accounts, Notify: a.notify, Policy: org.CreationPolicy(cfg.Realm.OrgCreation),
+			DeletionGrace: cfg.Realm.OrgDeletionGrace.D()}
 		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
 	}
 	a.email = &emailflow.Service{
@@ -231,6 +232,9 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		})
 	}
 	a.scheduler = &eventlog.Scheduler{Storage: d.Storage, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger}
+	if a.orgs != nil {
+		a.scheduler.Handlers = map[string]eventlog.Handler{org.EventOrgDeleted: a.orgs.PurgeDue, org.EventInvitationExpired: a.orgs.ExpireDue}
+	}
 	a.notifier = &eventlog.Relay{
 		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Clock, d.Logger), Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,

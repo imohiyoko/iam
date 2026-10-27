@@ -422,6 +422,51 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/orgs/{id}:delete:
+    post:
+      operationId: deleteOrg
+      summary: 共有 Org を削除する（4.10）
+      description: |
+        権限 `orgs:delete`。既定は realm の `org_deletion_grace` の後に削除する（その間は取り消せる）。`immediate` なら今削除する。
+        個人 Org はユーザーと一緒に消すので `409 personal_org`。フィーチャー org が動いていなければ `404 org_disabled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                immediate: { type: boolean, default: false }
+      responses:
+        "200":
+          description: 削除を予約した（か、削除した）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/orgs/{id}:cancel-deletion:
+    post:
+      operationId: cancelOrgDeletion
+      summary: Org の削除の予定を取り消す
+      description: 権限 `orgs:delete`。予定が無ければ `409 deletion_not_scheduled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 取り消した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
   /v1/admin/orgs/{id}/memberships:
     get:
       operationId: listOrgMemberships
@@ -598,6 +643,8 @@ components:
         personal_owner_id: { type: string, description: 個人 Org の持ち主（公開のユーザー ID） }
         valid_from: { type: string, format: date-time }
         valid_until: { type: string, format: date-time }
+        deletion_scheduled_at: { type: string, format: date-time, description: 削除の予定（猶予期間の終わり） }
+        deleted_at: { type: string, format: date-time, description: 削除した時刻 }
         created_at: { type: string, format: date-time }
     Membership:
       type: object

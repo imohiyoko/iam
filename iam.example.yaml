@@ -33,6 +33,7 @@ realm:
   slug: default
   timezone: UTC
   org_creation: anyone  # 共有 Org を作れる人：anyone / operators_only / invite_only（運営者はいつでも作れる）
+  org_deletion_grace: 30d  # Org の削除の猶予期間（その間は取り消せる。0 で猶予なし）
 
 security:
   session:
