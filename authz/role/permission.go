@@ -108,7 +108,7 @@ func Covered(granted []string, want string) bool {
 
 // realmResources は IAM 自身の、realm の範囲の管理の権限のリソース。Org の範囲のロールには入れられない
 // （Org の範囲の付与は realm の範囲の判定に効かないため、入れても意味が無く、誤解のもとになる）。
-var realmResources = []string{"users", "orgs", "sessions", "credentials", "suspensions", "connections", "pii", "notifications", "roles", "groups", "authz"}
+var realmResources = []string{"users", "orgs", "sessions", "credentials", "suspensions", "connections", "pii", "notifications", "roles", "groups", "authz", "clients", "signing_keys"}
 
 // IAM は IAM 自身の権限（realm の管理の権限と、Org の操作の `org:`）かを返す。管理の操作では、これを渡すには自分が持って
 // いなければならない（権限の引き上げを防ぐ）。それ以外は連携先の権限で、範囲の管理者が自由に渡せる。

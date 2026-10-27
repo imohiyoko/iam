@@ -92,6 +92,7 @@ const (
 	ServiceAccount Prefix = "sva"
 	SACredential   Prefix = "sac"
 	Client         Prefix = "cli"
+	SigningKey     Prefix = "sgk"
 	Passkey        Prefix = "psk"
 	TOTP           Prefix = "otp"
 	Password       Prefix = "pwd"

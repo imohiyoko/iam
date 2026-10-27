@@ -26,6 +26,7 @@ import (
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/password"
+	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/recovery"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/totp"
@@ -88,6 +89,9 @@ type App struct {
 	// recovery はリカバリーコードと復旧の完了（4.12）。
 	recovery *recovery.Service
 	notifier *eventlog.Relay
+	// clients と keys は OIDC Provider の連携先と ID トークンの署名鍵（5.5、9.3）。
+	clients *provider.Clients
+	keys    *provider.Keys
 	// authz は認可の判定（ADR 0064）。manage はロール・付与・Group の管理。
 	authz  *check.Checker
 	manage *manage.Service
@@ -193,6 +197,12 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		a.authz.Members = authzMembers{}
 	}
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock}
+	a.clients = &provider.Clients{Clock: d.Clock}
+	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D()}
+	// ID トークンの署名鍵は起動時に用意しておく（JWKS が空のまま公開されないように）。
+	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, a.realm.ID) }); err != nil {
+		return nil, err
+	}
 	a.email = &emailflow.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Notify: a.notify, Log: d.Logger,

@@ -54,3 +54,10 @@ outbox:
 ids:
   internal: uuidv7
   external: random
+
+oidc:
+  code_ttl: 1m  # 認可コードの寿命（10分以下）
+  id_token_ttl: 1h  # ID トークンの寿命
+  access_token_ttl: 10m  # 不透明なアクセストークンの寿命（失効はイントロスペクションに validity_max_delay の内に効く）
+  refresh_token_ttl: 30d  # リフレッシュトークンの寿命（ローテーションし、再利用を検知したらファミリーごと失効）
+  retired_key_ttl: 7d  # ローテーションした古い署名鍵を JWKS に残す期間

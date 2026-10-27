@@ -203,6 +203,8 @@ func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t.q} }
 func (t *tx) RoleBindings() port.RoleBindingRepo       { return roleBindings{t.q} }
 func (t *tx) Roles() port.RoleRepo                     { return roles{t.q} }
 func (t *tx) Groups() port.GroupRepo                   { return groups{t.q} }
+func (t *tx) Clients() port.ClientRepo                 { return clients{t.q} }
+func (t *tx) SigningKeys() port.SigningKeyRepo         { return signingKeys{t.q} }
 
 // ---------------------------------------------------------------------------
 
