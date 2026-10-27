@@ -2,8 +2,6 @@ package org
 
 import (
 	"context"
-	"errors"
-	"strings"
 
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -46,25 +44,21 @@ var (
 func IsManaged(u port.User, o port.Org) bool { return u.ManagedOrgID != "" && u.ManagedOrgID == o.ID }
 
 // managedDomain は m（この Org で使うメール）が確認済みで、そのドメインを o が証明済みかを確かめる。
+// ドメインはブラインドインデックスで比べる（復号しない。最小化モードでも判定できる）。
 func (s *Service) managedDomain(ctx context.Context, tx port.Tx, o port.Org, m port.Membership) error {
-	e, err := BoundEmail(ctx, tx, m)
-	if errors.Is(err, errs.NotFound) || (err == nil && e.VerifiedAt == nil) {
-		return ErrEmailDomainNotVerified
-	}
+	ds, err := tx.OrgDomains().ListByOrg(ctx, o.RealmID, o.ID)
 	if err != nil {
 		return err
 	}
-	addr, err := s.Accounts.EmailAddress(ctx, tx, e)
-	if err != nil {
-		return err
+	var verified []string
+	for _, d := range ds {
+		if d.VerifiedAt != nil {
+			verified = append(verified, d.Domain)
+		}
 	}
-	at := strings.LastIndexByte(addr, '@')
-	if at < 0 {
-		return ErrEmailDomainNotVerified // 最小化モード（アドレスを持たない）では判定できない
-	}
-	d, err := tx.OrgDomains().GetVerified(ctx, o.RealmID, strings.ToLower(addr[at+1:]))
-	if errors.Is(err, errs.NotFound) || (err == nil && d.OrgID != o.ID) {
-		return ErrEmailDomainNotVerified
+	ok, err := s.emailInDomains(ctx, tx, m, verified)
+	if err == nil && !ok {
+		err = ErrEmailDomainNotVerified
 	}
 	return err
 }
