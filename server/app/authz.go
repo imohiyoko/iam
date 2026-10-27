@@ -42,3 +42,14 @@ func (authzMembers) OrgRole(ctx context.Context, tx port.Tx, realmID string, p c
 	}
 	return m.Role, true, nil
 }
+
+func (authzMembers) OrgUsable(ctx context.Context, tx port.Tx, realmID, orgID string, now time.Time) (bool, error) {
+	o, err := tx.Orgs().Get(ctx, realmID, orgID)
+	if errors.Is(err, errs.NotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return org.Usable(ctx, tx, o, now)
+}

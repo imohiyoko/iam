@@ -6,6 +6,7 @@ package main
 import (
 	// フィーチャー。
 	_ "github.com/imohiyoko/iam/features/org"
+	_ "github.com/imohiyoko/iam/features/orghierarchy"
 	_ "github.com/imohiyoko/iam/features/orgloginpolicy"
 	_ "github.com/imohiyoko/iam/features/orgmanagedusers"
 	_ "github.com/imohiyoko/iam/features/password"

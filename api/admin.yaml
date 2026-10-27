@@ -662,6 +662,60 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/orgs/{id}:set-parent:
+    post:
+      operationId: setOrgParent
+      summary: Org の親を設定する・外す（Org 階層。11.4、ADR 0078）
+      description: |
+        権限 `orgs:update`。`parent_id` を省略か null にすると親を外す。親の Org の付与と org_role が、子孫の Org の範囲の
+        判定に効く（親の使える所属を持つ間、子の Org が使えるとき）。個人 Org は `409 personal_org`、削除した Org は
+        `409 org_deleted`、循環は `409 hierarchy_cycle`、段数（根を含めて 5）を超えるなら `409 hierarchy_too_deep`。
+        フィーチャー org_hierarchy が動いていなければ `404 hierarchy_disabled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parent_id: { type: string, nullable: true, description: 親の公開の Org ID }
+      responses:
+        "200":
+          description: 設定した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/orgs/{id}/children:
+    get:
+      operationId: listOrgChildren
+      summary: 子の Org の一覧（Org 階層）
+      description: 権限 `orgs:read`。フィーチャー org_hierarchy が動いていなければ `404 hierarchy_disabled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: ID の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orgs]
+                properties:
+                  orgs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Org" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/orgs/{id}:cancel-deletion:
     post:
       operationId: cancelOrgDeletion
@@ -1638,6 +1692,7 @@ components:
         valid_until: { type: string, format: date-time }
         deletion_scheduled_at: { type: string, format: date-time, description: 削除の予定（猶予期間の終わり） }
         deleted_at: { type: string, format: date-time, description: 削除した時刻 }
+        parent_id: { type: string, description: 親の Org（公開の Org ID。Org 階層、ADR 0078） }
         created_at: { type: string, format: date-time }
     Membership:
       type: object

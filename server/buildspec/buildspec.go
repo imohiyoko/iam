@@ -32,6 +32,7 @@ var featureCatalog = map[string]struct {
 }{
 	feature.Org:             {org.Feature, module + "/features/org"},
 	feature.OrgManagedUsers: {org.ManagedUsersFeature, module + "/features/orgmanagedusers"},
+	feature.OrgHierarchy:    {org.HierarchyFeature, module + "/features/orghierarchy"},
 	feature.OrgLoginPolicy:  {org.PolicyFeature, module + "/features/orgloginpolicy"},
 	feature.Quota:           {org.QuotaFeature, module + "/features/quota"},
 	feature.Warnings:        {warning.Feature, module + "/features/warnings"},

@@ -118,3 +118,21 @@ SELECT count(*) FROM org_domains;
 
 -- name: PurgeOrgDomains :execrows
 DELETE FROM org_domains WHERE id IN (SELECT d.id FROM org_domains d LIMIT sqlc.arg(lim));
+
+-- name: SetOrgParent :execrows
+UPDATE orgs SET parent_org_id = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
+
+-- name: ListOrgChildren :many
+SELECT * FROM orgs WHERE realm_id = ? AND parent_org_id = ? ORDER BY id;
+
+-- name: ListOrgAncestors :many
+SELECT ancestor_id, depth FROM org_ancestors WHERE realm_id = ? AND org_id = ? ORDER BY depth;
+
+-- name: ListOrgDescendants :many
+SELECT org_id, depth FROM org_ancestors WHERE realm_id = ? AND ancestor_id = ? ORDER BY depth, org_id;
+
+-- name: DeleteOrgAncestorsAbove :exec
+DELETE FROM org_ancestors WHERE realm_id = ? AND org_id = ? AND depth > ?;
+
+-- name: InsertOrgAncestor :exec
+INSERT INTO org_ancestors (realm_id, org_id, ancestor_id, depth) VALUES (?, ?, ?, ?);

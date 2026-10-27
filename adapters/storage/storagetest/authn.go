@@ -60,6 +60,7 @@ var authnTests = []struct {
 	{"InvitationAcceptConcurrent", testInvitationAcceptConcurrent},
 	{"QuotaGrants", testQuotaGrants},
 	{"OrgDomains", testOrgDomains},
+	{"OrgHierarchy", testOrgHierarchy},
 	{"ManagedUsers", testManagedUsers},
 	{"QuotaCountThenAddConcurrent", testQuotaCountThenAddConcurrent},
 	{"Clients", testClients},
@@ -990,5 +991,6 @@ var authnIsolationCases = []IsolationCase{
 	invitationIsolationCase,
 	quotaGrantIsolationCase,
 	orgDomainIsolationCase,
+	orgHierarchyIsolationCase,
 	managedUserIsolationCase,
 }

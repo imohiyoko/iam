@@ -127,15 +127,29 @@ func (s adminServer) adminOrg(ctx context.Context, tx port.Tx, publicID string) 
 	if err != nil {
 		return port.Org{}, adminapi.Org{}, err
 	}
+	v, err := s.orgOut(ctx, tx, o)
+	return o, v, err
+}
+
+// orgOut は Org の表示（個人 Org の持ち主と親の公開 ID を引く）。
+func (s adminServer) orgOut(ctx context.Context, tx port.Tx, o port.Org) (adminapi.Org, error) {
 	var owner string
 	if o.Kind == port.OrgPersonal {
 		u, err := tx.Users().Get(ctx, s.a.realm.ID, o.PersonalOwnerID)
 		if err != nil {
-			return port.Org{}, adminapi.Org{}, err
+			return adminapi.Org{}, err
 		}
 		owner = u.PublicID
 	}
-	return o, orgView(o, owner), nil
+	v := orgView(o, owner)
+	if o.ParentID != "" {
+		p, err := tx.Orgs().Get(ctx, s.a.realm.ID, o.ParentID)
+		if err != nil {
+			return adminapi.Org{}, err
+		}
+		v.ParentId = &p.PublicID
+	}
+	return v, nil
 }
 
 func (s adminServer) CreateOrg(ctx context.Context, req adminapi.CreateOrgRequestObject) (adminapi.CreateOrgResponseObject, error) {
@@ -295,8 +309,8 @@ func (s adminServer) UpdateOrg(ctx context.Context, req adminapi.UpdateOrgReques
 		if cur, err = s.a.orgs.SetOrgValidity(ctx, tx, cur, req.Body.ValidFrom, req.Body.ValidUntil, p.Actor, requestID(ctx)); err != nil {
 			return err
 		}
-		out = orgView(cur, "")
-		return nil
+		out, err = s.orgOut(ctx, tx, cur)
+		return err
 	})
 	switch {
 	case err != nil:

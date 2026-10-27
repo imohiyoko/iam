@@ -37,6 +37,12 @@ var cleaners = map[string]cleaner{
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
 		return eachOrg(ctx, tx, limit, func(o port.Org) (bool, error) { return org.ClearLoginPolicy(ctx, tx, o, now) })
 	}},
+	// 親子関係を外す（ADR 0078）。
+	feature.OrgHierarchy: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachOrg(ctx, tx, -1, func(o port.Org) (bool, error) { return o.ParentID != "", nil })
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachOrg(ctx, tx, limit, func(o port.Org) (bool, error) { return org.ClearParent(ctx, tx, o, now) })
+	}},
 	feature.Quota: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.QuotaGrants().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.QuotaGrants().Purge(ctx, limit)

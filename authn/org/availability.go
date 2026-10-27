@@ -59,6 +59,16 @@ func Check(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, now t
 	return n2, nil
 }
 
+// Usable は Org o が now に使えるか（削除・停止・有効期間の外・削除の予定でない）を返す（Membership は見ない）。
+// 親の Org のロールを子に効かせるときに、子の Org を確かめる（ADR 0078）。
+func Usable(ctx context.Context, tx port.Tx, o port.Org, now time.Time) (bool, error) {
+	_, err := Check(ctx, tx, o, port.Membership{RealmID: o.RealmID, OrgID: o.ID, Status: port.MembershipActive}, now)
+	if _, ok := errors.AsType[*account.UnavailableError](err); ok || errors.Is(err, ErrNoAvailableOrg) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // CheckActive はセッションの active な Org（内部 ID）が本人にとって now に使えるかを返す（Check。5.3）。
 // 所属が無ければ ErrNoAvailableOrg。
 func (s *Service) CheckActive(ctx context.Context, tx port.Tx, realmID, userID, orgID string, now time.Time) (*time.Time, error) {

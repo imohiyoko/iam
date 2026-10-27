@@ -645,6 +645,9 @@ type Org struct {
 	Kind OrgKind `json:"kind"`
 	Name *string `json:"name,omitempty"`
 
+	// ParentId 親の Org（公開の Org ID。Org 階層、ADR 0078）
+	ParentId *string `json:"parent_id,omitempty"`
+
 	// PersonalOwnerId 個人 Org の持ち主（公開のユーザー ID）
 	PersonalOwnerId *string    `json:"personal_owner_id,omitempty"`
 	ValidFrom       *time.Time `json:"valid_from,omitempty"`
@@ -1027,6 +1030,12 @@ type DeleteOrgJSONBody struct {
 	Immediate *bool `json:"immediate,omitempty"`
 }
 
+// SetOrgParentJSONBody defines parameters for SetOrgParent.
+type SetOrgParentJSONBody struct {
+	// ParentId 親の公開の Org ID
+	ParentId *string `json:"parent_id,omitempty"`
+}
+
 // ListServiceAccountsParams defines parameters for ListServiceAccounts.
 type ListServiceAccountsParams struct {
 	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
@@ -1137,6 +1146,9 @@ type SuspendOrgJSONRequestBody = SuspendRequest
 
 // DeleteOrgJSONRequestBody defines body for DeleteOrg for application/json ContentType.
 type DeleteOrgJSONRequestBody DeleteOrgJSONBody
+
+// SetOrgParentJSONRequestBody defines body for SetOrgParent for application/json ContentType.
+type SetOrgParentJSONRequestBody SetOrgParentJSONBody
 
 // CreateRoleBindingJSONRequestBody defines body for CreateRoleBinding for application/json ContentType.
 type CreateRoleBindingJSONRequestBody = RoleBindingInput
@@ -1257,6 +1269,9 @@ type ServerInterface interface {
 	// UpdateOrg Orgの有効期間を変更する（4.8）
 	// (PATCH /v1/admin/orgs/{id})
 	UpdateOrg(w http.ResponseWriter, r *http.Request, id string)
+	// ListOrgChildren 子の Org の一覧（Org 階層）
+	// (GET /v1/admin/orgs/{id}/children)
+	ListOrgChildren(w http.ResponseWriter, r *http.Request, id string)
 	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/memberships)
 	ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams)
@@ -1290,6 +1305,9 @@ type ServerInterface interface {
 	// DeleteOrg 共有 Org を削除する（4.10）
 	// (POST /v1/admin/orgs/{id}:delete)
 	DeleteOrg(w http.ResponseWriter, r *http.Request, id string)
+	// SetOrgParent Org の親を設定する・外す（Org 階層。11.4、ADR 0078）
+	// (POST /v1/admin/orgs/{id}:set-parent)
+	SetOrgParent(w http.ResponseWriter, r *http.Request, id string)
 	// ListRoleBindings realm の範囲のロールの付与の一覧
 	// (GET /v1/admin/role-bindings)
 	ListRoleBindings(w http.ResponseWriter, r *http.Request)
@@ -1902,6 +1920,32 @@ func (siw *ServerInterfaceWrapper) UpdateOrg(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ListOrgChildren operation middleware
+func (siw *ServerInterfaceWrapper) ListOrgChildren(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrgChildren(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListOrgMemberships operation middleware
 func (siw *ServerInterfaceWrapper) ListOrgMemberships(w http.ResponseWriter, r *http.Request) {
 
@@ -2226,6 +2270,32 @@ func (siw *ServerInterfaceWrapper) DeleteOrg(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteOrg(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetOrgParent operation middleware
+func (siw *ServerInterfaceWrapper) SetOrgParent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetOrgParent(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3210,6 +3280,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/admin/orgs/{id}/quota/grants/{grant_id}", wrapper.DeleteOrgQuotaGrant)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/orgs/{id}/quota/grants/{grant_id}", wrapper.UpdateOrgQuotaGrant)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}:delete", wrapper.DeleteOrg)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}:set-parent", wrapper.SetOrgParent)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/children", wrapper.ListOrgChildren)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}:cancel-deletion", wrapper.CancelOrgDeletion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/memberships", wrapper.ListOrgMemberships)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/suspensions", wrapper.ListOrgSuspensions)
@@ -4936,6 +5008,72 @@ func (response UpdateOrg409JSONResponse) VisitUpdateOrgResponse(w http.ResponseW
 	return err
 }
 
+type ListOrgChildrenRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListOrgChildrenResponseObject interface {
+	VisitListOrgChildrenResponse(w http.ResponseWriter) error
+}
+
+type ListOrgChildren200JSONResponse struct {
+	Orgs []Org `json:"orgs"`
+}
+
+func (response ListOrgChildren200JSONResponse) VisitListOrgChildrenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgChildren401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListOrgChildren401JSONResponse) VisitListOrgChildrenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgChildren403JSONResponse Error
+
+func (response ListOrgChildren403JSONResponse) VisitListOrgChildrenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgChildren404JSONResponse Error
+
+func (response ListOrgChildren404JSONResponse) VisitListOrgChildrenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListOrgMembershipsRequestObject struct {
 	Id     string `json:"id"`
 	Params ListOrgMembershipsParams
@@ -5846,6 +5984,99 @@ func (response DeleteOrg404JSONResponse) VisitDeleteOrgResponse(w http.ResponseW
 type DeleteOrg409JSONResponse Error
 
 func (response DeleteOrg409JSONResponse) VisitDeleteOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgParentRequestObject struct {
+	Id   string `json:"id"`
+	Body *SetOrgParentJSONRequestBody
+}
+
+type SetOrgParentResponseObject interface {
+	VisitSetOrgParentResponse(w http.ResponseWriter) error
+}
+
+type SetOrgParent200JSONResponse Org
+
+func (response SetOrgParent200JSONResponse) VisitSetOrgParentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgParent400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SetOrgParent400JSONResponse) VisitSetOrgParentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgParent401JSONResponse Error
+
+func (response SetOrgParent401JSONResponse) VisitSetOrgParentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgParent403JSONResponse Error
+
+func (response SetOrgParent403JSONResponse) VisitSetOrgParentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgParent404JSONResponse Error
+
+func (response SetOrgParent404JSONResponse) VisitSetOrgParentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgParent409JSONResponse Error
+
+func (response SetOrgParent409JSONResponse) VisitSetOrgParentResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -8383,6 +8614,9 @@ type StrictServerInterface interface {
 	// UpdateOrg Orgの有効期間を変更する（4.8）
 	// (PATCH /v1/admin/orgs/{id})
 	UpdateOrg(ctx context.Context, request UpdateOrgRequestObject) (UpdateOrgResponseObject, error)
+	// ListOrgChildren 子の Org の一覧（Org 階層）
+	// (GET /v1/admin/orgs/{id}/children)
+	ListOrgChildren(ctx context.Context, request ListOrgChildrenRequestObject) (ListOrgChildrenResponseObject, error)
 	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/memberships)
 	ListOrgMemberships(ctx context.Context, request ListOrgMembershipsRequestObject) (ListOrgMembershipsResponseObject, error)
@@ -8416,6 +8650,9 @@ type StrictServerInterface interface {
 	// DeleteOrg 共有 Org を削除する（4.10）
 	// (POST /v1/admin/orgs/{id}:delete)
 	DeleteOrg(ctx context.Context, request DeleteOrgRequestObject) (DeleteOrgResponseObject, error)
+	// SetOrgParent Org の親を設定する・外す（Org 階層。11.4、ADR 0078）
+	// (POST /v1/admin/orgs/{id}:set-parent)
+	SetOrgParent(ctx context.Context, request SetOrgParentRequestObject) (SetOrgParentResponseObject, error)
 	// ListRoleBindings realm の範囲のロールの付与の一覧
 	// (GET /v1/admin/role-bindings)
 	ListRoleBindings(ctx context.Context, request ListRoleBindingsRequestObject) (ListRoleBindingsResponseObject, error)
@@ -9222,6 +9459,32 @@ func (sh *strictHandler) UpdateOrg(w http.ResponseWriter, r *http.Request, id st
 	}
 }
 
+// ListOrgChildren operation middleware
+func (sh *strictHandler) ListOrgChildren(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListOrgChildrenRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrgChildren(ctx, request.(ListOrgChildrenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrgChildren")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrgChildrenResponseObject); ok {
+		if err := validResponse.VisitListOrgChildrenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListOrgMemberships operation middleware
 func (sh *strictHandler) ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams) {
 	var request ListOrgMembershipsRequestObject
@@ -9542,6 +9805,39 @@ func (sh *strictHandler) DeleteOrg(w http.ResponseWriter, r *http.Request, id st
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteOrgResponseObject); ok {
 		if err := validResponse.VisitDeleteOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetOrgParent operation middleware
+func (sh *strictHandler) SetOrgParent(w http.ResponseWriter, r *http.Request, id string) {
+	var request SetOrgParentRequestObject
+
+	request.Id = id
+
+	var body SetOrgParentJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetOrgParent(ctx, request.(SetOrgParentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetOrgParent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetOrgParentResponseObject); ok {
+		if err := validResponse.VisitSetOrgParentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

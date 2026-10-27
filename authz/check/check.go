@@ -50,6 +50,8 @@ type Members interface {
 	// OrgRole は主体が now に orgID（内部 ID）で使える所属の org_role を返す。所属が無いか、停止・有効期間の外などで
 	// 使えなければ ok が false。
 	OrgRole(ctx context.Context, tx port.Tx, realmID string, p Principal, orgID string, now time.Time) (r port.OrgRole, ok bool, err error)
+	// OrgUsable は Org（内部 ID）が now に使えるか（削除・停止・有効期間の外でない）を返す。親から効かせる付与の判定に使う。
+	OrgUsable(ctx context.Context, tx port.Tx, realmID, orgID string, now time.Time) (bool, error)
 }
 
 // Checker は判定を行う。
@@ -58,6 +60,9 @@ type Checker struct {
 	Clock   clock.Clock
 	// Members は所属の問い合わせ。nil なら Org がオフで、Org の範囲の付与は効かない。
 	Members Members
+	// Hierarchy は Org 階層（フィーチャー org_hierarchy。ADR 0078）。true なら、Org の範囲の判定に祖先の Org の付与と
+	// org_role を、祖先の使える所属を持つ間だけ（判定の Org が使えるときに）効かせる。
+	Hierarchy bool
 	// TTL は判定の材料のキャッシュの期限（反映の遅れの上限）。0 ならキャッシュしない。
 	TTL time.Duration
 	// MaxEntries はキャッシュの件数の上限。超えたら全部捨てる。0 なら 100000。
@@ -211,20 +216,60 @@ func (c *Checker) Grants(ctx context.Context, tx port.Tx, realmID string, p Prin
 	if c.Members == nil {
 		orgID = "" // Org がオフなら realm の範囲だけ
 	}
-	var member *bool
-	var orgRole port.OrgRole
-	isMember := func() (bool, error) {
-		if member == nil {
-			ok := false
-			if orgID != "" {
-				var err error
-				if orgRole, ok, err = c.Members.OrgRole(ctx, tx, realmID, p, orgID, c.Clock.Now()); err != nil {
-					return false, err
-				}
+	now := c.Clock.Now()
+	// 範囲の Org：判定の Org と、階層がオンならその祖先（近い順）。
+	scopes := []string{}
+	if orgID != "" {
+		scopes = append(scopes, orgID)
+		if c.Hierarchy {
+			up, err := tx.Orgs().Ancestors(ctx, realmID, orgID)
+			if err != nil {
+				return nil, err
 			}
-			member = &ok
+			scopes = append(scopes, up...)
 		}
-		return *member, nil
+	}
+	type membership struct {
+		role port.OrgRole
+		ok   bool
+	}
+	members := map[string]membership{}
+	memberOf := func(sc string) (membership, error) {
+		if m, done := members[sc]; done {
+			return m, nil
+		}
+		r, ok, err := c.Members.OrgRole(ctx, tx, realmID, p, sc, now)
+		if err != nil {
+			return membership{}, err
+		}
+		members[sc] = membership{r, ok}
+		return members[sc], nil
+	}
+	// 祖先から効かせるのは、判定の Org そのものが使えるときだけ。
+	var usable *bool
+	orgUsable := func() (bool, error) {
+		if usable == nil {
+			ok, err := c.Members.OrgUsable(ctx, tx, realmID, orgID, now)
+			if err != nil {
+				return false, err
+			}
+			usable = &ok
+		}
+		return *usable, nil
+	}
+	// sc の付与が効くか：範囲の Org のどれかで、その Org の使える所属を持つこと（祖先なら判定の Org が使えること）。
+	applies := func(sc string) (bool, error) {
+		if !slices.Contains(scopes, sc) {
+			return false, nil
+		}
+		m, err := memberOf(sc)
+		if err != nil || !m.ok {
+			return false, err
+		}
+		if sc == orgID {
+			return true, nil
+		}
+		return orgUsable()
 	}
 
 	// 直接の付与と Group の付与を、独自のロールの中身とともに1回で集める（キャッシュに外れたときの往復を減らす）。
@@ -239,10 +284,7 @@ func (c *Checker) Grants(ctx context.Context, tx port.Tx, realmID string, p Prin
 			if sc == "" {
 				continue
 			}
-			if sc != orgID {
-				return false, nil
-			}
-			if ok, err := isMember(); err != nil || !ok {
+			if ok, err := applies(sc); err != nil || !ok {
 				return false, err
 			}
 		}
@@ -257,13 +299,16 @@ func (c *Checker) Grants(ctx context.Context, tx port.Tx, realmID string, p Prin
 			out = append(out, Grant{ResourceType: b.ResourceType, ResourceID: b.ResourceID, Permissions: perms, Role: b.Role})
 		}
 	}
-	if orgID != "" {
-		if ok, err := isMember(); err != nil {
+	for _, sc := range scopes {
+		ok, err := applies(sc)
+		if err != nil {
 			return nil, err
-		} else if ok {
-			if b, found := role.Lookup(role.OrgRoleOf(orgRole)); found {
-				out = append(out, Grant{Permissions: b.Permissions, Role: b.Name})
-			}
+		}
+		if !ok {
+			continue
+		}
+		if b, found := role.Lookup(role.OrgRoleOf(members[sc].role)); found {
+			out = append(out, Grant{Permissions: b.Permissions, Role: b.Name})
 		}
 	}
 	return out, nil

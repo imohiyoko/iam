@@ -146,6 +146,10 @@ func (s *Service) purge(ctx context.Context, tx port.Tx, o port.Org, actor audit
 	if _, err := PurgeConnections(ctx, tx, o.RealmID, o.ID, now, -1); err != nil {
 		return err
 	}
+	// 親から外し、子を根にする（ADR 0078）。
+	if err := s.detachHierarchy(ctx, tx, o, now); err != nil {
+		return err
+	}
 	ds, err := tx.OrgDomains().ListByOrg(ctx, o.RealmID, o.ID)
 	if err != nil {
 		return err

@@ -17,9 +17,18 @@ var realm string
 // members は所属の偽物：主体ごとの Org と org_role。
 type members map[string]map[string]port.OrgRole
 
+// unusable は members で、使えない Org を並べる行のキー。
+const unusable = "!unusable"
+
 func (m members) OrgRole(_ context.Context, _ port.Tx, _ string, p check.Principal, orgID string, _ time.Time) (port.OrgRole, bool, error) {
 	r, ok := m[p.ID][orgID]
 	return r, ok, nil
+}
+
+// OrgUsable は、unusable の行に載せた Org だけを使えないとみなす。
+func (m members) OrgUsable(_ context.Context, _ port.Tx, _, orgID string, _ time.Time) (bool, error) {
+	_, bad := m[unusable][orgID]
+	return !bad, nil
 }
 
 type env struct {
@@ -236,4 +245,50 @@ func TestPermissionMatching(t *testing.T) {
 			t.Errorf("ValidPermission(%q) != %v", p, ok)
 		}
 	}
+}
+
+// Org 階層（ADR 0078）：祖先の Org の付与と org_role は、祖先の使える所属を持つ間だけ、使える子の Org で効く。
+func TestOrgHierarchy(t *testing.T) {
+	m := members{alice.ID: {"o_root": port.OrgAdmin}, bob.ID: {"o_mid": port.OrgMember}, robot.ID: {}}
+	e := newEnv(t, m)
+	e.c.Hierarchy = true
+	e.tx(func(ctx context.Context, tx port.Tx) error {
+		for _, id := range []string{"o_root", "o_mid", "o_leaf", "o_other"} {
+			if err := tx.Orgs().Create(ctx, port.Org{ID: id, PublicID: id + "_pub", RealmID: realm, Kind: port.OrgShared, Name: id,
+				CreatedAt: e.clk.Now(), UpdatedAt: e.clk.Now()}); err != nil {
+				return err
+			}
+		}
+		if err := tx.Orgs().SetParent(ctx, realm, "o_mid", "o_root", e.clk.Now()); err != nil {
+			return err
+		}
+		return tx.Orgs().SetParent(ctx, realm, "o_leaf", "o_mid", e.clk.Now())
+	})
+	r := e.role("o_mid", "doc:write")
+	e.bind(r.ID, bob, "o_mid", "", "")
+
+	// 根の admin は子孫で admin の権限を持つ。関係の無い Org では持たない。
+	e.check(true, check.Request{Principal: alice, Action: role.PermOrgInvite, OrgID: "o_leaf"})
+	e.check(true, check.Request{Principal: alice, Action: role.PermOrgInvite, OrgID: "o_mid"})
+	e.check(false, check.Request{Principal: alice, Action: role.PermOrgInvite, OrgID: "o_other"})
+	// 中間の Org の付与は子に効き、親には効かない。
+	e.check(true, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_leaf"})
+	e.check(false, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_root"})
+	e.check(false, check.Request{Principal: bob, Action: role.PermOrgInvite, OrgID: "o_leaf"})
+
+	// 子の Org が使えなければ、祖先からは効かない。
+	m[unusable] = map[string]port.OrgRole{"o_leaf": ""}
+	e.c.Invalidate(realm)
+	e.check(false, check.Request{Principal: alice, Action: role.PermOrgInvite, OrgID: "o_leaf"})
+	e.check(false, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_leaf"})
+	delete(m, unusable)
+	// 祖先の所属が使えなければ効かない。
+	delete(m[alice.ID], "o_root")
+	e.c.Invalidate(realm)
+	e.check(false, check.Request{Principal: alice, Action: role.PermOrgInvite, OrgID: "o_leaf"})
+	// 階層がオフなら祖先の付与は効かない。
+	e.c.Hierarchy = false
+	e.c.Invalidate(realm)
+	e.check(false, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_leaf"})
+	e.check(true, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_mid"})
 }

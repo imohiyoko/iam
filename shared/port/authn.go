@@ -529,6 +529,8 @@ type Org struct {
 	Settings  []byte
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// ParentID は親の Org（内部 ID。design.md 11.4、ADR 0078）。空なら親なし。
+	ParentID string
 }
 
 // OrgRepo は orgs の Repository。
@@ -547,6 +549,15 @@ type OrgRepo interface {
 	SetSettings(ctx context.Context, realmID, id string, settings []byte, updatedAt time.Time) error
 	// List は realm の Org（削除済みを含む）を ID の順に、afterID の次から最大 limit 件返す（フィーチャーの無効化。11.12）。
 	List(ctx context.Context, realmID, afterID string, limit int) ([]Org, error)
+	// SetParent は親を置き換え（空は親なし）、id とその子孫の祖先の一覧を計算し直す。循環と深さは呼び出し側が確かめる。
+	// 無ければ errs.NotFound。
+	SetParent(ctx context.Context, realmID, id, parentID string, updatedAt time.Time) error
+	// Ancestors は祖先（内部 ID）を近い順に返す。
+	Ancestors(ctx context.Context, realmID, id string) ([]string, error)
+	// SubtreeHeight は id から最も深い子孫までの段数を返す（子が無ければ 0）。
+	SubtreeHeight(ctx context.Context, realmID, id string) (int, error)
+	// ListChildren は子の Org を ID の順に返す。
+	ListChildren(ctx context.Context, realmID, id string) ([]Org, error)
 }
 
 // MembershipStatus は Membership の状態（design.md 3.1）。

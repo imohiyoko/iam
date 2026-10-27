@@ -73,7 +73,9 @@ type Service struct {
 	QuotaCount QuotaCount
 	// ManagedUsers は Org 管理ユーザー（フィーチャー org_managed_users）が active か。Resolver はドメインの証明に使う（nil なら net.DefaultResolver）。
 	ManagedUsers bool
-	Resolver     TXTResolver
+	// Hierarchy はフィーチャー org_hierarchy（Org 階層。ADR 0078）が動いているか。
+	Hierarchy bool
+	Resolver  TXTResolver
 }
 
 // NormalizeName は名前の前後の空白を除き、形式を確かめる。

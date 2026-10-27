@@ -18,9 +18,18 @@ import (
 
 type members map[string]map[string]port.OrgRole
 
+// unusable は members で、使えない Org を並べる行のキー。
+const unusable = "!unusable"
+
 func (m members) OrgRole(_ context.Context, _ port.Tx, _ string, p check.Principal, orgID string, _ time.Time) (port.OrgRole, bool, error) {
 	r, ok := m[p.ID][orgID]
 	return r, ok, nil
+}
+
+// OrgUsable は、unusable の行に載せた Org だけを使えないとみなす。
+func (m members) OrgUsable(_ context.Context, _ port.Tx, _, orgID string, _ time.Time) (bool, error) {
+	_, bad := m[unusable][orgID]
+	return !bad, nil
 }
 
 type env struct {

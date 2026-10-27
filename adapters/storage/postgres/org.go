@@ -17,7 +17,8 @@ func toOrg(r db.Org) (port.Org, error) {
 	var p times
 	o := port.Org{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Kind: port.OrgKind(r.Kind), Name: r.Name,
 		PersonalOwnerID: r.PersonalOwnerID, ValidFrom: p.null(r.ValidFrom), ValidUntil: p.null(r.ValidUntil),
-		DeletionScheduledAt: p.null(r.DeletionScheduledAt), DeletedAt: p.null(r.DeletedAt), Settings: r.Settings, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		DeletionScheduledAt: p.null(r.DeletionScheduledAt), DeletedAt: p.null(r.DeletedAt), Settings: r.Settings, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt),
+		ParentID: r.ParentOrgID}
 	return o, p.err
 }
 
@@ -63,6 +64,69 @@ func (r orgs) SetDeletion(ctx context.Context, realmID, id string, scheduledAt, 
 	n, err := r.q.SetOrgDeletion(ctx, db.SetOrgDeletionParams{DeletionScheduledAt: nullTime(scheduledAt), DeletedAt: nullTime(deletedAt),
 		UpdatedAt: formatTime(updatedAt), RealmID: realmID, ID: id})
 	return affected(n, err, "org")
+}
+
+// SetParent は親を置き換え、閉包テーブル（org_ancestors）の id とその子孫の行のうち、id より上の祖先を差し替える。
+// 子孫 s の id からの深さを d とすると、s の新しい祖先は、親（深さ d+1）と親の祖先（深さ d+1+親からの深さ）。
+func (r orgs) SetParent(ctx context.Context, realmID, id, parentID string, updatedAt time.Time) error {
+	n, err := r.q.SetOrgParent(ctx, db.SetOrgParentParams{ParentOrgID: parentID, UpdatedAt: formatTime(updatedAt), RealmID: realmID, ID: id})
+	if err := affected(n, err, "org"); err != nil {
+		return err
+	}
+	desc, err := r.q.ListOrgDescendants(ctx, db.ListOrgDescendantsParams{RealmID: realmID, AncestorID: id})
+	if err != nil {
+		return mapErr(err)
+	}
+	subtree := append([]db.ListOrgDescendantsRow{{OrgID: id, Depth: 0}}, desc...)
+	var above []db.ListOrgAncestorsRow
+	if parentID != "" {
+		up, err := r.q.ListOrgAncestors(ctx, db.ListOrgAncestorsParams{RealmID: realmID, OrgID: parentID})
+		if err != nil {
+			return mapErr(err)
+		}
+		above = append([]db.ListOrgAncestorsRow{{AncestorID: parentID, Depth: 0}}, up...)
+	}
+	for _, s := range subtree {
+		if err := r.q.DeleteOrgAncestorsAbove(ctx, db.DeleteOrgAncestorsAboveParams{RealmID: realmID, OrgID: s.OrgID, Depth: s.Depth}); err != nil {
+			return mapErr(err)
+		}
+		for _, a := range above {
+			if err := r.q.InsertOrgAncestor(ctx, db.InsertOrgAncestorParams{RealmID: realmID, OrgID: s.OrgID, AncestorID: a.AncestorID,
+				Depth: s.Depth + a.Depth + 1}); err != nil {
+				return mapErr(err)
+			}
+		}
+	}
+	return nil
+}
+
+func (r orgs) Ancestors(ctx context.Context, realmID, id string) ([]string, error) {
+	rs, err := r.q.ListOrgAncestors(ctx, db.ListOrgAncestorsParams{RealmID: realmID, OrgID: id})
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	out := make([]string, 0, len(rs))
+	for _, a := range rs {
+		out = append(out, a.AncestorID)
+	}
+	return out, nil
+}
+
+func (r orgs) SubtreeHeight(ctx context.Context, realmID, id string) (int, error) {
+	rs, err := r.q.ListOrgDescendants(ctx, db.ListOrgDescendantsParams{RealmID: realmID, AncestorID: id})
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	h := 0
+	for _, d := range rs {
+		h = max(h, int(d.Depth))
+	}
+	return h, nil
+}
+
+func (r orgs) ListChildren(ctx context.Context, realmID, id string) ([]port.Org, error) {
+	rs, err := r.q.ListOrgChildren(ctx, db.ListOrgChildrenParams{RealmID: realmID, ParentOrgID: id})
+	return rows(rs, err, toOrg)
 }
 
 func (r orgs) SetSettings(ctx context.Context, realmID, id string, settings []byte, updatedAt time.Time) error {
