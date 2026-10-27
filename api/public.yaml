@@ -1420,7 +1420,7 @@ paths:
           ほかのユーザーのものなら `409 email_exists`
         - ログインしていない：アドレスが誰のものでもなく、realm が経路 `invitation` を受け入れるなら、そのアドレスで登録して
           招待された Org に入ったセッションを返す（`login`）。既存のユーザーのものなら `409 login_required`
-        無い・期限切れ・使用済みのトークンは `404 invalid_invitation`。
+        無い・期限切れ・使用済みのトークンは `404 invalid_invitation`。Org の削除が予定されているなら `409 deletion_scheduled`。
       requestBody:
         required: true
         content:

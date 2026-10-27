@@ -246,6 +246,10 @@ func (s *Service) Accept(ctx context.Context, tx port.Tx, realmID, token string,
 	if err != nil {
 		return Accepted{}, err
 	}
+	// 削除の猶予期間の間は入れない（4.10）。
+	if o.DeletionScheduledAt != nil {
+		return Accepted{}, ErrDeletionScheduled
+	}
 	var out Accepted
 	var user port.User
 	var bound port.UserEmail
