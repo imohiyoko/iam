@@ -1473,7 +1473,7 @@ paths:
           ほかのユーザーのものなら `409 email_exists`
         - ログインしていない：アドレスが誰のものでもなく、realm が経路 `invitation` を受け入れるなら、そのアドレスで登録して
           招待された Org に入ったセッションを返す（`login`）。既存のユーザーのものなら `409 login_required`
-        無い・期限切れ・使用済みのトークンは `404 invalid_invitation`。
+        無い・期限切れ・使用済みのトークンは `404 invalid_invitation`。Org の削除が予定されているなら `409 deletion_scheduled`。
       requestBody:
         required: true
         content:
@@ -1506,7 +1506,7 @@ paths:
       summary: セッションの Org を切り替える（4.4）
       description: |
         active な Membership のある Org に切り替え、セッションの ID を入れ替える（古い ID はすぐ失効する）。
-        Cookie のセッションは Cookie を差し替える。入れない Org なら `403 no_available_org`、Org が無いか所属していなければ `404`。
+        Cookie のセッションは Cookie を差し替える。Org が無いか所属していなければ `404`（存在を明かさない）。所属しているが入れない（停止・有効期間の外）なら `403 no_available_org`。
       security:
         - cookieAuth: []
         - bearerAuth: []
