@@ -7,3 +7,5 @@ BenchmarkDecrypt       20000         # 10µs：個人情報1件の復号（デ�
 BenchmarkEmailIndex    20000         # 10µs：ブラインドインデックス1件
 BenchmarkPointLookup   500000        # 200µs：キャッシュに外れたときの ID での1件取得（SQLite）
 BenchmarkAuditRecord   3000000       # 1ms：監査ログ1件の追記（ハッシュチェーン + outbox、SQLite）
+BenchmarkCheckHit      2000          # 1µs：認可の判定の材料のキャッシュに当たった判定（4.5、ADR 0064）
+BenchmarkCheckMiss     500000        # 200µs：キャッシュに外れた判定（直接・Group の付与と独自のロールを1クエリで集める、SQLite）

@@ -35,8 +35,9 @@ M4 で認可を組み込む。design.md は次を求める。
 - 管理（`authz/manage`）
   - realm は `roles:manage`（ロールと付与。realm:owner）・`groups:manage`（Group。realm:owner・realm:admin）、Org は
     `org:roles`・`org:groups`（org:owner・org:admin）を求める
-  - 加えて、渡す権限（作る・変えるロールの権限、付与するロールの権限、Group に入れるときはその Group の権限）をすべて、自分が
-    その範囲全体で持っていなければならない（権限の引き上げを防ぐ）
+  - 加えて、渡す IAM 自身の権限（作る・変えるロールの、付与するロールの、Group に入れるときはその Group の権限のうち、
+    `org:`・`users:`・`orgs:`・`roles:` など IAM の管理の権限）をすべて、自分がその範囲全体で持っていなければならない
+    （権限の引き上げを防ぐ）。連携先の権限（`doc:read` など）は IAM の誰も持たないので、範囲の管理者が自由に入れて付与できる
   - Org の範囲のロールには、IAM 自身の realm の管理の権限（`users:`・`orgs:`・`roles:` など）は入れられない
   - Org の範囲の付与と Org の Group への所属は、その Org の使える所属を持つ主体だけ
   - 最後の `realm:owner` のユーザーの付与は消せない
@@ -47,6 +48,12 @@ M4 で認可を組み込む。design.md は次を求める。
   - realm の範囲は管理 API の `/v1/admin/roles`・`/role-bindings`・`/groups`、Org の範囲は公開 API の
     `/v1/me/orgs/{id}/roles`・`/role-bindings`・`/groups`。同じ処理で、形も同じ
   - 主体はユーザーと Group（サービスアカウントは公開 ID を持たないので、M4 では API から付与しない）
+- 判定の API
+  - 管理 API の `POST /v1/admin/authz:check`（`authz:check`。連携先・サービスアカウント向け）。主体はユーザーの公開 ID で、
+    使えないユーザー（削除・停止・有効期間の外）は `allowed: false` と理由のコード
+  - 公開 API の `POST /v1/me:check`（本人。省けば active な Org の範囲）
+  - キャッシュに外れたときは、直接の付与と Group の付与と独自のロールの中身を1つのクエリで集める
+    （`RoleBindingRepo.ListEffective`）。ベンチマークは当たり 1µs、外れ 200µs（SQLite）を目標にする（ADR 0044）
 - 既存の判定の置き換え
   - 管理 API の認可と、なりすませる操作の前の「対象の権限をすべて持つか」は判定を使う。運営者の操作は数が少なく、
     取り消しをすぐ効かせたいので、キャッシュを使わない（`CheckTx`）

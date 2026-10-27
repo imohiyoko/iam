@@ -65,6 +65,18 @@ type RoleBindingRepo interface {
 	ListByRole(ctx context.Context, realmID, role string) ([]RoleBinding, error)
 	// ListByOrg は org の（orgID が空なら realm 全体の）付与を返す。
 	ListByOrg(ctx context.Context, realmID, orgID string) ([]RoleBinding, error)
+	// ListEffective は判定のために、主体の直接の付与と、主体が所属する Group の付与を、独自のロールの中身とともに
+	// 1回で返す（作成時刻の順、同時刻は ID の順）。
+	ListEffective(ctx context.Context, realmID string, t PrincipalType, principalID string) ([]EffectiveBinding, error)
+}
+
+// EffectiveBinding は判定に使う付与（ListEffective）。
+type EffectiveBinding struct {
+	RoleBinding
+	// GroupOrgID は Group の付与のときの、その Group の Org（空なら realm 全体）。
+	GroupOrgID string
+	// Custom は独自のロールの付与のときの、そのロール。組み込みのロールの名前か、消えたロールなら nil。
+	Custom *Role
 }
 
 // Group は groups の1行（design.md 3.2）。

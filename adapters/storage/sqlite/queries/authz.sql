@@ -17,6 +17,20 @@ SELECT * FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY creat
 -- name: ListRoleBindingsByOrg :many
 SELECT * FROM authz_role_bindings WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id;
 
+-- name: ListEffectiveRoleBindings :many
+SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at,
+       COALESCE(g.org_id, '') AS group_org_id, r.public_id AS custom_public_id, r.org_id AS custom_org_id, r.name AS custom_name,
+       r.permissions AS custom_permissions, r.created_at AS custom_created_at, r.updated_at AS custom_updated_at
+FROM authz_role_bindings b
+LEFT JOIN authz_groups g ON b.principal_type = 'group' AND g.id = b.principal_id
+LEFT JOIN authz_roles r ON r.realm_id = b.realm_id AND r.id = b.role
+WHERE b.realm_id = @realm_id AND b.id IN (
+    SELECT d.id FROM authz_role_bindings d WHERE d.realm_id = @realm_id AND d.principal_type = @principal_type AND d.principal_id = @principal_id
+    UNION ALL
+    SELECT x.id FROM authz_group_members m JOIN authz_role_bindings x ON x.realm_id = @realm_id AND x.principal_type = 'group' AND x.principal_id = m.group_id
+    WHERE m.member_type = @principal_type AND m.member_id = @principal_id)
+ORDER BY b.created_at, b.id;
+
 -- name: CreateRole :exec
 INSERT INTO authz_roles (id, public_id, realm_id, org_id, name, permissions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 

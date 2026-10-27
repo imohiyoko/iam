@@ -12,14 +12,12 @@ package check
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/shared/clock"
-	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -229,62 +227,34 @@ func (c *Checker) Grants(ctx context.Context, tx port.Tx, realmID string, p Prin
 		return *member, nil
 	}
 
-	var out []Grant
-	add := func(bs []port.RoleBinding) error {
-		for _, b := range bs {
-			if b.OrgID != "" {
-				if b.OrgID != orgID {
-					continue
-				}
-				if ok, err := isMember(); err != nil || !ok {
-					if err != nil {
-						return err
-					}
-					continue
-				}
-			}
-			perms, err := permissionsOf(ctx, tx, realmID, b)
-			if err != nil {
-				return err
-			}
-			if len(perms) > 0 {
-				out = append(out, Grant{ResourceType: b.ResourceType, ResourceID: b.ResourceID, Permissions: perms, Role: b.Role})
-			}
-		}
-		return nil
-	}
-	bs, err := tx.RoleBindings().ListByPrincipal(ctx, realmID, p.Type, p.ID)
+	// 直接の付与と Group の付与を、独自のロールの中身とともに1回で集める（キャッシュに外れたときの往復を減らす）。
+	bs, err := tx.RoleBindings().ListEffective(ctx, realmID, p.Type, p.ID)
 	if err != nil {
 		return nil, err
 	}
-	if err := add(bs); err != nil {
-		return nil, err
+	var out []Grant
+	// Org の Group と Org の範囲の付与は、その Org の使える所属を持つ間だけ効く（3.2）。
+	inScope := func(b port.EffectiveBinding) (bool, error) {
+		for _, sc := range []string{b.GroupOrgID, b.OrgID} {
+			if sc == "" {
+				continue
+			}
+			if sc != orgID {
+				return false, nil
+			}
+			if ok, err := isMember(); err != nil || !ok {
+				return false, err
+			}
+		}
+		return true, nil
 	}
-	if p.Type == port.PrincipalUser || p.Type == port.PrincipalServiceAccount {
-		gs, err := tx.Groups().ListByMember(ctx, realmID, p.Type, p.ID)
+	for _, b := range bs {
+		ok, err := inScope(b)
 		if err != nil {
 			return nil, err
 		}
-		for _, g := range gs {
-			// Org の Group は、その Org の使える所属を持つ間だけ効く（3.2）。
-			if g.OrgID != "" {
-				if g.OrgID != orgID {
-					continue
-				}
-				if ok, err := isMember(); err != nil || !ok {
-					if err != nil {
-						return nil, err
-					}
-					continue
-				}
-			}
-			bs, err := tx.RoleBindings().ListByPrincipal(ctx, realmID, port.PrincipalGroup, g.ID)
-			if err != nil {
-				return nil, err
-			}
-			if err := add(bs); err != nil {
-				return nil, err
-			}
+		if perms := permissionsOf(b); ok && len(perms) > 0 {
+			out = append(out, Grant{ResourceType: b.ResourceType, ResourceID: b.ResourceID, Permissions: perms, Role: b.Role})
 		}
 	}
 	if orgID != "" {
@@ -301,25 +271,15 @@ func (c *Checker) Grants(ctx context.Context, tx port.Tx, realmID string, p Prin
 
 // permissionsOf は付与のロールの権限を返す。組み込みの Org のロールは付与では効かせない（org_role から効く）。
 // 独自のロールは、その付与の範囲（realm 共通か、同じ Org）のものだけが効く。消えたロールは権限を持たない。
-func permissionsOf(ctx context.Context, tx port.Tx, realmID string, b port.RoleBinding) ([]string, error) {
+func permissionsOf(b port.EffectiveBinding) []string {
 	if bi, ok := role.Lookup(b.Role); ok {
-		if bi.Scope == role.ScopeOrg {
-			return nil, nil
+		if bi.Scope == role.ScopeOrg || b.OrgID != "" { // 運営者ロールは realm の範囲だけ
+			return nil
 		}
-		if b.OrgID != "" {
-			return nil, nil // 運営者ロールは realm の範囲だけ
-		}
-		return bi.Permissions, nil
+		return bi.Permissions
 	}
-	r, err := tx.Roles().Get(ctx, realmID, b.Role)
-	if errors.Is(err, errs.NotFound) {
-		return nil, nil
+	if b.Custom == nil || (b.Custom.OrgID != "" && b.Custom.OrgID != b.OrgID) {
+		return nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	if r.OrgID != "" && r.OrgID != b.OrgID {
-		return nil, nil
-	}
-	return r.Permissions, nil
+	return b.Custom.Permissions
 }

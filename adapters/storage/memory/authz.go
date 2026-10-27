@@ -76,6 +76,40 @@ func (r roleBindings) ListByOrg(_ context.Context, realmID, orgID string) ([]por
 	return r.list(func(x port.RoleBinding) bool { return x.RealmID == realmID && x.OrgID == orgID }), nil
 }
 
+func (r roleBindings) ListEffective(_ context.Context, realmID string, t port.PrincipalType, principalID string) ([]port.EffectiveBinding, error) {
+	groupOrg := map[string]string{}
+	for _, m := range r.t.s.groupMembers {
+		if m.MemberType == t && m.MemberID == principalID {
+			if g, ok := r.t.s.groups[m.GroupID]; ok && g.RealmID == realmID {
+				groupOrg[g.ID] = g.OrgID
+			}
+		}
+	}
+	bs := r.list(func(x port.RoleBinding) bool {
+		if x.RealmID != realmID {
+			return false
+		}
+		if x.PrincipalType == t && x.PrincipalID == principalID {
+			return true
+		}
+		_, ok := groupOrg[x.PrincipalID]
+		return ok && x.PrincipalType == port.PrincipalGroup
+	})
+	out := make([]port.EffectiveBinding, 0, len(bs))
+	for _, b := range bs {
+		e := port.EffectiveBinding{RoleBinding: b}
+		if b.PrincipalType == port.PrincipalGroup {
+			e.GroupOrgID = groupOrg[b.PrincipalID]
+		}
+		if x, ok := r.t.s.roles[b.Role]; ok && x.RealmID == realmID {
+			c := cloneRole(x)
+			e.Custom = &c
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
 // ---------------------------------------------------------------------------
 
 type roles struct{ t *tx }

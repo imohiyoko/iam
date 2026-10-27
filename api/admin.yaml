@@ -752,7 +752,7 @@ paths:
       operationId: createRole
       summary: 独自のロールを作る（4.11）
       description: |
-        権限 `roles:manage`。渡す権限はすべて自分がrealm の範囲で持っていなければならない（`403 permission_denied`）。
+        権限 `roles:manage`。渡す IAM 自身の権限（`users:`・`orgs:` など）はすべて自分が realm の範囲で持っていなければならない（`403 permission_denied`）。連携先の権限（`doc:read` など）は自由に入れられる。
         名前に組み込みの名前空間（`realm:`・`org:`・`system:`）は使えない（`400 invalid_name`）。権限の形は `<リソース>:<操作>`（`400 invalid_permission`）。
         名前の重複は `409 role_exists`。`role.created` を監査ログに残す。
       requestBody:
@@ -777,7 +777,7 @@ paths:
       operationId: updateRole
       summary: 独自のロールの名前と権限を置き換える
       description: |
-        権限 `roles:manage`。今の権限と新しい権限をすべて自分が持っていなければならない。`role.updated` を監査ログに残す。
+        権限 `roles:manage`。今と新しい IAM 自身の権限をすべて自分が持っていなければならない。`role.updated` を監査ログに残す。
       parameters:
         - { name: role_id, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -802,7 +802,7 @@ paths:
       operationId: deleteRole
       summary: 独自のロールと、その付与を消す
       description: |
-        権限 `roles:manage`。ロールの権限をすべて自分が持っていなければならない。`role.deleted` を監査ログに残す。
+        権限 `roles:manage`。ロールの IAM 自身の権限をすべて自分が持っていなければならない。`role.deleted` を監査ログに残す。
       parameters:
         - { name: role_id, in: path, required: true, schema: { type: string } }
       responses:
@@ -831,7 +831,7 @@ paths:
       operationId: createRoleBinding
       summary: ロールを付与する（4.11）
       description: |
-        権限 `roles:manage`。ロールの権限をすべて自分が持っていなければならない。`role` は組み込みのロールの名前か、独自のロールの ID。
+        権限 `roles:manage`。ロールの IAM 自身の権限をすべて自分が持っていなければならない。`role` は組み込みのロールの名前か、独自のロールの ID。
         運営者ロールの付与は `realm:owner` だけ（`roles:manage`）。主体はユーザーか realm 全体の Group。
         `resource_type`・`resource_id` を渡せば、そのリソースだけに効く。同じ付与は `409 binding_exists`。`role.granted` を監査ログに残す。
       requestBody:
@@ -856,7 +856,7 @@ paths:
       operationId: deleteRoleBinding
       summary: ロールの付与を消す
       description: |
-        権限 `roles:manage`。ロールの権限をすべて自分が持っていなければならない。最後の `realm:owner` のユーザーの付与は消せない（`409 last_owner`）。`role.revoked` を監査ログに残す。
+        権限 `roles:manage`。ロールの IAM 自身の権限をすべて自分が持っていなければならない。最後の `realm:owner` のユーザーの付与は消せない（`409 last_owner`）。`role.revoked` を監査ログに残す。
       parameters:
         - { name: binding_id, in: path, required: true, schema: { type: string } }
       responses:
@@ -934,7 +934,7 @@ paths:
       operationId: deleteGroup
       summary: Group と、その所属と付与を消す
       description: |
-        権限 `groups:manage`。Group に付与されたロールの権限をすべて自分が持っていなければならない。`group.deleted` を監査ログに残す。
+        権限 `groups:manage`。Group に付与されたロールの IAM 自身の権限をすべて自分が持っていなければならない。`group.deleted` を監査ログに残す。
       parameters:
         - { name: group_id, in: path, required: true, schema: { type: string } }
       responses:
@@ -965,7 +965,7 @@ paths:
       operationId: addGroupMember
       summary: Group に主体を入れる
       description: |
-        権限 `groups:manage`。Group に付与されたロールの権限をすべて自分が持っていなければならない。主体はユーザー。
+        権限 `groups:manage`。Group に付与されたロールの IAM 自身の権限をすべて自分が持っていなければならない。主体はユーザー。
         既に所属していれば `409 member_exists`。`group.member_added` を監査ログに残す。
       parameters:
         - { name: group_id, in: path, required: true, schema: { type: string } }
@@ -999,6 +999,33 @@ paths:
       responses:
         "204":
           description: 成功
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/authz:check:
+    post:
+      operationId: checkAuthz
+      summary: 主体が操作をできるかを判定する（4.5、check）
+      description: |
+        権限 `authz:check`（連携先・サービスアカウント向け）。`check(principal, action, resource, context)` の API。
+        主体はユーザーの公開 ID。削除・停止中・有効期間の外のユーザーは `allowed: false`（`reasons` に理由のコード）。
+        `org_id` を渡せば、その Org の範囲で判定する（Org の範囲の付与と org_role は、その Org の使える所属がある間だけ効く）。
+        Org がオフの構成では `org_id` を無視して realm の範囲で判定する。`resource_type`・`resource_id` を渡せば、そのリソースを限った付与も効く。
+        判定の材料は `session.validity_max_delay` の間キャッシュする（ロール・所属の変更の反映の遅れの上限）。
+        主体か Org が無ければ `404`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CheckRequest" }
+      responses:
+        "200":
+          description: 判定の結果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CheckResult" }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
@@ -1300,3 +1327,22 @@ components:
       properties:
         principal_type: { type: string, description: user }
         principal_id: { type: string }
+    CheckRequest:
+      type: object
+      required: [principal_id, action]
+      properties:
+        principal_type: { type: string, enum: [user], default: user }
+        principal_id: { type: string, description: 主体の公開 ID }
+        action: { type: string, minLength: 1, maxLength: 130, description: "`<リソース>:<操作>`" }
+        org_id: { type: string, description: 判定の文脈の Org の公開 ID }
+        resource_type: { type: string, maxLength: 64 }
+        resource_id: { type: string, maxLength: 256 }
+    CheckResult:
+      type: object
+      required: [allowed]
+      properties:
+        allowed: { type: boolean }
+        reasons:
+          type: array
+          items: { type: string }
+          description: 主体が使えないときの理由のコード（4.9）

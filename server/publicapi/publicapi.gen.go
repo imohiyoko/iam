@@ -303,6 +303,11 @@ func (e InviteToOrgJSONBodyRole) Valid() bool {
 	}
 }
 
+// CheckResult defines model for CheckResult.
+type CheckResult struct {
+	Allowed bool `json:"allowed"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	// Error 公開の契約のコード（design.md 4.9、11.10）
@@ -397,6 +402,17 @@ type LoginResult struct {
 // 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
 // 決まった API にしか使えない（他は未ログインの扱い）。
 type LoginResultNext string
+
+// MyCheckRequest defines model for MyCheckRequest.
+type MyCheckRequest struct {
+	// Action `<リソース>:<操作>`
+	Action string `json:"action"`
+
+	// OrgId 判定の文脈の Org の公開 ID。省けば active な Org
+	OrgId        *string `json:"org_id,omitempty"`
+	ResourceId   *string `json:"resource_id,omitempty"`
+	ResourceType *string `json:"resource_type,omitempty"`
+}
 
 // MyEmail defines model for MyEmail.
 type MyEmail struct {
@@ -1016,6 +1032,9 @@ type SetMyPasswordJSONRequestBody SetMyPasswordJSONBody
 // ConfirmRegisterTOTPJSONRequestBody defines body for ConfirmRegisterTOTP for application/json ContentType.
 type ConfirmRegisterTOTPJSONRequestBody ConfirmRegisterTOTPJSONBody
 
+// CheckMyAuthzJSONRequestBody defines body for CheckMyAuthz for application/json ContentType.
+type CheckMyAuthzJSONRequestBody = MyCheckRequest
+
 // RedeemRecoveryCodeJSONRequestBody defines body for RedeemRecoveryCode for application/json ContentType.
 type RedeemRecoveryCodeJSONRequestBody RedeemRecoveryCodeJSONBody
 
@@ -1240,6 +1259,9 @@ type ServerInterface interface {
 	// StartRegisterTOTP TOTP（認証器アプリ）の登録を始める
 	// (POST /v1/me/totp:start)
 	StartRegisterTOTP(w http.ResponseWriter, r *http.Request)
+	// CheckMyAuthz 本人が操作をできるかを判定する（4.5）
+	// (POST /v1/me:check)
+	CheckMyAuthz(w http.ResponseWriter, r *http.Request)
 	// RedeemRecoveryCode 確認済みのメールアドレスとリカバリーコードで復旧を始める（4.12）
 	// (POST /v1/recovery/code:redeem)
 	RedeemRecoveryCode(w http.ResponseWriter, r *http.Request)
@@ -2893,6 +2915,20 @@ func (siw *ServerInterfaceWrapper) StartRegisterTOTP(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// CheckMyAuthz operation middleware
+func (siw *ServerInterfaceWrapper) CheckMyAuthz(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckMyAuthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RedeemRecoveryCode operation middleware
 func (siw *ServerInterfaceWrapper) RedeemRecoveryCode(w http.ResponseWriter, r *http.Request) {
 
@@ -3158,6 +3194,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}/members", wrapper.ListMyOrgGroupMembers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}/members", wrapper.AddMyOrgGroupMember)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}/members:remove", wrapper.RemoveMyOrgGroupMember)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me:check", wrapper.CheckMyAuthz)
 
 	return m
 }
@@ -7823,6 +7860,56 @@ func (response StartRegisterTOTP409JSONResponse) VisitStartRegisterTOTPResponse(
 	return err
 }
 
+type CheckMyAuthzRequestObject struct {
+	Body *CheckMyAuthzJSONRequestBody
+}
+
+type CheckMyAuthzResponseObject interface {
+	VisitCheckMyAuthzResponse(w http.ResponseWriter) error
+}
+
+type CheckMyAuthz200JSONResponse CheckResult
+
+func (response CheckMyAuthz200JSONResponse) VisitCheckMyAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckMyAuthz400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CheckMyAuthz400JSONResponse) VisitCheckMyAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckMyAuthz401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CheckMyAuthz401JSONResponse) VisitCheckMyAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RedeemRecoveryCodeRequestObject struct {
 	Body *RedeemRecoveryCodeJSONRequestBody
 }
@@ -8393,6 +8480,9 @@ type StrictServerInterface interface {
 	// StartRegisterTOTP TOTP（認証器アプリ）の登録を始める
 	// (POST /v1/me/totp:start)
 	StartRegisterTOTP(ctx context.Context, request StartRegisterTOTPRequestObject) (StartRegisterTOTPResponseObject, error)
+	// CheckMyAuthz 本人が操作をできるかを判定する（4.5）
+	// (POST /v1/me:check)
+	CheckMyAuthz(ctx context.Context, request CheckMyAuthzRequestObject) (CheckMyAuthzResponseObject, error)
 	// RedeemRecoveryCode 確認済みのメールアドレスとリカバリーコードで復旧を始める（4.12）
 	// (POST /v1/recovery/code:redeem)
 	RedeemRecoveryCode(ctx context.Context, request RedeemRecoveryCodeRequestObject) (RedeemRecoveryCodeResponseObject, error)
@@ -10483,6 +10573,37 @@ func (sh *strictHandler) StartRegisterTOTP(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StartRegisterTOTPResponseObject); ok {
 		if err := validResponse.VisitStartRegisterTOTPResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CheckMyAuthz operation middleware
+func (sh *strictHandler) CheckMyAuthz(w http.ResponseWriter, r *http.Request) {
+	var request CheckMyAuthzRequestObject
+
+	var body CheckMyAuthzJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CheckMyAuthz(ctx, request.(CheckMyAuthzRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CheckMyAuthz")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CheckMyAuthzResponseObject); ok {
+		if err := validResponse.VisitCheckMyAuthzResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -50,6 +50,31 @@ func (r roleBindings) ListByOrg(ctx context.Context, realmID, orgID string) ([]p
 	return rows(rs, err, toRoleBinding)
 }
 
+// ListEffective は1つのクエリで、直接の付与と所属する Group の付与を、Group の Org と独自のロールの中身とともに集める。
+func (r roleBindings) ListEffective(ctx context.Context, realmID string, t port.PrincipalType, principalID string) ([]port.EffectiveBinding, error) {
+	rs, err := r.q.ListEffectiveRoleBindings(ctx, db.ListEffectiveRoleBindingsParams{RealmID: realmID, PrincipalType: string(t), PrincipalID: principalID})
+	return rows(rs, err, func(x db.ListEffectiveRoleBindingsRow) (port.EffectiveBinding, error) {
+		b, err := toRoleBinding(db.AuthzRoleBinding{ID: x.ID, PublicID: x.PublicID, RealmID: x.RealmID, Role: x.Role, PrincipalType: x.PrincipalType,
+			PrincipalID: x.PrincipalID, OrgID: x.OrgID, ResourceType: x.ResourceType, ResourceID: x.ResourceID, CreatedAt: x.CreatedAt})
+		if err != nil {
+			return port.EffectiveBinding{}, err
+		}
+		e := port.EffectiveBinding{RoleBinding: b}
+		if x.PrincipalType == string(port.PrincipalGroup) {
+			e.GroupOrgID = x.GroupOrgID
+		}
+		if x.CustomPublicID.Valid {
+			c, err := toRole(db.AuthzRole{ID: x.Role, PublicID: x.CustomPublicID.String, RealmID: x.RealmID, OrgID: x.CustomOrgID.String,
+				Name: x.CustomName.String, Permissions: x.CustomPermissions.String, CreatedAt: x.CustomCreatedAt.String, UpdatedAt: x.CustomUpdatedAt.String})
+			if err != nil {
+				return port.EffectiveBinding{}, err
+			}
+			e.Custom = &c
+		}
+		return e, nil
+	})
+}
+
 // ---------------------------------------------------------------------------
 
 type roles struct{ q *db.Queries }

@@ -39,6 +39,21 @@ func (e AdminUserStatus) Valid() bool {
 	}
 }
 
+// Defines values for CheckRequestPrincipalType.
+const (
+	CheckRequestPrincipalTypeUser CheckRequestPrincipalType = "user"
+)
+
+// Valid indicates whether the value is a known member of the CheckRequestPrincipalType enum.
+func (e CheckRequestPrincipalType) Valid() bool {
+	switch e {
+	case CheckRequestPrincipalTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthStatus.
 const (
 	Ok          HealthStatus = "ok"
@@ -193,6 +208,32 @@ type AdminUser struct {
 
 // AdminUserStatus defines model for AdminUser.Status.
 type AdminUserStatus string
+
+// CheckRequest defines model for CheckRequest.
+type CheckRequest struct {
+	// Action `<リソース>:<操作>`
+	Action string `json:"action"`
+
+	// OrgId 判定の文脈の Org の公開 ID
+	OrgId *string `json:"org_id,omitempty"`
+
+	// PrincipalId 主体の公開 ID
+	PrincipalId   string                     `json:"principal_id"`
+	PrincipalType *CheckRequestPrincipalType `json:"principal_type,omitempty"`
+	ResourceId    *string                    `json:"resource_id,omitempty"`
+	ResourceType  *string                    `json:"resource_type,omitempty"`
+}
+
+// CheckRequestPrincipalType defines model for CheckRequest.PrincipalType.
+type CheckRequestPrincipalType string
+
+// CheckResult defines model for CheckResult.
+type CheckResult struct {
+	Allowed bool `json:"allowed"`
+
+	// Reasons 主体が使えないときの理由のコード（4.9）
+	Reasons *[]string `json:"reasons,omitempty"`
+}
 
 // ClaimedNotification defines model for ClaimedNotification.
 type ClaimedNotification struct {
@@ -574,6 +615,9 @@ type IssueRecoveryLinkJSONBody struct {
 	TtlSeconds *int   `json:"ttl_seconds,omitempty"`
 }
 
+// CheckAuthzJSONRequestBody defines body for CheckAuthz for application/json ContentType.
+type CheckAuthzJSONRequestBody = CheckRequest
+
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody CreateConnectionJSONBody
 
@@ -648,6 +692,9 @@ type ServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
+	// (POST /v1/admin/authz:check)
+	CheckAuthz(w http.ResponseWriter, r *http.Request)
 	// CreateConnection IdP 接続（OAuth / OIDC）を登録する
 	// (POST /v1/admin/connections)
 	CreateConnection(w http.ResponseWriter, r *http.Request)
@@ -796,6 +843,20 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckAuthz operation middleware
+func (siw *ServerInterfaceWrapper) CheckAuthz(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckAuthz(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2044,6 +2105,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/groups/{group_id}/members", wrapper.ListGroupMembers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/groups/{group_id}/members", wrapper.AddGroupMember)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/groups/{group_id}/members:remove", wrapper.RemoveGroupMember)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/authz:check", wrapper.CheckAuthz)
 
 	return m
 }
@@ -2081,6 +2143,84 @@ func (response GetHealth503JSONResponse) VisitGetHealthResponse(w http.ResponseW
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckAuthzRequestObject struct {
+	Body *CheckAuthzJSONRequestBody
+}
+
+type CheckAuthzResponseObject interface {
+	VisitCheckAuthzResponse(w http.ResponseWriter) error
+}
+
+type CheckAuthz200JSONResponse CheckResult
+
+func (response CheckAuthz200JSONResponse) VisitCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckAuthz400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CheckAuthz400JSONResponse) VisitCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckAuthz401JSONResponse Error
+
+func (response CheckAuthz401JSONResponse) VisitCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckAuthz403JSONResponse Error
+
+func (response CheckAuthz403JSONResponse) VisitCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CheckAuthz404JSONResponse Error
+
+func (response CheckAuthz404JSONResponse) VisitCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -5459,6 +5599,9 @@ type StrictServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
+	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
+	// (POST /v1/admin/authz:check)
+	CheckAuthz(ctx context.Context, request CheckAuthzRequestObject) (CheckAuthzResponseObject, error)
 	// CreateConnection IdP 接続（OAuth / OIDC）を登録する
 	// (POST /v1/admin/connections)
 	CreateConnection(ctx context.Context, request CreateConnectionRequestObject) (CreateConnectionResponseObject, error)
@@ -5649,6 +5792,37 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
 		if err := validResponse.VisitGetHealthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CheckAuthz operation middleware
+func (sh *strictHandler) CheckAuthz(w http.ResponseWriter, r *http.Request) {
+	var request CheckAuthzRequestObject
+
+	var body CheckAuthzJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CheckAuthz(ctx, request.(CheckAuthzRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CheckAuthz")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CheckAuthzResponseObject); ok {
+		if err := validResponse.VisitCheckAuthzResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

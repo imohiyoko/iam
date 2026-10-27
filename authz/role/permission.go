@@ -110,6 +110,13 @@ func Covered(granted []string, want string) bool {
 // （Org の範囲の付与は realm の範囲の判定に効かないため、入れても意味が無く、誤解のもとになる）。
 var realmResources = []string{"users", "orgs", "sessions", "credentials", "suspensions", "connections", "pii", "notifications", "roles", "groups", "authz"}
 
+// IAM は IAM 自身の権限（realm の管理の権限と、Org の操作の `org:`）かを返す。管理の操作では、これを渡すには自分が持って
+// いなければならない（権限の引き上げを防ぐ）。それ以外は連携先の権限で、範囲の管理者が自由に渡せる。
+func IAM(p string) bool {
+	res, _, _ := strings.Cut(p, ":")
+	return res == "org" || slices.Contains(realmResources, res)
+}
+
 // RealmOnly は realm の範囲でしか意味の無い（IAM 自身の管理の）権限かを返す。
 func RealmOnly(p string) bool {
 	res, _, _ := strings.Cut(p, ":")
