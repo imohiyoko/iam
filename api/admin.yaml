@@ -1700,6 +1700,132 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/realms:
+    get:
+      operationId: listRealms
+      summary: realm の一覧（複数 realm。design.md 11.1、ADR 0083）
+      description: |
+        権限 `realms:manage`。既定の realm の管理 API だけが受け付ける（他の realm では `404 realm_management_unavailable`）。
+        フィーチャー multi_realm が動いていなければ `404 multi_realm_disabled`。
+      responses:
+        "200":
+          description: ID の順（既定の realm も含む）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [realms]
+                properties:
+                  realms:
+                    type: array
+                    items: { $ref: "#/components/schemas/Realm" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createRealm
+      summary: realm を作る（ADR 0083）
+      description: |
+        権限 `realms:manage`（既定の realm の管理 API だけ）。`hosts` を渡せばそのホスト名で、渡さなければ `/realms/{slug}` で指す。
+        `settings` で省いた項目は設定ファイルの `realm` の値になる。作った realm の運営者は `…/operators` で作る。
+        `realm.created` を監査ログに残す。slug かホスト名が使われていれば `409 realm_taken`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RealmInput" }
+      responses:
+        "201":
+          description: 作った
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Realm" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/realms/{realm_id}:
+    get:
+      operationId: getRealm
+      summary: realm を返す
+      description: 権限 `realms:manage`（既定の realm の管理 API だけ）。
+      parameters:
+        - { name: realm_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: realm
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Realm" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateRealm
+      summary: realm のホスト名と設定を変える
+      description: |
+        権限 `realms:manage`（既定の realm の管理 API だけ）。渡した項目だけを変える（`hosts` は置き換え、`settings` は項目ごと）。
+        既定の realm は設定ファイルで変える（`409 default_realm`）。他のインスタンスには `validity_max_delay` の内に反映する。
+        `realm.updated` を監査ログに残す。
+      parameters:
+        - { name: realm_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RealmUpdate" }
+      responses:
+        "200":
+          description: 変えた後
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Realm" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/realms/{realm_id}/operators:
+    post:
+      operationId: createRealmOperator
+      summary: realm の運営者を作る（最初の運営者を置く）
+      description: |
+        権限 `realms:manage`（既定の realm の管理 API だけ）。`iam operator create` と同じく、メールで realm のユーザーを作り（あれば
+        そのユーザー）、運営者のロールを付けて、1回限りのログイン用リンクのトークンを返す。トークンは本人にだけ渡す。
+      parameters:
+        - { name: realm_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+                role: { type: string, default: "realm:owner" }
+                ttl_seconds: { type: integer, format: int64, minimum: 60, description: トークンの寿命。既定は 15 分 }
+      responses:
+        "201":
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, created, login_token, login_url]
+                properties:
+                  user_id: { type: string }
+                  created: { type: boolean, description: ユーザーを作ったか }
+                  login_token: { type: string }
+                  login_url: { type: string, description: ログイン画面のリンク（server.public_url が無ければ空） }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2212,3 +2338,72 @@ components:
         clients:
           type: array
           items: { $ref: "#/components/schemas/Client" }
+    RealmSettings:
+      type: object
+      description: realm ごとの設定（ADR 0083）。省いた項目は設定ファイルの `realm` の値
+      properties:
+        timezone: { type: string }
+        verified_via:
+          type: array
+          items: { type: string, enum: [code, oauth_provider, sso, invitation, admin] }
+        org_creation: { type: string, enum: [anyone, operators_only, invite_only] }
+        org_deletion_grace_seconds: { type: integer, format: int64, minimum: 0 }
+        user_deletion_grace_seconds: { type: integer, format: int64, minimum: 0 }
+        email_storage: { type: string, enum: [encrypted, index_only] }
+        quota_count:
+          type: object
+          properties:
+            invited: { type: boolean }
+            future: { type: boolean }
+            suspended: { type: boolean }
+    Realm:
+      type: object
+      required: [id, slug, hosts, default, settings, created_at, updated_at]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        hosts:
+          type: array
+          items: { type: string }
+        default: { type: boolean, description: 既定の realm（設定ファイルの realm。root で動く） }
+        issuer: { type: string, description: OIDC の iss（server.public_url が無ければ無い） }
+        settings:
+          type: object
+          required: [timezone, verified_via, org_creation, org_deletion_grace_seconds, user_deletion_grace_seconds, email_storage, quota_count]
+          properties:
+            timezone: { type: string }
+            verified_via:
+              type: array
+              items: { type: string }
+            org_creation: { type: string }
+            org_deletion_grace_seconds: { type: integer, format: int64 }
+            user_deletion_grace_seconds: { type: integer, format: int64 }
+            email_storage: { type: string }
+            quota_count:
+              type: object
+              required: [invited, future, suspended]
+              properties:
+                invited: { type: boolean }
+                future: { type: boolean }
+                suspended: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RealmInput:
+      type: object
+      required: [slug]
+      properties:
+        slug: { type: string, description: "英小文字・数字・ハイフン（63 文字まで）" }
+        hosts:
+          type: array
+          maxItems: 10
+          items: { type: string }
+          description: この realm を指すホスト名（ポートなし）。最初のものが issuer と passkey の RP になる
+        settings: { $ref: "#/components/schemas/RealmSettings" }
+    RealmUpdate:
+      type: object
+      properties:
+        hosts:
+          type: array
+          maxItems: 10
+          items: { type: string }
+        settings: { $ref: "#/components/schemas/RealmSettings" }

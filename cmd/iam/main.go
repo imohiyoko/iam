@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -50,7 +49,7 @@ commands:
                                     Storage の中身を書き出す・空の Storage に読み込む（移行用）
   version   [-manifest]             バージョン（とバイナリの構成）を表示する
   keys generate -out keys.json      KeyStore（file）用の鍵を作る
-  operator create -config iam.yaml -email <address> [-role realm:owner] [-ttl 15m]
+  operator create -config iam.yaml -email <address> [-role realm:owner] [-ttl 15m] [-realm slug]
                                     運営者を作り、1回限りのログイン用リンクのトークンを表示する
   service-account create -config iam.yaml -name <name> [-role system:notification_delivery]
                                     サービスアカウントを作り、API キーを1回だけ表示する
@@ -240,13 +239,14 @@ func serviceAccountCmd(ctx context.Context, args []string, stdout, stderr io.Wri
 
 func operator(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 || args[0] != "create" {
-		return errors.New("usage: iam operator create -config iam.yaml -email <address> [-role realm:owner] [-ttl 15m]")
+		return errors.New("usage: iam operator create -config iam.yaml -email <address> [-role realm:owner] [-ttl 15m] [-realm slug]")
 	}
 	fs := flag.NewFlagSet("operator create", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	email := fs.String("email", "", "運営者のメールアドレス（所有は実行する人が確かめる）")
 	roleName := fs.String("role", "realm:owner", "付与するロール")
 	ttl := fs.Duration("ttl", 15*time.Minute, "ログイン用リンクの有効期間（最大 24h）")
+	realmSlug := fs.String("realm", "", "既定以外の realm の slug（複数 realm。空なら既定の realm）")
 	cfg, err := loadConfig(fs, args[1:])
 	if err != nil {
 		return err
@@ -264,6 +264,11 @@ func operator(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if err != nil {
 		return err
 	}
+	if *realmSlug != "" {
+		if a, err = a.RealmApp(*realmSlug); err != nil {
+			return err
+		}
+	}
 	op, err := a.CreateOperator(ctx, *email, *roleName, *ttl)
 	if err != nil {
 		return err
@@ -276,7 +281,7 @@ func operator(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	fmt.Fprintf(stdout, "%s %s (%s)\n", what, op.UserID, *roleName)
 	fmt.Fprintf(stdout, "one-time login token (expires %s). Give it only to the operator:\n%s\n",
 		op.ExpiresAt.Format(time.RFC3339), op.LinkToken)
-	if u := strings.TrimSuffix(cfg.Server.PublicURL, "/"); u != "" {
+	if u := a.BaseURL(); u != "" {
 		fmt.Fprintf(stdout, "open in a browser: %s/login/link#token=%s\n", u, op.LinkToken)
 	} else {
 		fmt.Fprintln(stdout, "open <public_url>/login/link#token=<token> in a browser, or POST /v1/login/link:redeem {\"token\": \"...\"}")

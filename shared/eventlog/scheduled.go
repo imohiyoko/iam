@@ -44,6 +44,8 @@ type Scheduler struct {
 	Log      *slog.Logger
 	// Handlers は出来事の種類ごとの後始末。無い種類は監査ログに出すだけ。
 	Handlers map[string]Handler
+	// Prepare は発火の前に（トランザクションの外で）呼ぶ。複数 realm の表を読み直すのに使う（ADR 0083）。
+	Prepare func(ctx context.Context)
 }
 
 // Run は ctx が終わるまで発火を繰り返す。
@@ -64,6 +66,9 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 // Fire は時刻を過ぎた分を1回出す。出した件数を返す。1件の失敗で残りを止めない（最初の誤りを返す）。
 func (s *Scheduler) Fire(ctx context.Context) (int, error) {
+	if s.Prepare != nil {
+		s.Prepare(ctx)
+	}
 	var due []port.ScheduledEvent
 	if err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error

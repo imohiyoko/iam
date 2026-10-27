@@ -34,18 +34,22 @@ type Operator struct {
 // 確かめたものとし（経路 admin）、ロールを付与し、1回限りのログイン用リンクを発行する。
 // アドレスが登録済みなら、そのユーザーにロールを足す（自動リンクではなく、運営者による明示的な操作）。
 func (a *App) CreateOperator(ctx context.Context, email, roleName string, ttl time.Duration) (Operator, error) {
+	return a.createOperator(ctx, email, roleName, ttl, audit.Actor{Type: "operator_cli"}, "")
+}
+
+// createOperator は CreateOperator の本体。actor と requestID は監査ログに残す。
+func (a *App) createOperator(ctx context.Context, email, roleName string, ttl time.Duration, actor audit.Actor, requestID string) (Operator, error) {
 	if !role.Known(roleName) || roleName == role.NotificationDelivery {
 		return Operator{}, errs.New(errs.KindInvalid, "unknown operator role %q", roleName)
 	}
 	if err := loginlink.ValidTTL(ttl); err != nil {
 		return Operator{}, errs.Wrap(errs.KindInvalid, err, "ttl")
 	}
-	actor := audit.Actor{Type: "operator_cli"}
 	var op Operator
 	now := a.deps.Clock.Now()
 	err := a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var u port.User
-		c, err := a.accounts.CreateWithEmail(ctx, tx, a.realm.ID, email, port.VerifiedViaAdmin, actor, "")
+		c, err := a.accounts.CreateWithEmail(ctx, tx, a.realm.ID, email, port.VerifiedViaAdmin, actor, requestID)
 		switch {
 		case err == nil:
 			u, op.Created = c.User, true
@@ -69,14 +73,14 @@ func (a *App) CreateOperator(ctx context.Context, email, roleName string, ttl ti
 				return err
 			}
 			if _, err := eventlog.Record(ctx, tx, a.deps.Clock, audit.Event{
-				Type: "role.granted", Result: audit.ResultSuccess, RealmID: a.realm.ID, Actor: actor,
+				Type: "role.granted", Result: audit.ResultSuccess, RealmID: a.realm.ID, Actor: actor, RequestID: requestID,
 				Details: map[string]any{"role": roleName, "principal_type": string(port.PrincipalUser), "principal_id": u.PublicID},
 			}); err != nil {
 				return err
 			}
 		}
 		op.UserID = u.PublicID
-		return a.recordLoginLink(ctx, tx, actor, u.PublicID, "")
+		return a.recordLoginLink(ctx, tx, actor, u.PublicID, requestID)
 	})
 	if err != nil {
 		return Operator{}, err

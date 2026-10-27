@@ -45,7 +45,7 @@ func (s publicServer) CompleteOAuthLogin(ctx context.Context, req publicapi.Comp
 	if in.FlowID == "" {
 		in.FlowID = cookie(ctx, oauthCookie)
 	}
-	if tok, viaCookie := sessionToken(httpFrom(ctx).r); viaCookie {
+	if tok, viaCookie := s.a.sessionToken(httpFrom(ctx).r); viaCookie {
 		in.ReplaceToken = tok
 	}
 	res, err := s.a.oauth.Complete(ctx, s.a.realm.ID, in)

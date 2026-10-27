@@ -111,6 +111,12 @@ type AuthnRealm struct {
 	Slug      string
 	Settings  []byte
 	CreatedAt string
+	UpdatedAt string
+}
+
+type AuthnRealmHost struct {
+	Host    string
+	RealmID string
 }
 
 type AuthnRecoveryCode struct {

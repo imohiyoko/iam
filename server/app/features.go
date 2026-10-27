@@ -97,6 +97,11 @@ var cleaners = map[string]cleaner{
 			return true, tx.ServiceAccounts().SetDeleted(ctx, sa.RealmID, sa.ID, now)
 		})
 	}},
+	// 既定以外の realm（ADR 0083）。realm の削除はまだ無いため、realm があるうちは無効にできない。
+	feature.MultiRealm: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		rs, err := tx.Realms().List(ctx)
+		return max(len(rs)-1, 0), err
+	}, Hint: "realms other than the default cannot be deleted yet: keep multi_realm enabled while they exist"},
 	feature.Password: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.Passwords().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Passwords().Purge(ctx, limit)

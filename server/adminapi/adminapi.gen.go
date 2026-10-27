@@ -176,19 +176,19 @@ func (e HealthStatus) Valid() bool {
 
 // Defines values for MembershipRole.
 const (
-	Admin  MembershipRole = "admin"
-	Member MembershipRole = "member"
-	Owner  MembershipRole = "owner"
+	MembershipRoleAdmin  MembershipRole = "admin"
+	MembershipRoleMember MembershipRole = "member"
+	MembershipRoleOwner  MembershipRole = "owner"
 )
 
 // Valid indicates whether the value is a known member of the MembershipRole enum.
 func (e MembershipRole) Valid() bool {
 	switch e {
-	case Admin:
+	case MembershipRoleAdmin:
 		return true
-	case Member:
+	case MembershipRoleMember:
 		return true
-	case Owner:
+	case MembershipRoleOwner:
 		return true
 	default:
 		return false
@@ -360,6 +360,72 @@ func (e QuotaGrantInputKind) Valid() bool {
 	case QuotaGrantInputKindBase:
 		return true
 	case QuotaGrantInputKindOverride:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RealmSettingsEmailStorage.
+const (
+	Encrypted RealmSettingsEmailStorage = "encrypted"
+	IndexOnly RealmSettingsEmailStorage = "index_only"
+)
+
+// Valid indicates whether the value is a known member of the RealmSettingsEmailStorage enum.
+func (e RealmSettingsEmailStorage) Valid() bool {
+	switch e {
+	case Encrypted:
+		return true
+	case IndexOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RealmSettingsOrgCreation.
+const (
+	Anyone        RealmSettingsOrgCreation = "anyone"
+	InviteOnly    RealmSettingsOrgCreation = "invite_only"
+	OperatorsOnly RealmSettingsOrgCreation = "operators_only"
+)
+
+// Valid indicates whether the value is a known member of the RealmSettingsOrgCreation enum.
+func (e RealmSettingsOrgCreation) Valid() bool {
+	switch e {
+	case Anyone:
+		return true
+	case InviteOnly:
+		return true
+	case OperatorsOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RealmSettingsVerifiedVia.
+const (
+	RealmSettingsVerifiedViaAdmin         RealmSettingsVerifiedVia = "admin"
+	RealmSettingsVerifiedViaCode          RealmSettingsVerifiedVia = "code"
+	RealmSettingsVerifiedViaInvitation    RealmSettingsVerifiedVia = "invitation"
+	RealmSettingsVerifiedViaOauthProvider RealmSettingsVerifiedVia = "oauth_provider"
+	RealmSettingsVerifiedViaSso           RealmSettingsVerifiedVia = "sso"
+)
+
+// Valid indicates whether the value is a known member of the RealmSettingsVerifiedVia enum.
+func (e RealmSettingsVerifiedVia) Valid() bool {
+	switch e {
+	case RealmSettingsVerifiedViaAdmin:
+		return true
+	case RealmSettingsVerifiedViaCode:
+		return true
+	case RealmSettingsVerifiedViaInvitation:
+		return true
+	case RealmSettingsVerifiedViaOauthProvider:
+		return true
+	case RealmSettingsVerifiedViaSso:
 		return true
 	default:
 		return false
@@ -864,6 +930,78 @@ type QuotaShortage struct {
 	Until    *time.Time `json:"until,omitempty"`
 }
 
+// Realm defines model for Realm.
+type Realm struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Default 既定の realm（設定ファイルの realm。root で動く）
+	Default bool     `json:"default"`
+	Hosts   []string `json:"hosts"`
+	Id      string   `json:"id"`
+
+	// Issuer OIDC の iss（server.public_url が無ければ無い）
+	Issuer   *string `json:"issuer,omitempty"`
+	Settings struct {
+		EmailStorage            string `json:"email_storage"`
+		OrgCreation             string `json:"org_creation"`
+		OrgDeletionGraceSeconds int64  `json:"org_deletion_grace_seconds"`
+		QuotaCount              struct {
+			Future    bool `json:"future"`
+			Invited   bool `json:"invited"`
+			Suspended bool `json:"suspended"`
+		} `json:"quota_count"`
+		Timezone                 string   `json:"timezone"`
+		UserDeletionGraceSeconds int64    `json:"user_deletion_grace_seconds"`
+		VerifiedVia              []string `json:"verified_via"`
+	} `json:"settings"`
+	Slug      string    `json:"slug"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// RealmInput defines model for RealmInput.
+type RealmInput struct {
+	// Hosts この realm を指すホスト名（ポートなし）。最初のものが issuer と passkey の RP になる
+	Hosts *[]string `json:"hosts,omitempty"`
+
+	// Settings realm ごとの設定（ADR 0083）。省いた項目は設定ファイルの `realm` の値
+	Settings *RealmSettings `json:"settings,omitempty"`
+
+	// Slug 英小文字・数字・ハイフン（63 文字まで）
+	Slug string `json:"slug"`
+}
+
+// RealmSettings realm ごとの設定（ADR 0083）。省いた項目は設定ファイルの `realm` の値
+type RealmSettings struct {
+	EmailStorage            *RealmSettingsEmailStorage `json:"email_storage,omitempty"`
+	OrgCreation             *RealmSettingsOrgCreation  `json:"org_creation,omitempty"`
+	OrgDeletionGraceSeconds *int64                     `json:"org_deletion_grace_seconds,omitempty"`
+	QuotaCount              *struct {
+		Future    *bool `json:"future,omitempty"`
+		Invited   *bool `json:"invited,omitempty"`
+		Suspended *bool `json:"suspended,omitempty"`
+	} `json:"quota_count,omitempty"`
+	Timezone                 *string                     `json:"timezone,omitempty"`
+	UserDeletionGraceSeconds *int64                      `json:"user_deletion_grace_seconds,omitempty"`
+	VerifiedVia              *[]RealmSettingsVerifiedVia `json:"verified_via,omitempty"`
+}
+
+// RealmSettingsEmailStorage defines model for RealmSettings.EmailStorage.
+type RealmSettingsEmailStorage string
+
+// RealmSettingsOrgCreation defines model for RealmSettings.OrgCreation.
+type RealmSettingsOrgCreation string
+
+// RealmSettingsVerifiedVia defines model for RealmSettings.VerifiedVia.
+type RealmSettingsVerifiedVia string
+
+// RealmUpdate defines model for RealmUpdate.
+type RealmUpdate struct {
+	Hosts *[]string `json:"hosts,omitempty"`
+
+	// Settings realm ごとの設定（ADR 0083）。省いた項目は設定ファイルの `realm` の値
+	Settings *RealmSettings `json:"settings,omitempty"`
+}
+
 // RevokedCredentials defines model for RevokedCredentials.
 type RevokedCredentials struct {
 	Identities int  `json:"identities"`
@@ -1132,6 +1270,15 @@ type SetOrgParentJSONBody struct {
 	ParentId *string `json:"parent_id,omitempty"`
 }
 
+// CreateRealmOperatorJSONBody defines parameters for CreateRealmOperator.
+type CreateRealmOperatorJSONBody struct {
+	Email string  `json:"email"`
+	Role  *string `json:"role,omitempty"`
+
+	// TtlSeconds トークンの寿命。既定は 15 分
+	TtlSeconds *int64 `json:"ttl_seconds,omitempty"`
+}
+
 // ListServiceAccountsParams defines parameters for ListServiceAccounts.
 type ListServiceAccountsParams struct {
 	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
@@ -1251,6 +1398,15 @@ type DeleteOrgJSONRequestBody DeleteOrgJSONBody
 
 // SetOrgParentJSONRequestBody defines body for SetOrgParent for application/json ContentType.
 type SetOrgParentJSONRequestBody SetOrgParentJSONBody
+
+// CreateRealmJSONRequestBody defines body for CreateRealm for application/json ContentType.
+type CreateRealmJSONRequestBody = RealmInput
+
+// UpdateRealmJSONRequestBody defines body for UpdateRealm for application/json ContentType.
+type UpdateRealmJSONRequestBody = RealmUpdate
+
+// CreateRealmOperatorJSONRequestBody defines body for CreateRealmOperator for application/json ContentType.
+type CreateRealmOperatorJSONRequestBody CreateRealmOperatorJSONBody
 
 // CreateRoleBindingJSONRequestBody defines body for CreateRoleBinding for application/json ContentType.
 type CreateRoleBindingJSONRequestBody = RoleBindingInput
@@ -1425,6 +1581,21 @@ type ServerInterface interface {
 	// SetOrgParent Org の親を設定する・外す（Org 階層。11.4、ADR 0078）
 	// (POST /v1/admin/orgs/{id}:set-parent)
 	SetOrgParent(w http.ResponseWriter, r *http.Request, id string)
+	// ListRealms realm の一覧（複数 realm。design.md 11.1、ADR 0083）
+	// (GET /v1/admin/realms)
+	ListRealms(w http.ResponseWriter, r *http.Request)
+	// CreateRealm realm を作る（ADR 0083）
+	// (POST /v1/admin/realms)
+	CreateRealm(w http.ResponseWriter, r *http.Request)
+	// GetRealm realm を返す
+	// (GET /v1/admin/realms/{realm_id})
+	GetRealm(w http.ResponseWriter, r *http.Request, realmId string)
+	// UpdateRealm realm のホスト名と設定を変える
+	// (PATCH /v1/admin/realms/{realm_id})
+	UpdateRealm(w http.ResponseWriter, r *http.Request, realmId string)
+	// CreateRealmOperator realm の運営者を作る（最初の運営者を置く）
+	// (POST /v1/admin/realms/{realm_id}/operators)
+	CreateRealmOperator(w http.ResponseWriter, r *http.Request, realmId string)
 	// ListRoleBindings realm の範囲のロールの付与の一覧
 	// (GET /v1/admin/role-bindings)
 	ListRoleBindings(w http.ResponseWriter, r *http.Request)
@@ -2508,6 +2679,112 @@ func (siw *ServerInterfaceWrapper) SetOrgParent(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ListRealms operation middleware
+func (siw *ServerInterfaceWrapper) ListRealms(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRealms(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateRealm operation middleware
+func (siw *ServerInterfaceWrapper) CreateRealm(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateRealm(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRealm operation middleware
+func (siw *ServerInterfaceWrapper) GetRealm(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "realm_id" -------------
+	var realmId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "realm_id", r.PathValue("realm_id"), &realmId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "realm_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRealm(w, r, realmId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateRealm operation middleware
+func (siw *ServerInterfaceWrapper) UpdateRealm(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "realm_id" -------------
+	var realmId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "realm_id", r.PathValue("realm_id"), &realmId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "realm_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateRealm(w, r, realmId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateRealmOperator operation middleware
+func (siw *ServerInterfaceWrapper) CreateRealmOperator(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "realm_id" -------------
+	var realmId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "realm_id", r.PathValue("realm_id"), &realmId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "realm_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateRealmOperator(w, r, realmId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListRoleBindings operation middleware
 func (siw *ServerInterfaceWrapper) ListRoleBindings(w http.ResponseWriter, r *http.Request) {
 
@@ -3582,6 +3859,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/suspensions", wrapper.ListServiceAccountSuspensions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/suspensions", wrapper.SuspendServiceAccount)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/token", wrapper.IssueServiceAccountToken)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/realms", wrapper.ListRealms)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/realms", wrapper.CreateRealm)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/realms/{realm_id}", wrapper.GetRealm)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/realms/{realm_id}", wrapper.UpdateRealm)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/realms/{realm_id}/operators", wrapper.CreateRealmOperator)
 
 	return m
 }
@@ -6643,6 +6925,407 @@ func (response SetOrgParent409JSONResponse) VisitSetOrgParentResponse(w http.Res
 	return err
 }
 
+type ListRealmsRequestObject struct {
+}
+
+type ListRealmsResponseObject interface {
+	VisitListRealmsResponse(w http.ResponseWriter) error
+}
+
+type ListRealms200JSONResponse struct {
+	Realms []Realm `json:"realms"`
+}
+
+func (response ListRealms200JSONResponse) VisitListRealmsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRealms401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListRealms401JSONResponse) VisitListRealmsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRealms403JSONResponse Error
+
+func (response ListRealms403JSONResponse) VisitListRealmsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRealms404JSONResponse Error
+
+func (response ListRealms404JSONResponse) VisitListRealmsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealmRequestObject struct {
+	Body *CreateRealmJSONRequestBody
+}
+
+type CreateRealmResponseObject interface {
+	VisitCreateRealmResponse(w http.ResponseWriter) error
+}
+
+type CreateRealm201JSONResponse Realm
+
+func (response CreateRealm201JSONResponse) VisitCreateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealm400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateRealm400JSONResponse) VisitCreateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealm401JSONResponse Error
+
+func (response CreateRealm401JSONResponse) VisitCreateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealm403JSONResponse Error
+
+func (response CreateRealm403JSONResponse) VisitCreateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealm404JSONResponse Error
+
+func (response CreateRealm404JSONResponse) VisitCreateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealm409JSONResponse Error
+
+func (response CreateRealm409JSONResponse) VisitCreateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRealmRequestObject struct {
+	RealmId string `json:"realm_id"`
+}
+
+type GetRealmResponseObject interface {
+	VisitGetRealmResponse(w http.ResponseWriter) error
+}
+
+type GetRealm200JSONResponse Realm
+
+func (response GetRealm200JSONResponse) VisitGetRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRealm401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetRealm401JSONResponse) VisitGetRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRealm403JSONResponse Error
+
+func (response GetRealm403JSONResponse) VisitGetRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRealm404JSONResponse Error
+
+func (response GetRealm404JSONResponse) VisitGetRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateRealmRequestObject struct {
+	RealmId string `json:"realm_id"`
+	Body    *UpdateRealmJSONRequestBody
+}
+
+type UpdateRealmResponseObject interface {
+	VisitUpdateRealmResponse(w http.ResponseWriter) error
+}
+
+type UpdateRealm200JSONResponse Realm
+
+func (response UpdateRealm200JSONResponse) VisitUpdateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateRealm400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateRealm400JSONResponse) VisitUpdateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateRealm401JSONResponse Error
+
+func (response UpdateRealm401JSONResponse) VisitUpdateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateRealm403JSONResponse Error
+
+func (response UpdateRealm403JSONResponse) VisitUpdateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateRealm404JSONResponse Error
+
+func (response UpdateRealm404JSONResponse) VisitUpdateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateRealm409JSONResponse Error
+
+func (response UpdateRealm409JSONResponse) VisitUpdateRealmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealmOperatorRequestObject struct {
+	RealmId string `json:"realm_id"`
+	Body    *CreateRealmOperatorJSONRequestBody
+}
+
+type CreateRealmOperatorResponseObject interface {
+	VisitCreateRealmOperatorResponse(w http.ResponseWriter) error
+}
+
+type CreateRealmOperator201JSONResponse struct {
+	// Created ユーザーを作ったか
+	Created    bool   `json:"created"`
+	LoginToken string `json:"login_token"`
+
+	// LoginUrl ログイン画面のリンク（server.public_url が無ければ空）
+	LoginUrl string `json:"login_url"`
+	UserId   string `json:"user_id"`
+}
+
+func (response CreateRealmOperator201JSONResponse) VisitCreateRealmOperatorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealmOperator400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateRealmOperator400JSONResponse) VisitCreateRealmOperatorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealmOperator401JSONResponse Error
+
+func (response CreateRealmOperator401JSONResponse) VisitCreateRealmOperatorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealmOperator403JSONResponse Error
+
+func (response CreateRealmOperator403JSONResponse) VisitCreateRealmOperatorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRealmOperator404JSONResponse Error
+
+func (response CreateRealmOperator404JSONResponse) VisitCreateRealmOperatorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListRoleBindingsRequestObject struct {
 }
 
@@ -9363,6 +10046,21 @@ type StrictServerInterface interface {
 	// SetOrgParent Org の親を設定する・外す（Org 階層。11.4、ADR 0078）
 	// (POST /v1/admin/orgs/{id}:set-parent)
 	SetOrgParent(ctx context.Context, request SetOrgParentRequestObject) (SetOrgParentResponseObject, error)
+	// ListRealms realm の一覧（複数 realm。design.md 11.1、ADR 0083）
+	// (GET /v1/admin/realms)
+	ListRealms(ctx context.Context, request ListRealmsRequestObject) (ListRealmsResponseObject, error)
+	// CreateRealm realm を作る（ADR 0083）
+	// (POST /v1/admin/realms)
+	CreateRealm(ctx context.Context, request CreateRealmRequestObject) (CreateRealmResponseObject, error)
+	// GetRealm realm を返す
+	// (GET /v1/admin/realms/{realm_id})
+	GetRealm(ctx context.Context, request GetRealmRequestObject) (GetRealmResponseObject, error)
+	// UpdateRealm realm のホスト名と設定を変える
+	// (PATCH /v1/admin/realms/{realm_id})
+	UpdateRealm(ctx context.Context, request UpdateRealmRequestObject) (UpdateRealmResponseObject, error)
+	// CreateRealmOperator realm の運営者を作る（最初の運営者を置く）
+	// (POST /v1/admin/realms/{realm_id}/operators)
+	CreateRealmOperator(ctx context.Context, request CreateRealmOperatorRequestObject) (CreateRealmOperatorResponseObject, error)
 	// ListRoleBindings realm の範囲のロールの付与の一覧
 	// (GET /v1/admin/role-bindings)
 	ListRoleBindings(ctx context.Context, request ListRoleBindingsRequestObject) (ListRoleBindingsResponseObject, error)
@@ -10668,6 +11366,153 @@ func (sh *strictHandler) SetOrgParent(w http.ResponseWriter, r *http.Request, id
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetOrgParentResponseObject); ok {
 		if err := validResponse.VisitSetOrgParentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListRealms operation middleware
+func (sh *strictHandler) ListRealms(w http.ResponseWriter, r *http.Request) {
+	var request ListRealmsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRealms(ctx, request.(ListRealmsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRealms")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRealmsResponseObject); ok {
+		if err := validResponse.VisitListRealmsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateRealm operation middleware
+func (sh *strictHandler) CreateRealm(w http.ResponseWriter, r *http.Request) {
+	var request CreateRealmRequestObject
+
+	var body CreateRealmJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateRealm(ctx, request.(CreateRealmRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateRealm")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateRealmResponseObject); ok {
+		if err := validResponse.VisitCreateRealmResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRealm operation middleware
+func (sh *strictHandler) GetRealm(w http.ResponseWriter, r *http.Request, realmId string) {
+	var request GetRealmRequestObject
+
+	request.RealmId = realmId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRealm(ctx, request.(GetRealmRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRealm")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRealmResponseObject); ok {
+		if err := validResponse.VisitGetRealmResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateRealm operation middleware
+func (sh *strictHandler) UpdateRealm(w http.ResponseWriter, r *http.Request, realmId string) {
+	var request UpdateRealmRequestObject
+
+	request.RealmId = realmId
+
+	var body UpdateRealmJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateRealm(ctx, request.(UpdateRealmRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateRealm")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateRealmResponseObject); ok {
+		if err := validResponse.VisitUpdateRealmResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateRealmOperator operation middleware
+func (sh *strictHandler) CreateRealmOperator(w http.ResponseWriter, r *http.Request, realmId string) {
+	var request CreateRealmOperatorRequestObject
+
+	request.RealmId = realmId
+
+	var body CreateRealmOperatorJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateRealmOperator(ctx, request.(CreateRealmOperatorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateRealmOperator")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateRealmOperatorResponseObject); ok {
+		if err := validResponse.VisitCreateRealmOperatorResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

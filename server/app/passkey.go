@@ -86,7 +86,7 @@ func (s publicServer) FinishPasskeyLogin(ctx context.Context, req publicapi.Fini
 		return fail, nil
 	}
 	in := passkey.Login{FlowID: passkeyFlowID(ctx, req.Body.FlowId), Response: resp, Client: s.passkeyClient(ctx)}
-	if tok, viaCookie := sessionToken(httpFrom(ctx).r); viaCookie {
+	if tok, viaCookie := s.a.sessionToken(httpFrom(ctx).r); viaCookie {
 		in.ReplaceToken = tok
 	}
 	res, err := s.a.passkeys.FinishLogin(ctx, s.a.realm.ID, in)

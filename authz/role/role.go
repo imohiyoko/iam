@@ -65,6 +65,8 @@ const (
 	PermSigningKeysRotate = "signing_keys:rotate"
 	// PermServiceAccountsManage は汎用サービスアカウントとその認証情報の作成・削除（ADR 0074）。
 	PermServiceAccountsManage = "service_accounts:manage"
+	// PermRealmsManage は realm の作成・変更と、realm の運営者の作成（複数 realm。ADR 0083）。既定の realm でだけ効く。
+	PermRealmsManage = "realms:manage"
 	// PermAttributesManage はカスタム属性の定義（ADR 0080）。PermAttributesRead・PermAttributesWrite はユーザーの値。
 	PermAttributesManage = "attributes:manage"
 	PermAttributesRead   = "attributes:read"
@@ -84,7 +86,7 @@ func suspend(categories ...string) []string {
 }
 
 var builtin = map[string][]string{
-	RealmOwner: append([]string{PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
+	RealmOwner: append([]string{PermRealmsManage, PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
 		PermCredentialsRevoke, PermSuspensionsAny}, suspend("tos_violation", "customer_request", "security_risk", "billing")...),
 	RealmAdmin: append([]string{PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke},
 		suspend("tos_violation", "customer_request")...),

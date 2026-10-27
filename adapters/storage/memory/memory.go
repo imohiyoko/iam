@@ -219,8 +219,34 @@ func (r realms) Create(_ context.Context, v port.Realm) error {
 	if _, ok := r.t.s.realms[v.ID]; ok {
 		return errs.New(errs.KindConflict, "realm %s exists", v.ID)
 	}
-	v.Settings = bytes.Clone(v.Settings)
-	setKey(r.t, r.t.s.realms, v.ID, v)
+	if err := r.hostsFree(v); err != nil {
+		return err
+	}
+	if v.UpdatedAt.IsZero() {
+		v.UpdatedAt = v.CreatedAt
+	}
+	setKey(r.t, r.t.s.realms, v.ID, cloneRealm(v))
+	return nil
+}
+
+func (r realms) hostsFree(v port.Realm) error {
+	seen := map[string]bool{}
+	for _, h := range v.Hosts {
+		if seen[h] {
+			return errs.New(errs.KindConflict, "realm host %q repeated", h)
+		}
+		seen[h] = true
+	}
+	for _, x := range r.t.s.realms {
+		if x.ID == v.ID {
+			continue
+		}
+		for _, h := range x.Hosts {
+			if seen[h] {
+				return errs.New(errs.KindConflict, "realm host %q exists", h)
+			}
+		}
+	}
 	return nil
 }
 
@@ -241,6 +267,15 @@ func (r realms) GetBySlug(_ context.Context, slug string) (port.Realm, error) {
 	return port.Realm{}, errs.New(errs.KindNotFound, "realm slug %q", slug)
 }
 
+func (r realms) GetByHost(_ context.Context, host string) (port.Realm, error) {
+	for _, v := range r.t.s.realms {
+		if slices.Contains(v.Hosts, host) {
+			return cloneRealm(v), nil
+		}
+	}
+	return port.Realm{}, errs.New(errs.KindNotFound, "realm host %q", host)
+}
+
 func (r realms) List(context.Context) ([]port.Realm, error) {
 	out := make([]port.Realm, 0, len(r.t.s.realms))
 	for _, v := range r.t.s.realms {
@@ -250,7 +285,27 @@ func (r realms) List(context.Context) ([]port.Realm, error) {
 	return out, nil
 }
 
-func cloneRealm(v port.Realm) port.Realm { v.Settings = bytes.Clone(v.Settings); return v }
+func (r realms) Update(_ context.Context, v port.Realm) error {
+	cur, ok := r.t.s.realms[v.ID]
+	if !ok {
+		return errs.New(errs.KindNotFound, "realm %s", v.ID)
+	}
+	if err := r.hostsFree(v); err != nil {
+		return err
+	}
+	cur.Settings, cur.Hosts, cur.UpdatedAt = v.Settings, v.Hosts, v.UpdatedAt
+	setKey(r.t, r.t.s.realms, v.ID, cloneRealm(cur))
+	return nil
+}
+
+func cloneRealm(v port.Realm) port.Realm {
+	v.Settings = bytes.Clone(v.Settings)
+	v.Hosts = slices.Clone(v.Hosts)
+	if len(v.Hosts) == 0 {
+		v.Hosts = nil
+	}
+	return v
+}
 
 // ---------------------------------------------------------------------------
 

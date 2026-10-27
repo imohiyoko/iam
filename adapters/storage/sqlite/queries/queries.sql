@@ -1,14 +1,33 @@
 -- name: CreateRealm :exec
-INSERT INTO authn_realms (id, slug, settings, created_at) VALUES (?, ?, ?, ?);
+INSERT INTO authn_realms (id, slug, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?);
 
 -- name: GetRealm :one
-SELECT id, slug, settings, created_at FROM authn_realms WHERE id = ?;
+SELECT id, slug, settings, created_at, updated_at FROM authn_realms WHERE id = ?;
 
 -- name: GetRealmBySlug :one
-SELECT id, slug, settings, created_at FROM authn_realms WHERE slug = ?;
+SELECT id, slug, settings, created_at, updated_at FROM authn_realms WHERE slug = ?;
+
+-- name: GetRealmByHost :one
+SELECT r.id, r.slug, r.settings, r.created_at, r.updated_at FROM authn_realms r
+JOIN authn_realm_hosts h ON h.realm_id = r.id WHERE h.host = ?;
 
 -- name: ListRealms :many
-SELECT id, slug, settings, created_at FROM authn_realms ORDER BY id;
+SELECT id, slug, settings, created_at, updated_at FROM authn_realms ORDER BY id;
+
+-- name: UpdateRealm :execrows
+UPDATE authn_realms SET settings = ?, updated_at = ? WHERE id = ?;
+
+-- name: ListRealmHosts :many
+SELECT host, realm_id FROM authn_realm_hosts ORDER BY host;
+
+-- name: ListHostsOfRealm :many
+SELECT host FROM authn_realm_hosts WHERE realm_id = ? ORDER BY host;
+
+-- name: AddRealmHost :exec
+INSERT INTO authn_realm_hosts (host, realm_id) VALUES (?, ?);
+
+-- name: DeleteRealmHosts :exec
+DELETE FROM authn_realm_hosts WHERE realm_id = ?;
 
 -- name: ListFeatures :many
 SELECT feature, state, data_version, updated_at FROM shared_installed_features ORDER BY feature;

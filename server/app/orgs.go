@@ -701,7 +701,7 @@ func (s publicServer) AcceptInvitation(ctx context.Context, req publicapi.Accept
 	au, signedIn := authFrom(ctx)
 	c := s.a.clientOf(ctx)
 	var replace string
-	if tok, viaCookie := sessionToken(httpFrom(ctx).r); viaCookie {
+	if tok, viaCookie := s.a.sessionToken(httpFrom(ctx).r); viaCookie {
 		replace = tok
 	}
 	var out publicapi.AcceptInvitation200JSONResponse

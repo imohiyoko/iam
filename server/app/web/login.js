@@ -6,6 +6,8 @@
   const app = document.getElementById("app");
   const messages = JSON.parse(document.getElementById("messages").textContent || "{}");
   const msg = document.getElementById("message");
+  // realm を /realms/{slug} で指すときの接頭辞（ADR 0083）。API と戻り先に付ける。
+  const base = app.dataset.base || "";
 
   function show(step) {
     for (const s of document.querySelectorAll("[data-step]")) s.hidden = s.dataset.step !== step;
@@ -24,7 +26,7 @@
   }
 
   async function post(path, body) {
-    const res = await fetch(path, {
+    const res = await fetch(base + path, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -127,7 +129,7 @@
 
   for (const b of document.querySelectorAll(".provider")) {
     b.addEventListener("click", async () => {
-      const redirect = window.location.origin + "/login/oauth/callback";
+      const redirect = window.location.origin + base + "/login/oauth/callback";
       const r = await post("/v1/login/oauth/" + encodeURIComponent(b.dataset.connection) + ":start", { redirect_uri: redirect });
       if (!r.ok) return fail(r);
       window.location.assign(r.data.authorization_url);

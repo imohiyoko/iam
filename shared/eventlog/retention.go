@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/audit"
@@ -30,9 +31,11 @@ type Retention struct {
 	Ended time.Duration
 	// IndexOnlyRealms はメールの最小化モード（index_only）の realm。残っているアドレスの暗号文を消す。
 	IndexOnlyRealms []string
-	Interval        time.Duration
-	Batch           int
-	Log             *slog.Logger
+	// IndexOnly は掃除のたびに index_only の realm を返す（実行中に realm が増える構成。ADR 0083）。IndexOnlyRealms に足す。
+	IndexOnly func() []string
+	Interval  time.Duration
+	Batch     int
+	Log       *slog.Logger
 }
 
 // Swept は1回の掃除で消した件数。
@@ -100,7 +103,12 @@ func (r *Retention) Sweep(ctx context.Context) (Swept, error) {
 			}
 		}
 	}
-	for _, realmID := range r.IndexOnlyRealms {
+	realms := slices.Clone(r.IndexOnlyRealms)
+	if r.IndexOnly != nil {
+		realms = append(realms, r.IndexOnly()...)
+	}
+	slices.Sort(realms)
+	for _, realmID := range slices.Compact(realms) {
 		if err := r.drain(ctx, &n.Emails, func(ctx context.Context, tx port.Tx) (int, error) {
 			return tx.Emails().ClearCiphertexts(ctx, realmID, r.batch())
 		}); err != nil {

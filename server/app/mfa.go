@@ -66,7 +66,7 @@ func (s publicServer) loginResult(ctx context.Context, is session.Issued, userID
 		out.Token = &is.Token
 	}
 	// return_token でも Cookie は差し替える。送られてきた Cookie のセッションは入れ替えで失効しているため。
-	setCookie(ctx, sessionCookieFor(is.Token, is.Session.ExpiresAt, s.a.deps.Clock.Now()))
+	setCookie(ctx, s.a.sessionCookieFor(is.Token, is.Session.ExpiresAt, s.a.deps.Clock.Now()))
 	return out
 }
 

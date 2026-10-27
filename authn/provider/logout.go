@@ -95,6 +95,8 @@ type LogoutDeliverer struct {
 	Keys    *Keys
 	Clock   clock.Clock
 	Issuer  string
+	// IssuerOf は realm ごとの iss（複数 realm。ADR 0083）。nil なら Issuer。空なら送らない。
+	IssuerOf func(ctx context.Context, tx port.Tx, realmID string) (string, error)
 	// HTTP は送信に使う（nil なら 5 秒で打ち切り、転送を追わないクライアント）。
 	HTTP *http.Client
 	// GiveUp は送れないものをあきらめるまでの時間（既定 1 時間）。それまでは次の送出でまた送る。
@@ -164,7 +166,16 @@ func (d *LogoutDeliverer) token(ctx context.Context, m port.OutboxMessage) (uri,
 			return nil
 		}
 		now := d.Clock.Now()
-		claims := map[string]any{"iss": d.Issuer, "aud": cl.PublicID, "iat": now.Unix(), "exp": now.Add(LogoutTokenTTL).Unix(),
+		iss := d.Issuer
+		if d.IssuerOf != nil {
+			if iss, err = d.IssuerOf(ctx, tx, x.RealmID); err != nil {
+				return err
+			}
+		}
+		if iss == "" {
+			return nil
+		}
+		claims := map[string]any{"iss": iss, "aud": cl.PublicID, "iat": now.Unix(), "exp": now.Add(LogoutTokenTTL).Unix(),
 			"jti": m.ID, "sid": x.SID, "events": map[string]any{logoutEvent: map[string]any{}}}
 		// 消去したユーザーは sub を出さない（sid だけで足りる）。
 		if u, err := tx.Users().Get(ctx, x.RealmID, x.UserID); err == nil {
