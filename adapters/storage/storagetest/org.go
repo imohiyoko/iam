@@ -62,6 +62,22 @@ func testOrgs(t *testing.T, h Harness) {
 		if err := conflict("same public id", repo.Create(ctx, dup)); err != nil {
 			return err
 		}
+		from, until, at := T0.Add(time.Hour), T0.Add(2*time.Hour), T0.Add(time.Minute)
+		if err := repo.SetValidity(ctx, r, shared.ID, &from, &until, at); err != nil {
+			return err
+		}
+		if got, _ := repo.Get(ctx, r, shared.ID); got.ValidFrom == nil || !got.ValidFrom.Equal(from) || !got.ValidUntil.Equal(until) || !got.UpdatedAt.Equal(at) {
+			return fmt.Errorf("after SetValidity = %+v", got)
+		}
+		if err := repo.SetValidity(ctx, r, shared.ID, nil, nil, at); err != nil {
+			return err
+		}
+		if got, _ := repo.Get(ctx, r, shared.ID); got.ValidFrom != nil || got.ValidUntil != nil {
+			return fmt.Errorf("after clearing validity = %+v", got)
+		}
+		if err := notFound("set validity in another realm", repo.SetValidity(ctx, id.New(id.Realm), shared.ID, nil, nil, at)); err != nil {
+			return err
+		}
 		return notFound("get in another realm", second(repo.Get(ctx, id.New(id.Realm), shared.ID)))
 	})
 }
@@ -88,6 +104,12 @@ func testMemberships(t *testing.T, h Harness) {
 		}
 		if got, err := repo.GetByPublicID(ctx, r, a.PublicID); err != nil || !reflect.DeepEqual(got, a) {
 			return fmt.Errorf("memberships.GetByPublicID = %+v, %v", got, err)
+		}
+		if got, err := repo.Get(ctx, r, a.ID); err != nil || !reflect.DeepEqual(got, a) {
+			return fmt.Errorf("memberships.Get = %+v, %v", got, err)
+		}
+		if err := notFound("membership get in another realm", second(repo.Get(ctx, id.New(id.Realm), a.ID))); err != nil {
+			return err
 		}
 		if got, err := repo.GetByUserOrg(ctx, r, u, o); err != nil || got.ID != a.ID {
 			return fmt.Errorf("memberships.GetByUserOrg = %+v, %v", got, err)

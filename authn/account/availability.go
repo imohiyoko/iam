@@ -44,14 +44,20 @@ func Check(ctx context.Context, tx port.Tx, u port.User, since, now time.Time, i
 	if u.Status != port.UserActive {
 		return nil, ErrInactive
 	}
+	return CheckWindow(ctx, tx, u.RealmID, port.SuspensionTargetUser, u.ID, u.ValidFrom, u.ValidUntil, since, now, ignore...)
+}
+
+// CheckWindow は対象（ユーザー・Org・Membership）の有効期間と停止を、Check と同じ規則で時刻から計算する。
+// 有効期間の外か停止中なら *UnavailableError を返す。
+func CheckWindow(ctx context.Context, tx port.Tx, realmID string, t port.SuspensionTarget, targetID string, from, until *time.Time, since, now time.Time, ignore ...string) (*time.Time, error) {
 	var codes []string
 	var next *time.Time
-	if (u.ValidFrom != nil && now.Before(*u.ValidFrom)) || (u.ValidUntil != nil && !now.Before(*u.ValidUntil)) {
+	if (from != nil && now.Before(*from)) || (until != nil && !now.Before(*until)) {
 		codes = append(codes, CodeOutsideValidity)
-	} else if u.ValidUntil != nil {
-		next = earliest(next, *u.ValidUntil)
+	} else if until != nil {
+		next = earliest(next, *until)
 	}
-	ss, err := tx.Suspensions().ListByTarget(ctx, u.RealmID, port.SuspensionTargetUser, u.ID)
+	ss, err := tx.Suspensions().ListByTarget(ctx, realmID, t, targetID)
 	if err != nil {
 		return nil, err
 	}

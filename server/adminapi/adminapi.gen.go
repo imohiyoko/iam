@@ -117,6 +117,27 @@ func (e OrgKind) Valid() bool {
 	}
 }
 
+// Defines values for SuspensionTargetType.
+const (
+	SuspensionTargetTypeMembership SuspensionTargetType = "membership"
+	SuspensionTargetTypeOrg        SuspensionTargetType = "org"
+	SuspensionTargetTypeUser       SuspensionTargetType = "user"
+)
+
+// Valid indicates whether the value is a known member of the SuspensionTargetType enum.
+func (e SuspensionTargetType) Valid() bool {
+	switch e {
+	case SuspensionTargetTypeMembership:
+		return true
+	case SuspensionTargetTypeOrg:
+		return true
+	case SuspensionTargetTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // AdminUser defines model for AdminUser.
 type AdminUser struct {
 	Id         string          `json:"id"`
@@ -251,8 +272,17 @@ type Suspension struct {
 	LiftedBy    *string    `json:"lifted_by,omitempty"`
 	Reason      string     `json:"reason"`
 	StartsAt    time.Time  `json:"starts_at"`
-	UserId      string     `json:"user_id"`
+
+	// TargetId 対象の公開 ID
+	TargetId   string               `json:"target_id"`
+	TargetType SuspensionTargetType `json:"target_type"`
+
+	// UserId ユーザーと Membership の停止で、本人の公開 ID
+	UserId *string `json:"user_id,omitempty"`
 }
+
+// SuspensionTargetType defines model for Suspension.TargetType.
+type SuspensionTargetType string
 
 // Suspensions defines model for Suspensions.
 type Suspensions struct {
@@ -302,6 +332,12 @@ type UserTOTP struct {
 	Id        string    `json:"id"`
 }
 
+// Validity defines model for Validity.
+type Validity struct {
+	ValidFrom  *time.Time `json:"valid_from,omitempty"`
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+}
+
 // CreateConnectionJSONBody defines parameters for CreateConnection.
 type CreateConnectionJSONBody struct {
 	ClientId     string   `json:"client_id"`
@@ -344,8 +380,20 @@ type IssueRecoveryLinkJSONBody struct {
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody CreateConnectionJSONBody
 
+// UpdateMembershipJSONRequestBody defines body for UpdateMembership for application/json ContentType.
+type UpdateMembershipJSONRequestBody = Validity
+
+// SuspendMembershipJSONRequestBody defines body for SuspendMembership for application/json ContentType.
+type SuspendMembershipJSONRequestBody = SuspendRequest
+
 // CreateOrgJSONRequestBody defines body for CreateOrg for application/json ContentType.
 type CreateOrgJSONRequestBody CreateOrgJSONBody
+
+// UpdateOrgJSONRequestBody defines body for UpdateOrg for application/json ContentType.
+type UpdateOrgJSONRequestBody = Validity
+
+// SuspendOrgJSONRequestBody defines body for SuspendOrg for application/json ContentType.
+type SuspendOrgJSONRequestBody = SuspendRequest
 
 // LiftSuspensionJSONRequestBody defines body for LiftSuspension for application/json ContentType.
 type LiftSuspensionJSONRequestBody = LiftRequest
@@ -373,6 +421,15 @@ type ServerInterface interface {
 	// CreateConnection IdP 接続（OAuth / OIDC）を登録する
 	// (POST /v1/admin/connections)
 	CreateConnection(w http.ResponseWriter, r *http.Request)
+	// UpdateMembership Membershipの有効期間を変更する（4.8）
+	// (PATCH /v1/admin/memberships/{id})
+	UpdateMembership(w http.ResponseWriter, r *http.Request, id string)
+	// ListMembershipSuspensions Membershipの停止の一覧（解除・終了したものも含む）
+	// (GET /v1/admin/memberships/{id}/suspensions)
+	ListMembershipSuspensions(w http.ResponseWriter, r *http.Request, id string)
+	// SuspendMembership Membershipを停止する（4.7）
+	// (POST /v1/admin/memberships/{id}/suspensions)
+	SuspendMembership(w http.ResponseWriter, r *http.Request, id string)
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(w http.ResponseWriter, r *http.Request, id string)
@@ -382,9 +439,18 @@ type ServerInterface interface {
 	// GetOrg Org を返す
 	// (GET /v1/admin/orgs/{id})
 	GetOrg(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateOrg Orgの有効期間を変更する（4.8）
+	// (PATCH /v1/admin/orgs/{id})
+	UpdateOrg(w http.ResponseWriter, r *http.Request, id string)
 	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/memberships)
 	ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams)
+	// ListOrgSuspensions Orgの停止の一覧（解除・終了したものも含む）
+	// (GET /v1/admin/orgs/{id}/suspensions)
+	ListOrgSuspensions(w http.ResponseWriter, r *http.Request, id string)
+	// SuspendOrg Orgを停止する（4.7）
+	// (POST /v1/admin/orgs/{id}/suspensions)
+	SuspendOrg(w http.ResponseWriter, r *http.Request, id string)
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(w http.ResponseWriter, r *http.Request, id string)
@@ -460,6 +526,84 @@ func (siw *ServerInterfaceWrapper) CreateConnection(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// UpdateMembership operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMembership(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMembership(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMembershipSuspensions operation middleware
+func (siw *ServerInterfaceWrapper) ListMembershipSuspensions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMembershipSuspensions(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SuspendMembership operation middleware
+func (siw *ServerInterfaceWrapper) SuspendMembership(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SuspendMembership(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ClaimNotification operation middleware
 func (siw *ServerInterfaceWrapper) ClaimNotification(w http.ResponseWriter, r *http.Request) {
 
@@ -526,6 +670,32 @@ func (siw *ServerInterfaceWrapper) GetOrg(w http.ResponseWriter, r *http.Request
 	handler.ServeHTTP(w, r)
 }
 
+// UpdateOrg operation middleware
+func (siw *ServerInterfaceWrapper) UpdateOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateOrg(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListOrgMemberships operation middleware
 func (siw *ServerInterfaceWrapper) ListOrgMemberships(w http.ResponseWriter, r *http.Request) {
 
@@ -572,6 +742,58 @@ func (siw *ServerInterfaceWrapper) ListOrgMemberships(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListOrgMemberships(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOrgSuspensions operation middleware
+func (siw *ServerInterfaceWrapper) ListOrgSuspensions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrgSuspensions(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SuspendOrg operation middleware
+func (siw *ServerInterfaceWrapper) SuspendOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SuspendOrg(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1027,7 +1249,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs", wrapper.CreateOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.GetOrg)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.UpdateOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/memberships", wrapper.ListOrgMemberships)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/suspensions", wrapper.ListOrgSuspensions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}/suspensions", wrapper.SuspendOrg)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/memberships/{id}", wrapper.UpdateMembership)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/memberships/{id}/suspensions", wrapper.ListMembershipSuspensions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/memberships/{id}/suspensions", wrapper.SuspendMembership)
 
 	return m
 }
@@ -1139,6 +1367,270 @@ func (response CreateConnection403JSONResponse) VisitCreateConnectionResponse(w 
 type CreateConnection409JSONResponse Error
 
 func (response CreateConnection409JSONResponse) VisitCreateConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMembershipRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateMembershipJSONRequestBody
+}
+
+type UpdateMembershipResponseObject interface {
+	VisitUpdateMembershipResponse(w http.ResponseWriter) error
+}
+
+type UpdateMembership200JSONResponse Membership
+
+func (response UpdateMembership200JSONResponse) VisitUpdateMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMembership400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateMembership400JSONResponse) VisitUpdateMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMembership401JSONResponse Error
+
+func (response UpdateMembership401JSONResponse) VisitUpdateMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMembership403JSONResponse Error
+
+func (response UpdateMembership403JSONResponse) VisitUpdateMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMembership404JSONResponse Error
+
+func (response UpdateMembership404JSONResponse) VisitUpdateMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMembership409JSONResponse Error
+
+func (response UpdateMembership409JSONResponse) VisitUpdateMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembershipSuspensionsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListMembershipSuspensionsResponseObject interface {
+	VisitListMembershipSuspensionsResponse(w http.ResponseWriter) error
+}
+
+type ListMembershipSuspensions200JSONResponse Suspensions
+
+func (response ListMembershipSuspensions200JSONResponse) VisitListMembershipSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembershipSuspensions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListMembershipSuspensions401JSONResponse) VisitListMembershipSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembershipSuspensions403JSONResponse Error
+
+func (response ListMembershipSuspensions403JSONResponse) VisitListMembershipSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMembershipSuspensions404JSONResponse Error
+
+func (response ListMembershipSuspensions404JSONResponse) VisitListMembershipSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendMembershipRequestObject struct {
+	Id   string `json:"id"`
+	Body *SuspendMembershipJSONRequestBody
+}
+
+type SuspendMembershipResponseObject interface {
+	VisitSuspendMembershipResponse(w http.ResponseWriter) error
+}
+
+type SuspendMembership200JSONResponse Suspension
+
+func (response SuspendMembership200JSONResponse) VisitSuspendMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendMembership201JSONResponse Suspension
+
+func (response SuspendMembership201JSONResponse) VisitSuspendMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendMembership400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SuspendMembership400JSONResponse) VisitSuspendMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendMembership401JSONResponse Error
+
+func (response SuspendMembership401JSONResponse) VisitSuspendMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendMembership403JSONResponse Error
+
+func (response SuspendMembership403JSONResponse) VisitSuspendMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendMembership404JSONResponse Error
+
+func (response SuspendMembership404JSONResponse) VisitSuspendMembershipResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendMembership409JSONResponse Error
+
+func (response SuspendMembership409JSONResponse) VisitSuspendMembershipResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -1356,6 +1848,99 @@ func (response GetOrg404JSONResponse) VisitGetOrgResponse(w http.ResponseWriter)
 	return err
 }
 
+type UpdateOrgRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateOrgJSONRequestBody
+}
+
+type UpdateOrgResponseObject interface {
+	VisitUpdateOrgResponse(w http.ResponseWriter) error
+}
+
+type UpdateOrg200JSONResponse Org
+
+func (response UpdateOrg200JSONResponse) VisitUpdateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrg400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateOrg400JSONResponse) VisitUpdateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrg401JSONResponse Error
+
+func (response UpdateOrg401JSONResponse) VisitUpdateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrg403JSONResponse Error
+
+func (response UpdateOrg403JSONResponse) VisitUpdateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrg404JSONResponse Error
+
+func (response UpdateOrg404JSONResponse) VisitUpdateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrg409JSONResponse Error
+
+func (response UpdateOrg409JSONResponse) VisitUpdateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListOrgMembershipsRequestObject struct {
 	Id     string `json:"id"`
 	Params ListOrgMembershipsParams
@@ -1436,6 +2021,177 @@ func (response ListOrgMemberships404JSONResponse) VisitListOrgMembershipsRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgSuspensionsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListOrgSuspensionsResponseObject interface {
+	VisitListOrgSuspensionsResponse(w http.ResponseWriter) error
+}
+
+type ListOrgSuspensions200JSONResponse Suspensions
+
+func (response ListOrgSuspensions200JSONResponse) VisitListOrgSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgSuspensions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListOrgSuspensions401JSONResponse) VisitListOrgSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgSuspensions403JSONResponse Error
+
+func (response ListOrgSuspensions403JSONResponse) VisitListOrgSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgSuspensions404JSONResponse Error
+
+func (response ListOrgSuspensions404JSONResponse) VisitListOrgSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendOrgRequestObject struct {
+	Id   string `json:"id"`
+	Body *SuspendOrgJSONRequestBody
+}
+
+type SuspendOrgResponseObject interface {
+	VisitSuspendOrgResponse(w http.ResponseWriter) error
+}
+
+type SuspendOrg200JSONResponse Suspension
+
+func (response SuspendOrg200JSONResponse) VisitSuspendOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendOrg201JSONResponse Suspension
+
+func (response SuspendOrg201JSONResponse) VisitSuspendOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendOrg400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SuspendOrg400JSONResponse) VisitSuspendOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendOrg401JSONResponse Error
+
+func (response SuspendOrg401JSONResponse) VisitSuspendOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendOrg403JSONResponse Error
+
+func (response SuspendOrg403JSONResponse) VisitSuspendOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendOrg404JSONResponse Error
+
+func (response SuspendOrg404JSONResponse) VisitSuspendOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendOrg409JSONResponse Error
+
+func (response SuspendOrg409JSONResponse) VisitSuspendOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2305,6 +3061,15 @@ type StrictServerInterface interface {
 	// CreateConnection IdP 接続（OAuth / OIDC）を登録する
 	// (POST /v1/admin/connections)
 	CreateConnection(ctx context.Context, request CreateConnectionRequestObject) (CreateConnectionResponseObject, error)
+	// UpdateMembership Membershipの有効期間を変更する（4.8）
+	// (PATCH /v1/admin/memberships/{id})
+	UpdateMembership(ctx context.Context, request UpdateMembershipRequestObject) (UpdateMembershipResponseObject, error)
+	// ListMembershipSuspensions Membershipの停止の一覧（解除・終了したものも含む）
+	// (GET /v1/admin/memberships/{id}/suspensions)
+	ListMembershipSuspensions(ctx context.Context, request ListMembershipSuspensionsRequestObject) (ListMembershipSuspensionsResponseObject, error)
+	// SuspendMembership Membershipを停止する（4.7）
+	// (POST /v1/admin/memberships/{id}/suspensions)
+	SuspendMembership(ctx context.Context, request SuspendMembershipRequestObject) (SuspendMembershipResponseObject, error)
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(ctx context.Context, request ClaimNotificationRequestObject) (ClaimNotificationResponseObject, error)
@@ -2314,9 +3079,18 @@ type StrictServerInterface interface {
 	// GetOrg Org を返す
 	// (GET /v1/admin/orgs/{id})
 	GetOrg(ctx context.Context, request GetOrgRequestObject) (GetOrgResponseObject, error)
+	// UpdateOrg Orgの有効期間を変更する（4.8）
+	// (PATCH /v1/admin/orgs/{id})
+	UpdateOrg(ctx context.Context, request UpdateOrgRequestObject) (UpdateOrgResponseObject, error)
 	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/memberships)
 	ListOrgMemberships(ctx context.Context, request ListOrgMembershipsRequestObject) (ListOrgMembershipsResponseObject, error)
+	// ListOrgSuspensions Orgの停止の一覧（解除・終了したものも含む）
+	// (GET /v1/admin/orgs/{id}/suspensions)
+	ListOrgSuspensions(ctx context.Context, request ListOrgSuspensionsRequestObject) (ListOrgSuspensionsResponseObject, error)
+	// SuspendOrg Orgを停止する（4.7）
+	// (POST /v1/admin/orgs/{id}/suspensions)
+	SuspendOrg(ctx context.Context, request SuspendOrgRequestObject) (SuspendOrgResponseObject, error)
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(ctx context.Context, request RevokeSessionRequestObject) (RevokeSessionResponseObject, error)
@@ -2449,6 +3223,98 @@ func (sh *strictHandler) CreateConnection(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// UpdateMembership operation middleware
+func (sh *strictHandler) UpdateMembership(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateMembershipRequestObject
+
+	request.Id = id
+
+	var body UpdateMembershipJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateMembership(ctx, request.(UpdateMembershipRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateMembership")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateMembershipResponseObject); ok {
+		if err := validResponse.VisitUpdateMembershipResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMembershipSuspensions operation middleware
+func (sh *strictHandler) ListMembershipSuspensions(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListMembershipSuspensionsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMembershipSuspensions(ctx, request.(ListMembershipSuspensionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMembershipSuspensions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMembershipSuspensionsResponseObject); ok {
+		if err := validResponse.VisitListMembershipSuspensionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SuspendMembership operation middleware
+func (sh *strictHandler) SuspendMembership(w http.ResponseWriter, r *http.Request, id string) {
+	var request SuspendMembershipRequestObject
+
+	request.Id = id
+
+	var body SuspendMembershipJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SuspendMembership(ctx, request.(SuspendMembershipRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SuspendMembership")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SuspendMembershipResponseObject); ok {
+		if err := validResponse.VisitSuspendMembershipResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ClaimNotification operation middleware
 func (sh *strictHandler) ClaimNotification(w http.ResponseWriter, r *http.Request, id string) {
 	var request ClaimNotificationRequestObject
@@ -2532,6 +3398,39 @@ func (sh *strictHandler) GetOrg(w http.ResponseWriter, r *http.Request, id strin
 	}
 }
 
+// UpdateOrg operation middleware
+func (sh *strictHandler) UpdateOrg(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateOrgRequestObject
+
+	request.Id = id
+
+	var body UpdateOrgJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateOrg(ctx, request.(UpdateOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateOrgResponseObject); ok {
+		if err := validResponse.VisitUpdateOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListOrgMemberships operation middleware
 func (sh *strictHandler) ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams) {
 	var request ListOrgMembershipsRequestObject
@@ -2552,6 +3451,65 @@ func (sh *strictHandler) ListOrgMemberships(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListOrgMembershipsResponseObject); ok {
 		if err := validResponse.VisitListOrgMembershipsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOrgSuspensions operation middleware
+func (sh *strictHandler) ListOrgSuspensions(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListOrgSuspensionsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrgSuspensions(ctx, request.(ListOrgSuspensionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrgSuspensions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrgSuspensionsResponseObject); ok {
+		if err := validResponse.VisitListOrgSuspensionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SuspendOrg operation middleware
+func (sh *strictHandler) SuspendOrg(w http.ResponseWriter, r *http.Request, id string) {
+	var request SuspendOrgRequestObject
+
+	request.Id = id
+
+	var body SuspendOrgJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SuspendOrg(ctx, request.(SuspendOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SuspendOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SuspendOrgResponseObject); ok {
+		if err := validResponse.VisitSuspendOrgResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

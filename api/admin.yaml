@@ -381,6 +381,31 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
 
   /v1/admin/orgs/{id}:
+    patch:
+      operationId: updateOrg
+      summary: Orgの有効期間を変更する（4.8）
+      description: |
+        権限 `orgs:update`。`valid_from`・`valid_until` の両方を置き換える（省略か null は制限なし）。期間の外か停止中の Org にはメンバーが入れず、その Org を active にしているセッションは Org の操作ができない（個人 Org への切り替えはできる）。
+        境界の時刻に `org.validity_started`・`org.validity_ended` を監査ログに出す。個人 Org（とその Membership）は
+        `409 personal_org`。フィーチャー org が動いていなければ `404 org_disabled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Validity" }
+      responses:
+        "200":
+          description: 変更した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
     get:
       operationId: getOrg
       summary: Org を返す
@@ -420,6 +445,125 @@ paths:
                     items: { $ref: "#/components/schemas/Membership" }
                   next_cursor: { type: string, description: 続きがあるときだけ }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/orgs/{id}/suspensions:
+    post:
+      operationId: suspendOrg
+      summary: Orgを停止する（4.7）
+      description: |
+        権限と `external_ref` の扱いはユーザーの停止と同じ。期間の外か停止中の Org にはメンバーが入れず、その Org を active にしているセッションは Org の操作ができない（個人 Org への切り替えはできる）。停止を解除すれば戻る（ユーザーの停止と違い、
+        セッションは失効させない）。個人 Org（とその Membership）は止められない（`409 personal_org`）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SuspendRequest" }
+      responses:
+        "200":
+          description: 同じ external_ref の停止が既にある
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspension" }
+        "201":
+          description: 停止した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspension" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listOrgSuspensions
+      summary: Orgの停止の一覧（解除・終了したものも含む）
+      description: 権限 `suspensions:read`。開始の時刻の順。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspensions" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/memberships/{id}:
+    patch:
+      operationId: updateMembership
+      summary: Membershipの有効期間を変更する（4.8）
+      description: |
+        権限 `orgs:update`。`valid_from`・`valid_until` の両方を置き換える（省略か null は制限なし）。期間の外か停止中の Membership の本人は、その Org にだけ入れない。
+        境界の時刻に `membership.validity_started`・`membership.validity_ended` を監査ログに出す。個人 Org（とその Membership）は
+        `409 personal_org`。フィーチャー org が動いていなければ `404 org_disabled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Validity" }
+      responses:
+        "200":
+          description: 変更した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Membership" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/memberships/{id}/suspensions:
+    post:
+      operationId: suspendMembership
+      summary: Membershipを停止する（4.7）
+      description: |
+        権限と `external_ref` の扱いはユーザーの停止と同じ。期間の外か停止中の Membership の本人は、その Org にだけ入れない。停止を解除すれば戻る（ユーザーの停止と違い、
+        セッションは失効させない）。個人 Org（とその Membership）は止められない（`409 personal_org`）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SuspendRequest" }
+      responses:
+        "200":
+          description: 同じ external_ref の停止が既にある
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspension" }
+        "201":
+          description: 停止した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspension" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listMembershipSuspensions
+      summary: Membershipの停止の一覧（解除・終了したものも含む）
+      description: 権限 `suspensions:read`。開始の時刻の順。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspensions" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -539,6 +683,11 @@ components:
         password: { type: boolean }
         recovery_codes: { type: integer, description: 消した未使用のリカバリーコードの数 }
         sessions: { type: integer, description: 失効させたセッションの数 }
+    Validity:
+      type: object
+      properties:
+        valid_from: { type: string, format: date-time, nullable: true }
+        valid_until: { type: string, format: date-time, nullable: true }
     UpdateUser:
       type: object
       properties:
@@ -568,10 +717,12 @@ components:
         reason: { type: string, minLength: 1, maxLength: 1000 }
     Suspension:
       type: object
-      required: [id, user_id, category, reason, starts_at, active, created_at]
+      required: [id, target_type, target_id, category, reason, starts_at, active, created_at]
       properties:
         id: { type: string }
-        user_id: { type: string }
+        target_type: { type: string, enum: [user, org, membership] }
+        target_id: { type: string, description: 対象の公開 ID }
+        user_id: { type: string, description: ユーザーと Membership の停止で、本人の公開 ID }
         category: { type: string }
         reason: { type: string }
         external_ref: { type: string }

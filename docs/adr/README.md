@@ -69,3 +69,4 @@
 | [0055](0055-org-foundation.md) | Org の土台（個人 Org、共有 Org、後からの有効化） | 承認 |
 | [0056](0056-invitations-and-membership-email.md) | 招待と Membership ごとのメール | 承認 |
 | [0057](0057-org-selection-and-switching.md) | Org の決定と切り替え | 承認 |
+| [0058](0058-org-and-membership-suspension.md) | Org と Membership の停止と有効期間 | 承認 |

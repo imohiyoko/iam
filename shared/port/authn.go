@@ -449,6 +449,8 @@ type OrgRepo interface {
 	GetByPublicID(ctx context.Context, realmID, publicID string) (Org, error)
 	// GetPersonal はユーザーの個人 Org を返す。無ければ errs.NotFound。
 	GetPersonal(ctx context.Context, realmID, userID string) (Org, error)
+	// SetValidity は有効期間（design.md 4.8）を置き換える。無ければ errs.NotFound。
+	SetValidity(ctx context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error
 }
 
 // MembershipStatus は Membership の状態（design.md 3.1）。
@@ -491,6 +493,7 @@ type Membership struct {
 type MembershipRepo interface {
 	// Create は ID・(realm, PublicID)・(UserID, OrgID) が重複すれば errs.Conflict を返す。
 	Create(ctx context.Context, m Membership) error
+	Get(ctx context.Context, realmID, id string) (Membership, error)
 	GetByPublicID(ctx context.Context, realmID, publicID string) (Membership, error)
 	// GetByUserOrg はユーザーと Org の Membership を返す（終了したものも含む）。無ければ errs.NotFound。
 	GetByUserOrg(ctx context.Context, realmID, userID, orgID string) (Membership, error)

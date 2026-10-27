@@ -228,6 +228,36 @@ func (q *Queries) GetInvitationByPublicID(ctx context.Context, arg GetInvitation
 	return i, err
 }
 
+const getMembership = `-- name: GetMembership :one
+SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND id = ?
+`
+
+type GetMembershipParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetMembership(ctx context.Context, arg GetMembershipParams) (Membership, error) {
+	row := q.db.QueryRowContext(ctx, getMembership, arg.RealmID, arg.ID)
+	var i Membership
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.UserID,
+		&i.OrgID,
+		&i.Status,
+		&i.OrgRole,
+		&i.EmailID,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.EndedReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getMembershipByPublicID = `-- name: GetMembershipByPublicID :one
 SELECT id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason, created_at, updated_at FROM memberships WHERE realm_id = ? AND public_id = ?
 `
@@ -517,6 +547,32 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, arg ListMemberships
 		return nil, err
 	}
 	return items, nil
+}
+
+const setOrgValidity = `-- name: SetOrgValidity :execrows
+UPDATE orgs SET valid_from = ?, valid_until = ?, updated_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type SetOrgValidityParams struct {
+	ValidFrom  sql.NullString
+	ValidUntil sql.NullString
+	UpdatedAt  string
+	RealmID    string
+	ID         string
+}
+
+func (q *Queries) SetOrgValidity(ctx context.Context, arg SetOrgValidityParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setOrgValidity,
+		arg.ValidFrom,
+		arg.ValidUntil,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateMembership = `-- name: UpdateMembership :execrows

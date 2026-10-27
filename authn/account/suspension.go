@@ -24,7 +24,8 @@ const (
 // BuiltinCategories は組み込みの停止の種別。
 var BuiltinCategories = []string{CategoryTOSViolation, CategoryCustomerRequest, CategorySecurityRisk, CategoryBilling}
 
-// 境界のイベントの種類（scheduled_events に予約し、時刻の後に監査ログへ出す。4.8）。
+// ユーザーの境界のイベントの種類（scheduled_events に予約し、時刻の後に監査ログへ出す。4.8）。
+// Org・Membership は接頭辞が org.・membership. になる（Target）。
 const (
 	EventSuspensionStarted = "user.suspension_started"
 	EventSuspensionEnded   = "user.suspension_ended"
@@ -63,10 +64,30 @@ func (s *Service) Categories() []string {
 	return append(slices.Clone(BuiltinCategories), s.ExtraCategories...)
 }
 
-// SuspendUser はユーザーを停止する。2つ目の戻り値は新しく作ったか（ExternalRef で既存を返したときは false）。
+// Target は停止の対象（design.md 4.7）。
+type Target struct {
+	Type     port.SuspensionTarget
+	ID       string // 内部 ID
+	PublicID string // 監査ログに出す公開 ID
+}
+
+// UserTarget はユーザーの停止の対象。
+func UserTarget(u port.User) Target {
+	return Target{Type: port.SuspensionTargetUser, ID: u.ID, PublicID: u.PublicID}
+}
+
+// label は監査ログのイベントの種類と詳細の鍵の接頭辞（user.suspended、org_id など）。
+func (t Target) label() string { return string(t.Type) }
+
+// SuspendUser はユーザーを停止する（Suspend）。
+func (s *Service) SuspendUser(ctx context.Context, tx port.Tx, realmID string, u port.User, in Suspend, actor audit.Actor, requestID string) (port.Suspension, bool, error) {
+	return s.Suspend(ctx, tx, realmID, UserTarget(u), in, actor, requestID)
+}
+
+// Suspend は対象を停止する。2つ目の戻り値は新しく作ったか（ExternalRef で既存を返したときは false）。
 // 停止中かは時刻から計算するので、予約や終わりの時刻は scheduled_events の処理の遅れに左右されない（4.7、4.8）。
 // 呼び出し側は確定の後に session.Manager.Forget で検証結果のキャッシュを消す。
-func (s *Service) SuspendUser(ctx context.Context, tx port.Tx, realmID string, u port.User, in Suspend, actor audit.Actor, requestID string) (port.Suspension, bool, error) {
+func (s *Service) Suspend(ctx context.Context, tx port.Tx, realmID string, t Target, in Suspend, actor audit.Actor, requestID string) (port.Suspension, bool, error) {
 	if !slices.Contains(s.Categories(), in.Category) {
 		return port.Suspension{}, false, ErrUnknownCategory
 	}
@@ -85,30 +106,31 @@ func (s *Service) SuspendUser(ctx context.Context, tx port.Tx, realmID string, u
 		return port.Suspension{}, false, ErrInvalidPeriod
 	}
 	if in.ExternalRef != "" {
-		if x, ok, err := byExternalRef(ctx, tx, realmID, u.ID, in.Category, in.ExternalRef); err != nil || ok {
+		if x, ok, err := byExternalRef(ctx, tx, realmID, t, in.Category, in.ExternalRef); err != nil || ok {
 			return x, false, err
 		}
 	}
 	sp := port.Suspension{
 		ID: id.New(id.Suspension), PublicID: id.NewExternal(id.Suspension), RealmID: realmID,
-		TargetType: port.SuspensionTargetUser, TargetID: u.ID, Category: in.Category, Reason: in.Reason,
+		TargetType: t.Type, TargetID: t.ID, Category: in.Category, Reason: in.Reason,
 		ExternalRef: in.ExternalRef, StartsAt: start, EndsAt: in.EndsAt, CreatedBy: actor.ID, CreatedAt: now,
 	}
 	if err := tx.Suspensions().Create(ctx, sp); err != nil {
 		return port.Suspension{}, false, err
 	}
-	boundary := map[string]any{"user_id": u.PublicID, "suspension_id": sp.PublicID, "category": sp.Category}
+	key := t.label() + "_id"
+	boundary := map[string]any{key: t.PublicID, "suspension_id": sp.PublicID, "category": sp.Category}
 	if start.After(now) {
-		if err := eventlog.Schedule(ctx, tx, s.Clock, realmID, sp.PublicID, EventSuspensionStarted, start, boundary); err != nil {
+		if err := eventlog.Schedule(ctx, tx, s.Clock, realmID, sp.PublicID, t.label()+".suspension_started", start, boundary); err != nil {
 			return port.Suspension{}, false, err
 		}
 	}
 	if sp.EndsAt != nil {
-		if err := eventlog.Schedule(ctx, tx, s.Clock, realmID, sp.PublicID, EventSuspensionEnded, *sp.EndsAt, boundary); err != nil {
+		if err := eventlog.Schedule(ctx, tx, s.Clock, realmID, sp.PublicID, t.label()+".suspension_ended", *sp.EndsAt, boundary); err != nil {
 			return port.Suspension{}, false, err
 		}
 	}
-	details := map[string]any{"user_id": u.PublicID, "suspension_id": sp.PublicID, "category": sp.Category, "reason": sp.Reason,
+	details := map[string]any{key: t.PublicID, "suspension_id": sp.PublicID, "category": sp.Category, "reason": sp.Reason,
 		"starts_at": sp.StartsAt.UTC().Format(time.RFC3339Nano)}
 	if sp.EndsAt != nil {
 		details["ends_at"] = sp.EndsAt.UTC().Format(time.RFC3339Nano)
@@ -116,13 +138,13 @@ func (s *Service) SuspendUser(ctx context.Context, tx port.Tx, realmID string, u
 	if sp.ExternalRef != "" {
 		details["external_ref"] = sp.ExternalRef
 	}
-	return sp, true, s.record(ctx, tx, realmID, "user.suspended", actor, requestID, details)
+	return sp, true, s.record(ctx, tx, realmID, t.label()+".suspended", actor, requestID, details)
 }
 
 func validReason(r string) bool { return strings.TrimSpace(r) != "" && len(r) <= maxReason }
 
-func byExternalRef(ctx context.Context, tx port.Tx, realmID, userID, category, ref string) (port.Suspension, bool, error) {
-	ss, err := tx.Suspensions().ListByTarget(ctx, realmID, port.SuspensionTargetUser, userID)
+func byExternalRef(ctx context.Context, tx port.Tx, realmID string, t Target, category, ref string) (port.Suspension, bool, error) {
+	ss, err := tx.Suspensions().ListByTarget(ctx, realmID, t.Type, t.ID)
 	if err != nil {
 		return port.Suspension{}, false, err
 	}
@@ -152,48 +174,78 @@ func (s *Service) LiftSuspension(ctx context.Context, tx port.Tx, realmID string
 	}
 	sp.LiftedAt, sp.LiftedBy = &now, actor.ID
 	details := map[string]any{"suspension_id": sp.PublicID, "category": sp.Category, "reason": reason}
-	if sp.TargetType == port.SuspensionTargetUser {
-		u, err := tx.Users().Get(ctx, realmID, sp.TargetID)
-		if err != nil {
-			return port.Suspension{}, err
-		}
-		details["user_id"] = u.PublicID
+	publicID, err := TargetPublicID(ctx, tx, realmID, sp)
+	if err != nil {
+		return port.Suspension{}, err
 	}
-	return sp, s.record(ctx, tx, realmID, "user.suspension_lifted", actor, requestID, details)
+	details[string(sp.TargetType)+"_id"] = publicID
+	return sp, s.record(ctx, tx, realmID, string(sp.TargetType)+".suspension_lifted", actor, requestID, details)
+}
+
+// TargetPublicID は停止の対象の公開 ID を返す。
+func TargetPublicID(ctx context.Context, tx port.Tx, realmID string, sp port.Suspension) (string, error) {
+	switch sp.TargetType {
+	case port.SuspensionTargetUser:
+		u, err := tx.Users().Get(ctx, realmID, sp.TargetID)
+		return u.PublicID, err
+	case port.SuspensionTargetOrg:
+		o, err := tx.Orgs().Get(ctx, realmID, sp.TargetID)
+		return o.PublicID, err
+	case port.SuspensionTargetMembership:
+		m, err := tx.Memberships().Get(ctx, realmID, sp.TargetID)
+		return m.PublicID, err
+	}
+	return "", errs.New(errs.KindInternal, "unknown suspension target %q", sp.TargetType)
 }
 
 // SetValidity はユーザーの有効期間を置き換える（nil は制限なし。4.8）。境界のイベントを予約し直す。
 // 呼び出し側は確定の後に session.Manager.Forget で検証結果のキャッシュを消す。
 func (s *Service) SetValidity(ctx context.Context, tx port.Tx, realmID string, u port.User, from, until *time.Time, actor audit.Actor, requestID string) (port.User, error) {
-	if from != nil && until != nil && !until.After(*from) {
-		return port.User{}, ErrInvalidPeriod
+	if err := ValidPeriod(from, until); err != nil {
+		return port.User{}, err
 	}
 	now := s.Clock.Now()
 	if err := tx.Users().SetValidity(ctx, realmID, u.ID, from, until, now); err != nil {
 		return port.User{}, err
 	}
-	ref := "validity:" + u.PublicID
-	if err := tx.ScheduledEvents().CancelByRef(ctx, realmID, ref); err != nil {
-		return port.User{}, err
+	u.ValidFrom, u.ValidUntil, u.UpdatedAt = from, until, now
+	return u, s.ValidityChanged(ctx, tx, realmID, UserTarget(u), from, until, actor, requestID)
+}
+
+// ValidPeriod は有効期間の終わりが始まりより後であることを確かめる。
+func ValidPeriod(from, until *time.Time) error {
+	if from != nil && until != nil && !until.After(*from) {
+		return ErrInvalidPeriod
 	}
-	boundary := map[string]any{"user_id": u.PublicID}
-	details := map[string]any{"user_id": u.PublicID, "valid_from": nil, "valid_until": nil}
+	return nil
+}
+
+// ValidityChanged は対象の有効期間を置き換えたことを監査ログに残し、境界のイベント（<対象>.validity_started・
+// _ended）を予約し直す（4.8）。有効期間の保存は呼び出し側が同じトランザクションで行う。
+func (s *Service) ValidityChanged(ctx context.Context, tx port.Tx, realmID string, t Target, from, until *time.Time, actor audit.Actor, requestID string) error {
+	now := s.Clock.Now()
+	ref := "validity:" + t.PublicID
+	if err := tx.ScheduledEvents().CancelByRef(ctx, realmID, ref); err != nil {
+		return err
+	}
+	key := t.label() + "_id"
+	boundary := map[string]any{key: t.PublicID}
+	details := map[string]any{key: t.PublicID, "valid_from": nil, "valid_until": nil}
 	if from != nil {
 		details["valid_from"] = from.UTC().Format(time.RFC3339Nano)
 		if from.After(now) {
-			if err := eventlog.Schedule(ctx, tx, s.Clock, realmID, ref, EventValidityStarted, *from, boundary); err != nil {
-				return port.User{}, err
+			if err := eventlog.Schedule(ctx, tx, s.Clock, realmID, ref, t.label()+".validity_started", *from, boundary); err != nil {
+				return err
 			}
 		}
 	}
 	if until != nil {
 		details["valid_until"] = until.UTC().Format(time.RFC3339Nano)
 		if until.After(now) {
-			if err := eventlog.Schedule(ctx, tx, s.Clock, realmID, ref, EventValidityEnded, *until, boundary); err != nil {
-				return port.User{}, err
+			if err := eventlog.Schedule(ctx, tx, s.Clock, realmID, ref, t.label()+".validity_ended", *until, boundary); err != nil {
+				return err
 			}
 		}
 	}
-	u.ValidFrom, u.ValidUntil, u.UpdatedAt = from, until, now
-	return u, s.record(ctx, tx, realmID, "user.validity_changed", actor, requestID, details)
+	return s.record(ctx, tx, realmID, t.label()+".validity_changed", actor, requestID, details)
 }

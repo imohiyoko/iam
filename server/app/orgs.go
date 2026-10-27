@@ -39,10 +39,24 @@ func (s publicServer) ListMyOrgs(ctx context.Context, _ publicapi.ListMyOrgsRequ
 	out := publicapi.ListMyOrgs200JSONResponse{Orgs: []publicapi.MyOrg{}}
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		js, err := s.a.orgs.ListForUser(ctx, tx, s.a.realm.ID, au.PrincipalID)
-		for _, j := range js {
-			out.Orgs = append(out.Orgs, myOrg(j, au.ActiveOrgID))
+		if err != nil {
+			return err
 		}
-		return err
+		now := s.a.deps.Clock.Now()
+		for _, j := range js {
+			v := myOrg(j, au.ActiveOrgID)
+			if j.Membership.Status == port.MembershipActive {
+				_, err := org.Check(ctx, tx, j.Org, j.Membership, now)
+				if d, ok := errors.AsType[errs.Denial](err); ok {
+					reasons := d.Reasons()
+					v.Unavailable = &reasons
+				} else if err != nil {
+					return err
+				}
+			}
+			out.Orgs = append(out.Orgs, v)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -217,12 +231,7 @@ func (s adminServer) ListOrgMemberships(ctx context.Context, req adminapi.ListOr
 			if err != nil {
 				return err
 			}
-			v := adminapi.Membership{Id: m.PublicID, UserId: u.PublicID, OrgId: o.PublicID, Status: adminapi.MembershipStatus(m.Status),
-				Role: adminapi.MembershipRole(m.Role), ValidFrom: m.ValidFrom, ValidUntil: m.ValidUntil, CreatedAt: m.CreatedAt}
-			if m.EndedReason != "" {
-				v.EndedReason = &m.EndedReason
-			}
-			out.Memberships = append(out.Memberships, v)
+			out.Memberships = append(out.Memberships, membershipView(m, u.PublicID, o.PublicID))
 		}
 		return nil
 	})
@@ -235,15 +244,148 @@ func (s adminServer) ListOrgMemberships(ctx context.Context, req adminapi.ListOr
 	return out, nil
 }
 
+func membershipView(m port.Membership, userPublicID, orgPublicID string) adminapi.Membership {
+	v := adminapi.Membership{Id: m.PublicID, UserId: userPublicID, OrgId: orgPublicID, Status: adminapi.MembershipStatus(m.Status),
+		Role: adminapi.MembershipRole(m.Role), ValidFrom: m.ValidFrom, ValidUntil: m.ValidUntil, CreatedAt: m.CreatedAt}
+	if m.EndedReason != "" {
+		v.EndedReason = &m.EndedReason
+	}
+	return v
+}
+
+// updateValidity は運営者による Org・Membership の有効期間の変更の共通部分（4.8）。
+func (s adminServer) updateValidity(ctx context.Context, body *adminapi.Validity, change func(ctx context.Context, tx port.Tx, p adminPrincipal) error) (outcome, error) {
+	if body == nil {
+		return failed(http.StatusBadRequest, "invalid_request"), nil
+	}
+	p, d, err := s.a.authorize(ctx, role.PermOrgsUpdate)
+	if o, ok, err := outcomeOf(d, err); !ok {
+		return o, err
+	}
+	if o, off := s.orgsOff(true); off {
+		return o, nil
+	}
+	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return change(ctx, tx, p) })
+	if o, ok, err := outcomeOf(nil, err); !ok {
+		return o, err
+	}
+	return outcome{status: http.StatusOK}, nil
+}
+
+func (s adminServer) UpdateOrg(ctx context.Context, req adminapi.UpdateOrgRequestObject) (adminapi.UpdateOrgResponseObject, error) {
+	var out adminapi.Org
+	o, err := s.updateValidity(ctx, req.Body, func(ctx context.Context, tx port.Tx, p adminPrincipal) error {
+		cur, _, err := s.adminOrg(ctx, tx, req.Id)
+		if err != nil {
+			return err
+		}
+		if cur, err = s.a.orgs.SetOrgValidity(ctx, tx, cur, req.Body.ValidFrom, req.Body.ValidUntil, p.Actor, requestID(ctx)); err != nil {
+			return err
+		}
+		out = orgView(cur, "")
+		return nil
+	})
+	switch {
+	case err != nil:
+		return nil, err
+	case o.status == http.StatusOK:
+		return adminapi.UpdateOrg200JSONResponse(out), nil
+	case o.status == http.StatusBadRequest:
+		return adminapi.UpdateOrg400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(o.body)}, nil
+	case o.status == http.StatusUnauthorized:
+		return adminapi.UpdateOrg401JSONResponse(o.body), nil
+	case o.status == http.StatusForbidden:
+		return adminapi.UpdateOrg403JSONResponse(o.body), nil
+	case o.status == http.StatusNotFound:
+		return adminapi.UpdateOrg404JSONResponse(o.body), nil
+	case o.status == http.StatusConflict:
+		return adminapi.UpdateOrg409JSONResponse(o.body), nil
+	}
+	return nil, errUnexpected(o)
+}
+
+func (s adminServer) UpdateMembership(ctx context.Context, req adminapi.UpdateMembershipRequestObject) (adminapi.UpdateMembershipResponseObject, error) {
+	var out adminapi.Membership
+	var userID string
+	o, err := s.updateValidity(ctx, req.Body, func(ctx context.Context, tx port.Tx, p adminPrincipal) error {
+		m, err := tx.Memberships().GetByPublicID(ctx, s.a.realm.ID, req.Id)
+		if err != nil {
+			return err
+		}
+		og, err := tx.Orgs().Get(ctx, s.a.realm.ID, m.OrgID)
+		if err != nil {
+			return err
+		}
+		u, err := tx.Users().Get(ctx, s.a.realm.ID, m.UserID)
+		if err != nil {
+			return err
+		}
+		if m, err = s.a.orgs.SetMembershipValidity(ctx, tx, og, m, req.Body.ValidFrom, req.Body.ValidUntil, p.Actor, requestID(ctx)); err != nil {
+			return err
+		}
+		userID, out = u.ID, membershipView(m, u.PublicID, og.PublicID)
+		return nil
+	})
+	switch {
+	case err != nil:
+		return nil, err
+	case o.status == http.StatusOK:
+		s.a.sessions.Forget(ctx, s.a.realm.ID, userID)
+		return adminapi.UpdateMembership200JSONResponse(out), nil
+	case o.status == http.StatusBadRequest:
+		return adminapi.UpdateMembership400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(o.body)}, nil
+	case o.status == http.StatusUnauthorized:
+		return adminapi.UpdateMembership401JSONResponse(o.body), nil
+	case o.status == http.StatusForbidden:
+		return adminapi.UpdateMembership403JSONResponse(o.body), nil
+	case o.status == http.StatusNotFound:
+		return adminapi.UpdateMembership404JSONResponse(o.body), nil
+	case o.status == http.StatusConflict:
+		return adminapi.UpdateMembership409JSONResponse(o.body), nil
+	}
+	return nil, errUnexpected(o)
+}
+
 // ---------------------------------------------------------------------------
 // 招待とメンバー（4.4）。Org の中の操作は、その Org の active な Membership と org_role の固定の権限で判定する。
 
 // errOrgPermission は org_role に権限が無いこと。
 var errOrgPermission = errs.WithCode(errs.KindPermissionDenied, errs.CodePermissionDenied, "org permission denied")
 
+// orgUnavailable は Org か Membership が停止中か有効期間の外であること（4.7、4.8）。理由を返す（4.9）。
+type orgUnavailable struct{ errs.Denial }
+
+func (orgUnavailable) Is(target error) bool { return target == errs.PermissionDenied }
+
+// orgDenied は Org の操作の拒否の応答。停止などは理由を返す。
+func orgDenied(err error) publicapi.DeniedJSONResponse {
+	if d, ok := errors.AsType[errs.Denial](err); ok {
+		return denied(d)
+	}
+	return publicapi.DeniedJSONResponse{Error: errCode(err)}
+}
+
 // orgMember は本人の、公開 ID の Org と active な Membership を返す。perm が空でなければ、その権限が要る。
-// 所属していない Org は無いものとして扱う（errs.NotFound）。
+// 所属していない Org は無いものとして扱う（errs.NotFound）。Org か Membership が使えなければ orgUnavailable。
 func (s publicServer) orgMember(ctx context.Context, tx port.Tx, au auth, orgPublicID, perm string) (port.Org, port.Membership, error) {
+	o, m, err := s.membership(ctx, tx, au, orgPublicID)
+	if err != nil {
+		return port.Org{}, port.Membership{}, err
+	}
+	if _, err := org.Check(ctx, tx, o, m, s.a.deps.Clock.Now()); err != nil {
+		if d, ok := errors.AsType[errs.Denial](err); ok {
+			err = orgUnavailable{d}
+		}
+		return port.Org{}, port.Membership{}, err
+	}
+	if perm != "" && !role.OrgAllows(m, perm) {
+		return port.Org{}, port.Membership{}, errOrgPermission
+	}
+	return o, m, nil
+}
+
+// membership は本人の、公開 ID の Org と active な Membership を返す。使えるか（停止・有効期間）は見ない。
+func (s publicServer) membership(ctx context.Context, tx port.Tx, au auth, orgPublicID string) (port.Org, port.Membership, error) {
 	o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, orgPublicID)
 	if err != nil {
 		return port.Org{}, port.Membership{}, err
@@ -254,9 +396,6 @@ func (s publicServer) orgMember(ctx context.Context, tx port.Tx, au auth, orgPub
 	}
 	if err != nil {
 		return port.Org{}, port.Membership{}, err
-	}
-	if perm != "" && !role.OrgAllows(m, perm) {
-		return port.Org{}, port.Membership{}, errOrgPermission
 	}
 	return o, m, nil
 }
@@ -319,24 +458,9 @@ func (s publicServer) ListOrgMembers(ctx context.Context, req publicapi.ListOrgM
 			if m.Status == port.MembershipEnded {
 				continue
 			}
-			u, err := tx.Users().Get(ctx, s.a.realm.ID, m.UserID)
+			v, err := s.orgMemberView(ctx, tx, m)
 			if err != nil {
 				return err
-			}
-			v := publicapi.OrgMember{MembershipId: m.PublicID, UserId: u.PublicID, Role: publicapi.OrgMemberRole(m.Role), Status: publicapi.OrgMemberStatus(m.Status)}
-			// 見せるのは結び付けたメールだけ（4.4）。
-			e, err := org.BoundEmail(ctx, tx, m)
-			if err != nil && !errors.Is(err, errs.NotFound) {
-				return err
-			}
-			if err == nil {
-				addr, err := s.a.accounts.EmailAddress(ctx, tx, e)
-				if err != nil {
-					return err
-				}
-				if addr != "" {
-					v.Email = &addr
-				}
 			}
 			out.Members = append(out.Members, v)
 		}
@@ -346,11 +470,36 @@ func (s publicServer) ListOrgMembers(ctx context.Context, req publicapi.ListOrgM
 	case errors.Is(err, errs.NotFound):
 		return publicapi.ListOrgMembers404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	case errors.Is(err, errs.PermissionDenied):
-		return publicapi.ListOrgMembers403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errCode(err)}}, nil
+		return publicapi.ListOrgMembers403JSONResponse{DeniedJSONResponse: orgDenied(err)}, nil
 	case err != nil:
 		return nil, err
 	}
 	return out, nil
+}
+
+// orgMemberView は Org の管理者に見せるメンバー。見せるメールは結び付けたものだけ（4.4）。
+func (s publicServer) orgMemberView(ctx context.Context, tx port.Tx, m port.Membership) (publicapi.OrgMember, error) {
+	u, err := tx.Users().Get(ctx, s.a.realm.ID, m.UserID)
+	if err != nil {
+		return publicapi.OrgMember{}, err
+	}
+	v := publicapi.OrgMember{MembershipId: m.PublicID, UserId: u.PublicID, Role: publicapi.OrgMemberRole(m.Role), Status: publicapi.OrgMemberStatus(m.Status),
+		ValidFrom: m.ValidFrom, ValidUntil: m.ValidUntil}
+	e, err := org.BoundEmail(ctx, tx, m)
+	if errors.Is(err, errs.NotFound) {
+		return v, nil
+	}
+	if err != nil {
+		return publicapi.OrgMember{}, err
+	}
+	addr, err := s.a.accounts.EmailAddress(ctx, tx, e)
+	if err != nil {
+		return publicapi.OrgMember{}, err
+	}
+	if addr != "" {
+		v.Email = &addr
+	}
+	return v, nil
 }
 
 func (s publicServer) ListOrgInvitations(ctx context.Context, req publicapi.ListOrgInvitationsRequestObject) (publicapi.ListOrgInvitationsResponseObject, error) {
@@ -385,7 +534,7 @@ func (s publicServer) ListOrgInvitations(ctx context.Context, req publicapi.List
 	case errors.Is(err, errs.NotFound):
 		return publicapi.ListOrgInvitations404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	case errors.Is(err, errs.PermissionDenied):
-		return publicapi.ListOrgInvitations403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errCode(err)}}, nil
+		return publicapi.ListOrgInvitations403JSONResponse{DeniedJSONResponse: orgDenied(err)}, nil
 	case err != nil:
 		return nil, err
 	}
@@ -426,7 +575,7 @@ func (s publicServer) InviteToOrg(ctx context.Context, req publicapi.InviteToOrg
 	case errors.Is(err, errs.NotFound):
 		return publicapi.InviteToOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	case errors.Is(err, errs.PermissionDenied):
-		return publicapi.InviteToOrg403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errCode(err)}}, nil
+		return publicapi.InviteToOrg403JSONResponse{DeniedJSONResponse: orgDenied(err)}, nil
 	case errors.Is(err, errs.Invalid):
 		return publicapi.InviteToOrg400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: errCode(err)}}, nil
 	case err != nil:
@@ -454,7 +603,7 @@ func (s publicServer) RevokeOrgInvitation(ctx context.Context, req publicapi.Rev
 	case errors.Is(err, errs.NotFound):
 		return publicapi.RevokeOrgInvitation404JSONResponse{NotFoundJSONResponse: publicapi.NotFoundJSONResponse{Error: errCodeOr(err, "not_found")}}, nil
 	case errors.Is(err, errs.PermissionDenied):
-		return publicapi.RevokeOrgInvitation403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errCode(err)}}, nil
+		return publicapi.RevokeOrgInvitation403JSONResponse{DeniedJSONResponse: orgDenied(err)}, nil
 	case err != nil:
 		return nil, err
 	}
@@ -601,6 +750,9 @@ func (s publicServer) SwitchMyOrg(ctx context.Context, req publicapi.SwitchMyOrg
 		return nil, err
 	}
 	is, err := s.a.sessions.SwitchOrg(ctx, s.a.realm.ID, au.SessionID, orgID, requestID(ctx))
+	if d, ok := errors.AsType[errs.Denial](err); ok {
+		return publicapi.SwitchMyOrg403JSONResponse{DeniedJSONResponse: denied(d)}, nil
+	}
 	switch {
 	case errors.Is(err, org.ErrNoAvailableOrg):
 		return publicapi.SwitchMyOrg403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errs.CodeNoAvailableOrg}}, nil
@@ -638,7 +790,8 @@ func (s publicServer) SetMyPasskeyOrg(ctx context.Context, req publicapi.SetMyPa
 		}
 		var orgID string
 		if orgPublicID != "" {
-			o, _, err := s.orgMember(ctx, tx, au, orgPublicID, "")
+			// 停止中の Org も既定にできる（ログインでは使える Org だけを候補にする）。
+			o, _, err := s.membership(ctx, tx, au, orgPublicID)
 			if err != nil {
 				return err
 			}

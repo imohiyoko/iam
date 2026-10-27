@@ -1066,6 +1066,133 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}/members/{membership_id}:
+    patch:
+      operationId: updateOrgMember
+      summary: メンバーの有効期間を変更する（Org の owner と admin。4.8）
+      description: |
+        `valid_from`・`valid_until` の両方を置き換える（省略か null は制限なし）。期間の外のメンバーはこの Org にだけ入れない。
+        自分は対象にできず（`403 self_target`）、owner を対象にできるのは owner だけ。個人 Org は `409 personal_org`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: membership_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                valid_from: { type: string, format: date-time, nullable: true }
+                valid_until: { type: string, format: date-time, nullable: true }
+      responses:
+        "200":
+          description: 変更した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgMember" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/members/{membership_id}/suspensions:
+    post:
+      operationId: suspendOrgMember
+      summary: メンバーを停止する（Org の owner と admin。種別は customer_request。4.7）
+      description: |
+        `starts_at` を省略か過去なら今から、未来なら予約。`ends_at` を省略で無期限。停止中のメンバーはこの Org にだけ入れない。
+        本人には `suspended.customer_request` だけを返し、`reason` は見せない。自分は対象にできず（`403 self_target`）、
+        owner を対象にできるのは owner だけ。個人 Org は `409 personal_org`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: membership_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 1000 }
+                starts_at: { type: string, format: date-time }
+                ends_at: { type: string, format: date-time }
+      responses:
+        "201":
+          description: 停止した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgSuspension" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      operationId: listOrgMemberSuspensions
+      summary: メンバーの停止の一覧（Org の owner と admin。customer_request だけ）
+      description: 運営者による停止（規約違反など）は含めない。開始の時刻の順。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: membership_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [suspensions]
+                properties:
+                  suspensions:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgSuspension" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/orgs/{id}/suspensions/{suspension_id}:lift:
+    post:
+      operationId: liftOrgSuspension
+      summary: メンバーの停止を解除する（Org の owner と admin。customer_request だけ）
+      description: 既に解除・終了していれば何もせず 200。自分の停止は解除できない（`403 self_target`）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: suspension_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 1000 }
+      responses:
+        "200":
+          description: 解除した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgSuspension" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/me/orgs/{id}/invitations:
     get:
       operationId: listOrgInvitations
@@ -1394,6 +1521,10 @@ components:
         status: { type: string, enum: [invited, active] }
         active: { type: boolean, description: このセッションが入っている Org か }
         email_id: { type: string, description: この Org に結び付けたメール。未設定（primary を使う）なら無し }
+        unavailable:
+          type: array
+          items: { type: string }
+          description: 今この Org に入れない理由のコード（`suspended.<category>`、`outside_validity`。4.9）。入れるなら無し
     OrgMember:
       type: object
       required: [membership_id, user_id, role, status]
@@ -1403,6 +1534,21 @@ components:
         role: { type: string, enum: [owner, admin, member] }
         status: { type: string, enum: [invited, active] }
         email: { type: string, description: この Org に結び付けたメール（未設定なら primary） }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+    OrgSuspension:
+      type: object
+      required: [id, membership_id, category, reason, starts_at, active, created_at]
+      properties:
+        id: { type: string }
+        membership_id: { type: string }
+        category: { type: string }
+        reason: { type: string }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        active: { type: boolean, description: 今停止中か }
+        created_at: { type: string, format: date-time }
+        lifted_at: { type: string, format: date-time }
     OrgInvitation:
       type: object
       required: [id, role, status, expires_at, created_at]

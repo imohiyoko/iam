@@ -11,6 +11,12 @@ SELECT * FROM orgs WHERE realm_id = ? AND public_id = ?;
 -- name: GetPersonalOrg :one
 SELECT * FROM orgs WHERE realm_id = ? AND kind = 'personal' AND personal_owner_id = ?;
 
+-- name: SetOrgValidity :execrows
+UPDATE orgs SET valid_from = ?, valid_until = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
+
+-- name: GetMembership :one
+SELECT * FROM memberships WHERE realm_id = ? AND id = ?;
+
 -- name: CreateMembership :exec
 INSERT INTO memberships (id, public_id, realm_id, user_id, org_id, status, org_role, email_id, valid_from, valid_until, ended_reason,
     created_at, updated_at)

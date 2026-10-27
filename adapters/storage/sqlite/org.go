@@ -40,6 +40,18 @@ func (r orgs) GetPersonal(ctx context.Context, realmID, userID string) (port.Org
 	return one(row, err, toOrg)
 }
 
+func (r orgs) SetValidity(ctx context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error {
+	n, err := r.q.SetOrgValidity(ctx, db.SetOrgValidityParams{ValidFrom: nullTime(from), ValidUntil: nullTime(until), UpdatedAt: formatTime(updatedAt),
+		RealmID: realmID, ID: id})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return errs.New(errs.KindNotFound, "org")
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 
 type memberships struct{ q *db.Queries }
@@ -57,6 +69,11 @@ func (r memberships) Create(ctx context.Context, m port.Membership) error {
 		UserID: m.UserID, OrgID: m.OrgID, Status: string(m.Status), OrgRole: string(m.Role), EmailID: m.EmailID,
 		ValidFrom: nullTime(m.ValidFrom), ValidUntil: nullTime(m.ValidUntil), EndedReason: m.EndedReason,
 		CreatedAt: formatTime(m.CreatedAt), UpdatedAt: formatTime(m.UpdatedAt)}))
+}
+
+func (r memberships) Get(ctx context.Context, realmID, id string) (port.Membership, error) {
+	row, err := r.q.GetMembership(ctx, db.GetMembershipParams{RealmID: realmID, ID: id})
+	return one(row, err, toMembership)
 }
 
 func (r memberships) GetByPublicID(ctx context.Context, realmID, publicID string) (port.Membership, error) {
