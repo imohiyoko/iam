@@ -206,11 +206,11 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
 	}
 	// 判定の材料のキャッシュは、セッションの検証と同じ反映の遅れの上限（5.3）まで。
-	a.authz = &check.Checker{Storage: d.Storage, Clock: d.Clock, TTL: ss.ValidityMaxDelay.D()}
+	a.authz = &check.Checker{Storage: d.Storage, Clock: d.Clock, TTL: ss.ValidityMaxDelay.D(), NestedGroups: plan.IsActive(feature.NestedGroups)}
 	if a.orgs != nil {
 		a.authz.Members, a.authz.Hierarchy = authzMembers{}, a.orgs.Hierarchy
 	}
-	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock}
+	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
 	a.clients = &provider.Clients{Clock: d.Clock}
 	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D()}
 	// ID トークンの署名鍵は起動時に用意しておく（JWKS が空のまま公開されないように）。

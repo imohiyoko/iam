@@ -31,6 +31,28 @@ func (q *Queries) AddGroupMember(ctx context.Context, arg AddGroupMemberParams) 
 	return err
 }
 
+const countGroupClosure = `-- name: CountGroupClosure :one
+SELECT count(*) FROM authz_group_closure
+`
+
+func (q *Queries) CountGroupClosure(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countGroupClosure)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countNestedGroupMembers = `-- name: CountNestedGroupMembers :one
+SELECT count(*) FROM authz_group_members WHERE member_type = 'group'
+`
+
+func (q *Queries) CountNestedGroupMembers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countNestedGroupMembers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createGroup = `-- name: CreateGroup :exec
 INSERT INTO authz_groups (id, public_id, realm_id, org_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
 `
@@ -138,12 +160,49 @@ func (q *Queries) DeleteGroup(ctx context.Context, arg DeleteGroupParams) (int64
 	return result.RowsAffected()
 }
 
+const deleteGroupAncestors = `-- name: DeleteGroupAncestors :exec
+DELETE FROM authz_group_closure WHERE realm_id = ? AND group_id = ?
+`
+
+type DeleteGroupAncestorsParams struct {
+	RealmID string
+	GroupID string
+}
+
+func (q *Queries) DeleteGroupAncestors(ctx context.Context, arg DeleteGroupAncestorsParams) error {
+	_, err := q.db.ExecContext(ctx, deleteGroupAncestors, arg.RealmID, arg.GroupID)
+	return err
+}
+
+const deleteGroupClosure = `-- name: DeleteGroupClosure :exec
+DELETE FROM authz_group_closure WHERE realm_id = ?1 AND (group_id = ?2 OR ancestor_id = ?2)
+`
+
+type DeleteGroupClosureParams struct {
+	RealmID string
+	GroupID string
+}
+
+func (q *Queries) DeleteGroupClosure(ctx context.Context, arg DeleteGroupClosureParams) error {
+	_, err := q.db.ExecContext(ctx, deleteGroupClosure, arg.RealmID, arg.GroupID)
+	return err
+}
+
 const deleteGroupMembers = `-- name: DeleteGroupMembers :exec
 DELETE FROM authz_group_members WHERE group_id = ?
 `
 
 func (q *Queries) DeleteGroupMembers(ctx context.Context, groupID string) error {
 	_, err := q.db.ExecContext(ctx, deleteGroupMembers, groupID)
+	return err
+}
+
+const deleteGroupMemberships = `-- name: DeleteGroupMemberships :exec
+DELETE FROM authz_group_members WHERE member_type = 'group' AND member_id = ?
+`
+
+func (q *Queries) DeleteGroupMemberships(ctx context.Context, memberID string) error {
+	_, err := q.db.ExecContext(ctx, deleteGroupMemberships, memberID)
 	return err
 }
 
@@ -306,6 +365,27 @@ func (q *Queries) GetRoleByPublicID(ctx context.Context, arg GetRoleByPublicIDPa
 	return i, err
 }
 
+const insertGroupAncestor = `-- name: InsertGroupAncestor :exec
+INSERT INTO authz_group_closure (realm_id, group_id, ancestor_id, depth) VALUES (?, ?, ?, ?)
+`
+
+type InsertGroupAncestorParams struct {
+	RealmID    string
+	GroupID    string
+	AncestorID string
+	Depth      int64
+}
+
+func (q *Queries) InsertGroupAncestor(ctx context.Context, arg InsertGroupAncestorParams) error {
+	_, err := q.db.ExecContext(ctx, insertGroupAncestor,
+		arg.RealmID,
+		arg.GroupID,
+		arg.AncestorID,
+		arg.Depth,
+	)
+	return err
+}
+
 const listEffectiveRoleBindings = `-- name: ListEffectiveRoleBindings :many
 SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at,
        COALESCE(g.org_id, '') AS group_org_id, r.public_id AS custom_public_id, r.org_id AS custom_org_id, r.name AS custom_name,
@@ -375,6 +455,166 @@ func (q *Queries) ListEffectiveRoleBindings(ctx context.Context, arg ListEffecti
 			&i.CustomCreatedAt,
 			&i.CustomUpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEffectiveRoleBindingsNested = `-- name: ListEffectiveRoleBindingsNested :many
+SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at,
+       COALESCE(g.org_id, '') AS group_org_id, r.public_id AS custom_public_id, r.org_id AS custom_org_id, r.name AS custom_name,
+       r.permissions AS custom_permissions, r.created_at AS custom_created_at, r.updated_at AS custom_updated_at
+FROM authz_role_bindings b
+LEFT JOIN authz_groups g ON b.principal_type = 'group' AND g.id = b.principal_id
+LEFT JOIN authz_roles r ON r.realm_id = b.realm_id AND r.id = b.role
+WHERE b.realm_id = ?1 AND b.id IN (
+    SELECT d.id FROM authz_role_bindings d WHERE d.realm_id = ?1 AND d.principal_type = ?2 AND d.principal_id = ?3
+    UNION ALL
+    SELECT x.id FROM authz_group_members m JOIN authz_role_bindings x ON x.realm_id = ?1 AND x.principal_type = 'group' AND x.principal_id = m.group_id
+    WHERE m.member_type = ?2 AND m.member_id = ?3
+    UNION ALL
+    SELECT y.id FROM authz_group_members n JOIN authz_group_closure c ON c.realm_id = ?1 AND c.group_id = n.group_id
+    JOIN authz_role_bindings y ON y.realm_id = ?1 AND y.principal_type = 'group' AND y.principal_id = c.ancestor_id
+    WHERE n.member_type = ?2 AND n.member_id = ?3)
+ORDER BY b.created_at, b.id
+`
+
+type ListEffectiveRoleBindingsNestedParams struct {
+	RealmID       string
+	PrincipalType string
+	PrincipalID   string
+}
+
+type ListEffectiveRoleBindingsNestedRow struct {
+	ID                string
+	PublicID          string
+	RealmID           string
+	Role              string
+	PrincipalType     string
+	PrincipalID       string
+	OrgID             string
+	ResourceType      string
+	ResourceID        string
+	CreatedAt         string
+	GroupOrgID        string
+	CustomPublicID    sql.NullString
+	CustomOrgID       sql.NullString
+	CustomName        sql.NullString
+	CustomPermissions sql.NullString
+	CustomCreatedAt   sql.NullString
+	CustomUpdatedAt   sql.NullString
+}
+
+func (q *Queries) ListEffectiveRoleBindingsNested(ctx context.Context, arg ListEffectiveRoleBindingsNestedParams) ([]ListEffectiveRoleBindingsNestedRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEffectiveRoleBindingsNested, arg.RealmID, arg.PrincipalType, arg.PrincipalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEffectiveRoleBindingsNestedRow
+	for rows.Next() {
+		var i ListEffectiveRoleBindingsNestedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.Role,
+			&i.PrincipalType,
+			&i.PrincipalID,
+			&i.OrgID,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.CreatedAt,
+			&i.GroupOrgID,
+			&i.CustomPublicID,
+			&i.CustomOrgID,
+			&i.CustomName,
+			&i.CustomPermissions,
+			&i.CustomCreatedAt,
+			&i.CustomUpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupAncestors = `-- name: ListGroupAncestors :many
+SELECT ancestor_id, depth FROM authz_group_closure WHERE realm_id = ? AND group_id = ? ORDER BY depth, ancestor_id
+`
+
+type ListGroupAncestorsParams struct {
+	RealmID string
+	GroupID string
+}
+
+type ListGroupAncestorsRow struct {
+	AncestorID string
+	Depth      int64
+}
+
+func (q *Queries) ListGroupAncestors(ctx context.Context, arg ListGroupAncestorsParams) ([]ListGroupAncestorsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listGroupAncestors, arg.RealmID, arg.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListGroupAncestorsRow
+	for rows.Next() {
+		var i ListGroupAncestorsRow
+		if err := rows.Scan(&i.AncestorID, &i.Depth); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupDescendants = `-- name: ListGroupDescendants :many
+SELECT group_id, depth FROM authz_group_closure WHERE realm_id = ? AND ancestor_id = ? ORDER BY depth, group_id
+`
+
+type ListGroupDescendantsParams struct {
+	RealmID    string
+	AncestorID string
+}
+
+type ListGroupDescendantsRow struct {
+	GroupID string
+	Depth   int64
+}
+
+func (q *Queries) ListGroupDescendants(ctx context.Context, arg ListGroupDescendantsParams) ([]ListGroupDescendantsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listGroupDescendants, arg.RealmID, arg.AncestorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListGroupDescendantsRow
+	for rows.Next() {
+		var i ListGroupDescendantsRow
+		if err := rows.Scan(&i.GroupID, &i.Depth); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -671,6 +911,32 @@ func (q *Queries) ListRolesByOrg(ctx context.Context, arg ListRolesByOrgParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeGroupClosure = `-- name: PurgeGroupClosure :execrows
+DELETE FROM authz_group_closure WHERE (realm_id, group_id, ancestor_id) IN (
+    SELECT c.realm_id, c.group_id, c.ancestor_id FROM authz_group_closure c LIMIT ?1)
+`
+
+func (q *Queries) PurgeGroupClosure(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeGroupClosure, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const purgeNestedGroupMembers = `-- name: PurgeNestedGroupMembers :execrows
+DELETE FROM authz_group_members WHERE member_type = 'group' AND (group_id, member_id) IN (
+    SELECT m.group_id, m.member_id FROM authz_group_members m WHERE m.member_type = 'group' LIMIT ?1)
+`
+
+func (q *Queries) PurgeNestedGroupMembers(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeNestedGroupMembers, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const removeGroupMember = `-- name: RemoveGroupMember :execrows

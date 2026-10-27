@@ -5,6 +5,7 @@ package main
 // このバイナリに含めるフィーチャーとアダプタ（自己登録。design.md 11.11）。
 import (
 	// フィーチャー。
+	_ "github.com/imohiyoko/iam/features/nestedgroups"
 	_ "github.com/imohiyoko/iam/features/org"
 	_ "github.com/imohiyoko/iam/features/orghierarchy"
 	_ "github.com/imohiyoko/iam/features/orgloginpolicy"

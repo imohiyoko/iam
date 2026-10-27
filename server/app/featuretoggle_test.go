@@ -247,3 +247,26 @@ func TestDisableOrgWithData(t *testing.T) {
 		t.Fatal("no personal org for the user created while org was disabled")
 	}
 }
+
+// nested_groups は Group としての所属と閉包の行を消す。Group とユーザーの所属は残す。
+func TestDisableNestedGroupsWithData(t *testing.T) {
+	l := allFeaturesEnv(t)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	base := "/v1/me/orgs/" + acme
+	var ids []string
+	for _, name := range []string{"all", "eng"} {
+		code, body := l.meDo(t, "POST", owner, base+"/groups", map[string]any{"name": name})
+		if code != 201 {
+			t.Fatalf("create group: %d %v", code, body)
+		}
+		ids = append(ids, body["id"].(string))
+	}
+	if code, body := l.meDo(t, "POST", owner, base+"/groups/"+ids[0]+"/members", map[string]any{"principal_type": "group", "principal_id": ids[1]}); code != 204 {
+		t.Fatalf("nest: %d %v", code, body)
+	}
+	disableWithData(t, l, feature.NestedGroups, 2)
+	if code, body := l.meDo(t, "GET", owner, base+"/groups/"+ids[0]+"/members", nil); code != 200 || len(body["members"].([]any)) != 0 {
+		t.Fatalf("members after purge: %d %v", code, body)
+	}
+}

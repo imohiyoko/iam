@@ -63,6 +63,8 @@ type Checker struct {
 	// Hierarchy は Org 階層（フィーチャー org_hierarchy。ADR 0078）。true なら、Org の範囲の判定に祖先の Org の付与と
 	// org_role を、祖先の使える所属を持つ間だけ（判定の Org が使えるときに）効かせる。
 	Hierarchy bool
+	// NestedGroups は Group のネスト（フィーチャー nested_groups。ADR 0079）。true なら、所属する Group を含む Group の付与も効く。
+	NestedGroups bool
 	// TTL は判定の材料のキャッシュの期限（反映の遅れの上限）。0 ならキャッシュしない。
 	TTL time.Duration
 	// MaxEntries はキャッシュの件数の上限。超えたら全部捨てる。0 なら 100000。
@@ -272,8 +274,9 @@ func (c *Checker) Grants(ctx context.Context, tx port.Tx, realmID string, p Prin
 		return orgUsable()
 	}
 
-	// 直接の付与と Group の付与を、独自のロールの中身とともに1回で集める（キャッシュに外れたときの往復を減らす）。
-	bs, err := tx.RoleBindings().ListEffective(ctx, realmID, p.Type, p.ID)
+	// 直接の付与と Group（ネストなら、それを含む Group も）の付与を、独自のロールの中身とともに1回で集める
+	// （キャッシュに外れたときの往復を減らす）。
+	bs, err := tx.RoleBindings().ListEffective(ctx, realmID, p.Type, p.ID, c.NestedGroups)
 	if err != nil {
 		return nil, err
 	}

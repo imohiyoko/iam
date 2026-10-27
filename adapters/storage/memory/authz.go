@@ -76,12 +76,21 @@ func (r roleBindings) ListByOrg(_ context.Context, realmID, orgID string) ([]por
 	return r.list(func(x port.RoleBinding) bool { return x.RealmID == realmID && x.OrgID == orgID }), nil
 }
 
-func (r roleBindings) ListEffective(_ context.Context, realmID string, t port.PrincipalType, principalID string) ([]port.EffectiveBinding, error) {
+func (r roleBindings) ListEffective(_ context.Context, realmID string, t port.PrincipalType, principalID string, nested bool) ([]port.EffectiveBinding, error) {
 	groupOrg := map[string]string{}
 	for _, m := range r.t.s.groupMembers {
 		if m.MemberType == t && m.MemberID == principalID {
 			if g, ok := r.t.s.groups[m.GroupID]; ok && g.RealmID == realmID {
 				groupOrg[g.ID] = g.OrgID
+			}
+		}
+	}
+	if nested {
+		for _, l := range r.t.s.groupClosure {
+			if _, ok := groupOrg[l.group]; ok && l.realm == realmID {
+				if g, ok := r.t.s.groups[l.ancestor]; ok {
+					groupOrg[g.ID] = g.OrgID
+				}
 			}
 		}
 	}
@@ -267,8 +276,13 @@ func (r groups) Delete(_ context.Context, realmID, id string) error {
 		return err
 	}
 	for k, m := range r.t.s.groupMembers {
-		if m.GroupID == id {
+		if m.GroupID == id || m.MemberType == port.PrincipalGroup && m.MemberID == id {
 			deleteKey(r.t, r.t.s.groupMembers, k)
+		}
+	}
+	for k, l := range r.t.s.groupClosure {
+		if l.realm == realmID && (l.group == id || l.ancestor == id) {
+			deleteKey(r.t, r.t.s.groupClosure, k)
 		}
 	}
 	deleteKey(r.t, r.t.s.groups, id)
@@ -333,4 +347,81 @@ func (r groups) ListByMember(_ context.Context, realmID string, t port.Principal
 		out[i] = j.g
 	}
 	return out, nil
+}
+
+// groupLink は Group のネストの閉包の1行。
+type groupLink struct {
+	realm, group, ancestor string
+	depth                  int
+}
+
+func (r groups) links(match func(groupLink) bool, key func(groupLink) string) []port.GroupLink {
+	var out []port.GroupLink
+	for _, l := range r.t.s.groupClosure {
+		if match(l) {
+			out = append(out, port.GroupLink{GroupID: key(l), Depth: l.depth})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Depth != out[j].Depth {
+			return out[i].Depth < out[j].Depth
+		}
+		return out[i].GroupID < out[j].GroupID
+	})
+	return out
+}
+
+func (r groups) Ancestors(_ context.Context, realmID, groupID string) ([]port.GroupLink, error) {
+	return r.links(func(l groupLink) bool { return l.realm == realmID && l.group == groupID }, func(l groupLink) string { return l.ancestor }), nil
+}
+
+func (r groups) Descendants(_ context.Context, realmID, groupID string) ([]port.GroupLink, error) {
+	return r.links(func(l groupLink) bool { return l.realm == realmID && l.ancestor == groupID }, func(l groupLink) string { return l.group }), nil
+}
+
+func (r groups) SetAncestors(_ context.Context, realmID, groupID string, ancestors []port.GroupLink) error {
+	for k, l := range r.t.s.groupClosure {
+		if l.realm == realmID && l.group == groupID {
+			deleteKey(r.t, r.t.s.groupClosure, k)
+		}
+	}
+	for _, a := range ancestors {
+		k := realmID + "\x00" + groupID + "\x00" + a.GroupID
+		if _, ok := r.t.s.groupClosure[k]; ok {
+			return errs.New(errs.KindConflict, "group ancestor exists")
+		}
+		setKey(r.t, r.t.s.groupClosure, k, groupLink{realm: realmID, group: groupID, ancestor: a.GroupID, depth: a.Depth})
+	}
+	return nil
+}
+
+func (r groups) CountNested(context.Context) (int, error) {
+	n := len(r.t.s.groupClosure)
+	for _, m := range r.t.s.groupMembers {
+		if m.MemberType == port.PrincipalGroup {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r groups) PurgeNested(_ context.Context, limit int) (int, error) {
+	n := 0
+	for k := range r.t.s.groupClosure {
+		if n >= limit {
+			return n, nil
+		}
+		deleteKey(r.t, r.t.s.groupClosure, k)
+		n++
+	}
+	for k, m := range r.t.s.groupMembers {
+		if n >= limit {
+			break
+		}
+		if m.MemberType == port.PrincipalGroup {
+			deleteKey(r.t, r.t.s.groupMembers, k)
+			n++
+		}
+	}
+	return n, nil
 }

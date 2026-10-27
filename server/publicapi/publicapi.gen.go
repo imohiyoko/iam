@@ -357,7 +357,7 @@ type GroupMember struct {
 	// PrincipalId 主体の公開 ID
 	PrincipalId string `json:"principal_id"`
 
-	// PrincipalType user
+	// PrincipalType user・service_account・group（nested_groups が有効なとき）
 	PrincipalType string `json:"principal_type"`
 }
 
@@ -365,7 +365,7 @@ type GroupMember struct {
 type GroupMemberInput struct {
 	PrincipalId string `json:"principal_id"`
 
-	// PrincipalType user
+	// PrincipalType user・service_account・group（nested_groups が有効なとき）
 	PrincipalType string `json:"principal_type"`
 }
 

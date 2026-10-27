@@ -1114,6 +1114,8 @@ paths:
       summary: Group に主体を入れる
       description: |
         権限 `groups:manage`。Group に付与されたロールの IAM 自身の権限をすべて自分が持っていなければならない。主体はユーザー。
+        フィーチャー `nested_groups` が有効なら、同じ範囲の Group も入れられる（入れた Group の所属に、この Group の付与が効く。
+        循環は `409 group_cycle`、入れ子が 5 段を超えるなら `409 group_too_deep`。ADR 0079）。
         既に所属していれば `409 member_exists`。`group.member_added` を監査ログに残す。
       parameters:
         - { name: group_id, in: path, required: true, schema: { type: string } }
@@ -1958,7 +1960,7 @@ components:
       type: object
       required: [principal_type, principal_id, created_at]
       properties:
-        principal_type: { type: string, description: user }
+        principal_type: { type: string, description: "user・service_account・group（nested_groups が有効なとき）" }
         principal_id: { type: string, description: 主体の公開 ID }
         created_at: { type: string, format: date-time }
     GroupMembers:
@@ -1972,7 +1974,7 @@ components:
       type: object
       required: [principal_type, principal_id]
       properties:
-        principal_type: { type: string, description: user }
+        principal_type: { type: string, description: "user・service_account・group（nested_groups が有効なとき）" }
         principal_id: { type: string }
     CheckRequest:
       type: object

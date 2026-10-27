@@ -2,6 +2,7 @@
 package all
 
 import (
+	_ "github.com/imohiyoko/iam/features/nestedgroups"
 	_ "github.com/imohiyoko/iam/features/org"
 	_ "github.com/imohiyoko/iam/features/orghierarchy"
 	_ "github.com/imohiyoko/iam/features/orgloginpolicy"

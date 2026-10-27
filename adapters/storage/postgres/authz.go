@@ -52,29 +52,39 @@ func (r roleBindings) ListByOrg(ctx context.Context, realmID, orgID string) ([]p
 	return rows(rs, err, toRoleBinding)
 }
 
-// ListEffective は1つのクエリで、直接の付与と所属する Group の付与を、Group の Org と独自のロールの中身とともに集める。
-func (r roleBindings) ListEffective(ctx context.Context, realmID string, t port.PrincipalType, principalID string) ([]port.EffectiveBinding, error) {
+// ListEffective は1つのクエリで、直接の付与と所属する Group（nested なら、それを含む Group も）の付与を、Group の Org と
+// 独自のロールの中身とともに集める。
+func (r roleBindings) ListEffective(ctx context.Context, realmID string, t port.PrincipalType, principalID string, nested bool) ([]port.EffectiveBinding, error) {
+	if nested {
+		rs, err := r.q.ListEffectiveRoleBindingsNested(ctx, db.ListEffectiveRoleBindingsNestedParams{RealmID: realmID, PrincipalType: string(t),
+			PrincipalID: principalID})
+		return rows(rs, err, func(x db.ListEffectiveRoleBindingsNestedRow) (port.EffectiveBinding, error) {
+			return toEffective(db.ListEffectiveRoleBindingsRow(x))
+		})
+	}
 	rs, err := r.q.ListEffectiveRoleBindings(ctx, db.ListEffectiveRoleBindingsParams{RealmID: realmID, PrincipalType: string(t), PrincipalID: principalID})
-	return rows(rs, err, func(x db.ListEffectiveRoleBindingsRow) (port.EffectiveBinding, error) {
-		b, err := toRoleBinding(db.AuthzRoleBinding{ID: x.ID, PublicID: x.PublicID, RealmID: x.RealmID, Role: x.Role, PrincipalType: x.PrincipalType,
-			PrincipalID: x.PrincipalID, OrgID: x.OrgID, ResourceType: x.ResourceType, ResourceID: x.ResourceID, CreatedAt: x.CreatedAt})
+	return rows(rs, err, toEffective)
+}
+
+func toEffective(x db.ListEffectiveRoleBindingsRow) (port.EffectiveBinding, error) {
+	b, err := toRoleBinding(db.AuthzRoleBinding{ID: x.ID, PublicID: x.PublicID, RealmID: x.RealmID, Role: x.Role, PrincipalType: x.PrincipalType,
+		PrincipalID: x.PrincipalID, OrgID: x.OrgID, ResourceType: x.ResourceType, ResourceID: x.ResourceID, CreatedAt: x.CreatedAt})
+	if err != nil {
+		return port.EffectiveBinding{}, err
+	}
+	e := port.EffectiveBinding{RoleBinding: b}
+	if x.PrincipalType == string(port.PrincipalGroup) {
+		e.GroupOrgID = x.GroupOrgID
+	}
+	if x.CustomPublicID.Valid {
+		c, err := toRole(db.AuthzRole{ID: x.Role, PublicID: x.CustomPublicID.String, RealmID: x.RealmID, OrgID: x.CustomOrgID.String,
+			Name: x.CustomName.String, Permissions: x.CustomPermissions.String, CreatedAt: x.CustomCreatedAt.String, UpdatedAt: x.CustomUpdatedAt.String})
 		if err != nil {
 			return port.EffectiveBinding{}, err
 		}
-		e := port.EffectiveBinding{RoleBinding: b}
-		if x.PrincipalType == string(port.PrincipalGroup) {
-			e.GroupOrgID = x.GroupOrgID
-		}
-		if x.CustomPublicID.Valid {
-			c, err := toRole(db.AuthzRole{ID: x.Role, PublicID: x.CustomPublicID.String, RealmID: x.RealmID, OrgID: x.CustomOrgID.String,
-				Name: x.CustomName.String, Permissions: x.CustomPermissions.String, CreatedAt: x.CustomCreatedAt.String, UpdatedAt: x.CustomUpdatedAt.String})
-			if err != nil {
-				return port.EffectiveBinding{}, err
-			}
-			e.Custom = &c
-		}
-		return e, nil
-	})
+		e.Custom = &c
+	}
+	return e, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +194,12 @@ func (r groups) Delete(ctx context.Context, realmID, id string) error {
 	if err := r.q.DeleteGroupMembers(ctx, id); err != nil {
 		return mapErr(err)
 	}
+	if err := r.q.DeleteGroupMemberships(ctx, id); err != nil {
+		return mapErr(err)
+	}
+	if err := r.q.DeleteGroupClosure(ctx, db.DeleteGroupClosureParams{RealmID: realmID, GroupID: id}); err != nil {
+		return mapErr(err)
+	}
 	n, err := r.q.DeleteGroup(ctx, db.DeleteGroupParams{RealmID: realmID, ID: id})
 	return affected(n, err, "group")
 }
@@ -215,4 +231,49 @@ func (r groups) ListMembers(ctx context.Context, realmID, groupID string) ([]por
 func (r groups) ListByMember(ctx context.Context, realmID string, t port.PrincipalType, memberID string) ([]port.Group, error) {
 	rs, err := r.q.ListGroupsByMember(ctx, db.ListGroupsByMemberParams{RealmID: realmID, MemberType: string(t), MemberID: memberID})
 	return rows(rs, err, toGroup)
+}
+
+func (r groups) Ancestors(ctx context.Context, realmID, groupID string) ([]port.GroupLink, error) {
+	rs, err := r.q.ListGroupAncestors(ctx, db.ListGroupAncestorsParams{RealmID: realmID, GroupID: groupID})
+	return rows(rs, err, func(x db.ListGroupAncestorsRow) (port.GroupLink, error) {
+		return port.GroupLink{GroupID: x.AncestorID, Depth: int(x.Depth)}, nil
+	})
+}
+
+func (r groups) Descendants(ctx context.Context, realmID, groupID string) ([]port.GroupLink, error) {
+	rs, err := r.q.ListGroupDescendants(ctx, db.ListGroupDescendantsParams{RealmID: realmID, AncestorID: groupID})
+	return rows(rs, err, func(x db.ListGroupDescendantsRow) (port.GroupLink, error) {
+		return port.GroupLink{GroupID: x.GroupID, Depth: int(x.Depth)}, nil
+	})
+}
+
+func (r groups) SetAncestors(ctx context.Context, realmID, groupID string, ancestors []port.GroupLink) error {
+	if err := r.q.DeleteGroupAncestors(ctx, db.DeleteGroupAncestorsParams{RealmID: realmID, GroupID: groupID}); err != nil {
+		return mapErr(err)
+	}
+	for _, a := range ancestors {
+		if err := r.q.InsertGroupAncestor(ctx, db.InsertGroupAncestorParams{RealmID: realmID, GroupID: groupID, AncestorID: a.GroupID,
+			Depth: int64(a.Depth)}); err != nil {
+			return mapErr(err)
+		}
+	}
+	return nil
+}
+
+func (r groups) CountNested(ctx context.Context) (int, error) {
+	m, err := r.q.CountNestedGroupMembers(ctx)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	c, err := r.q.CountGroupClosure(ctx)
+	return int(m + c), mapErr(err)
+}
+
+func (r groups) PurgeNested(ctx context.Context, limit int) (int, error) {
+	c, err := r.q.PurgeGroupClosure(ctx, int64(limit))
+	if err != nil || int(c) >= limit {
+		return int(c), mapErr(err)
+	}
+	m, err := r.q.PurgeNestedGroupMembers(ctx, int64(limit)-c)
+	return int(c + m), mapErr(err)
 }

@@ -332,7 +332,7 @@ func (a *App) addGroupMember(ctx context.Context, tx port.Tx, c authzCall, publi
 	if err != nil {
 		return err
 	}
-	t, err := resolvePrincipal(ctx, tx, c.sc, in.PrincipalType, in.PrincipalId, false)
+	t, err := resolvePrincipal(ctx, tx, c.sc, in.PrincipalType, in.PrincipalId, a.manage.NestedGroups)
 	if err != nil {
 		return err
 	}
@@ -344,7 +344,8 @@ func (a *App) removeGroupMember(ctx context.Context, tx port.Tx, c authzCall, pu
 	if err != nil {
 		return err
 	}
-	t, err := resolvePrincipal(ctx, tx, c.sc, in.PrincipalType, in.PrincipalId, false)
+	// Group のネストを無効にする途中でも、Group としての所属は外せる。
+	t, err := resolvePrincipal(ctx, tx, c.sc, in.PrincipalType, in.PrincipalId, true)
 	if errors.Is(err, errInvalidPrincipal) {
 		return errs.New(errs.KindNotFound, "group member")
 	}

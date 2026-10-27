@@ -51,6 +51,8 @@ var (
 type Service struct {
 	Checker *check.Checker
 	Clock   clock.Clock
+	// NestedGroups は Group のネスト（フィーチャー nested_groups。ADR 0079）。true なら Group を Group の所属にできる。
+	NestedGroups bool
 }
 
 // Scope は操作の範囲。OrgID が空なら realm。
@@ -419,19 +421,43 @@ func (s *Service) DeleteGroup(ctx context.Context, tx port.Tx, sc Scope, a Actor
 			return err
 		}
 	}
+	down, err := subtree(ctx, tx, sc.RealmID, g.ID)
+	if err != nil {
+		return err
+	}
 	if err := tx.Groups().Delete(ctx, sc.RealmID, g.ID); err != nil {
+		return err
+	}
+	// 含まれていた Group の閉包を計算し直す（g と、g を通じた祖先が外れる）。
+	if err := rebuild(ctx, tx, sc.RealmID, down[1:]); err != nil {
 		return err
 	}
 	return s.record(ctx, tx, sc, a, "group.deleted", map[string]any{"group_id": g.PublicID, "name": g.Name, "bindings_removed": len(bs)})
 }
 
-// AddMember は Group に主体を入れる（ユーザーかサービスアカウント。Org の Group には、その Org の使える所属が要る）。
-// Group に付与されたロールの権限をすべて持っていなければならない。
+// AddMember は Group に主体を入れる（ユーザーかサービスアカウント。Org の Group には、その Org の使える所属が要る。
+// Group のネストが有効なら、同じ範囲の Group も入れられる）。Group に付与されたロールの権限をすべて持っていなければならない。
 func (s *Service) AddMember(ctx context.Context, tx port.Tx, sc Scope, a Actor, g port.Group, t Target) error {
 	if g.OrgID != sc.OrgID {
 		return errs.New(errs.KindNotFound, "group")
 	}
-	if t.Principal.Type != port.PrincipalUser && t.Principal.Type != port.PrincipalServiceAccount {
+	switch t.Principal.Type {
+	case port.PrincipalUser, port.PrincipalServiceAccount:
+	case port.PrincipalGroup:
+		if !s.NestedGroups {
+			return ErrInvalidPrincipal
+		}
+		child, err := tx.Groups().Get(ctx, sc.RealmID, t.Principal.ID)
+		if errors.Is(err, errs.NotFound) {
+			return ErrInvalidPrincipal
+		}
+		if err != nil {
+			return err
+		}
+		if err := checkNesting(ctx, tx, sc.RealmID, g, child); err != nil {
+			return err
+		}
+	default:
 		return ErrInvalidPrincipal
 	}
 	if err := s.requireMember(ctx, tx, sc, t.Principal); err != nil {
@@ -446,6 +472,9 @@ func (s *Service) AddMember(ctx context.Context, tx port.Tx, sc Scope, a Actor, 
 	}
 	if err := tx.Groups().AddMember(ctx, sc.RealmID, port.GroupMember{GroupID: g.ID, MemberType: t.Principal.Type, MemberID: t.Principal.ID,
 		CreatedAt: s.Clock.Now()}); err != nil {
+		return err
+	}
+	if err := s.rebuildMember(ctx, tx, sc.RealmID, t); err != nil {
 		return err
 	}
 	return s.record(ctx, tx, sc, a, "group.member_added", map[string]any{"group_id": g.PublicID, "member_type": string(t.Principal.Type),
@@ -463,6 +492,21 @@ func (s *Service) RemoveMember(ctx context.Context, tx port.Tx, sc Scope, a Acto
 	if err := tx.Groups().RemoveMember(ctx, sc.RealmID, g.ID, t.Principal.Type, t.Principal.ID); err != nil {
 		return err
 	}
+	if err := s.rebuildMember(ctx, tx, sc.RealmID, t); err != nil {
+		return err
+	}
 	return s.record(ctx, tx, sc, a, "group.member_removed", map[string]any{"group_id": g.PublicID, "member_type": string(t.Principal.Type),
 		"member_id": t.PublicID})
+}
+
+// rebuildMember は所属を変えた主体が Group なら、それと子孫の閉包を計算し直す。
+func (s *Service) rebuildMember(ctx context.Context, tx port.Tx, realmID string, t Target) error {
+	if t.Principal.Type != port.PrincipalGroup {
+		return nil
+	}
+	ids, err := subtree(ctx, tx, realmID, t.Principal.ID)
+	if err != nil {
+		return err
+	}
+	return rebuild(ctx, tx, realmID, ids)
 }
