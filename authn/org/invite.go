@@ -153,9 +153,9 @@ func newInvitationToken(publicID string) (string, []byte, error) {
 	return publicID + "." + secret, h[:], nil
 }
 
-// InvitationEmail は pending の招待のアドレスを返す。終わった招待は鍵を消しているため空を返す。
+// InvitationEmail は pending で期限前の招待のアドレスを返す。終わった・期限切れの招待は（鍵を消しうるため）空を返す。
 func (s *Service) InvitationEmail(ctx context.Context, tx port.Tx, inv port.Invitation) (string, error) {
-	if inv.Status != port.InvitationPending {
+	if inv.Status != port.InvitationPending || !s.Clock.Now().Before(inv.ExpiresAt) {
 		return "", nil
 	}
 	b, err := s.Crypter.Decrypt(ctx, tx.DataKeys(), inv.ID, inv.EmailCiphertext, "invitation.email")
