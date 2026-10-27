@@ -142,6 +142,9 @@ func (s publicServer) VerifyAddEmail(ctx context.Context, req publicapi.VerifyAd
 	if !ok || req.Body == nil {
 		return fail, nil
 	}
+	if s.stale(au) {
+		return publicapi.VerifyAddEmail401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
 	in := emailflow.Verify{FlowID: deref(req.Body.FlowId), Code: deref(req.Body.Code), LinkToken: deref(req.Body.Token), Client: s.a.clientOf(ctx)}
 	if in.FlowID == "" {
 		in.FlowID = cookie(ctx, flowCookie)
@@ -262,6 +265,9 @@ func (s publicServer) CompleteLinkIdentity(ctx context.Context, req publicapi.Co
 	au, ok := authFrom(ctx)
 	if !ok || req.Body == nil {
 		return fail, nil
+	}
+	if s.stale(au) {
+		return publicapi.CompleteLinkIdentity401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	c := s.a.clientOf(ctx)
 	in := oauth.Complete{FlowID: deref(req.Body.FlowId), State: req.Body.State, Code: req.Body.Code,

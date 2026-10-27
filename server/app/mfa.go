@@ -177,6 +177,9 @@ func (s publicServer) ConfirmRegisterTOTP(ctx context.Context, req publicapi.Con
 	if !ok || req.Body == nil {
 		return fail, nil
 	}
+	if s.stale(au) {
+		return publicapi.ConfirmRegisterTOTP401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
 	c := s.a.clientOf(ctx)
 	var t port.TOTPCredential
 	var is session.Issued

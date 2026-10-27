@@ -130,6 +130,8 @@ func TestOrgSettingsLifetimes(t *testing.T) {
 		"/v1/me/totp:start": nil, "/v1/me/passkeys:start": nil, "/v1/me/emails:start": map[string]string{"email": "new@acme.example"},
 		"/v1/me/identities/google:start": nil, "/v1/me/totp/x:revoke": nil, "/v1/me/passkeys/x:revoke": nil,
 		"/v1/me/emails/x:remove": nil, "/v1/me/identities/x:unlink": nil,
+		"/v1/me/emails:verify": map[string]string{"flow_id": "x", "code": "000000"}, "/v1/me/identities:complete": map[string]string{"flow_id": "x", "state": "x", "code": "x"},
+		"/v1/me/totp:confirm": map[string]string{"code": "000000"}, "/v1/me/passkeys:finish": map[string]any{"credential": map[string]any{}},
 	} {
 		if code, out, _ := l.post(t, s, path, body); code != 401 || out["error"] != "reauthentication_required" {
 			t.Fatalf("%s after max_auth_age: %d %v", path, code, out)

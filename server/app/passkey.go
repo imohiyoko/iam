@@ -129,7 +129,13 @@ func (s publicServer) StartRegisterPasskey(ctx context.Context, _ publicapi.Star
 func (s publicServer) FinishRegisterPasskey(ctx context.Context, req publicapi.FinishRegisterPasskeyRequestObject) (publicapi.FinishRegisterPasskeyResponseObject, error) {
 	fail := publicapi.FinishRegisterPasskey401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}
 	au, ok := authFrom(ctx)
-	if !ok || s.a.passkeys == nil || req.Body == nil {
+	if !ok || req.Body == nil {
+		return fail, nil
+	}
+	if s.stale(au) {
+		return publicapi.FinishRegisterPasskey401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
+	if s.a.passkeys == nil {
 		return fail, nil
 	}
 	resp, err := json.Marshal(req.Body.Credential)
