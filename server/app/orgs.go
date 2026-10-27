@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/imohiyoko/iam/authn/org"
+	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/server/publicapi"
@@ -231,4 +233,338 @@ func (s adminServer) ListOrgMemberships(ctx context.Context, req adminapi.ListOr
 		return nil, err
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// 招待とメンバー（4.4）。Org の中の操作は、その Org の active な Membership と org_role の固定の権限で判定する。
+
+// errOrgPermission は org_role に権限が無いこと。
+var errOrgPermission = errs.WithCode(errs.KindPermissionDenied, errs.CodePermissionDenied, "org permission denied")
+
+// orgMember は本人の、公開 ID の Org と active な Membership を返す。perm が空でなければ、その権限が要る。
+// 所属していない Org は無いものとして扱う（errs.NotFound）。
+func (s publicServer) orgMember(ctx context.Context, tx port.Tx, au auth, orgPublicID, perm string) (port.Org, port.Membership, error) {
+	o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, orgPublicID)
+	if err != nil {
+		return port.Org{}, port.Membership{}, err
+	}
+	m, err := tx.Memberships().GetByUserOrg(ctx, s.a.realm.ID, au.PrincipalID, o.ID)
+	if err == nil && m.Status != port.MembershipActive {
+		err = errs.New(errs.KindNotFound, "membership")
+	}
+	if err != nil {
+		return port.Org{}, port.Membership{}, err
+	}
+	if perm != "" && !role.OrgAllows(m, perm) {
+		return port.Org{}, port.Membership{}, errOrgPermission
+	}
+	return o, m, nil
+}
+
+func orgInvitation(inv port.Invitation, email string, now time.Time) publicapi.OrgInvitation {
+	st := publicapi.OrgInvitationStatus(inv.Status)
+	if inv.Status == port.InvitationPending && !now.Before(inv.ExpiresAt) {
+		st = "expired"
+	}
+	v := publicapi.OrgInvitation{Id: inv.PublicID, Role: publicapi.OrgInvitationRole(inv.Role), Status: st, ExpiresAt: inv.ExpiresAt, CreatedAt: inv.CreatedAt}
+	if email != "" && inv.Status == port.InvitationPending && now.Before(inv.ExpiresAt) {
+		v.Email = &email
+	}
+	return v
+}
+
+func myOrgWithEmail(ctx context.Context, tx port.Tx, j org.Joined, activeOrgID string) (publicapi.MyOrg, error) {
+	v := myOrg(j, activeOrgID)
+	if j.Membership.EmailID != "" {
+		e, err := org.BoundEmail(ctx, tx, j.Membership)
+		if err != nil {
+			return v, err
+		}
+		v.EmailId = &e.PublicID
+	}
+	return v, nil
+}
+
+func (s publicServer) ListOrgMembers(ctx context.Context, req publicapi.ListOrgMembersRequestObject) (publicapi.ListOrgMembersResponseObject, error) {
+	au, ok := authFrom(ctx)
+	if !ok {
+		return publicapi.ListOrgMembers401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	if s.a.orgs == nil {
+		return publicapi.ListOrgMembers404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	limit := 100
+	if req.Params.Limit != nil {
+		limit = *req.Params.Limit
+	}
+	if limit < 1 || limit > 200 {
+		return publicapi.ListOrgMembers400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
+	}
+	out := publicapi.ListOrgMembers200JSONResponse{Members: []publicapi.OrgMember{}}
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		o, _, err := s.orgMember(ctx, tx, au, req.Id, role.PermOrgRemove)
+		if err != nil {
+			return err
+		}
+		ms, err := tx.Memberships().ListByOrg(ctx, s.a.realm.ID, o.ID, deref(req.Params.After), limit+1)
+		if err != nil {
+			return err
+		}
+		if len(ms) > limit {
+			ms = ms[:limit]
+			next := ms[limit-1].PublicID
+			out.NextCursor = &next
+		}
+		for _, m := range ms {
+			if m.Status == port.MembershipEnded {
+				continue
+			}
+			u, err := tx.Users().Get(ctx, s.a.realm.ID, m.UserID)
+			if err != nil {
+				return err
+			}
+			v := publicapi.OrgMember{MembershipId: m.PublicID, UserId: u.PublicID, Role: publicapi.OrgMemberRole(m.Role), Status: publicapi.OrgMemberStatus(m.Status)}
+			// 見せるのは結び付けたメールだけ（4.4）。
+			e, err := org.BoundEmail(ctx, tx, m)
+			if err != nil && !errors.Is(err, errs.NotFound) {
+				return err
+			}
+			if err == nil {
+				addr, err := s.a.accounts.EmailAddress(ctx, tx, e)
+				if err != nil {
+					return err
+				}
+				if addr != "" {
+					v.Email = &addr
+				}
+			}
+			out.Members = append(out.Members, v)
+		}
+		return nil
+	})
+	switch {
+	case errors.Is(err, errs.NotFound):
+		return publicapi.ListOrgMembers404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	case errors.Is(err, errs.PermissionDenied):
+		return publicapi.ListOrgMembers403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errCode(err)}}, nil
+	case err != nil:
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s publicServer) ListOrgInvitations(ctx context.Context, req publicapi.ListOrgInvitationsRequestObject) (publicapi.ListOrgInvitationsResponseObject, error) {
+	au, ok := authFrom(ctx)
+	if !ok {
+		return publicapi.ListOrgInvitations401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	if s.a.orgs == nil {
+		return publicapi.ListOrgInvitations404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	now := s.a.deps.Clock.Now()
+	out := publicapi.ListOrgInvitations200JSONResponse{Invitations: []publicapi.OrgInvitation{}}
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		o, _, err := s.orgMember(ctx, tx, au, req.Id, role.PermOrgInvite)
+		if err != nil {
+			return err
+		}
+		invs, err := tx.Invitations().ListByOrg(ctx, s.a.realm.ID, o.ID)
+		if err != nil {
+			return err
+		}
+		for _, inv := range invs {
+			email, err := s.a.orgs.InvitationEmail(ctx, tx, inv)
+			if err != nil {
+				return err
+			}
+			out.Invitations = append(out.Invitations, orgInvitation(inv, email, now))
+		}
+		return nil
+	})
+	switch {
+	case errors.Is(err, errs.NotFound):
+		return publicapi.ListOrgInvitations404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	case errors.Is(err, errs.PermissionDenied):
+		return publicapi.ListOrgInvitations403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errCode(err)}}, nil
+	case err != nil:
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s publicServer) InviteToOrg(ctx context.Context, req publicapi.InviteToOrgRequestObject) (publicapi.InviteToOrgResponseObject, error) {
+	au, ok := authFrom(ctx)
+	if !ok {
+		return publicapi.InviteToOrg401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	if s.a.orgs == nil {
+		return publicapi.InviteToOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	if req.Body == nil {
+		return publicapi.InviteToOrg400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
+	}
+	var out publicapi.OrgInvitation
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		o, m, err := s.orgMember(ctx, tx, au, req.Id, role.PermOrgInvite)
+		if err != nil {
+			return err
+		}
+		r := port.OrgRole(req.Body.Role)
+		// owner として招けるのは owner だけ（下位の役割が上位の役割を作れないように）。
+		if r == port.OrgOwner && m.Role != port.OrgOwner {
+			return errOrgPermission
+		}
+		inv, err := s.a.orgs.Invite(ctx, tx, o, org.Invite{Email: req.Body.Email, Role: r, ValidFrom: req.Body.ValidFrom, ValidUntil: req.Body.ValidUntil},
+			au.Actor(), requestID(ctx))
+		out = orgInvitation(inv.Invitation, inv.Email, s.a.deps.Clock.Now())
+		return err
+	})
+	if c, ok := stateCode(err); ok {
+		return publicapi.InviteToOrg409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: c}}, nil
+	}
+	switch {
+	case errors.Is(err, errs.NotFound):
+		return publicapi.InviteToOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	case errors.Is(err, errs.PermissionDenied):
+		return publicapi.InviteToOrg403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errCode(err)}}, nil
+	case errors.Is(err, errs.Invalid):
+		return publicapi.InviteToOrg400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: errCode(err)}}, nil
+	case err != nil:
+		return nil, err
+	}
+	return publicapi.InviteToOrg201JSONResponse(out), nil
+}
+
+func (s publicServer) RevokeOrgInvitation(ctx context.Context, req publicapi.RevokeOrgInvitationRequestObject) (publicapi.RevokeOrgInvitationResponseObject, error) {
+	au, ok := authFrom(ctx)
+	if !ok {
+		return publicapi.RevokeOrgInvitation401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	if s.a.orgs == nil {
+		return publicapi.RevokeOrgInvitation404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		o, _, err := s.orgMember(ctx, tx, au, req.Id, role.PermOrgInvite)
+		if err != nil {
+			return err
+		}
+		return s.a.orgs.Revoke(ctx, tx, o, req.InvitationId, au.Actor(), requestID(ctx))
+	})
+	switch {
+	case errors.Is(err, errs.NotFound):
+		return publicapi.RevokeOrgInvitation404JSONResponse{NotFoundJSONResponse: publicapi.NotFoundJSONResponse{Error: errCodeOr(err, "not_found")}}, nil
+	case errors.Is(err, errs.PermissionDenied):
+		return publicapi.RevokeOrgInvitation403JSONResponse{DeniedJSONResponse: publicapi.DeniedJSONResponse{Error: errCode(err)}}, nil
+	case err != nil:
+		return nil, err
+	}
+	return publicapi.RevokeOrgInvitation204Response{}, nil
+}
+
+func (s publicServer) BindMyOrgEmail(ctx context.Context, req publicapi.BindMyOrgEmailRequestObject) (publicapi.BindMyOrgEmailResponseObject, error) {
+	if _, ok := authFrom(ctx); !ok {
+		return publicapi.BindMyOrgEmail401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	if s.a.orgs == nil {
+		return publicapi.BindMyOrgEmail404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	var emailID string
+	if req.Body != nil {
+		emailID = deref(req.Body.EmailId)
+	}
+	var out publicapi.MyOrg
+	nf, code, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
+		u, err := tx.Users().Get(ctx, s.a.realm.ID, au.PrincipalID)
+		if err != nil {
+			return err
+		}
+		j, err := s.a.orgs.BindEmail(ctx, tx, u, req.Id, emailID, requestID(ctx))
+		if err != nil {
+			return err
+		}
+		out, err = myOrgWithEmail(ctx, tx, j, au.ActiveOrgID)
+		return err
+	})
+	switch {
+	case err != nil:
+		return nil, err
+	case nf:
+		return publicapi.BindMyOrgEmail404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	case code != "":
+		return publicapi.BindMyOrgEmail409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
+	}
+	return publicapi.BindMyOrgEmail200JSONResponse(out), nil
+}
+
+func (s publicServer) AcceptInvitation(ctx context.Context, req publicapi.AcceptInvitationRequestObject) (publicapi.AcceptInvitationResponseObject, error) {
+	if s.a.orgs == nil {
+		return publicapi.AcceptInvitation404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	if req.Body == nil {
+		return publicapi.AcceptInvitation400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
+	}
+	au, signedIn := authFrom(ctx)
+	c := s.a.clientOf(ctx)
+	var replace string
+	if tok, viaCookie := sessionToken(httpFrom(ctx).r); viaCookie {
+		replace = tok
+	}
+	var out publicapi.AcceptInvitation200JSONResponse
+	var issued *session.Issued
+	var userPublicID string
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var u *port.User
+		if signedIn {
+			x, err := tx.Users().Get(ctx, s.a.realm.ID, au.PrincipalID)
+			if err != nil {
+				return err
+			}
+			u = &x
+		}
+		acc, err := s.a.orgs.Accept(ctx, tx, s.a.realm.ID, req.Body.Token, u, c.RequestID)
+		if err != nil {
+			return err
+		}
+		active := au.ActiveOrgID
+		if acc.Created != nil {
+			// 招待からの登録：招待された Org に入ったセッションを発行する。
+			is, err := s.a.sessions.Issue(ctx, tx, session.Issue{
+				RealmID: s.a.realm.ID, UserID: acc.Created.User.ID, AuthMethods: []string{"otp"}, Credentials: []string{acc.Created.Email.ID},
+				IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, ReplaceToken: replace, OrgID: acc.Joined.Org.ID,
+			})
+			if err != nil {
+				return err
+			}
+			issued, userPublicID, active = &is, acc.Created.User.PublicID, is.Session.ActiveOrgID
+		}
+		out.Org, err = myOrgWithEmail(ctx, tx, acc.Joined, active)
+		return err
+	})
+	if d, ok := errors.AsType[errs.Denial](err); ok {
+		return publicapi.AcceptInvitation403JSONResponse{DeniedJSONResponse: denied(d)}, nil
+	}
+	if code, ok := stateCode(err); ok {
+		return publicapi.AcceptInvitation409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
+	}
+	switch {
+	case errors.Is(err, errs.NotFound):
+		return publicapi.AcceptInvitation404JSONResponse{NotFoundJSONResponse: publicapi.NotFoundJSONResponse{Error: errCodeOr(err, "not_found")}}, nil
+	case errors.Is(err, errs.Invalid):
+		return publicapi.AcceptInvitation400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: errCode(err)}}, nil
+	case err != nil:
+		return nil, err
+	}
+	if issued != nil {
+		s.a.sessions.Committed(ctx, s.a.realm.ID, *issued)
+		login := s.loginResult(ctx, *issued, userPublicID, true, req.Body.ReturnToken)
+		out.Login = &login
+	}
+	return out, nil
+}
+
+func errCodeOr(err error, fallback string) string {
+	if c := errCode(err); c != "" {
+		return c
+	}
+	return fallback
 }

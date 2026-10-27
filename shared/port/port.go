@@ -51,6 +51,7 @@ type Tx interface {
 	Sessions() SessionRepo
 	Orgs() OrgRepo
 	Memberships() MembershipRepo
+	Invitations() InvitationRepo
 	ServiceAccounts() ServiceAccountRepo
 	RoleBindings() RoleBindingRepo
 }

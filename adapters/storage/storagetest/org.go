@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/shared/clock"
+	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/port"
 )
@@ -187,5 +188,114 @@ var membershipIsolationCase = IsolationCase{
 		}
 		d, err := count(tx.Memberships().ListByOrg(ctx, r, isoOrg, "", 10))
 		return a + b + c + d, err
+	},
+}
+
+func testMembershipUpdate(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r := id.New(id.Realm)
+	m := newMembership(r, id.New(id.User), id.New(id.Org))
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		if err := tx.Memberships().Create(ctx, m); err != nil {
+			return err
+		}
+		want := m
+		want.Status, want.Role, want.EmailID, want.EndedReason = port.MembershipEnded, port.OrgAdmin, id.New(id.Email), "removed"
+		want.ValidFrom, want.ValidUntil, want.UpdatedAt = ptr(T0), ptr(T0.Add(time.Hour)), T0.Add(time.Minute)
+		// ユーザー・Org・作成時刻は変わらない。
+		changed := want
+		changed.UserID, changed.OrgID, changed.CreatedAt = id.New(id.User), id.New(id.Org), T0.Add(time.Hour)
+		if err := tx.Memberships().Update(ctx, changed); err != nil {
+			return err
+		}
+		got, err := tx.Memberships().GetByPublicID(ctx, r, m.PublicID)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			return fmt.Errorf("after Update = %+v, %v (want %+v)", got, err, want)
+		}
+		other := want
+		other.RealmID = id.New(id.Realm)
+		return notFound("update in another realm", tx.Memberships().Update(ctx, other))
+	})
+}
+
+func newInvitation(realmID, orgID string) port.Invitation {
+	return port.Invitation{ID: id.New(id.Invitation), PublicID: id.NewExternal(id.Invitation), RealmID: realmID, OrgID: orgID,
+		EmailIndex: []byte("ix"), EmailCiphertext: []byte("ct"), IndexKeyID: "ik_1", Role: port.OrgMember, TokenHash: []byte("hash"),
+		InvitedBy: "usr_admin", ExpiresAt: T0.Add(7 * 24 * time.Hour), Status: port.InvitationPending, CreatedAt: T0}
+}
+
+func testInvitations(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, o := id.New(id.Realm), id.New(id.Org)
+	a := newInvitation(r, o)
+	a.ValidUntil = ptr(T0.Add(time.Hour))
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.Invitations()
+		if err := repo.Create(ctx, a); err != nil {
+			return err
+		}
+		if got, err := repo.GetByPublicID(ctx, r, a.PublicID); err != nil || !reflect.DeepEqual(got, a) {
+			return fmt.Errorf("invitations.GetByPublicID = %+v, %v", got, err)
+		}
+		dup := newInvitation(r, o)
+		dup.PublicID = a.PublicID
+		if err := conflict("same public id", repo.Create(ctx, dup)); err != nil {
+			return err
+		}
+		b := newInvitation(r, o)
+		b.CreatedAt = T0.Add(time.Minute)
+		if err := repo.Create(ctx, b); err != nil {
+			return err
+		}
+		if list, err := repo.ListByOrg(ctx, r, o); err != nil || len(list) != 2 || list[0].ID != a.ID {
+			return fmt.Errorf("invitations.ListByOrg = %+v, %v", list, err)
+		}
+		at := T0.Add(time.Hour)
+		if ok, err := repo.Close(ctx, r, a.ID, port.InvitationAccepted, at, "usr_1"); err != nil || !ok {
+			return fmt.Errorf("close = %v, %v", ok, err)
+		}
+		if ok, err := repo.Close(ctx, r, a.ID, port.InvitationRevoked, at, "usr_2"); err != nil || ok {
+			return fmt.Errorf("close again = %v, %v", ok, err)
+		}
+		got, _ := repo.GetByPublicID(ctx, r, a.PublicID)
+		if got.Status != port.InvitationAccepted || got.ClosedAt == nil || !got.ClosedAt.Equal(at) || got.ClosedBy != "usr_1" {
+			return fmt.Errorf("closed = %+v", got)
+		}
+		_, err := repo.Close(ctx, id.New(id.Realm), b.ID, port.InvitationRevoked, at, "x")
+		return notFound("close in another realm", err)
+	})
+}
+
+func testInvitationAcceptConcurrent(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	i := newInvitation(id.New(id.Realm), id.New(id.Org))
+	tx(t, s, func(ctx context.Context, tx port.Tx) error { return tx.Invitations().Create(ctx, i) })
+	ExactlyOneSucceeds(t, Concurrent(16, func(int) error {
+		return s.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+			ok, err := tx.Invitations().Close(ctx, i.RealmID, i.ID, port.InvitationAccepted, T0, "usr_1")
+			if err == nil && !ok {
+				return errs.New(errs.KindConflict, "already closed")
+			}
+			return err
+		})
+	}))
+}
+
+const isoInvitation = "inv_00000000000000000000000009"
+
+var invitationIsolationCase = IsolationCase{
+	Name: "Invitations.GetByPublicID+ListByOrg",
+	Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
+		i := newInvitation(r, isoOrg)
+		i.PublicID = isoInvitation
+		return tx.Invitations().Create(ctx, i)
+	},
+	Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {
+		n, err := countOne(tx.Invitations().GetByPublicID(ctx, r, isoInvitation))
+		if err != nil {
+			return 0, err
+		}
+		m, err := count(tx.Invitations().ListByOrg(ctx, r, isoOrg))
+		return n + m, err
 	},
 }

@@ -1034,6 +1034,180 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}/members:
+    get:
+      operationId: listOrgMembers
+      summary: Org のメンバーの一覧（Org の owner と admin。4.4）
+      description: |
+        メールは Membership に結び付けたもの（未設定なら primary）だけを返す。ほかのメールは見せない。
+        権限が無ければ `403 permission_denied`、Org が無いか所属していなければ `404`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+        - { name: after, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Membership の公開 ID の順（終了したものは含めない）。続きは `next_cursor` を `after` に渡す
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgMember" }
+                  next_cursor: { type: string, description: 続きがあるときだけ }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/orgs/{id}/invitations:
+    get:
+      operationId: listOrgInvitations
+      summary: Org の招待の一覧（Org の owner と admin）
+      description: アドレスは pending の招待だけに返す（終わった招待はアドレスの鍵を消している）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 作成の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [invitations]
+                properties:
+                  invitations:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgInvitation" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: inviteToOrg
+      summary: Org にアドレスを招待する（Org の owner と admin。owner として招待できるのは owner だけ。4.4）
+      description: |
+        トークンは通知（`org_invitation`）で招待したアドレスに届く。個人 Org には招待できない（`409 personal_org`）。
+        既に active なメンバーなら `409 already_member`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, maxLength: 254 }
+                role: { type: string, enum: [owner, admin, member] }
+                valid_from: { type: string, format: date-time }
+                valid_until: { type: string, format: date-time }
+      responses:
+        "201":
+          description: 招待した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgInvitation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/invitations/{invitation_id}:revoke:
+    post:
+      operationId: revokeOrgInvitation
+      summary: pending の招待を取り消す（Org の owner と admin）
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: invitation_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 取り消した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/orgs/{id}:bind-email:
+    post:
+      operationId: bindMyOrgEmail
+      summary: この Org で使うメールを結び付ける（4.4）
+      description: "`email_id` を省くと primary に戻す。確認済みの本人のメールだけ。"
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email_id: { type: string }
+      responses:
+        "200":
+          description: 結び付けた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyOrg" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/invitations:accept:
+    post:
+      operationId: acceptInvitation
+      summary: 招待を受け入れる（4.4）
+      description: |
+        トークンは招待したアドレスに届いたもの。招待したアドレスが Membership に結び付く。
+        - ログインしている：アドレスが本人のものならそれを結び付ける。誰のものでもなければ、realm が経路 `invitation` を受け入れるなら
+          本人に足して結び付ける（受け入れないなら `409 email_verification_required`。先に `/v1/me/emails:start` で確かめる）。
+          ほかのユーザーのものなら `409 email_exists`
+        - ログインしていない：アドレスが誰のものでもなく、realm が経路 `invitation` を受け入れるなら、そのアドレスで登録して
+          招待された Org に入ったセッションを返す（`login`）。既存のユーザーのものなら `409 login_required`
+        無い・期限切れ・使用済みのトークンは `404 invalid_invitation`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: 受け入れた
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [org]
+                properties:
+                  org: { $ref: "#/components/schemas/MyOrg" }
+                  login: { $ref: "#/components/schemas/LoginResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -1153,6 +1327,26 @@ components:
         membership_id: { type: string }
         status: { type: string, enum: [invited, active] }
         active: { type: boolean, description: このセッションが入っている Org か }
+        email_id: { type: string, description: この Org に結び付けたメール。未設定（primary を使う）なら無し }
+    OrgMember:
+      type: object
+      required: [membership_id, user_id, role, status]
+      properties:
+        membership_id: { type: string }
+        user_id: { type: string, description: 公開のユーザー ID }
+        role: { type: string, enum: [owner, admin, member] }
+        status: { type: string, enum: [invited, active] }
+        email: { type: string, description: この Org に結び付けたメール（未設定なら primary） }
+    OrgInvitation:
+      type: object
+      required: [id, role, status, expires_at, created_at]
+      properties:
+        id: { type: string }
+        email: { type: string, description: pending の招待だけ }
+        role: { type: string, enum: [owner, admin, member] }
+        status: { type: string, enum: [pending, accepted, revoked, expired] }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
     MyEmail:
       type: object
       required: [id, email, primary, verified, created_at]

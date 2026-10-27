@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"sort"
 	"time"
@@ -128,4 +129,69 @@ func (r memberships) ListByOrg(_ context.Context, realmID, orgID, afterPublicID 
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+func (r memberships) Update(_ context.Context, m port.Membership) error {
+	old, err := get(r.t.s.memberships, m.RealmID, m.ID, func(m port.Membership) string { return m.RealmID }, "membership")
+	if err != nil {
+		return err
+	}
+	m = cloneMembership(m)
+	m.PublicID, m.UserID, m.OrgID, m.CreatedAt = old.PublicID, old.UserID, old.OrgID, old.CreatedAt
+	setKey(r.t, r.t.s.memberships, m.ID, m)
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+
+type invitations struct{ t *tx }
+
+func cloneInvitation(i port.Invitation) port.Invitation {
+	i.EmailIndex, i.EmailCiphertext, i.TokenHash = bytes.Clone(i.EmailIndex), bytes.Clone(i.EmailCiphertext), bytes.Clone(i.TokenHash)
+	i.ValidFrom, i.ValidUntil, i.ClosedAt = cloneTime(i.ValidFrom), cloneTime(i.ValidUntil), cloneTime(i.ClosedAt)
+	return i
+}
+
+func (r invitations) Create(_ context.Context, i port.Invitation) error {
+	if _, ok := r.t.s.invitations[i.ID]; ok {
+		return errs.New(errs.KindConflict, "invitation %s exists", i.ID)
+	}
+	for _, x := range r.t.s.invitations {
+		if x.RealmID == i.RealmID && x.PublicID == i.PublicID {
+			return errs.New(errs.KindConflict, "invitation public id exists in realm")
+		}
+	}
+	setKey(r.t, r.t.s.invitations, i.ID, cloneInvitation(i))
+	return nil
+}
+
+func (r invitations) GetByPublicID(_ context.Context, realmID, publicID string) (port.Invitation, error) {
+	for _, x := range r.t.s.invitations {
+		if x.RealmID == realmID && x.PublicID == publicID {
+			return cloneInvitation(x), nil
+		}
+	}
+	return port.Invitation{}, errs.New(errs.KindNotFound, "invitation")
+}
+
+func (r invitations) ListByOrg(_ context.Context, realmID, orgID string) ([]port.Invitation, error) {
+	var out []port.Invitation
+	for _, x := range r.t.s.invitations {
+		if x.RealmID == realmID && x.OrgID == orgID {
+			out = append(out, cloneInvitation(x))
+		}
+	}
+	sortByCreated(out, func(x port.Invitation) (time.Time, string) { return x.CreatedAt, x.ID })
+	return out, nil
+}
+
+func (r invitations) Close(_ context.Context, realmID, id string, status port.InvitationStatus, at time.Time, by string) (bool, error) {
+	i, err := get(r.t.s.invitations, realmID, id, func(i port.Invitation) string { return i.RealmID }, "invitation")
+	if err != nil || i.Status != port.InvitationPending {
+		return false, err
+	}
+	i = cloneInvitation(i)
+	i.Status, i.ClosedAt, i.ClosedBy = status, &at, by
+	setKey(r.t, r.t.s.invitations, id, i)
+	return true, nil
 }
