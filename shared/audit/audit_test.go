@@ -69,9 +69,10 @@ func TestMarshalDeterministic(t *testing.T) {
 	}
 }
 
-func TestExternalDropsPII(t *testing.T) {
-	e := External(Event{IP: "192.0.2.1", UserAgent: "ua"})
-	if e.IP != "" || e.UserAgent != "" {
-		t.Fatal("PII not dropped")
+func TestExternalDropsClient(t *testing.T) {
+	// 切り詰めた値は残し（出し方は出力先が選ぶ）、全文の暗号文は外す。
+	e := External(Event{IP: "192.0.2.0/24", UserAgent: "Chrome on Windows", Client: "sealed"})
+	if e.Client != "" || e.IP != "192.0.2.0/24" || e.UserAgent != "Chrome on Windows" {
+		t.Fatalf("external = %+v", e)
 	}
 }

@@ -557,7 +557,7 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 
 - EventSink で出す（標準出力 JSON Lines / syslog RFC 5424 / OTLP / Webhook）。独自 JSON か OCSF を選べる
 - outbox 経由（少なくとも1回。イベント ID で重複排除）
-- 個人情報の出し方を出力先ごとに選ぶ：そのまま / 仮名化（既定）/ 出さない
+- 個人情報の出し方を出力先ごとに選ぶ：そのまま / 仮名化（既定）/ 出さない（ADR 0071）
 - Storage の監査ログはハッシュチェーンにする
 
 ### 6.4 アプリケーションログ
