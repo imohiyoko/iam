@@ -486,7 +486,7 @@ type Membership struct {
 	EmailID     string
 	ValidFrom   *time.Time
 	ValidUntil  *time.Time
-	EndedReason string // self_leave / removed / expired / org_deleted / user_deleted
+	EndedReason string // left / removed / expired / org_deleted / user_deleted
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
