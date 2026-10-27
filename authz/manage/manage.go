@@ -274,7 +274,8 @@ func (s *Service) Bind(ctx context.Context, tx port.Tx, sc Scope, a Actor, ref s
 		if err != nil {
 			return port.RoleBinding{}, err
 		}
-		if g.OrgID != "" && g.OrgID != sc.OrgID {
+		// Group と付与の範囲は揃える。Org の範囲から realm の Group に付与すると、realm の範囲から管理できなくなる。
+		if g.OrgID != sc.OrgID {
 			return port.RoleBinding{}, ErrInvalidPrincipal
 		}
 	}

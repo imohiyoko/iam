@@ -296,6 +296,17 @@ func TestGroups(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Org の範囲からは realm の Group に付与できない。
+	err = e.run(func(ctx context.Context, tx port.Tx) error {
+		inviter, err := e.s.CreateRole(ctx, tx, sc, actor("alice"), "inviter", []string{role.PermOrgInvite})
+		if err != nil {
+			return err
+		}
+		_, err = e.s.Bind(ctx, tx, sc, actor("alice"), inviter.PublicID,
+			manage.Target{Principal: check.Principal{Type: port.PrincipalGroup, ID: rg.ID}, PublicID: rg.PublicID}, check.Resource{})
+		return err
+	})
+	wantCode(t, err, "invalid_principal")
 	err = e.run(func(ctx context.Context, tx port.Tx) error {
 		return e.s.AddMember(ctx, tx, e.realm(), actor("admin"), rg, target("admin"))
 	})
