@@ -78,6 +78,21 @@ func testOrgs(t *testing.T, h Harness) {
 		if err := notFound("set validity in another realm", repo.SetValidity(ctx, id.New(id.Realm), shared.ID, nil, nil, at)); err != nil {
 			return err
 		}
+		if err := repo.SetSettings(ctx, r, shared.ID, []byte(`{"a":1}`), at); err != nil {
+			return err
+		}
+		if got, _ := repo.Get(ctx, r, shared.ID); string(got.Settings) != `{"a":1}` {
+			return fmt.Errorf("after SetSettings = %q", got.Settings)
+		}
+		if err := repo.SetSettings(ctx, r, shared.ID, nil, at); err != nil {
+			return err
+		}
+		if got, _ := repo.Get(ctx, r, shared.ID); got.Settings != nil {
+			return fmt.Errorf("after clearing settings = %q", got.Settings)
+		}
+		if err := notFound("set settings in another realm", repo.SetSettings(ctx, id.New(id.Realm), shared.ID, nil, at)); err != nil {
+			return err
+		}
 		del := T0.Add(30 * 24 * time.Hour)
 		if err := repo.SetDeletion(ctx, r, shared.ID, &del, nil, at); err != nil {
 			return err

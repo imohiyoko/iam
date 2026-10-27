@@ -1119,6 +1119,57 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}/settings:
+    get:
+      operationId: getMyOrgSettings
+      summary: Org の段のセキュリティ設定を返す（2.8）
+      description: 権限 `org:settings`。`settings` は Org が設定した値（省いた項目は realm に従う）、`effective` は効く値。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 設定
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgSettingsView" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: putMyOrgSettings
+      summary: Org の段のセキュリティ設定を置き換える（2.8、5.4、10章）
+      description: |
+        権限 `org:settings`。省いた項目は realm に従う。寿命はホスト先が決める範囲の内で、realm より厳しくする向きにだけ変えられる
+        （ホスト先が `org_may_relax` を許した項目は緩められる）。警告のアクションは realm より厳しくする向きのみ。外れれば `400 setting_invalid`。
+        寿命は認証の時刻から数え、超えたセッションは使えなくなる（既存のセッションにも `validity_max_delay` の内に効く）。
+        寿命を超えたセッションでこの Org に切り替えると `401 reauthentication_required`。
+        deny にした警告に当たるセッションはこの Org に入れない（`warning_denied.<code>`。ログインは個人 Org などで成功する）。
+        変更は `org.settings_changed` として監査ログに残す。個人 Org は `409 personal_org`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrgSettings" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgSettingsView" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /v1/me/orgs/{id}:delete:
     post:
       operationId: deleteMyOrg
@@ -1702,6 +1753,33 @@ components:
         email: { type: string, description: この Org に結び付けたメール（未設定なら primary） }
         valid_from: { type: string, format: date-time }
         valid_until: { type: string, format: date-time }
+    OrgSettings:
+      type: object
+      description: Org の段の設定。省いた項目は realm に従う
+      properties:
+        absolute_lifetime_seconds: { type: integer, format: int64, minimum: 1, description: 認証の時刻からのセッションの寿命 }
+        idle_timeout_seconds: { type: integer, format: int64, minimum: 1 }
+        max_auth_age_seconds: { type: integer, format: int64, minimum: 1, description: 重要な操作に求める直近の認証の期限 }
+        warnings:
+          type: object
+          description: 警告のコードごとのアクション
+          additionalProperties: { type: string, enum: [ignore, warn, deny] }
+    OrgSettingsView:
+      type: object
+      required: [settings, effective]
+      properties:
+        settings: { $ref: "#/components/schemas/OrgSettings" }
+        effective:
+          type: object
+          required: [absolute_lifetime_seconds, idle_timeout_seconds, max_auth_age_seconds, warnings]
+          properties:
+            absolute_lifetime_seconds: { type: integer, format: int64 }
+            idle_timeout_seconds: { type: integer, format: int64 }
+            max_auth_age_seconds: { type: integer, format: int64 }
+            warnings:
+              type: object
+              description: すべての警告のコードのアクション（フィーチャー warnings が動いていなければ空）
+              additionalProperties: { type: string, enum: [ignore, warn, deny] }
     OrgSuspension:
       type: object
       required: [id, membership_id, category, reason, starts_at, active, created_at]

@@ -37,6 +37,8 @@ import (
 type Config struct {
 	AbsoluteLifetime time.Duration
 	IdleTimeout      time.Duration
+	// MaxAuthAge は重要な操作に求める直近の認証の期限（realm の値。Org の段で変わる）。
+	MaxAuthAge time.Duration
 	// ValidityMaxDelay は変更が検証に反映されるまでの遅れの上限（保証値。5.3）。
 	ValidityMaxDelay time.Duration
 	// RotationInterval ごとに ID を入れ替える。0 なら入れ替えない。
@@ -112,6 +114,52 @@ type OrgPicker interface {
 	// CheckActive はセッションの active な Org が本人にとって now に使えるかを返す（5.3）。使えなければ errs.Denial か
 	// errs.PermissionDenied のエラー、next は可否が次に変わりうる時刻。
 	CheckActive(ctx context.Context, tx port.Tx, realmID, userID, orgID string, now time.Time) (*time.Time, error)
+	// Limits は Org の段で決まる、セッションに効く値を返す（2.8）。個人 Org は空（realm に従う）。
+	Limits(ctx context.Context, tx port.Tx, realmID, orgID string) (OrgLimits, error)
+}
+
+// OrgLimits は active な Org で決まる、セッションに効く値（2.8、5.4、10章）。0 の項目は realm の値に従う。
+type OrgLimits struct {
+	// AbsoluteLifetime は認証の時刻からの寿命。
+	AbsoluteLifetime time.Duration
+	IdleTimeout      time.Duration
+	// MaxAuthAge は重要な操作に求める直近の認証の期限。
+	MaxAuthAge time.Duration
+	// Warnings は Org の段の警告のアクション。realm の段より厳しいものだけが効く（warning.Evaluator.Apply）。
+	Warnings map[string]warning.Action
+}
+
+// ErrReauthRequired は、切り替え先の Org の寿命（認証の時刻から・無操作）を超えていること。再認証を求める（5.4）。
+var ErrReauthRequired = errs.WithCode(errs.KindUnauthenticated, CodeReauthRequired, "reauthentication required")
+
+// CodeReauthRequired は再認証を求めるエラーのコード。
+const CodeReauthRequired = "reauthentication_required"
+
+// limits は Org の段の値を realm の値で埋めて返す。Org がオフか orgID が空なら realm の値。
+func (m *Manager) limits(ctx context.Context, tx port.Tx, realmID, orgID string) (OrgLimits, error) {
+	var l OrgLimits
+	if m.Orgs != nil && orgID != "" {
+		var err error
+		if l, err = m.Orgs.Limits(ctx, tx, realmID, orgID); err != nil {
+			return OrgLimits{}, err
+		}
+	}
+	if l.AbsoluteLifetime <= 0 {
+		l.AbsoluteLifetime = m.Config.AbsoluteLifetime
+	}
+	if l.IdleTimeout <= 0 {
+		l.IdleTimeout = m.Config.IdleTimeout
+	}
+	if l.MaxAuthAge <= 0 {
+		l.MaxAuthAge = m.Config.MaxAuthAge
+	}
+	return l, nil
+}
+
+// beyond は認証の時刻 authAt・最後の利用 lastSeen のセッションが、now に l の寿命を超えているかを返す。
+func (l OrgLimits) beyond(authAt, lastSeen, now time.Time) bool {
+	return (l.AbsoluteLifetime > 0 && !now.Before(authAt.Add(l.AbsoluteLifetime))) ||
+		(l.IdleTimeout > 0 && !now.Before(lastSeen.Add(l.IdleTimeout)))
 }
 
 // OrgPick は Org の決定に渡す手がかり（4.4）。
@@ -121,7 +169,9 @@ type OrgPick struct {
 	// Credentials はログインに使った認証情報（メール・passkey の内部 ID）。結び付けたメールと passkey の既定の Org を手がかりにする。
 	Credentials []string
 	// Email は OAuth のプロバイダが返したアドレス。結び付けたメールと一致すれば手がかりにする。
-	Email     string
+	Email string
+	// Warnings はこの認証で該当した警告（warning.Evaluator.Hits）。Org の段で deny になる Org には入れない（10章）。
+	Warnings  []warning.Warning
 	RequestID string
 }
 
@@ -204,16 +254,17 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	}
 	ev := in.Evidence
 	ev.AMR = in.AuthMethods
-	warnings, err := m.Warnings.Evaluate(ev)
+	// 該当した警告はすべて（ignore のものも）セッションに残し、Org の段のアクションを後から当てはめる（2.8、10章）。
+	hits := m.Warnings.Hits(ev)
 	if restriction != port.RestrictionNone {
 		// 2要素目を待つ間は1要素なのが当然なので、single_factor は2要素目の後に評価する（deny でも2要素目に進める）。
-		warnings, err = withoutSingleFactor(warnings, err)
+		hits = slices.DeleteFunc(hits, func(w warning.Warning) bool { return w.Code == warning.CodeSingleFactor })
 	}
-	if err != nil {
+	hits = carry(hits, in.Carried)
+	if _, err := m.Warnings.Apply(hits, nil); err != nil {
 		return Issued{}, err
 	}
-	warnings = carry(warnings, in.Carried)
-	warningsJSON, err := json.Marshal(nonNilWarnings(warnings))
+	warningsJSON, err := json.Marshal(nonNilWarnings(hits))
 	if err != nil {
 		return Issued{}, err
 	}
@@ -232,14 +283,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	s := port.Session{
 		ID: id.NewExternal(id.Session), RealmID: in.RealmID, PrincipalType: port.PrincipalUser, PrincipalID: in.UserID,
 		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: warningsJSON, IP: ip, UserAgent: ua,
-		AuthenticatedAt: authAt, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(m.Config.AbsoluteLifetime), Restriction: restriction,
-	}
-	switch restriction {
-	case port.RestrictionNone:
-	case port.RestrictionRecovery:
-		s.ExpiresAt = earliest(s.ExpiresAt, now.Add(m.recoveryTTL()))
-	default:
-		s.ExpiresAt = earliest(s.ExpiresAt, now.Add(m.secondFactorTTL()))
+		AuthenticatedAt: authAt, CreatedAt: now, LastSeenAt: now, Restriction: restriction,
 	}
 	token, hash, err := newToken(s.ID)
 	if err != nil {
@@ -249,12 +293,28 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	actor := audit.Actor{Type: "user", ID: u.PublicID}
 	var choices []string
 	if m.Orgs != nil {
-		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: in.OrgID, Credentials: in.Credentials, Email: in.OrgEmail, RequestID: in.RequestID})
+		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: in.OrgID, Credentials: in.Credentials, Email: in.OrgEmail, Warnings: hits,
+			RequestID: in.RequestID})
 		if err != nil {
 			return Issued{}, err
 		}
 		s.ActiveOrgID, choices = picked.OrgID, picked.Choices
 	}
+	lim, err := m.limits(ctx, tx, in.RealmID, s.ActiveOrgID)
+	if err != nil {
+		return Issued{}, err
+	}
+	// 寿命は認証の時刻から数え、active な Org の値に従う（5.4）。
+	s.ExpiresAt = authAt.Add(lim.AbsoluteLifetime)
+	switch restriction {
+	case port.RestrictionNone:
+	case port.RestrictionRecovery:
+		s.ExpiresAt = earliest(s.ExpiresAt, now.Add(m.recoveryTTL()))
+	default:
+		s.ExpiresAt = earliest(s.ExpiresAt, now.Add(m.secondFactorTTL()))
+	}
+	// 入った Org で deny にならないことは Pick が確かめている。本人に返すのは Org の段を当てはめた警告。
+	warnings, _ := m.Warnings.Apply(hits, lim.Warnings)
 	if err := tx.Sessions().Create(ctx, s); err != nil {
 		return Issued{}, err
 	}
@@ -295,18 +355,6 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	})
 	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced, SecondFactorMethods: methods, OrgChoices: choices,
 		OrgPublicID: orgPublicID}, err
-}
-
-func withoutSingleFactor(ws []warning.Warning, err error) ([]warning.Warning, error) {
-	ws = slices.DeleteFunc(ws, func(w warning.Warning) bool { return w.Code == warning.CodeSingleFactor })
-	if d, ok := errors.AsType[*warning.DeniedError](err); ok {
-		codes := slices.DeleteFunc(slices.Clone(d.Codes), func(c string) bool { return c == warning.CodeSingleFactor })
-		if len(codes) == 0 {
-			return ws, nil
-		}
-		return ws, &warning.DeniedError{Codes: codes}
-	}
-	return ws, err
 }
 
 // carry は前の段の警告のうち、新しい評価に無いコードのものを足す。
@@ -462,6 +510,24 @@ func (m *Manager) DeletionCancelled(ctx context.Context, tx port.Tx, realmID, se
 	return is, nil
 }
 
+// deniedWarnings は、セッションに残した警告のうち Org の段のアクション（lim）で deny になるものの理由のコードを返す。
+func (m *Manager) deniedWarnings(s port.Session, lim OrgLimits) ([]string, error) {
+	if len(lim.Warnings) == 0 || len(s.Warnings) == 0 {
+		return nil, nil
+	}
+	var hits []warning.Warning
+	if err := json.Unmarshal(s.Warnings, &hits); err != nil {
+		return nil, err
+	}
+	if _, err := m.Warnings.Apply(hits, lim.Warnings); err != nil {
+		if d, ok := errors.AsType[*warning.DeniedError](err); ok {
+			return d.Reasons(), nil
+		}
+		return nil, err
+	}
+	return nil, nil
+}
+
 func nonNilWarnings(w []warning.Warning) []warning.Warning {
 	if w == nil {
 		return []warning.Warning{}
@@ -523,7 +589,9 @@ type Validated struct {
 	ActiveOrgID string
 	// OrgUnavailable は active な Org が使えない理由のコード（Org・Membership の停止や有効期間の外、所属の終わり。4.7）。
 	// 空なら使える。使えないセッションは失効させず、Org の操作だけを止める（個人 Org への切り替えはできる）。
-	OrgUnavailable  []string
+	OrgUnavailable []string
+	// MaxAuthAge は重要な操作に求める直近の認証の期限（active な Org の値。5.4）。
+	MaxAuthAge      time.Duration
 	AuthMethods     []string
 	AuthenticatedAt time.Time
 	// Restriction は使える操作の制限（2要素目の確認待ちなど）。空なら制限なし。
@@ -540,6 +608,7 @@ type cached struct {
 	PublicID        string                  `json:"u"`
 	ActiveOrgID     string                  `json:"o,omitempty"`
 	OrgUnavailable  []string                `json:"ou,omitempty"`
+	MaxAuthAge      time.Duration           `json:"ma,omitempty"`
 	AuthMethods     []string                `json:"amr"`
 	AuthenticatedAt time.Time               `json:"at"`
 	CreatedAt       time.Time               `json:"c"`
@@ -579,7 +648,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 		if subtle.ConstantTimeCompare(s.TokenHash, hash) != 1 {
 			return rejected("token mismatch")
 		}
-		next, u, err := m.check(ctx, tx, s, now)
+		next, u, lim, err := m.check(ctx, tx, s, now)
 		if err != nil {
 			return err
 		}
@@ -587,24 +656,31 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 		if err := tx.Sessions().Touch(ctx, realmID, sid, now); err != nil {
 			return err
 		}
-		if m.Config.IdleTimeout > 0 {
-			next = earliest(next, now.Add(m.Config.IdleTimeout))
+		if lim.IdleTimeout > 0 {
+			next = earliest(next, now.Add(lim.IdleTimeout))
 		}
 		var orgUnavailable []string
 		if s.ActiveOrgID != "" && m.Orgs != nil {
+			// Org の段で deny にした警告に当たるセッションは、その Org に入れない（10章）。
+			denied, err := m.deniedWarnings(s, lim)
+			if err != nil {
+				return err
+			}
+			orgUnavailable = append(orgUnavailable, denied...)
 			at, err := m.Orgs.CheckActive(ctx, tx, realmID, s.PrincipalID, s.ActiveOrgID, now)
 			if d, ok := errors.AsType[errs.Denial](err); ok {
-				orgUnavailable = d.Reasons()
+				orgUnavailable = append(orgUnavailable, d.Reasons()...)
 			} else if errors.Is(err, errs.PermissionDenied) {
-				orgUnavailable = []string{errs.CodeNoAvailableOrg}
+				orgUnavailable = append(orgUnavailable, errs.CodeNoAvailableOrg)
 			} else if err != nil {
 				return err
 			} else if at != nil {
 				next = earliest(next, *at)
 			}
 		}
+		slices.Sort(orgUnavailable)
 		c = cached{Hash: s.TokenHash, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
-			ActiveOrgID: s.ActiveOrgID, OrgUnavailable: orgUnavailable, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
+			ActiveOrgID: s.ActiveOrgID, OrgUnavailable: slices.Compact(orgUnavailable), MaxAuthAge: lim.MaxAuthAge, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
 		return nil
 	})
 	if errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) {
@@ -626,7 +702,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 
 func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Validated {
 	v := Validated{SessionID: sid, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
-		PublicID: c.PublicID, ActiveOrgID: c.ActiveOrgID, OrgUnavailable: c.OrgUnavailable, AuthMethods: c.AuthMethods,
+		PublicID: c.PublicID, ActiveOrgID: c.ActiveOrgID, OrgUnavailable: c.OrgUnavailable, MaxAuthAge: c.MaxAuthAge, AuthMethods: c.AuthMethods,
 		AuthenticatedAt: c.AuthenticatedAt, Restriction: c.Restriction}
 	if m.Config.RotationInterval > 0 && !now.Before(c.CreatedAt.Add(m.Config.RotationInterval)) {
 		v.RotateDue = true
@@ -634,16 +710,32 @@ func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Valida
 	return v
 }
 
-// check はセッションが今有効かを確かめ、次に状態が変わる時刻（再検証の期限）と主体を返す。
-func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now time.Time) (time.Time, port.User, error) {
+// check はセッションが今有効かを確かめ、次に状態が変わる時刻（再検証の期限）と主体、active な Org で決まる値を返す。
+// 寿命は active な Org の値に従う（設定の変更は ValidityMaxDelay の内に既存のセッションにも効く。5.4）。
+func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now time.Time) (time.Time, port.User, OrgLimits, error) {
+	next, u, err := m.checkSession(ctx, tx, s, now)
+	if err != nil {
+		return time.Time{}, port.User{}, OrgLimits{}, err
+	}
+	lim, err := m.limits(ctx, tx, s.RealmID, s.ActiveOrgID)
+	if err != nil {
+		return time.Time{}, port.User{}, OrgLimits{}, err
+	}
+	if lim.beyond(s.AuthenticatedAt, s.LastSeenAt, now) {
+		return time.Time{}, port.User{}, OrgLimits{}, rejected("beyond the lifetime")
+	}
+	if lim.AbsoluteLifetime > 0 {
+		next = earliest(next, s.AuthenticatedAt.Add(lim.AbsoluteLifetime))
+	}
+	return next, u, lim, nil
+}
+
+func (m *Manager) checkSession(ctx context.Context, tx port.Tx, s port.Session, now time.Time) (time.Time, port.User, error) {
 	if s.RevokedAt != nil && !now.Before(*s.RevokedAt) {
 		return time.Time{}, port.User{}, rejected("revoked")
 	}
 	if !now.Before(s.ExpiresAt) {
 		return time.Time{}, port.User{}, rejected("expired")
-	}
-	if m.Config.IdleTimeout > 0 && !now.Before(s.LastSeenAt.Add(m.Config.IdleTimeout)) {
-		return time.Time{}, port.User{}, rejected("idle timeout")
 	}
 	next := earliest(s.ExpiresAt, now.Add(m.Config.ValidityMaxDelay))
 	if s.RevokedAt != nil {
@@ -820,9 +912,23 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requ
 		if err != nil {
 			return err
 		}
-		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: orgID, RequestID: requestID})
+		var hits []warning.Warning
+		if len(old.Warnings) > 0 {
+			if err := json.Unmarshal(old.Warnings, &hits); err != nil {
+				return err
+			}
+		}
+		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: orgID, Warnings: hits, RequestID: requestID})
 		if err != nil {
 			return err
+		}
+		// 切り替え先の Org の寿命を超えていれば再認証を求める（5.4）。
+		lim, err := m.limits(ctx, tx, realmID, picked.OrgID)
+		if err != nil {
+			return err
+		}
+		if lim.beyond(old.AuthenticatedAt, old.LastSeenAt, now) {
+			return ErrReauthRequired
 		}
 		o, err := tx.Orgs().Get(ctx, realmID, picked.OrgID)
 		if err != nil {
@@ -830,6 +936,7 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requ
 		}
 		s := old
 		s.ID, s.ActiveOrgID, s.CreatedAt, s.LastSeenAt, s.RevokedAt, s.RevokeReason = id.NewExternal(id.Session), picked.OrgID, now, now, nil, ""
+		s.ExpiresAt = old.AuthenticatedAt.Add(lim.AbsoluteLifetime)
 		token, hash, err := newToken(s.ID)
 		if err != nil {
 			return err

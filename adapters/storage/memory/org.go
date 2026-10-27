@@ -15,6 +15,7 @@ type orgs struct{ t *tx }
 func cloneOrg(o port.Org) port.Org {
 	o.ValidFrom, o.ValidUntil = cloneTime(o.ValidFrom), cloneTime(o.ValidUntil)
 	o.DeletionScheduledAt, o.DeletedAt = cloneTime(o.DeletionScheduledAt), cloneTime(o.DeletedAt)
+	o.Settings = bytes.Clone(o.Settings)
 	return o
 }
 
@@ -78,6 +79,17 @@ func (r orgs) SetDeletion(_ context.Context, realmID, id string, scheduledAt, de
 	}
 	o = cloneOrg(o)
 	o.DeletionScheduledAt, o.DeletedAt, o.UpdatedAt = cloneTime(scheduledAt), cloneTime(deletedAt), updatedAt
+	setKey(r.t, r.t.s.orgs, id, o)
+	return nil
+}
+
+func (r orgs) SetSettings(_ context.Context, realmID, id string, settings []byte, updatedAt time.Time) error {
+	o, err := get(r.t.s.orgs, realmID, id, func(o port.Org) string { return o.RealmID }, "org")
+	if err != nil {
+		return err
+	}
+	o = cloneOrg(o)
+	o.Settings, o.UpdatedAt = bytes.Clone(settings), updatedAt
 	setKey(r.t, r.t.s.orgs, id, o)
 	return nil
 }

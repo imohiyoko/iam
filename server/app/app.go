@@ -152,7 +152,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.sessions = &session.Manager{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Log: d.Logger, Warnings: warnings,
 		Config: session.Config{
-			AbsoluteLifetime: ss.AbsoluteLifetime.Default.D(), IdleTimeout: ss.IdleTimeout.Default.D(),
+			AbsoluteLifetime: ss.AbsoluteLifetime.Default.D(), IdleTimeout: ss.IdleTimeout.Default.D(), MaxAuthAge: ss.MaxAuthAge.Default.D(),
 			ValidityMaxDelay: ss.ValidityMaxDelay.D(), RotationInterval: ss.RotationInterval.D(), RotationGrace: ss.RotationGrace.D(),
 			RequireSecondFactor: cfg.Security.SecondFactor.Required, SecondFactorTTL: cfg.Security.SecondFactor.TTL.D(),
 			RecoveryTTL: cfg.Security.Recovery.TTL.D(),
@@ -170,7 +170,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
 	if plan.IsActive(feature.Org) {
 		a.orgs = &org.Service{Clock: d.Clock, Crypter: a.pii, Accounts: a.accounts, Notify: a.notify, Policy: org.CreationPolicy(cfg.Realm.OrgCreation),
-			DeletionGrace: cfg.Realm.OrgDeletionGrace.D()}
+			DeletionGrace: cfg.Realm.OrgDeletionGrace.D(), Rules: org.Rules{
+				AbsoluteLifetime: ss.AbsoluteLifetime.Rule("session.absolute_lifetime"), IdleTimeout: ss.IdleTimeout.Rule("session.idle_timeout"),
+				MaxAuthAge: ss.MaxAuthAge.Rule("session.max_auth_age"), Warnings: warnings,
+			}}
 		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
 	}
 	a.email = &emailflow.Service{

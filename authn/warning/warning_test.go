@@ -2,6 +2,7 @@ package warning_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/imohiyoko/iam/authn/warning"
@@ -92,5 +93,30 @@ func TestValidate(t *testing.T) {
 		if _, err := warning.New(bad); err == nil {
 			t.Errorf("%v accepted", bad)
 		}
+	}
+}
+
+func TestApplyOrgOverrides(t *testing.T) {
+	e, err := warning.New(map[string]warning.Action{warning.CodeOAuthEmailUnverified: warning.Warn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := false
+	hits := e.Hits(warning.Evidence{AMR: []string{"otp"}, OAuthEmailVerified: &f})
+	if len(hits) != 2 {
+		t.Fatalf("hits = %+v", hits)
+	}
+	// realm の段では single_factor は ignore（返さない）。
+	if ws, err := e.Apply(hits, nil); err != nil || len(ws) != 1 || ws[0].Code != warning.CodeOAuthEmailUnverified {
+		t.Fatalf("realm: %+v, %v", ws, err)
+	}
+	// Org の段は厳しくする向きだけが効く。
+	ws, err := e.Apply(hits, map[string]warning.Action{warning.CodeSingleFactor: warning.Deny, warning.CodeOAuthEmailUnverified: warning.Ignore})
+	var d *warning.DeniedError
+	if !errors.As(err, &d) || !slices.Equal(d.Codes, []string{warning.CodeSingleFactor}) || len(ws) != 2 {
+		t.Fatalf("org: %+v, %v", ws, err)
+	}
+	if !warning.Stricter(warning.Deny, warning.Warn) || warning.Stricter(warning.Ignore, warning.Warn) {
+		t.Fatal("Stricter")
 	}
 }

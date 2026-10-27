@@ -183,7 +183,7 @@ func (s publicServer) RegenerateMyRecoveryCodes(ctx context.Context, _ publicapi
 	if !ok || au.Restriction != port.RestrictionNone {
 		return publicapi.RegenerateMyRecoveryCodes401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
-	if s.a.deps.Clock.Now().Sub(au.AuthenticatedAt) > s.a.cfg.Security.Session.MaxAuthAge.Default.D() {
+	if !s.recent(au) {
 		return publicapi.RegenerateMyRecoveryCodes401JSONResponse{UnauthenticatedJSONResponse: publicapi.UnauthenticatedJSONResponse{Error: "reauthentication_required"}}, nil
 	}
 	var codes []string
