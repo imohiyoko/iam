@@ -109,6 +109,68 @@ func (r orgs) SetSettings(_ context.Context, realmID, id string, settings []byte
 	return nil
 }
 
+func (r orgs) MoveContents(_ context.Context, realmID, fromID, toID string) error {
+	if fromID == "" || toID == "" {
+		return errs.New(errs.KindInvalid, "org: move contents needs both orgs")
+	}
+	s := r.t.s
+	names := map[string]bool{}
+	for _, g := range s.groups {
+		if g.RealmID == realmID && g.OrgID == toID {
+			names["g\x00"+g.Name] = true
+		}
+	}
+	for _, x := range s.roles {
+		if x.RealmID == realmID && x.OrgID == toID {
+			names["r\x00"+x.Name] = true
+		}
+	}
+	for _, g := range s.groups {
+		if g.RealmID == realmID && g.OrgID == fromID && names["g\x00"+g.Name] {
+			return errs.New(errs.KindConflict, "group name")
+		}
+	}
+	for _, x := range s.roles {
+		if x.RealmID == realmID && x.OrgID == fromID && names["r\x00"+x.Name] {
+			return errs.New(errs.KindConflict, "role name")
+		}
+	}
+	for k, x := range s.roles {
+		if x.RealmID == realmID && x.OrgID == fromID {
+			x = cloneRole(x)
+			x.OrgID = toID
+			setKey(r.t, s.roles, k, x)
+		}
+	}
+	for k, g := range s.groups {
+		if g.RealmID == realmID && g.OrgID == fromID {
+			g.OrgID = toID
+			setKey(r.t, s.groups, k, g)
+		}
+	}
+	for k, a := range s.accounts {
+		if a.RealmID == realmID && a.OrgID == fromID {
+			a.OrgID = toID
+			setKey(r.t, s.accounts, k, a)
+		}
+	}
+	for k, g := range s.quotaGrants {
+		if g.RealmID == realmID && g.OrgID == fromID {
+			g = cloneQuotaGrant(g)
+			g.OrgID = toID
+			setKey(r.t, s.quotaGrants, k, g)
+		}
+	}
+	for k, p := range s.passkeys {
+		if p.RealmID == realmID && p.PreferredOrgID == fromID {
+			p = clonePasskey(p)
+			p.PreferredOrgID = toID
+			setKey(r.t, s.passkeys, k, p)
+		}
+	}
+	return nil
+}
+
 // SetParent は親を置き換える。祖先の一覧は親をたどって求める（メモリでは計算し直すものが無い）。
 func (r orgs) SetParent(_ context.Context, realmID, id, parentID string, updatedAt time.Time) error {
 	o, err := get(r.t.s.orgs, realmID, id, func(o port.Org) string { return o.RealmID }, "org")

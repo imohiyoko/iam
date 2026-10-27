@@ -93,6 +93,7 @@ type AuthnPasskey struct {
 	RevokedAt      sql.NullString
 	RevokeReason   string
 	PreferredOrgID string
+	UserHandle     []byte
 }
 
 type AuthnPasswordCredential struct {
@@ -237,6 +238,7 @@ type AuthnUser struct {
 	LegalHold           int64
 	ManagedOrgID        sql.NullString
 	ManagedAt           sql.NullString
+	MergedInto          sql.NullString
 }
 
 type AuthnUserAttribute struct {

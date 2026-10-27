@@ -993,6 +993,78 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/merge-tokens:
+    post:
+      operationId: createMyMergeToken
+      summary: 統合トークンを発行する（統合元。design.md 11.6、ADR 0082）
+      description: |
+        このアカウント（統合元）を別のアカウント（統合先）に統合するための、1回限り・10 分のトークンを返す。統合先でログインした
+        本人が `POST /v1/me/merges` で使う（両方の所有の証明）。直近の本人確認が要る（`401 reauthentication_required`）。
+        Org 管理ユーザーは `409 managed_user`、削除の予定があれば `409 deletion_scheduled`。フィーチャー account_merge が
+        動いていなければ `404`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "201":
+          description: 発行した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, expires_at]
+                properties:
+                  token: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/merges:
+    post:
+      operationId: mergeIntoMe
+      summary: 別のアカウントをこのアカウントに統合する（取り消し不可）
+      description: |
+        統合元が発行した統合トークンを使い、統合元のメール・外部 ID・passkey・TOTP とパスワード（このアカウントに無ければ）・
+        ロールの付与・Group の所属・カスタム属性の値（このアカウントに無ければ）・Membership をこのアカウントに移す。
+        統合元の個人 Org は残し、このアカウントを owner にした新しい共有 Org を作って、個人 Org の中身（Group・独自のロール・
+        サービスアカウント・Quota の付与）を移す。ロールの付与は移さない（owner が付け直す）。ホスト先は `user.merged` の
+        `personal_org_id`・`shared_org_id` を見て、個人 Org の ID で持つデータを付け替える。両方が所属する Org では、
+        役割の高い方を残す。統合元は `merged` になり、セッションと連携先の認可を失効する。監査ログと EventSink に
+        `user.merged`（`user_id`・`merged_user_id`）を出す（連携先には統合元の `sub` が無くなることを伝える）。
+        直近の本人確認が要る（`401 reauthentication_required`）。トークンが誤り・使用済み・期限切れなら `400 invalid_merge_token`、
+        同じアカウントなら `400 same_user`。どちらかが Org 管理ユーザーなら `409 managed_user`、削除の予定があれば
+        `409 deletion_scheduled`、統合元に消去の保留があれば `409 legal_hold`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        "200":
+          description: 統合した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [merged_user_id]
+                properties:
+                  merged_user_id: { type: string, description: 統合元のユーザー }
+                  shared_org_id: { type: string, description: 統合元の個人 Org の中身を移した、新しい共有 Org }
+                  personal_org_id: { type: string, description: 統合元の個人 Org（残したまま） }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /v1/me/password:set:
     post:
       operationId: setMyPassword

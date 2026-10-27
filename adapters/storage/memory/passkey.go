@@ -13,7 +13,7 @@ import (
 type passkeys struct{ t *tx }
 
 func clonePasskey(p port.Passkey) port.Passkey {
-	p.CredentialID, p.PublicKey, p.AAGUID = bytes.Clone(p.CredentialID), bytes.Clone(p.PublicKey), bytes.Clone(p.AAGUID)
+	p.CredentialID, p.PublicKey, p.AAGUID, p.UserHandle = bytes.Clone(p.CredentialID), bytes.Clone(p.PublicKey), bytes.Clone(p.AAGUID), bytes.Clone(p.UserHandle)
 	p.Transports = slices.Clone(p.Transports)
 	p.LastUsedAt, p.RevokedAt = cloneTime(p.LastUsedAt), cloneTime(p.RevokedAt)
 	return p
@@ -98,4 +98,21 @@ func (r passkeys) Revoke(_ context.Context, realmID, id string, at time.Time, re
 	}
 	setKey(r.t, r.t.s.revokedPasskeys, revokedKey(realmID, p.CredentialID), at)
 	return r.update(realmID, id, func(p *port.Passkey) { p.RevokedAt, p.RevokeReason = &at, reason })
+}
+
+func (r passkeys) MoveUser(_ context.Context, realmID, fromUserID, toUserID string, handle []byte) (int, error) {
+	n := 0
+	for id, p := range r.t.s.passkeys {
+		if p.RealmID != realmID || p.UserID != fromUserID {
+			continue
+		}
+		p = clonePasskey(p)
+		p.UserID = toUserID
+		if len(p.UserHandle) == 0 {
+			p.UserHandle = bytes.Clone(handle)
+		}
+		setKey(r.t, r.t.s.passkeys, id, p)
+		n++
+	}
+	return n, nil
 }

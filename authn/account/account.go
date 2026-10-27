@@ -50,6 +50,9 @@ type UserOrgs interface {
 	Release(ctx context.Context, tx port.Tx, u port.User, actor audit.Actor, requestID string) error
 }
 
+// EmailAAD はメールアドレスの暗号文の AAD の用途（ユーザーのデータ鍵で暗号化する）。
+const EmailAAD = "email"
+
 // ErrEmailInvalid はメールアドレスの形式の誤り。
 var ErrEmailInvalid = errs.WithCode(errs.KindInvalid, "invalid_email", "invalid email address")
 
@@ -166,7 +169,7 @@ func (s *Service) createEmail(ctx context.Context, tx port.Tx, realmID, userID, 
 	}
 	var ct []byte
 	if !s.IndexOnly {
-		if ct, err = s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, []byte(email), "email"); err != nil {
+		if ct, err = s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, []byte(email), EmailAAD); err != nil {
 			return port.UserEmail{}, err
 		}
 	}
@@ -180,6 +183,6 @@ func (s *Service) EmailAddress(ctx context.Context, tx port.Tx, e port.UserEmail
 	if len(e.Ciphertext) == 0 {
 		return "", errors.New("account: address not stored (index_only)")
 	}
-	b, err := s.Crypter.Decrypt(ctx, tx.DataKeys(), e.UserID, e.Ciphertext, "email")
+	b, err := s.Crypter.Decrypt(ctx, tx.DataKeys(), e.UserID, e.Ciphertext, EmailAAD)
 	return string(b), err
 }

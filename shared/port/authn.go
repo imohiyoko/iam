@@ -36,8 +36,10 @@ type User struct {
 	// ManagedOrgID はユーザーを管理する Org（内部 ID。design.md 11.3、ADR 0076）。空なら個人ユーザー（本人が所有する）。
 	ManagedOrgID string
 	ManagedAt    *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// MergedInto は統合先のユーザー（内部 ID。design.md 11.6、ADR 0082）。Status が merged のときだけ。
+	MergedInto string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // UserRepo は users の Repository。
@@ -65,6 +67,8 @@ type UserRepo interface {
 	// TOTP・パスワード・リカバリーコード・セッション・ロールの付与・連携先への認可・カスタム属性の値を消す（4.10）。データ鍵、Membership、個人 Org、停止の記録は
 	// 呼び出し側が扱う。無ければ errs.NotFound。
 	Erase(ctx context.Context, realmID, id string, at time.Time) error
+	// SetMerged は active なユーザーを統合済み（merged、統合先 into）にし、削除の予定を外す（11.6）。active でなければ errs.NotFound。
+	SetMerged(ctx context.Context, realmID, id, into string, at time.Time) error
 }
 
 // VerifiedVia はメールを確認済みとみなした経路（design.md 4.1）。
@@ -163,10 +167,13 @@ type Passkey struct {
 	Name       string
 	// PreferredOrgID はこの passkey でログインしたときに入る Org（内部 ID。4.4）。空なら指定なし。
 	PreferredOrgID string
-	CreatedAt      time.Time
-	LastUsedAt     *time.Time
-	RevokedAt      *time.Time
-	RevokeReason   string
+	// UserHandle は登録時のユーザーハンドル（WebAuthn の user.id）。空なら持ち主の公開 ID。統合（11.6）で移した passkey は
+	// 元のユーザーの公開 ID を持つ。
+	UserHandle   []byte
+	CreatedAt    time.Time
+	LastUsedAt   *time.Time
+	RevokedAt    *time.Time
+	RevokeReason string
 }
 
 // PasskeyRepo は passkeys と revoked_passkey_credentials の Repository。
@@ -188,6 +195,9 @@ type PasskeyRepo interface {
 	// Revoke は at に無効化し、credential_id を無効化済みに加える。既に無効化されていれば何もしない。
 	// 無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+	// MoveUser は fromUserID の passkey（無効化したものも）を toUserID に移し、移した数を返す（統合。11.6）。UserHandle が
+	// 空のものには handle（元の持ち主の公開 ID）を入れる。
+	MoveUser(ctx context.Context, realmID, fromUserID, toUserID string, handle []byte) (int, error)
 }
 
 // TOTPCredential は totp_credentials の1行（design.md 3.1、4.1）。秘密はユーザーのデータ鍵で暗号化する（9.5）。
@@ -558,6 +568,10 @@ type OrgRepo interface {
 	SubtreeHeight(ctx context.Context, realmID, id string) (int, error)
 	// ListChildren は子の Org を ID の順に返す。
 	ListChildren(ctx context.Context, realmID, id string) ([]Org, error)
+	// MoveContents は Org fromID の中身（独自のロール・Group・サービスアカウント・Quota の付与・passkey のログインで入る Org）
+	// を Org toID に移す（統合で、統合元の個人 Org の中身を新しい Org に移す。11.6）。ID は変えない。ロールの付与は移さない
+	// （移した先では owner が付け直す）。移す先に同じ名前の Group・ロールがあれば errs.Conflict。
+	MoveContents(ctx context.Context, realmID, fromID, toID string) error
 }
 
 // MembershipStatus は Membership の状態（design.md 3.1）。

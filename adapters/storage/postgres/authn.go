@@ -90,8 +90,8 @@ func toUser(r db.AuthnUser) (port.User, error) {
 	var p times
 	u := port.User{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Status: port.UserStatus(r.Status),
 		ValidFrom: p.null(r.ValidFrom), ValidUntil: p.null(r.ValidUntil), DeletionScheduledAt: p.null(r.DeletionScheduledAt),
-		LegalHold: r.LegalHold != 0, ManagedOrgID: r.ManagedOrgID.String, ManagedAt: p.null(r.ManagedAt), CreatedAt: p.at(r.CreatedAt),
-		UpdatedAt: p.at(r.UpdatedAt)}
+		LegalHold: r.LegalHold != 0, ManagedOrgID: r.ManagedOrgID.String, ManagedAt: p.null(r.ManagedAt), MergedInto: r.MergedInto.String,
+		CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	return u, p.err
 }
 
@@ -461,6 +461,12 @@ func (r users) SetLegalHold(ctx context.Context, realmID, id string, hold bool, 
 		v = 1
 	}
 	n, err := r.q.SetUserLegalHold(ctx, db.SetUserLegalHoldParams{LegalHold: v, UpdatedAt: formatTime(updatedAt), RealmID: realmID, ID: id})
+	return affected(n, err, "user")
+}
+
+func (r users) SetMerged(ctx context.Context, realmID, id, into string, at time.Time) error {
+	n, err := r.q.SetUserMerged(ctx, db.SetUserMergedParams{MergedInto: sql.NullString{String: into, Valid: true}, UpdatedAt: formatTime(at),
+		RealmID: realmID, ID: id})
 	return affected(n, err, "user")
 }
 

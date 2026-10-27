@@ -24,6 +24,7 @@ import (
 	"github.com/imohiyoko/iam/authn/emailflow"
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/loginlink"
+	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/org"
@@ -81,6 +82,8 @@ type App struct {
 	// sessions はセッションの発行・検証（authn/session）。
 	sessions *session.Manager
 	accounts *account.Service
+	// merge はアカウント統合（11.6）。フィーチャー account_merge が動いていなければ nil。
+	merge *merge.Service
 	// orgs は Org と Membership（4.4、11.13）。フィーチャー org が動いていなければ nil。
 	orgs   *org.Service
 	notify *notify.Service
@@ -324,6 +327,9 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.notifier = &eventlog.Relay{
 		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Clock, d.Logger), Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
+	}
+	if plan.IsActive(feature.AccountMerge) {
+		a.merge = &merge.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Sessions: a.sessions, Orgs: a.orgs}
 	}
 	if plan.IsActive(feature.FlowHooks) {
 		runner, err := flowHooks(cfg, d, a.realm.Slug)

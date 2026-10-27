@@ -36,10 +36,10 @@ var ErrTOTPExists = errs.WithCode(errs.KindConflict, "totp_exists", "totp alread
 // 外には ErrAuthFailed として返す。基盤の障害はこれに含めず、そのまま返す。
 var errRejected = errors.New("totp rejected")
 
-const (
-	secretAAD   = "totp.secret"
-	sealPurpose = "flow.totp"
-)
+// SecretAAD は TOTP の秘密の暗号文の AAD の用途（ユーザーのデータ鍵で暗号化する）。
+const SecretAAD = "totp.secret"
+
+const sealPurpose = "flow.totp"
 
 // Service は TOTP の登録と照合を扱う。
 type Service struct {
@@ -203,7 +203,7 @@ func (s *Service) confirm(ctx context.Context, tx port.Tx, realmID, userID, flow
 	if err := active(ctx, tx, realmID, userID); err != nil {
 		return port.TOTPCredential{}, err
 	}
-	ct, err := s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, st.Secret, secretAAD)
+	ct, err := s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, st.Secret, SecretAAD)
 	if err != nil {
 		return port.TOTPCredential{}, err
 	}
@@ -244,7 +244,7 @@ func (s *Service) verify(ctx context.Context, tx port.Tx, realmID, userID, code 
 		if c.RevokedAt != nil {
 			continue
 		}
-		secret, err := s.Crypter.Decrypt(ctx, tx.DataKeys(), userID, c.SecretCiphertext, secretAAD)
+		secret, err := s.Crypter.Decrypt(ctx, tx.DataKeys(), userID, c.SecretCiphertext, SecretAAD)
 		if err != nil {
 			return port.TOTPCredential{}, err
 		}

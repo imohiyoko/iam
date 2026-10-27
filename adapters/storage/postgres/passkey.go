@@ -28,6 +28,9 @@ func toPasskey(r db.AuthnPasskey) (port.Passkey, error) {
 		PublicKey: r.PublicKey, Alg: r.Alg, SignCount: uint32(r.SignCount), Flags: uint8(r.Flags), AAGUID: r.Aaguid,
 		Transports: transports, Name: r.Name, CreatedAt: p.at(r.CreatedAt), LastUsedAt: p.null(r.LastUsedAt),
 		RevokedAt: p.null(r.RevokedAt), RevokeReason: r.RevokeReason, PreferredOrgID: r.PreferredOrgID}
+	if len(r.UserHandle) > 0 {
+		k.UserHandle = r.UserHandle
+	}
 	return k, p.err
 }
 
@@ -50,7 +53,8 @@ func (r passkeys) Create(ctx context.Context, k port.Passkey) error {
 	return mapErr(r.q.CreatePasskey(ctx, db.CreatePasskeyParams{ID: k.ID, PublicID: k.PublicID, RealmID: k.RealmID, UserID: k.UserID,
 		CredentialID: k.CredentialID, PublicKey: k.PublicKey, Alg: k.Alg, SignCount: int64(k.SignCount), Flags: int64(k.Flags),
 		Aaguid: append([]byte{}, k.AAGUID...), Transports: string(tj), Name: k.Name, CreatedAt: formatTime(k.CreatedAt),
-		LastUsedAt: nullTime(k.LastUsedAt), RevokedAt: nullTime(k.RevokedAt), RevokeReason: k.RevokeReason, PreferredOrgID: k.PreferredOrgID}))
+		LastUsedAt: nullTime(k.LastUsedAt), RevokedAt: nullTime(k.RevokedAt), RevokeReason: k.RevokeReason, PreferredOrgID: k.PreferredOrgID,
+		UserHandle: append([]byte{}, k.UserHandle...)}))
 }
 
 func (r passkeys) GetByCredentialID(ctx context.Context, realmID string, credentialID []byte) (port.Passkey, error) {
@@ -95,4 +99,12 @@ func (r passkeys) Revoke(ctx context.Context, realmID, id string, at time.Time, 
 		return mapErr(err)
 	}
 	return mapErr(r.q.RevokePasskey(ctx, db.RevokePasskeyParams{RevokedAt: nullTime(&at), RevokeReason: reason, RealmID: realmID, ID: id}))
+}
+
+func (r passkeys) MoveUser(ctx context.Context, realmID, fromUserID, toUserID string, handle []byte) (int, error) {
+	if err := r.q.SetPasskeyHandles(ctx, db.SetPasskeyHandlesParams{UserHandle: handle, RealmID: realmID, UserID: fromUserID}); err != nil {
+		return 0, mapErr(err)
+	}
+	n, err := r.q.MovePasskeys(ctx, db.MovePasskeysParams{ToUserID: toUserID, RealmID: realmID, FromUserID: fromUserID})
+	return int(n), mapErr(err)
 }

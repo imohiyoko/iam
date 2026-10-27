@@ -925,6 +925,11 @@ type CompleteLinkIdentityJSONBody struct {
 	State  string  `json:"state"`
 }
 
+// MergeIntoMeJSONBody defines parameters for MergeIntoMe.
+type MergeIntoMeJSONBody struct {
+	Token string `json:"token"`
+}
+
 // CreateMyOrgJSONBody defines parameters for CreateMyOrg.
 type CreateMyOrgJSONBody struct {
 	Name string `json:"name"`
@@ -1114,6 +1119,9 @@ type StartLinkIdentityJSONRequestBody StartLinkIdentityJSONBody
 // CompleteLinkIdentityJSONRequestBody defines body for CompleteLinkIdentity for application/json ContentType.
 type CompleteLinkIdentityJSONRequestBody CompleteLinkIdentityJSONBody
 
+// MergeIntoMeJSONRequestBody defines body for MergeIntoMe for application/json ContentType.
+type MergeIntoMeJSONRequestBody MergeIntoMeJSONBody
+
 // CreateMyOrgJSONRequestBody defines body for CreateMyOrg for application/json ContentType.
 type CreateMyOrgJSONRequestBody CreateMyOrgJSONBody
 
@@ -1281,6 +1289,12 @@ type ServerInterface interface {
 	// CompleteLinkIdentity プロバイダからの戻りで連携を完了する
 	// (POST /v1/me/identities:complete)
 	CompleteLinkIdentity(w http.ResponseWriter, r *http.Request)
+	// CreateMyMergeToken 統合トークンを発行する（統合元。design.md 11.6、ADR 0082）
+	// (POST /v1/me/merge-tokens)
+	CreateMyMergeToken(w http.ResponseWriter, r *http.Request)
+	// MergeIntoMe 別のアカウントをこのアカウントに統合する（取り消し不可）
+	// (POST /v1/me/merges)
+	MergeIntoMe(w http.ResponseWriter, r *http.Request)
 	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(w http.ResponseWriter, r *http.Request)
@@ -1902,6 +1916,34 @@ func (siw *ServerInterfaceWrapper) CompleteLinkIdentity(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CompleteLinkIdentity(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMyMergeToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateMyMergeToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMyMergeToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MergeIntoMe operation middleware
+func (siw *ServerInterfaceWrapper) MergeIntoMe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MergeIntoMe(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3764,6 +3806,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys/{id}:revoke", wrapper.RevokeMyPasskey)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/attributes", wrapper.GetMyAttributes)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/me/attributes", wrapper.UpdateMyAttributes)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/merge-tokens", wrapper.CreateMyMergeToken)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/merges", wrapper.MergeIntoMe)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/password:set", wrapper.SetMyPassword)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/password:remove", wrapper.RemoveMyPassword)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:start", wrapper.StartRegisterTOTP)
@@ -5384,6 +5428,173 @@ func (response CompleteLinkIdentity401JSONResponse) VisitCompleteLinkIdentityRes
 type CompleteLinkIdentity409JSONResponse struct{ ConflictJSONResponse }
 
 func (response CompleteLinkIdentity409JSONResponse) VisitCompleteLinkIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyMergeTokenRequestObject struct {
+}
+
+type CreateMyMergeTokenResponseObject interface {
+	VisitCreateMyMergeTokenResponse(w http.ResponseWriter) error
+}
+
+type CreateMyMergeToken201JSONResponse struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	Token     string    `json:"token"`
+}
+
+func (response CreateMyMergeToken201JSONResponse) VisitCreateMyMergeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyMergeToken401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateMyMergeToken401JSONResponse) VisitCreateMyMergeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyMergeToken404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateMyMergeToken404JSONResponse) VisitCreateMyMergeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyMergeToken409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateMyMergeToken409JSONResponse) VisitCreateMyMergeTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MergeIntoMeRequestObject struct {
+	Body *MergeIntoMeJSONRequestBody
+}
+
+type MergeIntoMeResponseObject interface {
+	VisitMergeIntoMeResponse(w http.ResponseWriter) error
+}
+
+type MergeIntoMe200JSONResponse struct {
+	// MergedUserId 統合元のユーザー
+	MergedUserId string `json:"merged_user_id"`
+
+	// PersonalOrgId 統合元の個人 Org（残したまま）
+	PersonalOrgId *string `json:"personal_org_id,omitempty"`
+
+	// SharedOrgId 統合元の個人 Org の中身を移した、新しい共有 Org
+	SharedOrgId *string `json:"shared_org_id,omitempty"`
+}
+
+func (response MergeIntoMe200JSONResponse) VisitMergeIntoMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MergeIntoMe400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response MergeIntoMe400JSONResponse) VisitMergeIntoMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MergeIntoMe401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response MergeIntoMe401JSONResponse) VisitMergeIntoMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MergeIntoMe403JSONResponse struct{ DeniedJSONResponse }
+
+func (response MergeIntoMe403JSONResponse) VisitMergeIntoMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MergeIntoMe404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response MergeIntoMe404JSONResponse) VisitMergeIntoMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MergeIntoMe409JSONResponse struct{ ConflictJSONResponse }
+
+func (response MergeIntoMe409JSONResponse) VisitMergeIntoMeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -10040,6 +10251,12 @@ type StrictServerInterface interface {
 	// CompleteLinkIdentity プロバイダからの戻りで連携を完了する
 	// (POST /v1/me/identities:complete)
 	CompleteLinkIdentity(ctx context.Context, request CompleteLinkIdentityRequestObject) (CompleteLinkIdentityResponseObject, error)
+	// CreateMyMergeToken 統合トークンを発行する（統合元。design.md 11.6、ADR 0082）
+	// (POST /v1/me/merge-tokens)
+	CreateMyMergeToken(ctx context.Context, request CreateMyMergeTokenRequestObject) (CreateMyMergeTokenResponseObject, error)
+	// MergeIntoMe 別のアカウントをこのアカウントに統合する（取り消し不可）
+	// (POST /v1/me/merges)
+	MergeIntoMe(ctx context.Context, request MergeIntoMeRequestObject) (MergeIntoMeResponseObject, error)
 	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(ctx context.Context, request ListMyMethodsRequestObject) (ListMyMethodsResponseObject, error)
@@ -11024,6 +11241,61 @@ func (sh *strictHandler) CompleteLinkIdentity(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CompleteLinkIdentityResponseObject); ok {
 		if err := validResponse.VisitCompleteLinkIdentityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateMyMergeToken operation middleware
+func (sh *strictHandler) CreateMyMergeToken(w http.ResponseWriter, r *http.Request) {
+	var request CreateMyMergeTokenRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMyMergeToken(ctx, request.(CreateMyMergeTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMyMergeToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMyMergeTokenResponseObject); ok {
+		if err := validResponse.VisitCreateMyMergeTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MergeIntoMe operation middleware
+func (sh *strictHandler) MergeIntoMe(w http.ResponseWriter, r *http.Request) {
+	var request MergeIntoMeRequestObject
+
+	var body MergeIntoMeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MergeIntoMe(ctx, request.(MergeIntoMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MergeIntoMe")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MergeIntoMeResponseObject); ok {
+		if err := validResponse.VisitMergeIntoMeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
