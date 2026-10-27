@@ -137,27 +137,28 @@ func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) 
 
 const createPasskey = `-- name: CreatePasskey :exec
 INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,
-    transports, name, created_at, last_used_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreatePasskeyParams struct {
-	ID           string
-	PublicID     string
-	RealmID      string
-	UserID       string
-	CredentialID []byte
-	PublicKey    []byte
-	Alg          int64
-	SignCount    int64
-	Flags        int64
-	Aaguid       []byte
-	Transports   string
-	Name         string
-	CreatedAt    string
-	LastUsedAt   sql.NullString
-	RevokedAt    sql.NullString
-	RevokeReason string
+	ID             string
+	PublicID       string
+	RealmID        string
+	UserID         string
+	CredentialID   []byte
+	PublicKey      []byte
+	Alg            int64
+	SignCount      int64
+	Flags          int64
+	Aaguid         []byte
+	Transports     string
+	Name           string
+	CreatedAt      string
+	LastUsedAt     sql.NullString
+	RevokedAt      sql.NullString
+	RevokeReason   string
+	PreferredOrgID string
 }
 
 func (q *Queries) CreatePasskey(ctx context.Context, arg CreatePasskeyParams) error {
@@ -178,6 +179,7 @@ func (q *Queries) CreatePasskey(ctx context.Context, arg CreatePasskeyParams) er
 		arg.LastUsedAt,
 		arg.RevokedAt,
 		arg.RevokeReason,
+		arg.PreferredOrgID,
 	)
 	return err
 }
@@ -779,7 +781,7 @@ func (q *Queries) GetIdentityBySubject(ctx context.Context, arg GetIdentityBySub
 }
 
 const getPasskey = `-- name: GetPasskey :one
-SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason FROM authn_passkeys WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id FROM authn_passkeys WHERE realm_id = ? AND id = ?
 `
 
 type GetPasskeyParams struct {
@@ -807,12 +809,13 @@ func (q *Queries) GetPasskey(ctx context.Context, arg GetPasskeyParams) (AuthnPa
 		&i.LastUsedAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
+		&i.PreferredOrgID,
 	)
 	return i, err
 }
 
 const getPasskeyByCredentialID = `-- name: GetPasskeyByCredentialID :one
-SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason FROM authn_passkeys WHERE realm_id = ? AND credential_id = ? AND revoked_at IS NULL
+SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id FROM authn_passkeys WHERE realm_id = ? AND credential_id = ? AND revoked_at IS NULL
 `
 
 type GetPasskeyByCredentialIDParams struct {
@@ -840,12 +843,13 @@ func (q *Queries) GetPasskeyByCredentialID(ctx context.Context, arg GetPasskeyBy
 		&i.LastUsedAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
+		&i.PreferredOrgID,
 	)
 	return i, err
 }
 
 const getPasskeyByPublicID = `-- name: GetPasskeyByPublicID :one
-SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason FROM authn_passkeys WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id FROM authn_passkeys WHERE realm_id = ? AND public_id = ?
 `
 
 type GetPasskeyByPublicIDParams struct {
@@ -873,6 +877,7 @@ func (q *Queries) GetPasskeyByPublicID(ctx context.Context, arg GetPasskeyByPubl
 		&i.LastUsedAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
+		&i.PreferredOrgID,
 	)
 	return i, err
 }
@@ -1305,7 +1310,7 @@ func (q *Queries) ListIdentitiesByUser(ctx context.Context, arg ListIdentitiesBy
 }
 
 const listPasskeysByUser = `-- name: ListPasskeysByUser :many
-SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason FROM authn_passkeys WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id FROM authn_passkeys WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
 `
 
 type ListPasskeysByUserParams struct {
@@ -1339,6 +1344,7 @@ func (q *Queries) ListPasskeysByUser(ctx context.Context, arg ListPasskeysByUser
 			&i.LastUsedAt,
 			&i.RevokedAt,
 			&i.RevokeReason,
+			&i.PreferredOrgID,
 		); err != nil {
 			return nil, err
 		}
@@ -1896,6 +1902,24 @@ func (q *Queries) ScheduleEvent(ctx context.Context, arg ScheduleEventParams) er
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const setPasskeyPreferredOrg = `-- name: SetPasskeyPreferredOrg :execrows
+UPDATE authn_passkeys SET preferred_org_id = ? WHERE realm_id = ? AND id = ?
+`
+
+type SetPasskeyPreferredOrgParams struct {
+	PreferredOrgID string
+	RealmID        string
+	ID             string
+}
+
+func (q *Queries) SetPasskeyPreferredOrg(ctx context.Context, arg SetPasskeyPreferredOrgParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setPasskeyPreferredOrg, arg.PreferredOrgID, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setPrimaryEmail = `-- name: SetPrimaryEmail :exec
