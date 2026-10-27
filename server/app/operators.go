@@ -10,6 +10,7 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -265,7 +266,18 @@ var errOutranked = errors.New("target holds permissions the caller lacks")
 
 // outranks は、対象になりすませる操作の前に、呼び出し側が対象のロールの権限をすべて持つかを確かめる。
 func (a *App) outranks(ctx context.Context, tx port.Tx, p adminPrincipal, targetUserID string) error {
-	ok, err := role.Covers(ctx, tx, a.realm.ID, p.Type, p.ID, targetUserID)
+	// 対象の realm の範囲全体の権限を集め、呼び出し側がすべて持つかを確かめる（Group から効く権限も含む）。
+	gs, err := a.authz.Grants(ctx, tx, a.realm.ID, check.Principal{Type: port.PrincipalUser, ID: targetUserID}, "")
+	if err != nil {
+		return err
+	}
+	var need []string
+	for _, g := range gs {
+		if g.ResourceType == "" {
+			need = append(need, g.Permissions...)
+		}
+	}
+	ok, err := a.authz.Holds(ctx, tx, a.realm.ID, check.Principal{Type: p.Type, ID: p.ID}, "", need)
 	if err != nil {
 		return err
 	}
