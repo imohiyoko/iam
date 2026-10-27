@@ -21,7 +21,9 @@ import (
 
 type hookFunc func(context.Context, port.HookInput) (port.HookResult, error)
 
-func (f hookFunc) Call(ctx context.Context, in port.HookInput) (port.HookResult, error) { return f(ctx, in) }
+func (f hookFunc) Call(ctx context.Context, in port.HookInput) (port.HookResult, error) {
+	return f(ctx, in)
+}
 
 func TestRunner(t *testing.T) {
 	ctx := context.Background()
@@ -32,7 +34,9 @@ func TestRunner(t *testing.T) {
 	if res, err := nilRunner.Run(ctx, port.HookInput{Hook: port.HookPreToken}); err != nil || !res.Allow {
 		t.Fatalf("nil runner: %v %v", res, err)
 	}
-	down := hookFunc(func(context.Context, port.HookInput) (port.HookResult, error) { return port.HookResult{}, errors.New("down") })
+	down := hookFunc(func(context.Context, port.HookInput) (port.HookResult, error) {
+		return port.HookResult{}, errors.New("down")
+	})
 	wait := hookFunc(func(ctx context.Context, _ port.HookInput) (port.HookResult, error) {
 		<-ctx.Done()
 		return port.HookResult{}, ctx.Err()
