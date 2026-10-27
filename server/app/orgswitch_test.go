@@ -59,7 +59,7 @@ func TestLoginWithWorkEmailEntersCompanyOrg(t *testing.T) {
 	}
 	// 所属していない Org には切り替えられない。
 	_, outsider := l.login(t, "out@example.com")
-	if code, _, _ := l.post(t, outsider, "/v1/me/orgs/"+acme+":switch", nil); code != 403 {
+	if code, _, _ := l.post(t, outsider, "/v1/me/orgs/"+acme+":switch", nil); code != 404 {
 		t.Fatalf("outsider switch = %d", code)
 	}
 }
