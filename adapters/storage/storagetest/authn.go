@@ -46,6 +46,8 @@ var authnTests = []struct {
 	{"UserDeletion", testUserDeletion},
 	{"ServiceAccounts", testServiceAccounts},
 	{"RoleBindings", testRoleBindings},
+	{"Roles", testRoles},
+	{"Groups", testGroups},
 	{"Orgs", testOrgs},
 	{"PersonalOrgUniqueConcurrent", testPersonalOrgUniqueConcurrent},
 	{"Memberships", testMemberships},
@@ -524,7 +526,7 @@ func testUserDeletion(t *testing.T, h Harness) {
 	e, oe := newEmail(r, u.ID, "u"), newEmail(r, other.ID, "o")
 	ses, os := newSession(r, u.ID, T0), newSession(r, other.ID, T0)
 	pk, pw, tp, rc := newPasskey(r, u.ID, "cred-u"), newPassword(r, u.ID), newTOTP(r, u.ID), newRecoveryCode(r, u.ID, "l1")
-	rb := port.RoleBinding{ID: id.New(id.RoleBinding), RealmID: r, Role: "realm:admin", PrincipalType: port.PrincipalUser, PrincipalID: u.ID, CreatedAt: T0}
+	rb := port.RoleBinding{ID: id.New(id.RoleBinding), PublicID: id.NewExternal(id.RoleBinding), RealmID: r, Role: "realm:admin", PrincipalType: port.PrincipalUser, PrincipalID: u.ID, CreatedAt: T0}
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		for _, x := range []port.User{u, other} {
 			if err := tx.Users().Create(ctx, x); err != nil {
@@ -638,36 +640,6 @@ func testServiceAccounts(t *testing.T, h Harness) {
 		}
 		_, err = repo.GetCredential(ctx, other, c.ID)
 		return notFound("GetCredential from another realm", err)
-	})
-}
-
-func testRoleBindings(t *testing.T, h Harness) {
-	s, _ := open(t, h)
-	r, u := id.New(id.Realm), id.New(id.User)
-	b := port.RoleBinding{ID: id.New(id.RoleBinding), RealmID: r, Role: "realm:owner", PrincipalType: port.PrincipalUser, PrincipalID: u, CreatedAt: T0}
-	tx(t, s, func(ctx context.Context, tx port.Tx) error {
-		repo := tx.RoleBindings()
-		if err := repo.Create(ctx, b); err != nil {
-			return err
-		}
-		dup := b
-		dup.ID = id.New(id.RoleBinding)
-		if err := conflict("same binding", repo.Create(ctx, dup)); err != nil {
-			return err
-		}
-		dup.Role, dup.CreatedAt = "realm:security", T0.Add(time.Minute)
-		if err := repo.Create(ctx, dup); err != nil {
-			return err
-		}
-		list, err := repo.ListByPrincipal(ctx, r, port.PrincipalUser, u)
-		if err != nil || len(list) != 2 || !reflect.DeepEqual(list[0], b) {
-			return fmt.Errorf("ListByPrincipal = %+v, %v", list, err)
-		}
-		list, err = repo.ListByRole(ctx, r, "realm:owner")
-		if err != nil || len(list) != 1 || list[0].ID != b.ID {
-			return fmt.Errorf("ListByRole = %+v, %v", list, err)
-		}
-		return nil
 	})
 }
 
@@ -805,7 +777,7 @@ var authnIsolationCases = []IsolationCase{
 	{
 		Name: "RoleBindings.ListByPrincipal+ListByRole",
 		Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
-			return tx.RoleBindings().Create(ctx, port.RoleBinding{ID: id.New(id.RoleBinding), RealmID: r, Role: "realm:owner",
+			return tx.RoleBindings().Create(ctx, port.RoleBinding{ID: id.New(id.RoleBinding), PublicID: id.NewExternal(id.RoleBinding), RealmID: r, Role: "realm:owner",
 				PrincipalType: port.PrincipalUser, PrincipalID: isoUser, CreatedAt: T0})
 		},
 		Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {

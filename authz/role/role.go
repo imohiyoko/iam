@@ -54,6 +54,12 @@ const (
 	PermUsersDelete = "users:delete"
 	// PermUsersLegalHold は消去の保留（4.10）。realm:owner だけ。
 	PermUsersLegalHold = "users:legal_hold"
+	// PermRolesManage は realm 共通の独自のロールと、realm の範囲のロールの付与の管理（運営者ロールの付与を含む。4.11）。
+	PermRolesManage = "roles:manage"
+	// PermGroupsManage は realm 全体の Group と所属の管理。
+	PermGroupsManage = "groups:manage"
+	// PermAuthzCheck は他の主体についての判定の問い合わせ（連携先・サービスアカウント向け）。
+	PermAuthzCheck = "authz:check"
 )
 
 // SuspensionPerm は停止の種別ごとの停止・解除の権限（`suspensions:<category>`。4.11）。
@@ -69,9 +75,9 @@ func suspend(categories ...string) []string {
 }
 
 var builtin = map[string][]string{
-	RealmOwner: append([]string{PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
+	RealmOwner: append([]string{PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
 		PermCredentialsRevoke, PermSuspensionsAny}, suspend("tos_violation", "customer_request", "security_risk", "billing")...),
-	RealmAdmin: append([]string{PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke},
+	RealmAdmin: append([]string{PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke},
 		suspend("tos_violation", "customer_request")...),
 	RealmSecurity:        append([]string{PermSessionsRevoke, PermCredentialsRevoke}, suspend("security_risk")...),
 	RealmSupport:         {PermOrgsRead, PermSuspensionsRead, PermUsersRecover},
@@ -84,7 +90,7 @@ func Known(r string) bool { _, ok := builtin[r]; return ok }
 
 // Grant はロールを付与する（realm 全体）。
 func Grant(ctx context.Context, tx port.Tx, realmID, roleName string, t port.PrincipalType, principalID string, now time.Time) error {
-	return tx.RoleBindings().Create(ctx, port.RoleBinding{ID: id.New(id.RoleBinding), RealmID: realmID, Role: roleName,
+	return tx.RoleBindings().Create(ctx, port.RoleBinding{ID: id.New(id.RoleBinding), PublicID: id.NewExternal(id.RoleBinding), RealmID: realmID, Role: roleName,
 		PrincipalType: t, PrincipalID: principalID, CreatedAt: now})
 }
 

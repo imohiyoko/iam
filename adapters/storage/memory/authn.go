@@ -414,42 +414,6 @@ func (r accounts) RevokeCredential(_ context.Context, realmID, id string, at tim
 
 // ---------------------------------------------------------------------------
 
-type roleBindings struct{ t *tx }
-
-func (r roleBindings) Create(_ context.Context, b port.RoleBinding) error {
-	if _, ok := r.t.s.roleBindings[b.ID]; ok {
-		return errs.New(errs.KindConflict, "role binding %s exists", b.ID)
-	}
-	for _, x := range r.t.s.roleBindings {
-		if x.RealmID == b.RealmID && x.Role == b.Role && x.PrincipalType == b.PrincipalType && x.PrincipalID == b.PrincipalID && x.OrgID == b.OrgID {
-			return errs.New(errs.KindConflict, "role binding exists")
-		}
-	}
-	setKey(r.t, r.t.s.roleBindings, b.ID, b)
-	return nil
-}
-
-func (r roleBindings) list(match func(port.RoleBinding) bool) []port.RoleBinding {
-	var out []port.RoleBinding
-	for _, x := range r.t.s.roleBindings {
-		if match(x) {
-			out = append(out, x)
-		}
-	}
-	sortByCreated(out, func(x port.RoleBinding) (time.Time, string) { return x.CreatedAt, x.ID })
-	return out
-}
-
-func (r roleBindings) ListByPrincipal(_ context.Context, realmID string, t port.PrincipalType, principalID string) ([]port.RoleBinding, error) {
-	return r.list(func(x port.RoleBinding) bool {
-		return x.RealmID == realmID && x.PrincipalType == t && x.PrincipalID == principalID
-	}), nil
-}
-
-func (r roleBindings) ListByRole(_ context.Context, realmID, role string) ([]port.RoleBinding, error) {
-	return r.list(func(x port.RoleBinding) bool { return x.RealmID == realmID && x.Role == role }), nil
-}
-
 // sortByCreated は作成時刻の順（同時刻は ID の順）に並べる。ID は乱数のことがあるので、順序の主には使わない。
 func sortByCreated[T any](out []T, key func(T) (time.Time, string)) {
 	sort.Slice(out, func(i, j int) bool {
@@ -508,6 +472,10 @@ func (r users) Erase(_ context.Context, realmID, id string, at time.Time) error 
 	})
 	eraseWhere(r.t, s.roleBindings, func(x port.RoleBinding) bool {
 		return x.RealmID == realmID && x.PrincipalType == port.PrincipalUser && x.PrincipalID == id
+	})
+	eraseWhere(r.t, s.groupMembers, func(x port.GroupMember) bool {
+		g, ok := s.groups[x.GroupID]
+		return ok && g.RealmID == realmID && x.MemberType == port.PrincipalUser && x.MemberID == id
 	})
 	return nil
 }

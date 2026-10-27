@@ -110,15 +110,6 @@ SELECT * FROM authn_service_account_credentials WHERE realm_id = ? AND id = ?;
 -- name: RevokeServiceAccountCredential :execrows
 UPDATE authn_service_account_credentials SET revoked_at = coalesce(revoked_at, sqlc.arg(at)) WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
 
--- name: CreateRoleBinding :exec
-INSERT INTO authz_role_bindings (id, realm_id, role, principal_type, principal_id, org_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);
-
--- name: ListRoleBindingsByPrincipal :many
-SELECT * FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at, id;
-
--- name: ListRoleBindingsByRole :many
-SELECT * FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY created_at, id;
-
 -- name: CreatePasskey :exec
 INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,
     transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id)
@@ -226,6 +217,10 @@ DELETE FROM authn_sessions WHERE realm_id = ? AND principal_type = 'user' AND pr
 
 -- name: EraseUserRoleBindings :exec
 DELETE FROM authz_role_bindings WHERE realm_id = ? AND principal_type = 'user' AND principal_id = ?;
+
+-- name: EraseUserGroupMembers :exec
+DELETE FROM authz_group_members WHERE member_type = 'user' AND member_id = sqlc.arg(user_id)
+    AND group_id IN (SELECT id FROM authz_groups WHERE realm_id = sqlc.arg(realm_id));
 
 -- name: CreateSuspension :exec
 INSERT INTO authn_suspensions (id, public_id, realm_id, target_type, target_id, category, reason, external_ref, starts_at, ends_at,

@@ -75,3 +75,4 @@
 | [0061](0061-account-deletion.md) | アカウントの削除 | 承認 |
 | [0062](0062-org-tier-settings.md) | 設定の Org の段（セッションの寿命と警告のアクション） | 承認 |
 | [0063](0063-audit-client-data.md) | 監査ログの IP と User-Agent の暗号化 | 承認 |
+| [0064](0064-authz-roles-groups-check.md) | ロール・付与・Group と認可の判定 | 承認 |
