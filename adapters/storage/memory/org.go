@@ -52,6 +52,20 @@ func (r orgs) GetByPublicID(_ context.Context, realmID, publicID string) (port.O
 	return port.Org{}, errs.New(errs.KindNotFound, "org")
 }
 
+func (r orgs) List(_ context.Context, realmID, afterID string, limit int) ([]port.Org, error) {
+	var out []port.Org
+	for _, o := range r.t.s.orgs {
+		if o.RealmID == realmID && o.ID > afterID {
+			out = append(out, cloneOrg(o))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (r orgs) GetPersonal(_ context.Context, realmID, userID string) (port.Org, error) {
 	for _, x := range r.t.s.orgs {
 		if x.RealmID == realmID && x.Kind == port.OrgPersonal && x.PersonalOwnerID == userID {
@@ -304,6 +318,20 @@ func (r quotaGrants) Update(_ context.Context, g port.QuotaGrant) error {
 	x.Kind, x.Quantity, x.StartsAt, x.EndsAt, x.UpdatedAt = g.Kind, g.Quantity, g.StartsAt, cloneTime(g.EndsAt), g.UpdatedAt
 	setKey(r.t, r.t.s.quotaGrants, x.ID, x)
 	return nil
+}
+
+func (r quotaGrants) Count(context.Context) (int, error) { return len(r.t.s.quotaGrants), nil }
+
+func (r quotaGrants) Purge(_ context.Context, limit int) (int, error) {
+	n := 0
+	for id := range r.t.s.quotaGrants {
+		if n >= limit {
+			break
+		}
+		deleteKey(r.t, r.t.s.quotaGrants, id)
+		n++
+	}
+	return n, nil
 }
 
 func (r quotaGrants) Delete(_ context.Context, realmID, id string) error {

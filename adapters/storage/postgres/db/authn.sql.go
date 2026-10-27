@@ -59,6 +59,17 @@ func (q *Queries) ClearEmailCiphertexts(ctx context.Context, arg ClearEmailCiphe
 	return result.RowsAffected()
 }
 
+const countPasswords = `-- name: CountPasswords :one
+SELECT count(*) FROM authn_password_credentials
+`
+
+func (q *Queries) CountPasswords(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPasswords)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createConnection = `-- name: CreateConnection :exec
 INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at) VALUES ($1, $2, $3, $4, $5, $6)
 `
@@ -1861,6 +1872,18 @@ func (q *Queries) MoveSessionsOrg(ctx context.Context, arg MoveSessionsOrgParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgePasswords = `-- name: PurgePasswords :execrows
+DELETE FROM authn_password_credentials WHERE id IN (SELECT p.id FROM authn_password_credentials p LIMIT $1::bigint)
+`
+
+func (q *Queries) PurgePasswords(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgePasswords, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const renamePasskey = `-- name: RenamePasskey :execrows

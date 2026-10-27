@@ -83,3 +83,12 @@ UPDATE org_quota_grants SET kind = ?, quantity = ?, starts_at = ?, ends_at = ?, 
 
 -- name: DeleteQuotaGrant :execrows
 DELETE FROM org_quota_grants WHERE realm_id = ? AND id = ?;
+
+-- name: ListOrgs :many
+SELECT * FROM orgs WHERE realm_id = ? AND id > sqlc.arg(after) ORDER BY id LIMIT sqlc.arg(lim);
+
+-- name: CountQuotaGrants :one
+SELECT count(*) FROM org_quota_grants;
+
+-- name: PurgeQuotaGrants :execrows
+DELETE FROM org_quota_grants WHERE id IN (SELECT g.id FROM org_quota_grants g LIMIT sqlc.arg(lim));

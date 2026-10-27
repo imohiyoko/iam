@@ -53,6 +53,17 @@ func (q *Queries) CountActiveMemberships(ctx context.Context, arg CountActiveMem
 	return count, err
 }
 
+const countQuotaGrants = `-- name: CountQuotaGrants :one
+SELECT count(*) FROM org_quota_grants
+`
+
+func (q *Queries) CountQuotaGrants(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countQuotaGrants)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createInvitation = `-- name: CreateInvitation :exec
 INSERT INTO invitations (id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash,
     valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by)
@@ -706,6 +717,53 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, arg ListMemberships
 	return items, nil
 }
 
+const listOrgs = `-- name: ListOrgs :many
+SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = $1 AND id > $2 ORDER BY id LIMIT $3::bigint
+`
+
+type ListOrgsParams struct {
+	RealmID string
+	After   string
+	Lim     int64
+}
+
+func (q *Queries) ListOrgs(ctx context.Context, arg ListOrgsParams) ([]Org, error) {
+	rows, err := q.db.QueryContext(ctx, listOrgs, arg.RealmID, arg.After, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Org
+	for rows.Next() {
+		var i Org
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.Kind,
+			&i.Name,
+			&i.PersonalOwnerID,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletionScheduledAt,
+			&i.DeletedAt,
+			&i.Settings,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQuotaGrantsByOrg = `-- name: ListQuotaGrantsByOrg :many
 SELECT id, public_id, realm_id, org_id, quota_key, kind, quantity, starts_at, ends_at, source, external_ref, created_by, created_at, updated_at FROM org_quota_grants WHERE realm_id = $1 AND org_id = $2 AND quota_key = $3 ORDER BY created_at, id
 `
@@ -752,6 +810,18 @@ func (q *Queries) ListQuotaGrantsByOrg(ctx context.Context, arg ListQuotaGrantsB
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeQuotaGrants = `-- name: PurgeQuotaGrants :execrows
+DELETE FROM org_quota_grants WHERE id IN (SELECT g.id FROM org_quota_grants g LIMIT $1::bigint)
+`
+
+func (q *Queries) PurgeQuotaGrants(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeQuotaGrants, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setOrgDeletion = `-- name: SetOrgDeletion :execrows

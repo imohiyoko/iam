@@ -25,9 +25,8 @@ import (
 	"github.com/imohiyoko/iam/shared/port"
 )
 
-func init() {
-	feature.Register(feature.Feature{Name: feature.Org, DataVersion: 1, DefaultEnabled: true})
-}
+// Feature は Org（11.13）の宣言。バイナリに含めるのは features/org が登録する（11.11）。
+var Feature = feature.Feature{Name: feature.Org, DataVersion: 1, DefaultEnabled: true}
 
 // CreationPolicy は共有 Org を作れる人（design.md 4.11）。運営者は管理 API からいつでも作れる。
 type CreationPolicy string

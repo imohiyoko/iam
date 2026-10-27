@@ -229,6 +229,10 @@ type PasswordRepo interface {
 	UpdateHash(ctx context.Context, realmID, id, hash string) error
 	// Revoke は at に無効化する。既に無効化されていれば何もしない。無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+	// Count はパスワードの件数（無効化したものを含む、全 realm）を返す（フィーチャーの無効化。11.12）。
+	Count(ctx context.Context) (int, error)
+	// Purge はパスワードを全 realm から最大 limit 件消し、消した件数を返す（フィーチャーの無効化）。
+	Purge(ctx context.Context, limit int) (int, error)
 }
 
 // RecoveryCode は authn_recovery_codes の1行（design.md 4.12）。コードは表示の1回だけで、argon2id のハッシュを持つ。
@@ -487,6 +491,8 @@ type OrgRepo interface {
 	SetDeletion(ctx context.Context, realmID, id string, scheduledAt, deletedAt *time.Time, updatedAt time.Time) error
 	// SetSettings は Org の段の設定を置き換える。nil は未設定に戻す。無ければ errs.NotFound。
 	SetSettings(ctx context.Context, realmID, id string, settings []byte, updatedAt time.Time) error
+	// List は realm の Org（削除済みを含む）を ID の順に、afterID の次から最大 limit 件返す（フィーチャーの無効化。11.12）。
+	List(ctx context.Context, realmID, afterID string, limit int) ([]Org, error)
 }
 
 // MembershipStatus は Membership の状態（design.md 3.1）。
@@ -593,6 +599,10 @@ type QuotaGrantRepo interface {
 	Update(ctx context.Context, g QuotaGrant) error
 	// Delete は付与を消す。無ければ errs.NotFound。
 	Delete(ctx context.Context, realmID, id string) error
+	// Count は付与の件数（全 realm）を返す（フィーチャーの無効化。11.12）。
+	Count(ctx context.Context) (int, error)
+	// Purge は付与を全 realm から最大 limit 件消し、消した件数を返す。
+	Purge(ctx context.Context, limit int) (int, error)
 }
 
 // InvitationStatus は招待の状態。期限切れは ExpiresAt から計算し、行は pending のまま残してよい。

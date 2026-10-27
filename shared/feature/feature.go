@@ -186,3 +186,71 @@ func Resolve(ledger []port.FeatureRecord, binary []Feature, enabled []string) (P
 	}
 	return plan, nil
 }
+
+// Change は今のバイナリから次のバイナリへの変更の見積もり（`iam features plan`。11.12）。
+type Change struct {
+	Added, Removed []string
+	// Problems は次のバイナリが起動を拒否する理由と、先に行うこと。空なら配ってよい。
+	Problems []string
+	// Steps は配った後に行うこと・知っておくこと。
+	Steps []string
+}
+
+// PlanChange は台帳と設定に照らして、next のバイナリに入れ替えたときの影響を見積もる。
+// enabled は設定で有効にしたフィーチャー名（nil なら各フィーチャーの既定）。
+func PlanChange(ledger []port.FeatureRecord, current, next []Feature, enabled []string) Change {
+	var c Change
+	has := func(fs []Feature, n string) (Feature, bool) {
+		i := slices.IndexFunc(fs, func(f Feature) bool { return f.Name == n })
+		if i < 0 {
+			return Feature{}, false
+		}
+		return fs[i], true
+	}
+	for _, f := range next {
+		if _, ok := has(current, f.Name); !ok {
+			c.Added = append(c.Added, f.Name)
+		}
+	}
+	for _, f := range current {
+		if _, ok := has(next, f.Name); !ok {
+			c.Removed = append(c.Removed, f.Name)
+		}
+	}
+	if err := CheckBuild(next); err != nil {
+		c.Problems = append(c.Problems, err.Error())
+	}
+	recorded := map[string]port.FeatureRecord{}
+	for _, r := range ledger {
+		recorded[r.Feature] = r
+		f, ok := has(next, r.Feature)
+		switch {
+		case !ok:
+			c.Problems = append(c.Problems, fmt.Sprintf("%s is %s in the ledger but not in the new binary: run `iam features disable %s` (with -purge if it keeps data) before deploying", r.Feature, r.State, r.Feature))
+		case r.State == port.FeatureActive && r.DataVersion > f.DataVersion:
+			c.Problems = append(c.Problems, fmt.Sprintf("%s data version %d is newer than the new binary (%d)", r.Feature, r.DataVersion, f.DataVersion))
+		case r.State == port.FeatureActive && r.DataVersion < f.DataVersion:
+			c.Steps = append(c.Steps, fmt.Sprintf("%s data version changes %d -> %d: the servers refuse to start until the data is migrated", r.Feature, r.DataVersion, f.DataVersion))
+		}
+	}
+	want := map[string]bool{}
+	if enabled == nil {
+		for _, f := range next {
+			want[f.Name] = f.DefaultEnabled
+		}
+	} else {
+		for _, n := range enabled {
+			if _, ok := has(next, n); !ok {
+				c.Problems = append(c.Problems, fmt.Sprintf("%s is enabled in config but not in the new binary: remove it from `features`", n))
+				continue
+			}
+			want[n] = true
+		}
+	}
+	for _, f := range next {
+		if want[f.Name] && recorded[f.Name].State != port.FeatureActive {
+			c.Steps = append(c.Steps, fmt.Sprintf("%s is enabled in config but not active: after deploying to all servers, run `iam features enable %s`", f.Name, f.Name))
+		}
+	}
+	return c
+}
