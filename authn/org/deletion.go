@@ -142,5 +142,18 @@ func (s *Service) purge(ctx context.Context, tx port.Tx, o port.Org, actor audit
 		}
 	}
 	now := s.Clock.Now()
+	// Org 専用 SSO の connection と、ドメインの所有証明を消す（ADR 0077。ドメインは別の Org が証明できるようになる）。
+	if _, err := PurgeConnections(ctx, tx, o.RealmID, o.ID, now, -1); err != nil {
+		return err
+	}
+	ds, err := tx.OrgDomains().ListByOrg(ctx, o.RealmID, o.ID)
+	if err != nil {
+		return err
+	}
+	for _, d := range ds {
+		if err := tx.OrgDomains().Delete(ctx, o.RealmID, d.ID); err != nil {
+			return err
+		}
+	}
 	return tx.Orgs().SetDeletion(ctx, o.RealmID, o.ID, o.DeletionScheduledAt, &now, now)
 }

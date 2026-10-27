@@ -720,6 +720,7 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 - 証明済みのドメインは realm で1つの Org だけが持てる（`domain_taken`）。DNS はトランザクションの外で引く
 - 管理ユーザーは `users.managed_org_id`（ADR 0076）。Org の owner が求め（`:request-management`）、本人が受け入れる（`:accept-management`）。対象は、この Org で使う確認済みのメールが証明済みドメインのメンバー。管理ユーザーはその Org を抜けられず、自分でアカウントを消せない。Org が手放す・除名・削除すると個人ユーザーに戻る
 - 招待の `managed` で、新しく登録した人を最初から管理ユーザーにする。管理ユーザーは管理する Org に入れなければログインできず（停止・ログインポリシー）、Org の owner がアカウントを消せる
+- Org 専用 SSO（ADR 0077）：Org の owner が `/v1/me/orgs/{id}/connections` で OIDC の connection を登録する。その Org の管理ユーザーだけがログインでき、未登録なら証明済みドメインのアドレスで管理ユーザーとして作る。戻り先は固定、トークンエンドポイントは公開のアドレスに限る。ログインポリシー `require_sso`、`/v1/login/sso:discover` でドメインから探す。SAML は後に回す
 
 ### 11.4 Org 階層
 

@@ -664,6 +664,9 @@ type OrgLoginPolicy struct {
 
 	// RequirePasskey passkey で本人確認したセッションだけを入れる
 	RequirePasskey *bool `json:"require_passkey,omitempty"`
+
+	// RequireSso この Org の connection（Org 専用 SSO。ADR 0077）で認証したセッションだけを入れる。フィーチャー org_managed_users も要る
+	RequireSso *bool `json:"require_sso,omitempty"`
 }
 
 // OrgQuota defines model for OrgQuota.

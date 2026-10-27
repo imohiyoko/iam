@@ -1607,6 +1607,9 @@ components:
           maxItems: 100
           description: 要求の IP がこのどれか（CIDR）に入ること
           items: { type: string }
+        require_sso:
+          type: boolean
+          description: この Org の connection（Org 専用 SSO。ADR 0077）で認証したセッションだけを入れる。フィーチャー org_managed_users も要る
     OrgSettingsView:
       type: object
       required: [settings, effective]

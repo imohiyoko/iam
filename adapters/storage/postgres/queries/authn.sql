@@ -50,11 +50,14 @@ SELECT * FROM authn_user_identities WHERE realm_id = $1 AND id = $2;
 -- name: RevokeIdentity :exec
 UPDATE authn_user_identities SET revoked_at = $1, revoke_reason = $2 WHERE realm_id = $3 AND id = $4 AND revoked_at IS NULL;
 
+-- name: RevokeIdentitiesByConnection :execrows
+UPDATE authn_user_identities SET revoked_at = $1, revoke_reason = $2 WHERE realm_id = $3 AND connection_id = $4 AND revoked_at IS NULL;
+
 -- name: ListIdentitiesByUser :many
 SELECT * FROM authn_user_identities WHERE realm_id = $1 AND user_id = $2 ORDER BY created_at, id;
 
 -- name: CreateConnection :exec
-INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at) VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at, owner_org_id) VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- name: GetConnection :one
 SELECT * FROM authn_connections WHERE realm_id = $1 AND id = $2;
@@ -64,6 +67,15 @@ SELECT * FROM authn_connections WHERE realm_id = $1 AND slug = $2;
 
 -- name: ListConnections :many
 SELECT * FROM authn_connections WHERE realm_id = $1 ORDER BY slug;
+
+-- name: ListConnectionsByOwner :many
+SELECT * FROM authn_connections WHERE realm_id = $1 AND owner_org_id = $2 ORDER BY created_at, id;
+
+-- name: CountOwnedConnections :one
+SELECT COUNT(*) FROM authn_connections WHERE realm_id = $1 AND owner_org_id <> '';
+
+-- name: DeleteConnection :execrows
+DELETE FROM authn_connections WHERE realm_id = $1 AND id = $2;
 
 -- name: CreateSession :exec
 INSERT INTO authn_sessions (id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids,

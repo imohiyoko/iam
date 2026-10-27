@@ -191,6 +191,17 @@ func (r identities) GetByPublicID(ctx context.Context, realmID, publicID string)
 	return one(row, err, toIdentity)
 }
 
+func (r identities) Get(ctx context.Context, realmID, id string) (port.Identity, error) {
+	row, err := r.q.GetIdentity(ctx, db.GetIdentityParams{RealmID: realmID, ID: id})
+	return one(row, err, toIdentity)
+}
+
+func (r identities) RevokeByConnection(ctx context.Context, realmID, connectionID string, at time.Time, reason string) (int, error) {
+	n, err := r.q.RevokeIdentitiesByConnection(ctx, db.RevokeIdentitiesByConnectionParams{RevokedAt: nullTime(&at), RevokeReason: reason,
+		RealmID: realmID, ConnectionID: connectionID})
+	return int(n), mapErr(err)
+}
+
 func (r identities) Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error {
 	if _, err := r.q.GetIdentity(ctx, db.GetIdentityParams{RealmID: realmID, ID: id}); err != nil {
 		return mapErr(err)
@@ -214,12 +225,12 @@ type connections struct{ q *db.Queries }
 
 func toConnection(r db.AuthnConnection) (port.Connection, error) {
 	t, err := parseTime(r.CreatedAt)
-	return port.Connection{ID: r.ID, RealmID: r.RealmID, Slug: r.Slug, Type: r.Type, Config: r.Config, CreatedAt: t}, err
+	return port.Connection{ID: r.ID, RealmID: r.RealmID, Slug: r.Slug, Type: r.Type, Config: r.Config, CreatedAt: t, OwnerOrgID: r.OwnerOrgID}, err
 }
 
 func (r connections) Create(ctx context.Context, c port.Connection) error {
 	return mapErr(r.q.CreateConnection(ctx, db.CreateConnectionParams{ID: c.ID, RealmID: c.RealmID, Slug: c.Slug, Type: c.Type,
-		Config: nonNil(c.Config), CreatedAt: formatTime(c.CreatedAt)}))
+		Config: nonNil(c.Config), CreatedAt: formatTime(c.CreatedAt), OwnerOrgID: c.OwnerOrgID}))
 }
 
 func (r connections) Get(ctx context.Context, realmID, id string) (port.Connection, error) {
@@ -235,6 +246,21 @@ func (r connections) GetBySlug(ctx context.Context, realmID, slug string) (port.
 func (r connections) List(ctx context.Context, realmID string) ([]port.Connection, error) {
 	rs, err := r.q.ListConnections(ctx, realmID)
 	return rows(rs, err, toConnection)
+}
+
+func (r connections) ListByOwner(ctx context.Context, realmID, orgID string) ([]port.Connection, error) {
+	rs, err := r.q.ListConnectionsByOwner(ctx, db.ListConnectionsByOwnerParams{RealmID: realmID, OwnerOrgID: orgID})
+	return rows(rs, err, toConnection)
+}
+
+func (r connections) CountOwned(ctx context.Context, realmID string) (int, error) {
+	n, err := r.q.CountOwnedConnections(ctx, realmID)
+	return int(n), mapErr(err)
+}
+
+func (r connections) Delete(ctx context.Context, realmID, id string) error {
+	n, err := r.q.DeleteConnection(ctx, db.DeleteConnectionParams{RealmID: realmID, ID: id})
+	return affected(n, err, "connection")
 }
 
 // ---------------------------------------------------------------------------

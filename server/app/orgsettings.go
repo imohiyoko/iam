@@ -57,6 +57,9 @@ func policyOut(p *org.LoginPolicy) *publicapi.OrgLoginPolicy {
 		return nil
 	}
 	out := publicapi.OrgLoginPolicy{RequirePasskey: &p.RequirePasskey}
+	if p.RequireSSO {
+		out.RequireSso = &p.RequireSSO
+	}
 	if len(p.MembershipEmailDomains) > 0 {
 		out.MembershipEmailDomains = &p.MembershipEmailDomains
 	}
@@ -73,6 +76,9 @@ func policyIn(p *publicapi.OrgLoginPolicy) *org.LoginPolicy {
 	var out org.LoginPolicy
 	if p.RequirePasskey != nil {
 		out.RequirePasskey = *p.RequirePasskey
+	}
+	if p.RequireSso != nil {
+		out.RequireSSO = *p.RequireSso
 	}
 	if p.MembershipEmailDomains != nil {
 		out.MembershipEmailDomains = *p.MembershipEmailDomains
@@ -122,7 +128,8 @@ func adminSettingsView(v publicapi.OrgSettingsView) adminapi.OrgSettingsView {
 	out.Settings = adminapi.OrgSettings{AbsoluteLifetimeSeconds: v.Settings.AbsoluteLifetimeSeconds, IdleTimeoutSeconds: v.Settings.IdleTimeoutSeconds,
 		MaxAuthAgeSeconds: v.Settings.MaxAuthAgeSeconds}
 	if p := v.Settings.LoginPolicy; p != nil {
-		out.Settings.LoginPolicy = &adminapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist}
+		out.Settings.LoginPolicy = &adminapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist,
+			RequireSso: p.RequireSso}
 	}
 	if v.Settings.Warnings != nil {
 		w := make(map[string]adminapi.OrgSettingsWarnings, len(*v.Settings.Warnings))
@@ -295,7 +302,8 @@ func (s adminServer) putOrgSettings(ctx context.Context, req adminapi.PutOrgSett
 	}
 	st.Warnings = actionsIn(b.Warnings)
 	if p := b.LoginPolicy; p != nil {
-		st.LoginPolicy = policyIn(&publicapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist})
+		st.LoginPolicy = policyIn(&publicapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist,
+			RequireSso: p.RequireSso})
 	}
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cur, _, err := s.adminOrg(ctx, tx, req.Id)

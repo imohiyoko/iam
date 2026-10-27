@@ -176,7 +176,8 @@ func (l OrgLimits) beyond(authAt, lastSeen, now time.Time) bool {
 type OrgPick struct {
 	// Explicit は明示的な指定（Org の内部 ID）。
 	Explicit string
-	// Credentials はログインに使った認証情報（メール・passkey の内部 ID）。結び付けたメールと passkey の既定の Org を手がかりにする。
+	// Credentials はログインに使った認証情報（メール・passkey・外部 ID の内部 ID）。結び付けたメールと passkey の既定の Org を
+	// 手がかりにし、Org のログインポリシー require_sso（ADR 0077）の判定にも使う。
 	Credentials []string
 	// Email は OAuth のプロバイダが返したアドレス。結び付けたメールと一致すれば手がかりにする。
 	Email string
@@ -982,7 +983,7 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, ip, 
 				return err
 			}
 		}
-		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: orgID, Warnings: hits, AuthMethods: old.AuthMethods, IP: ip, RequestID: requestID})
+		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: orgID, Credentials: old.AuthCredentialIDs, Warnings: hits, AuthMethods: old.AuthMethods, IP: ip, RequestID: requestID})
 		if err != nil {
 			return err
 		}

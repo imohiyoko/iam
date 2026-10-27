@@ -134,6 +134,10 @@ type IdentityRepo interface {
 	// GetBySubject は無効化されていない紐付けを返す。無ければ errs.NotFound。
 	GetBySubject(ctx context.Context, realmID, connectionID, subject string) (Identity, error)
 	GetByPublicID(ctx context.Context, realmID, publicID string) (Identity, error)
+	// Get は内部 ID で返す（無効化したものも）。無ければ errs.NotFound。
+	Get(ctx context.Context, realmID, id string) (Identity, error)
+	// RevokeByConnection は connection の無効化されていない紐付けをすべて at に無効化し、その数を返す。
+	RevokeByConnection(ctx context.Context, realmID, connectionID string, at time.Time, reason string) (int, error)
 	// Revoke は at に無効化する。既に無効化されていれば何もしない。無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
 	// ListByUser はユーザーの外部 ID を作成時刻の順（同時刻は ID の順）に返す。
@@ -345,6 +349,8 @@ type Connection struct {
 	Type      string // oauth2 / oidc / saml
 	Config    []byte
 	CreatedAt time.Time
+	// OwnerOrgID は Org 専用 SSO の connection を持つ Org の内部 ID。空なら realm 共通（design.md 11.3、ADR 0077）。
+	OwnerOrgID string
 }
 
 // ConnectionRepo は connections の Repository。
@@ -352,7 +358,13 @@ type ConnectionRepo interface {
 	Create(ctx context.Context, c Connection) error // (realm, slug) が重複すれば errs.Conflict
 	Get(ctx context.Context, realmID, id string) (Connection, error)
 	GetBySlug(ctx context.Context, realmID, slug string) (Connection, error)
-	List(ctx context.Context, realmID string) ([]Connection, error)
+	List(ctx context.Context, realmID string) ([]Connection, error) // realm 共通と Org 専用の両方
+	// ListByOwner は Org 専用の connection を作成の順に返す。
+	ListByOwner(ctx context.Context, realmID, orgID string) ([]Connection, error)
+	// CountOwned は realm の Org 専用の connection の数を返す（フィーチャーの無効化で数える。11.12）。
+	CountOwned(ctx context.Context, realmID string) (int, error)
+	// Delete は connection を消す。無ければ errs.NotFound。
+	Delete(ctx context.Context, realmID, id string) error
 }
 
 // PrincipalType は主体の種類。
