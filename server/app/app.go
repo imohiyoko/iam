@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/emailflow"
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/notify"
@@ -106,6 +107,8 @@ type App struct {
 	// authz は認可の判定（ADR 0064）。manage はロール・付与・Group の管理。
 	authz  *check.Checker
 	manage *manage.Service
+	// attributes はカスタム属性（design.md 11.7）。フィーチャー custom_attributes が動いていなければ nil。
+	attributes *attribute.Service
 	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
 	scheduler *eventlog.Scheduler
 	retention *eventlog.Retention
@@ -224,7 +227,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.serviceAccounts = &serviceaccount.Service{Clock: d.Clock, Replay: d.Ephemeral, Audience: a.issuer,
 		TokenTTL: cfg.ServiceAccounts.TokenTTL.D(), Authenticator: serviceaccount.Authenticator{Enabled: plan.IsActive(feature.ServiceAccounts), DeliveryOnly: deliveryOnly}}
 	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D()}
-	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Issuer: a.issuer,
+	if plan.IsActive(feature.CustomAttributes) {
+		a.attributes = &attribute.Service{Clock: d.Clock, Crypter: a.pii}
+	}
+	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Attributes: a.attributes, Issuer: a.issuer,
 		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D()}
 	if a.issuer != "" {
 		a.sessions.Lineages = a.tokens

@@ -15,6 +15,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
@@ -31,15 +32,16 @@ var featureCatalog = map[string]struct {
 	decl feature.Feature
 	pkg  string
 }{
-	feature.Org:             {org.Feature, module + "/features/org"},
-	feature.OrgManagedUsers: {org.ManagedUsersFeature, module + "/features/orgmanagedusers"},
-	feature.OrgHierarchy:    {org.HierarchyFeature, module + "/features/orghierarchy"},
-	feature.OrgLoginPolicy:  {org.PolicyFeature, module + "/features/orgloginpolicy"},
-	feature.Quota:           {org.QuotaFeature, module + "/features/quota"},
-	feature.Warnings:        {warning.Feature, module + "/features/warnings"},
-	feature.Password:        {password.Feature, module + "/features/password"},
-	feature.ServiceAccounts: {serviceaccount.Feature, module + "/features/serviceaccounts"},
-	feature.NestedGroups:    {manage.NestedGroupsFeature, module + "/features/nestedgroups"},
+	feature.Org:              {org.Feature, module + "/features/org"},
+	feature.OrgManagedUsers:  {org.ManagedUsersFeature, module + "/features/orgmanagedusers"},
+	feature.OrgHierarchy:     {org.HierarchyFeature, module + "/features/orghierarchy"},
+	feature.OrgLoginPolicy:   {org.PolicyFeature, module + "/features/orgloginpolicy"},
+	feature.Quota:            {org.QuotaFeature, module + "/features/quota"},
+	feature.Warnings:         {warning.Feature, module + "/features/warnings"},
+	feature.Password:         {password.Feature, module + "/features/password"},
+	feature.ServiceAccounts:  {serviceaccount.Feature, module + "/features/serviceaccounts"},
+	feature.NestedGroups:     {manage.NestedGroupsFeature, module + "/features/nestedgroups"},
+	feature.CustomAttributes: {attribute.Feature, module + "/features/customattributes"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

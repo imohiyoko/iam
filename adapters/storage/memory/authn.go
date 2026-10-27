@@ -678,6 +678,7 @@ func (r users) Erase(_ context.Context, realmID, id string, at time.Time) error 
 		return x.RealmID == realmID && x.PrincipalType == port.PrincipalUser && x.PrincipalID == id
 	})
 	eraseGrants(r.t, func(g port.Grant) bool { return g.RealmID == realmID && g.UserID == id })
+	eraseWhere(r.t, s.attrValues, func(x port.UserAttribute) bool { return x.RealmID == realmID && x.UserID == id })
 	eraseWhere(r.t, s.groupMembers, func(x port.GroupMember) bool {
 		g, ok := s.groups[x.GroupID]
 		return ok && g.RealmID == realmID && x.MemberType == port.PrincipalUser && x.MemberID == id

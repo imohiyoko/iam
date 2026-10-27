@@ -168,6 +168,22 @@ var (
 	assertionAlgs           = []string{"ES256", "ES384", "EdDSA", "PS256", "RS256"}
 )
 
+// scopes は対応するスコープ。カスタム属性が動いていれば attributes も。
+func (s *oidcServer) scopes() []string {
+	if s.a.attributes != nil {
+		return append(slices.Clone(provider.Scopes), provider.ScopeAttributes)
+	}
+	return provider.Scopes
+}
+
+func (s *oidcServer) claims() []string {
+	out := []string{"iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "sid", "azp", "org_id", "email", "email_verified"}
+	if s.a.attributes != nil {
+		out = append(out, "attributes")
+	}
+	return out
+}
+
 func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Response, error) {
 	return op.NewResponse(&oidc.DiscoveryConfiguration{
 		Issuer:                            s.a.issuer,
@@ -175,7 +191,7 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		TokenEndpoint:                     s.endpoint(oidcToken),
 		UserinfoEndpoint:                  s.endpoint(oidcUserinfo),
 		JwksURI:                           s.endpoint(oidcKeys),
-		ScopesSupported:                   provider.Scopes,
+		ScopesSupported:                   s.scopes(),
 		ResponseTypesSupported:            []string{string(oidc.ResponseTypeCode)},
 		ResponseModesSupported:            []string{string(oidc.ResponseModeQuery)},
 		GrantTypesSupported:               grantTypes,
@@ -183,8 +199,7 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		IDTokenSigningAlgValuesSupported:  provider.Algs,
 		TokenEndpointAuthMethodsSupported: authMethods,
 		TokenEndpointAuthSigningAlgValuesSupported: assertionAlgs,
-		ClaimsSupported: []string{"iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "sid", "azp", "org_id", "email",
-			"email_verified"},
+		ClaimsSupported:                                    s.claims(),
 		CodeChallengeMethodsSupported:                      []oidc.CodeChallengeMethod{oidc.CodeChallengeMethodS256},
 		ClaimTypesSupported:                                []string{"normal"},
 		IntrospectionEndpoint:                              s.endpoint(oidcIntrospect),
@@ -254,7 +269,9 @@ func (opClient) RestrictAdditionalIdTokenScopes() func([]string) []string {
 func (opClient) RestrictAdditionalAccessTokenScopes() func([]string) []string {
 	return func(s []string) []string { return s }
 }
-func (opClient) IsScopeAllowed(string) bool           { return false }
+
+// IsScopeAllowed は op に、標準でないスコープ（attributes）を残させる。使えるかは authorize が scopes で決める。
+func (opClient) IsScopeAllowed(sc string) bool        { return sc == provider.ScopeAttributes }
 func (opClient) IDTokenUserinfoClaimsAssertion() bool { return false }
 func (opClient) ClockSkew() time.Duration             { return 0 }
 
@@ -303,7 +320,7 @@ func (s *oidcServer) Authorize(ctx context.Context, r *op.ClientRequest[oidc.Aut
 	req := provider.AuthRequest{RealmID: s.a.realm.ID, ClientID: d.ClientID, RedirectURI: d.RedirectURI, State: d.State, Nonce: d.Nonce,
 		CodeChallenge: d.CodeChallenge, ResponseMode: string(d.ResponseMode), MaxAge: d.MaxAge}
 	for _, sc := range d.Scopes {
-		if slices.Contains(provider.Scopes, sc) && !slices.Contains(req.Scopes, sc) {
+		if slices.Contains(s.scopes(), sc) && !slices.Contains(req.Scopes, sc) {
 			req.Scopes = append(req.Scopes, sc)
 		}
 	}

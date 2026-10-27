@@ -85,6 +85,11 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Groups().PurgeNested(ctx, limit)
 		}},
+	// 値と定義を消す（ADR 0080）。
+	feature.CustomAttributes: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.Attributes().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return tx.Attributes().Purge(ctx, limit)
+		}},
 	feature.ServiceAccounts: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		return eachServiceAccount(ctx, tx, -1, func(port.ServiceAccount) (bool, error) { return true, nil })
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {

@@ -744,6 +744,8 @@ A にログインした状態で B の所有を証明すると、B のメール�
 
 realm ごとに型・検証・本人による編集可否・トークンへの掲載・暗号化の有無を定義する。保存方法はアダプタが決める。
 
+実装（ADR 0080）：フィーチャー `custom_attributes`。運営者が管理 API（`/v1/admin/attributes`、権限 `attributes:manage`）で定義する。型は `string`・`integer`・`boolean`・`enum`、realm に 50 まで。型と暗号化の有無は後から変えない。値は管理 API（`attributes:read`・`attributes:write`）と、本人の `/v1/me/attributes`（編集できる属性だけ書ける）で扱う。暗号化する属性はユーザーのデータ鍵で暗号化する。`in_token` の属性は、スコープ `attributes` の ID トークン・UserInfo の `attributes` クレームに載せる。
+
 ### 11.8 フロー フック
 
 | フック | タイミング |

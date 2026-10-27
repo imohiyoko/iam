@@ -39,6 +39,54 @@ func (e AdminUserStatus) Valid() bool {
 	}
 }
 
+// Defines values for AttributeDefType.
+const (
+	AttributeDefTypeBoolean AttributeDefType = "boolean"
+	AttributeDefTypeEnum    AttributeDefType = "enum"
+	AttributeDefTypeInteger AttributeDefType = "integer"
+	AttributeDefTypeString  AttributeDefType = "string"
+)
+
+// Valid indicates whether the value is a known member of the AttributeDefType enum.
+func (e AttributeDefType) Valid() bool {
+	switch e {
+	case AttributeDefTypeBoolean:
+		return true
+	case AttributeDefTypeEnum:
+		return true
+	case AttributeDefTypeInteger:
+		return true
+	case AttributeDefTypeString:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttributeDefInputType.
+const (
+	AttributeDefInputTypeBoolean AttributeDefInputType = "boolean"
+	AttributeDefInputTypeEnum    AttributeDefInputType = "enum"
+	AttributeDefInputTypeInteger AttributeDefInputType = "integer"
+	AttributeDefInputTypeString  AttributeDefInputType = "string"
+)
+
+// Valid indicates whether the value is a known member of the AttributeDefInputType enum.
+func (e AttributeDefInputType) Valid() bool {
+	switch e {
+	case AttributeDefInputTypeBoolean:
+		return true
+	case AttributeDefInputTypeEnum:
+		return true
+	case AttributeDefInputTypeInteger:
+		return true
+	case AttributeDefInputTypeString:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CheckRequestPrincipalType.
 const (
 	CheckRequestPrincipalTypeUser CheckRequestPrincipalType = "user"
@@ -451,6 +499,48 @@ type AdminUser struct {
 
 // AdminUserStatus defines model for AdminUser.Status.
 type AdminUserStatus string
+
+// AttributeDef defines model for AttributeDef.
+type AttributeDef struct {
+	CreatedAt time.Time `json:"created_at"`
+	Encrypted bool      `json:"encrypted"`
+	InToken   bool      `json:"in_token"`
+	Key       string    `json:"key"`
+
+	// MaxLength string の最大の文字数
+	MaxLength    *int             `json:"max_length,omitempty"`
+	Type         AttributeDefType `json:"type"`
+	UpdatedAt    time.Time        `json:"updated_at"`
+	UserEditable bool             `json:"user_editable"`
+
+	// Values enum の選択肢
+	Values []string `json:"values"`
+}
+
+// AttributeDefType defines model for AttributeDef.Type.
+type AttributeDefType string
+
+// AttributeDefInput defines model for AttributeDefInput.
+type AttributeDefInput struct {
+	Encrypted    *bool                 `json:"encrypted,omitempty"`
+	InToken      *bool                 `json:"in_token,omitempty"`
+	Key          string                `json:"key"`
+	MaxLength    *int                  `json:"max_length,omitempty"`
+	Type         AttributeDefInputType `json:"type"`
+	UserEditable *bool                 `json:"user_editable,omitempty"`
+	Values       *[]string             `json:"values,omitempty"`
+}
+
+// AttributeDefInputType defines model for AttributeDefInput.Type.
+type AttributeDefInputType string
+
+// AttributeDefUpdate defines model for AttributeDefUpdate.
+type AttributeDefUpdate struct {
+	InToken      *bool     `json:"in_token,omitempty"`
+	MaxLength    *int      `json:"max_length,omitempty"`
+	UserEditable *bool     `json:"user_editable,omitempty"`
+	Values       *[]string `json:"values,omitempty"`
+}
 
 // CheckRequest defines model for CheckRequest.
 type CheckRequest struct {
@@ -959,6 +1049,12 @@ type UpdateUser struct {
 	ValidUntil *time.Time `json:"valid_until,omitempty"`
 }
 
+// UserAttributes defines model for UserAttributes.
+type UserAttributes struct {
+	// Attributes key ごとの値（書くときの null は消す）
+	Attributes map[string]interface{} `json:"attributes"`
+}
+
 // UserCredentials defines model for UserCredentials.
 type UserCredentials struct {
 	Identities []UserIdentity `json:"identities"`
@@ -1096,6 +1192,12 @@ type IssueRecoveryLinkJSONBody struct {
 	TtlSeconds *int   `json:"ttl_seconds,omitempty"`
 }
 
+// CreateAttributeDefJSONRequestBody defines body for CreateAttributeDef for application/json ContentType.
+type CreateAttributeDefJSONRequestBody = AttributeDefInput
+
+// UpdateAttributeDefJSONRequestBody defines body for UpdateAttributeDef for application/json ContentType.
+type UpdateAttributeDefJSONRequestBody = AttributeDefUpdate
+
 // CheckAuthzJSONRequestBody defines body for CheckAuthz for application/json ContentType.
 type CheckAuthzJSONRequestBody = CheckRequest
 
@@ -1183,6 +1285,9 @@ type CreateUserJSONRequestBody CreateUserJSONBody
 // UpdateUserJSONRequestBody defines body for UpdateUser for application/json ContentType.
 type UpdateUserJSONRequestBody = UpdateUser
 
+// UpdateUserAttributesJSONRequestBody defines body for UpdateUserAttributes for application/json ContentType.
+type UpdateUserAttributesJSONRequestBody = UserAttributes
+
 // SuspendUserJSONRequestBody defines body for SuspendUser for application/json ContentType.
 type SuspendUserJSONRequestBody = SuspendRequest
 
@@ -1203,6 +1308,18 @@ type ServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// ListAttributeDefs カスタム属性の定義の一覧（design.md 11.7、ADR 0080）
+	// (GET /v1/admin/attributes)
+	ListAttributeDefs(w http.ResponseWriter, r *http.Request)
+	// CreateAttributeDef カスタム属性を定義する
+	// (POST /v1/admin/attributes)
+	CreateAttributeDef(w http.ResponseWriter, r *http.Request)
+	// UpdateAttributeDef カスタム属性の定義を変える
+	// (PUT /v1/admin/attributes/{key})
+	UpdateAttributeDef(w http.ResponseWriter, r *http.Request, key string)
+	// DeleteAttributeDef カスタム属性の定義と、そのすべての値を消す
+	// (POST /v1/admin/attributes/{key}:delete)
+	DeleteAttributeDef(w http.ResponseWriter, r *http.Request, key string)
 	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
 	// (POST /v1/admin/authz:check)
 	CheckAuthz(w http.ResponseWriter, r *http.Request)
@@ -1374,6 +1491,12 @@ type ServerInterface interface {
 	// UpdateUser ユーザーの有効期間を変更する（4.8）
 	// (PATCH /v1/admin/users/{id})
 	UpdateUser(w http.ResponseWriter, r *http.Request, id string)
+	// GetUserAttributes ユーザーのカスタム属性の値
+	// (GET /v1/admin/users/{id}/attributes)
+	GetUserAttributes(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateUserAttributes ユーザーのカスタム属性の値を書く
+	// (PATCH /v1/admin/users/{id}/attributes)
+	UpdateUserAttributes(w http.ResponseWriter, r *http.Request, id string)
 	// ListUserCredentials ユーザーの有効な認証情報の一覧（無効化の対象を選ぶため）
 	// (GET /v1/admin/users/{id}/credentials)
 	ListUserCredentials(w http.ResponseWriter, r *http.Request, id string)
@@ -1423,6 +1546,86 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAttributeDefs operation middleware
+func (siw *ServerInterfaceWrapper) ListAttributeDefs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAttributeDefs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAttributeDef operation middleware
+func (siw *ServerInterfaceWrapper) CreateAttributeDef(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAttributeDef(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateAttributeDef operation middleware
+func (siw *ServerInterfaceWrapper) UpdateAttributeDef(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateAttributeDef(w, r, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteAttributeDef operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAttributeDef(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteAttributeDef(w, r, key)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2837,6 +3040,58 @@ func (siw *ServerInterfaceWrapper) UpdateUser(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetUserAttributes operation middleware
+func (siw *ServerInterfaceWrapper) GetUserAttributes(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUserAttributes(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateUserAttributes operation middleware
+func (siw *ServerInterfaceWrapper) UpdateUserAttributes(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateUserAttributes(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUserCredentials operation middleware
 func (siw *ServerInterfaceWrapper) ListUserCredentials(w http.ResponseWriter, r *http.Request) {
 
@@ -3311,6 +3566,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients/{id}:rotate-secret", wrapper.RotateClientSecret)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients/{id}:delete", wrapper.DeleteClient)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/signing-keys:rotate", wrapper.RotateSigningKey)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/attributes", wrapper.ListAttributeDefs)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/attributes", wrapper.CreateAttributeDef)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/attributes/{key}", wrapper.UpdateAttributeDef)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/attributes/{key}:delete", wrapper.DeleteAttributeDef)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/attributes", wrapper.GetUserAttributes)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/users/{id}/attributes", wrapper.UpdateUserAttributes)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts", wrapper.ListServiceAccounts)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/service-accounts", wrapper.CreateServiceAccount)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts/{id}", wrapper.GetServiceAccount)
@@ -3358,6 +3619,300 @@ func (response GetHealth503JSONResponse) VisitGetHealthResponse(w http.ResponseW
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAttributeDefsRequestObject struct {
+}
+
+type ListAttributeDefsResponseObject interface {
+	VisitListAttributeDefsResponse(w http.ResponseWriter) error
+}
+
+type ListAttributeDefs200JSONResponse struct {
+	Attributes []AttributeDef `json:"attributes"`
+}
+
+func (response ListAttributeDefs200JSONResponse) VisitListAttributeDefsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAttributeDefs401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListAttributeDefs401JSONResponse) VisitListAttributeDefsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAttributeDefs403JSONResponse Error
+
+func (response ListAttributeDefs403JSONResponse) VisitListAttributeDefsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAttributeDefs404JSONResponse Error
+
+func (response ListAttributeDefs404JSONResponse) VisitListAttributeDefsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDefRequestObject struct {
+	Body *CreateAttributeDefJSONRequestBody
+}
+
+type CreateAttributeDefResponseObject interface {
+	VisitCreateAttributeDefResponse(w http.ResponseWriter) error
+}
+
+type CreateAttributeDef201JSONResponse AttributeDef
+
+func (response CreateAttributeDef201JSONResponse) VisitCreateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDef400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateAttributeDef400JSONResponse) VisitCreateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDef401JSONResponse Error
+
+func (response CreateAttributeDef401JSONResponse) VisitCreateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDef403JSONResponse Error
+
+func (response CreateAttributeDef403JSONResponse) VisitCreateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDef404JSONResponse Error
+
+func (response CreateAttributeDef404JSONResponse) VisitCreateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDef409JSONResponse Error
+
+func (response CreateAttributeDef409JSONResponse) VisitCreateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDefRequestObject struct {
+	Key  string `json:"key"`
+	Body *UpdateAttributeDefJSONRequestBody
+}
+
+type UpdateAttributeDefResponseObject interface {
+	VisitUpdateAttributeDefResponse(w http.ResponseWriter) error
+}
+
+type UpdateAttributeDef200JSONResponse AttributeDef
+
+func (response UpdateAttributeDef200JSONResponse) VisitUpdateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDef400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateAttributeDef400JSONResponse) VisitUpdateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDef401JSONResponse Error
+
+func (response UpdateAttributeDef401JSONResponse) VisitUpdateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDef403JSONResponse Error
+
+func (response UpdateAttributeDef403JSONResponse) VisitUpdateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDef404JSONResponse Error
+
+func (response UpdateAttributeDef404JSONResponse) VisitUpdateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAttributeDefRequestObject struct {
+	Key string `json:"key"`
+}
+
+type DeleteAttributeDefResponseObject interface {
+	VisitDeleteAttributeDefResponse(w http.ResponseWriter) error
+}
+
+type DeleteAttributeDef204Response struct {
+}
+
+func (response DeleteAttributeDef204Response) VisitDeleteAttributeDefResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteAttributeDef401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteAttributeDef401JSONResponse) VisitDeleteAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAttributeDef403JSONResponse Error
+
+func (response DeleteAttributeDef403JSONResponse) VisitDeleteAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAttributeDef404JSONResponse Error
+
+func (response DeleteAttributeDef404JSONResponse) VisitDeleteAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7747,6 +8302,149 @@ func (response UpdateUser404JSONResponse) VisitUpdateUserResponse(w http.Respons
 	return err
 }
 
+type GetUserAttributesRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetUserAttributesResponseObject interface {
+	VisitGetUserAttributesResponse(w http.ResponseWriter) error
+}
+
+type GetUserAttributes200JSONResponse UserAttributes
+
+func (response GetUserAttributes200JSONResponse) VisitGetUserAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserAttributes401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetUserAttributes401JSONResponse) VisitGetUserAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserAttributes403JSONResponse Error
+
+func (response GetUserAttributes403JSONResponse) VisitGetUserAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserAttributes404JSONResponse Error
+
+func (response GetUserAttributes404JSONResponse) VisitGetUserAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserAttributesRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateUserAttributesJSONRequestBody
+}
+
+type UpdateUserAttributesResponseObject interface {
+	VisitUpdateUserAttributesResponse(w http.ResponseWriter) error
+}
+
+type UpdateUserAttributes200JSONResponse UserAttributes
+
+func (response UpdateUserAttributes200JSONResponse) VisitUpdateUserAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserAttributes400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateUserAttributes400JSONResponse) VisitUpdateUserAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserAttributes401JSONResponse Error
+
+func (response UpdateUserAttributes401JSONResponse) VisitUpdateUserAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserAttributes403JSONResponse Error
+
+func (response UpdateUserAttributes403JSONResponse) VisitUpdateUserAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserAttributes404JSONResponse Error
+
+func (response UpdateUserAttributes404JSONResponse) VisitUpdateUserAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListUserCredentialsRequestObject struct {
 	Id string `json:"id"`
 }
@@ -8548,6 +9246,18 @@ type StrictServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
+	// ListAttributeDefs カスタム属性の定義の一覧（design.md 11.7、ADR 0080）
+	// (GET /v1/admin/attributes)
+	ListAttributeDefs(ctx context.Context, request ListAttributeDefsRequestObject) (ListAttributeDefsResponseObject, error)
+	// CreateAttributeDef カスタム属性を定義する
+	// (POST /v1/admin/attributes)
+	CreateAttributeDef(ctx context.Context, request CreateAttributeDefRequestObject) (CreateAttributeDefResponseObject, error)
+	// UpdateAttributeDef カスタム属性の定義を変える
+	// (PUT /v1/admin/attributes/{key})
+	UpdateAttributeDef(ctx context.Context, request UpdateAttributeDefRequestObject) (UpdateAttributeDefResponseObject, error)
+	// DeleteAttributeDef カスタム属性の定義と、そのすべての値を消す
+	// (POST /v1/admin/attributes/{key}:delete)
+	DeleteAttributeDef(ctx context.Context, request DeleteAttributeDefRequestObject) (DeleteAttributeDefResponseObject, error)
 	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
 	// (POST /v1/admin/authz:check)
 	CheckAuthz(ctx context.Context, request CheckAuthzRequestObject) (CheckAuthzResponseObject, error)
@@ -8719,6 +9429,12 @@ type StrictServerInterface interface {
 	// UpdateUser ユーザーの有効期間を変更する（4.8）
 	// (PATCH /v1/admin/users/{id})
 	UpdateUser(ctx context.Context, request UpdateUserRequestObject) (UpdateUserResponseObject, error)
+	// GetUserAttributes ユーザーのカスタム属性の値
+	// (GET /v1/admin/users/{id}/attributes)
+	GetUserAttributes(ctx context.Context, request GetUserAttributesRequestObject) (GetUserAttributesResponseObject, error)
+	// UpdateUserAttributes ユーザーのカスタム属性の値を書く
+	// (PATCH /v1/admin/users/{id}/attributes)
+	UpdateUserAttributes(ctx context.Context, request UpdateUserAttributesRequestObject) (UpdateUserAttributesResponseObject, error)
 	// ListUserCredentials ユーザーの有効な認証情報の一覧（無効化の対象を選ぶため）
 	// (GET /v1/admin/users/{id}/credentials)
 	ListUserCredentials(ctx context.Context, request ListUserCredentialsRequestObject) (ListUserCredentialsResponseObject, error)
@@ -8810,6 +9526,120 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
 		if err := validResponse.VisitGetHealthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAttributeDefs operation middleware
+func (sh *strictHandler) ListAttributeDefs(w http.ResponseWriter, r *http.Request) {
+	var request ListAttributeDefsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAttributeDefs(ctx, request.(ListAttributeDefsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAttributeDefs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAttributeDefsResponseObject); ok {
+		if err := validResponse.VisitListAttributeDefsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateAttributeDef operation middleware
+func (sh *strictHandler) CreateAttributeDef(w http.ResponseWriter, r *http.Request) {
+	var request CreateAttributeDefRequestObject
+
+	var body CreateAttributeDefJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateAttributeDef(ctx, request.(CreateAttributeDefRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateAttributeDef")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateAttributeDefResponseObject); ok {
+		if err := validResponse.VisitCreateAttributeDefResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAttributeDef operation middleware
+func (sh *strictHandler) UpdateAttributeDef(w http.ResponseWriter, r *http.Request, key string) {
+	var request UpdateAttributeDefRequestObject
+
+	request.Key = key
+
+	var body UpdateAttributeDefJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAttributeDef(ctx, request.(UpdateAttributeDefRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAttributeDef")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAttributeDefResponseObject); ok {
+		if err := validResponse.VisitUpdateAttributeDefResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteAttributeDef operation middleware
+func (sh *strictHandler) DeleteAttributeDef(w http.ResponseWriter, r *http.Request, key string) {
+	var request DeleteAttributeDefRequestObject
+
+	request.Key = key
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteAttributeDef(ctx, request.(DeleteAttributeDefRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteAttributeDef")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteAttributeDefResponseObject); ok {
+		if err := validResponse.VisitDeleteAttributeDefResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -10478,6 +11308,65 @@ func (sh *strictHandler) UpdateUser(w http.ResponseWriter, r *http.Request, id s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateUserResponseObject); ok {
 		if err := validResponse.VisitUpdateUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUserAttributes operation middleware
+func (sh *strictHandler) GetUserAttributes(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetUserAttributesRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUserAttributes(ctx, request.(GetUserAttributesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUserAttributes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUserAttributesResponseObject); ok {
+		if err := validResponse.VisitGetUserAttributesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateUserAttributes operation middleware
+func (sh *strictHandler) UpdateUserAttributes(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateUserAttributesRequestObject
+
+	request.Id = id
+
+	var body UpdateUserAttributesJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateUserAttributes(ctx, request.(UpdateUserAttributesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateUserAttributes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateUserAttributesResponseObject); ok {
+		if err := validResponse.VisitUpdateUserAttributesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

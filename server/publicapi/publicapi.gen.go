@@ -424,6 +424,12 @@ type LoginResult struct {
 // 決まった API にしか使えない（他は未ログインの扱い）。
 type LoginResultNext string
 
+// MyAttributes defines model for MyAttributes.
+type MyAttributes struct {
+	Attributes map[string]interface{} `json:"attributes"`
+	Editable   []string               `json:"editable"`
+}
+
 // MyCheckRequest defines model for MyCheckRequest.
 type MyCheckRequest struct {
 	// Action `<リソース>:<操作>`
@@ -890,6 +896,11 @@ type CancelMyAccountDeletionJSONBody struct {
 	ReturnToken *bool `json:"return_token,omitempty"`
 }
 
+// UpdateMyAttributesJSONBody defines parameters for UpdateMyAttributes.
+type UpdateMyAttributesJSONBody struct {
+	Attributes map[string]interface{} `json:"attributes"`
+}
+
 // StartAddEmailJSONBody defines parameters for StartAddEmail.
 type StartAddEmailJSONBody struct {
 	Email string `json:"email"`
@@ -1088,6 +1099,9 @@ type DiscoverSSOJSONRequestBody DiscoverSSOJSONBody
 // CancelMyAccountDeletionJSONRequestBody defines body for CancelMyAccountDeletion for application/json ContentType.
 type CancelMyAccountDeletionJSONRequestBody CancelMyAccountDeletionJSONBody
 
+// UpdateMyAttributesJSONRequestBody defines body for UpdateMyAttributes for application/json ContentType.
+type UpdateMyAttributesJSONRequestBody UpdateMyAttributesJSONBody
+
 // StartAddEmailJSONRequestBody defines body for StartAddEmail for application/json ContentType.
 type StartAddEmailJSONRequestBody StartAddEmailJSONBody
 
@@ -1240,6 +1254,12 @@ type ServerInterface interface {
 	// DeleteMyAccount アカウントを削除する（4.10）
 	// (POST /v1/me/account:delete)
 	DeleteMyAccount(w http.ResponseWriter, r *http.Request)
+	// GetMyAttributes 自分のカスタム属性の値（design.md 11.7、ADR 0080）
+	// (GET /v1/me/attributes)
+	GetMyAttributes(w http.ResponseWriter, r *http.Request)
+	// UpdateMyAttributes 自分のカスタム属性の値を書く
+	// (PATCH /v1/me/attributes)
+	UpdateMyAttributes(w http.ResponseWriter, r *http.Request)
 	// MakeMyEmailPrimary 確認済みのメールを primary にする
 	// (POST /v1/me/emails/{id}:make-primary)
 	MakeMyEmailPrimary(w http.ResponseWriter, r *http.Request, id string)
@@ -1708,6 +1728,34 @@ func (siw *ServerInterfaceWrapper) DeleteMyAccount(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteMyAccount(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMyAttributes operation middleware
+func (siw *ServerInterfaceWrapper) GetMyAttributes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMyAttributes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateMyAttributes operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMyAttributes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMyAttributes(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3714,6 +3762,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys:finish", wrapper.FinishRegisterPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys/{id}:rename", wrapper.RenameMyPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys/{id}:revoke", wrapper.RevokeMyPasskey)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/attributes", wrapper.GetMyAttributes)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/me/attributes", wrapper.UpdateMyAttributes)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/password:set", wrapper.SetMyPassword)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/password:remove", wrapper.RemoveMyPassword)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:start", wrapper.StartRegisterTOTP)
@@ -4775,6 +4825,133 @@ func (response DeleteMyAccount409JSONResponse) VisitDeleteMyAccountResponse(w ht
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyAttributesRequestObject struct {
+}
+
+type GetMyAttributesResponseObject interface {
+	VisitGetMyAttributesResponse(w http.ResponseWriter) error
+}
+
+type GetMyAttributes200JSONResponse MyAttributes
+
+func (response GetMyAttributes200JSONResponse) VisitGetMyAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyAttributes401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetMyAttributes401JSONResponse) VisitGetMyAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyAttributes404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetMyAttributes404JSONResponse) VisitGetMyAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyAttributesRequestObject struct {
+	Body *UpdateMyAttributesJSONRequestBody
+}
+
+type UpdateMyAttributesResponseObject interface {
+	VisitUpdateMyAttributesResponse(w http.ResponseWriter) error
+}
+
+type UpdateMyAttributes200JSONResponse MyAttributes
+
+func (response UpdateMyAttributes200JSONResponse) VisitUpdateMyAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyAttributes400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateMyAttributes400JSONResponse) VisitUpdateMyAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyAttributes401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateMyAttributes401JSONResponse) VisitUpdateMyAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyAttributes403JSONResponse struct{ DeniedJSONResponse }
+
+func (response UpdateMyAttributes403JSONResponse) VisitUpdateMyAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyAttributes404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateMyAttributes404JSONResponse) VisitUpdateMyAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -9836,6 +10013,12 @@ type StrictServerInterface interface {
 	// DeleteMyAccount アカウントを削除する（4.10）
 	// (POST /v1/me/account:delete)
 	DeleteMyAccount(ctx context.Context, request DeleteMyAccountRequestObject) (DeleteMyAccountResponseObject, error)
+	// GetMyAttributes 自分のカスタム属性の値（design.md 11.7、ADR 0080）
+	// (GET /v1/me/attributes)
+	GetMyAttributes(ctx context.Context, request GetMyAttributesRequestObject) (GetMyAttributesResponseObject, error)
+	// UpdateMyAttributes 自分のカスタム属性の値を書く
+	// (PATCH /v1/me/attributes)
+	UpdateMyAttributes(ctx context.Context, request UpdateMyAttributesRequestObject) (UpdateMyAttributesResponseObject, error)
 	// MakeMyEmailPrimary 確認済みのメールを primary にする
 	// (POST /v1/me/emails/{id}:make-primary)
 	MakeMyEmailPrimary(ctx context.Context, request MakeMyEmailPrimaryRequestObject) (MakeMyEmailPrimaryResponseObject, error)
@@ -10579,6 +10762,61 @@ func (sh *strictHandler) DeleteMyAccount(w http.ResponseWriter, r *http.Request)
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteMyAccountResponseObject); ok {
 		if err := validResponse.VisitDeleteMyAccountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMyAttributes operation middleware
+func (sh *strictHandler) GetMyAttributes(w http.ResponseWriter, r *http.Request) {
+	var request GetMyAttributesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMyAttributes(ctx, request.(GetMyAttributesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMyAttributes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMyAttributesResponseObject); ok {
+		if err := validResponse.VisitGetMyAttributesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateMyAttributes operation middleware
+func (sh *strictHandler) UpdateMyAttributes(w http.ResponseWriter, r *http.Request) {
+	var request UpdateMyAttributesRequestObject
+
+	var body UpdateMyAttributesJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateMyAttributes(ctx, request.(UpdateMyAttributesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateMyAttributes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateMyAttributesResponseObject); ok {
+		if err := validResponse.VisitUpdateMyAttributesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
