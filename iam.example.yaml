@@ -32,6 +32,7 @@ notifier:
 realm:
   slug: default
   timezone: UTC
+  org_creation: anyone  # 共有 Org を作れる人：anyone / operators_only / invite_only（運営者はいつでも作れる）
 
 security:
   session:

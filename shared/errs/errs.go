@@ -92,6 +92,7 @@ var (
 	Conflict           = &Error{Kind: KindConflict}
 	Invalid            = &Error{Kind: KindInvalid}
 	FailedPrecondition = &Error{Kind: KindFailedPrecondition}
+	PermissionDenied   = &Error{Kind: KindPermissionDenied}
 )
 
 // New は分類とメッセージからエラーを作る。

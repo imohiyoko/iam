@@ -354,6 +354,76 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/orgs:
+    post:
+      operationId: createOrg
+      summary: 共有 Org を作り、ユーザーを owner にする（運営者。realm の `org_creation` に関わらず作れる。4.11）
+      description: 権限 `orgs:create`。フィーチャー org が動いていなければ `404 org_disabled`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, owner_id]
+              properties:
+                name: { type: string, maxLength: 400 }
+                owner_id: { type: string, description: 公開のユーザー ID }
+      responses:
+        "201":
+          description: 作った
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/orgs/{id}:
+    get:
+      operationId: getOrg
+      summary: Org を返す
+      description: 権限 `orgs:read`。フィーチャー org が動いていなければ `404 org_disabled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Org
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/orgs/{id}/memberships:
+    get:
+      operationId: listOrgMemberships
+      summary: Org の Membership の一覧（終了したものも含む）
+      description: 権限 `orgs:read`。Membership の公開 ID の順に、`limit` 件ずつ返す。続きは `next_cursor` を `after` に渡す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+        - { name: after, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Membership の公開 ID の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [memberships]
+                properties:
+                  memberships:
+                    type: array
+                    items: { $ref: "#/components/schemas/Membership" }
+                  next_cursor: { type: string, description: 続きがあるときだけ }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -374,6 +444,30 @@ components:
         status:
           type: string
           enum: [ok, unavailable]
+    Org:
+      type: object
+      required: [id, kind, created_at]
+      properties:
+        id: { type: string, description: 公開の Org ID }
+        kind: { type: string, enum: [personal, shared] }
+        name: { type: string }
+        personal_owner_id: { type: string, description: 個人 Org の持ち主（公開のユーザー ID） }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    Membership:
+      type: object
+      required: [id, user_id, org_id, status, role, created_at]
+      properties:
+        id: { type: string }
+        user_id: { type: string, description: 公開のユーザー ID }
+        org_id: { type: string }
+        status: { type: string, enum: [invited, active, ended] }
+        role: { type: string, enum: [owner, admin, member] }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        ended_reason: { type: string }
+        created_at: { type: string, format: date-time }
     Error:
       type: object
       required: [error]

@@ -7,6 +7,9 @@ SELECT * FROM authn_users WHERE realm_id = ? AND id = ?;
 -- name: GetUserByPublicID :one
 SELECT * FROM authn_users WHERE realm_id = ? AND public_id = ?;
 
+-- name: ListUsers :many
+SELECT * FROM authn_users WHERE realm_id = ? AND id > sqlc.arg(after) ORDER BY id LIMIT sqlc.arg(lim);
+
 -- name: CreateEmail :exec
 INSERT INTO authn_user_emails (id, public_id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);

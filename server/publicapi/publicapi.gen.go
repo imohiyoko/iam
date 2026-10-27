@@ -57,6 +57,63 @@ func (e LoginResultNext) Valid() bool {
 	}
 }
 
+// Defines values for MyOrgKind.
+const (
+	Personal MyOrgKind = "personal"
+	Shared   MyOrgKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the MyOrgKind enum.
+func (e MyOrgKind) Valid() bool {
+	switch e {
+	case Personal:
+		return true
+	case Shared:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MyOrgRole.
+const (
+	Admin  MyOrgRole = "admin"
+	Member MyOrgRole = "member"
+	Owner  MyOrgRole = "owner"
+)
+
+// Valid indicates whether the value is a known member of the MyOrgRole enum.
+func (e MyOrgRole) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case Member:
+		return true
+	case Owner:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MyOrgStatus.
+const (
+	Active  MyOrgStatus = "active"
+	Invited MyOrgStatus = "invited"
+)
+
+// Valid indicates whether the value is a known member of the MyOrgStatus enum.
+func (e MyOrgStatus) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Invited:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WarningAction.
 const (
 	Deny WarningAction = "deny"
@@ -168,6 +225,31 @@ type MyIdentity struct {
 	// Id 公開の外部 ID の紐付けの ID（idn_…）
 	Id string `json:"id"`
 }
+
+// MyOrg defines model for MyOrg.
+type MyOrg struct {
+	// Active このセッションが入っている Org か
+	Active bool `json:"active"`
+
+	// Id 公開の Org ID
+	Id           string    `json:"id"`
+	Kind         MyOrgKind `json:"kind"`
+	MembershipId string    `json:"membership_id"`
+
+	// Name 共有 Org の名前（個人 Org には無い）
+	Name   *string      `json:"name,omitempty"`
+	Role   MyOrgRole    `json:"role"`
+	Status *MyOrgStatus `json:"status,omitempty"`
+}
+
+// MyOrgKind defines model for MyOrg.Kind.
+type MyOrgKind string
+
+// MyOrgRole defines model for MyOrg.Role.
+type MyOrgRole string
+
+// MyOrgStatus defines model for MyOrg.Status.
+type MyOrgStatus string
 
 // MyPasskey defines model for MyPasskey.
 type MyPasskey struct {
@@ -351,6 +433,11 @@ type CompleteLinkIdentityJSONBody struct {
 	State  string  `json:"state"`
 }
 
+// CreateMyOrgJSONBody defines parameters for CreateMyOrg.
+type CreateMyOrgJSONBody struct {
+	Name string `json:"name"`
+}
+
 // RenameMyPasskeyJSONBody defines parameters for RenameMyPasskey.
 type RenameMyPasskeyJSONBody struct {
 	Name string `json:"name"`
@@ -445,6 +532,9 @@ type StartLinkIdentityJSONRequestBody StartLinkIdentityJSONBody
 // CompleteLinkIdentityJSONRequestBody defines body for CompleteLinkIdentity for application/json ContentType.
 type CompleteLinkIdentityJSONRequestBody CompleteLinkIdentityJSONBody
 
+// CreateMyOrgJSONRequestBody defines body for CreateMyOrg for application/json ContentType.
+type CreateMyOrgJSONRequestBody CreateMyOrgJSONBody
+
 // RenameMyPasskeyJSONRequestBody defines body for RenameMyPasskey for application/json ContentType.
 type RenameMyPasskeyJSONRequestBody RenameMyPasskeyJSONBody
 
@@ -537,6 +627,12 @@ type ServerInterface interface {
 	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(w http.ResponseWriter, r *http.Request)
+	// ListMyOrgs 本人の Org の一覧（終了した Membership は含めない。11.13）
+	// (GET /v1/me/orgs)
+	ListMyOrgs(w http.ResponseWriter, r *http.Request)
+	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
+	// (POST /v1/me/orgs)
+	CreateMyOrg(w http.ResponseWriter, r *http.Request)
 	// RenameMyPasskey passkey の名前を変える
 	// (POST /v1/me/passkeys/{id}:rename)
 	RenameMyPasskey(w http.ResponseWriter, r *http.Request, id string)
@@ -944,6 +1040,34 @@ func (siw *ServerInterfaceWrapper) ListMyMethods(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMyMethods(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyOrgs operation middleware
+func (siw *ServerInterfaceWrapper) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyOrgs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMyOrg operation middleware
+func (siw *ServerInterfaceWrapper) CreateMyOrg(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMyOrg(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1397,6 +1521,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:start", wrapper.StartRegisterTOTP)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:confirm", wrapper.ConfirmRegisterTOTP)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp/{id}:revoke", wrapper.RevokeMyTOTP)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs", wrapper.ListMyOrgs)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs", wrapper.CreateMyOrg)
 
 	return m
 }
@@ -2643,6 +2769,135 @@ func (response ListMyMethods401JSONResponse) VisitListMyMethodsResponse(w http.R
 	return err
 }
 
+type ListMyOrgsRequestObject struct {
+}
+
+type ListMyOrgsResponseObject interface {
+	VisitListMyOrgsResponse(w http.ResponseWriter) error
+}
+
+type ListMyOrgs200JSONResponse struct {
+	Orgs []MyOrg `json:"orgs"`
+}
+
+func (response ListMyOrgs200JSONResponse) VisitListMyOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgs401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyOrgs401JSONResponse) VisitListMyOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgs404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyOrgs404JSONResponse) VisitListMyOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRequestObject struct {
+	Body *CreateMyOrgJSONRequestBody
+}
+
+type CreateMyOrgResponseObject interface {
+	VisitCreateMyOrgResponse(w http.ResponseWriter) error
+}
+
+type CreateMyOrg201JSONResponse MyOrg
+
+func (response CreateMyOrg201JSONResponse) VisitCreateMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrg400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateMyOrg400JSONResponse) VisitCreateMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrg401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateMyOrg401JSONResponse) VisitCreateMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrg403JSONResponse struct{ DeniedJSONResponse }
+
+func (response CreateMyOrg403JSONResponse) VisitCreateMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrg404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateMyOrg404JSONResponse) VisitCreateMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RenameMyPasskeyRequestObject struct {
 	Id   string `json:"id"`
 	Body *RenameMyPasskeyJSONRequestBody
@@ -3744,6 +3999,12 @@ type StrictServerInterface interface {
 	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(ctx context.Context, request ListMyMethodsRequestObject) (ListMyMethodsResponseObject, error)
+	// ListMyOrgs 本人の Org の一覧（終了した Membership は含めない。11.13）
+	// (GET /v1/me/orgs)
+	ListMyOrgs(ctx context.Context, request ListMyOrgsRequestObject) (ListMyOrgsResponseObject, error)
+	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
+	// (POST /v1/me/orgs)
+	CreateMyOrg(ctx context.Context, request CreateMyOrgRequestObject) (CreateMyOrgResponseObject, error)
 	// RenameMyPasskey passkey の名前を変える
 	// (POST /v1/me/passkeys/{id}:rename)
 	RenameMyPasskey(ctx context.Context, request RenameMyPasskeyRequestObject) (RenameMyPasskeyResponseObject, error)
@@ -4433,6 +4694,61 @@ func (sh *strictHandler) ListMyMethods(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListMyMethodsResponseObject); ok {
 		if err := validResponse.VisitListMyMethodsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyOrgs operation middleware
+func (sh *strictHandler) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
+	var request ListMyOrgsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyOrgs(ctx, request.(ListMyOrgsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyOrgs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyOrgsResponseObject); ok {
+		if err := validResponse.VisitListMyOrgsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateMyOrg operation middleware
+func (sh *strictHandler) CreateMyOrg(w http.ResponseWriter, r *http.Request) {
+	var request CreateMyOrgRequestObject
+
+	var body CreateMyOrgJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMyOrg(ctx, request.(CreateMyOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMyOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMyOrgResponseObject); ok {
+		if err := validResponse.VisitCreateMyOrgResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

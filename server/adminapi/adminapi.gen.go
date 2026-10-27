@@ -20,19 +20,19 @@ import (
 
 // Defines values for AdminUserStatus.
 const (
-	Active  AdminUserStatus = "active"
-	Deleted AdminUserStatus = "deleted"
-	Merged  AdminUserStatus = "merged"
+	AdminUserStatusActive  AdminUserStatus = "active"
+	AdminUserStatusDeleted AdminUserStatus = "deleted"
+	AdminUserStatusMerged  AdminUserStatus = "merged"
 )
 
 // Valid indicates whether the value is a known member of the AdminUserStatus enum.
 func (e AdminUserStatus) Valid() bool {
 	switch e {
-	case Active:
+	case AdminUserStatusActive:
 		return true
-	case Deleted:
+	case AdminUserStatusDeleted:
 		return true
-	case Merged:
+	case AdminUserStatusMerged:
 		return true
 	default:
 		return false
@@ -51,6 +51,66 @@ func (e HealthStatus) Valid() bool {
 	case Ok:
 		return true
 	case Unavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MembershipRole.
+const (
+	Admin  MembershipRole = "admin"
+	Member MembershipRole = "member"
+	Owner  MembershipRole = "owner"
+)
+
+// Valid indicates whether the value is a known member of the MembershipRole enum.
+func (e MembershipRole) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case Member:
+		return true
+	case Owner:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MembershipStatus.
+const (
+	MembershipStatusActive  MembershipStatus = "active"
+	MembershipStatusEnded   MembershipStatus = "ended"
+	MembershipStatusInvited MembershipStatus = "invited"
+)
+
+// Valid indicates whether the value is a known member of the MembershipStatus enum.
+func (e MembershipStatus) Valid() bool {
+	switch e {
+	case MembershipStatusActive:
+		return true
+	case MembershipStatusEnded:
+		return true
+	case MembershipStatusInvited:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OrgKind.
+const (
+	Personal OrgKind = "personal"
+	Shared   OrgKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the OrgKind enum.
+func (e OrgKind) Valid() bool {
+	switch e {
+	case Personal:
+		return true
+	case Shared:
 		return true
 	default:
 		return false
@@ -109,6 +169,45 @@ type LoginLink struct {
 	// Token 1回限り。本人以外に渡さない
 	Token string `json:"token"`
 }
+
+// Membership defines model for Membership.
+type Membership struct {
+	CreatedAt   time.Time        `json:"created_at"`
+	EndedReason *string          `json:"ended_reason,omitempty"`
+	Id          string           `json:"id"`
+	OrgId       string           `json:"org_id"`
+	Role        MembershipRole   `json:"role"`
+	Status      MembershipStatus `json:"status"`
+
+	// UserId 公開のユーザー ID
+	UserId     string     `json:"user_id"`
+	ValidFrom  *time.Time `json:"valid_from,omitempty"`
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+}
+
+// MembershipRole defines model for Membership.Role.
+type MembershipRole string
+
+// MembershipStatus defines model for Membership.Status.
+type MembershipStatus string
+
+// Org defines model for Org.
+type Org struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id 公開の Org ID
+	Id   string  `json:"id"`
+	Kind OrgKind `json:"kind"`
+	Name *string `json:"name,omitempty"`
+
+	// PersonalOwnerId 個人 Org の持ち主（公開のユーザー ID）
+	PersonalOwnerId *string    `json:"personal_owner_id,omitempty"`
+	ValidFrom       *time.Time `json:"valid_from,omitempty"`
+	ValidUntil      *time.Time `json:"valid_until,omitempty"`
+}
+
+// OrgKind defines model for Org.Kind.
+type OrgKind string
 
 // RevokedCredentials defines model for RevokedCredentials.
 type RevokedCredentials struct {
@@ -212,6 +311,20 @@ type CreateConnectionJSONBody struct {
 	Slug         string   `json:"slug"`
 }
 
+// CreateOrgJSONBody defines parameters for CreateOrg.
+type CreateOrgJSONBody struct {
+	Name string `json:"name"`
+
+	// OwnerId 公開のユーザー ID
+	OwnerId string `json:"owner_id"`
+}
+
+// ListOrgMembershipsParams defines parameters for ListOrgMemberships.
+type ListOrgMembershipsParams struct {
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // CreateUserJSONBody defines parameters for CreateUser.
 type CreateUserJSONBody struct {
 	Email string `json:"email"`
@@ -230,6 +343,9 @@ type IssueRecoveryLinkJSONBody struct {
 
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody CreateConnectionJSONBody
+
+// CreateOrgJSONRequestBody defines body for CreateOrg for application/json ContentType.
+type CreateOrgJSONRequestBody CreateOrgJSONBody
 
 // LiftSuspensionJSONRequestBody defines body for LiftSuspension for application/json ContentType.
 type LiftSuspensionJSONRequestBody = LiftRequest
@@ -260,6 +376,15 @@ type ServerInterface interface {
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(w http.ResponseWriter, r *http.Request, id string)
+	// CreateOrg 共有 Org を作り、ユーザーを owner にする（運営者。realm の `org_creation` に関わらず作れる。4.11）
+	// (POST /v1/admin/orgs)
+	CreateOrg(w http.ResponseWriter, r *http.Request)
+	// GetOrg Org を返す
+	// (GET /v1/admin/orgs/{id})
+	GetOrg(w http.ResponseWriter, r *http.Request, id string)
+	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
+	// (GET /v1/admin/orgs/{id}/memberships)
+	ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams)
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(w http.ResponseWriter, r *http.Request, id string)
@@ -352,6 +477,101 @@ func (siw *ServerInterfaceWrapper) ClaimNotification(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ClaimNotification(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOrg operation middleware
+func (siw *ServerInterfaceWrapper) CreateOrg(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOrg(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOrg operation middleware
+func (siw *ServerInterfaceWrapper) GetOrg(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOrg(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOrgMemberships operation middleware
+func (siw *ServerInterfaceWrapper) ListOrgMemberships(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListOrgMembershipsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrgMemberships(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -805,6 +1025,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/suspensions/{id}:lift", wrapper.LiftSuspension)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/sessions/{id}:revoke", wrapper.RevokeSession)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs", wrapper.CreateOrg)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.GetOrg)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/memberships", wrapper.ListOrgMemberships)
 
 	return m
 }
@@ -980,6 +1203,232 @@ func (response ClaimNotification403JSONResponse) VisitClaimNotificationResponse(
 type ClaimNotification404JSONResponse Error
 
 func (response ClaimNotification404JSONResponse) VisitClaimNotificationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgRequestObject struct {
+	Body *CreateOrgJSONRequestBody
+}
+
+type CreateOrgResponseObject interface {
+	VisitCreateOrgResponse(w http.ResponseWriter) error
+}
+
+type CreateOrg201JSONResponse Org
+
+func (response CreateOrg201JSONResponse) VisitCreateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrg400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateOrg400JSONResponse) VisitCreateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrg401JSONResponse Error
+
+func (response CreateOrg401JSONResponse) VisitCreateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrg403JSONResponse Error
+
+func (response CreateOrg403JSONResponse) VisitCreateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrg404JSONResponse Error
+
+func (response CreateOrg404JSONResponse) VisitCreateOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetOrgResponseObject interface {
+	VisitGetOrgResponse(w http.ResponseWriter) error
+}
+
+type GetOrg200JSONResponse Org
+
+func (response GetOrg200JSONResponse) VisitGetOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrg401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetOrg401JSONResponse) VisitGetOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrg403JSONResponse Error
+
+func (response GetOrg403JSONResponse) VisitGetOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrg404JSONResponse Error
+
+func (response GetOrg404JSONResponse) VisitGetOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgMembershipsRequestObject struct {
+	Id     string `json:"id"`
+	Params ListOrgMembershipsParams
+}
+
+type ListOrgMembershipsResponseObject interface {
+	VisitListOrgMembershipsResponse(w http.ResponseWriter) error
+}
+
+type ListOrgMemberships200JSONResponse struct {
+	Memberships []Membership `json:"memberships"`
+
+	// NextCursor 続きがあるときだけ
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+func (response ListOrgMemberships200JSONResponse) VisitListOrgMembershipsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgMemberships400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListOrgMemberships400JSONResponse) VisitListOrgMembershipsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgMemberships401JSONResponse Error
+
+func (response ListOrgMemberships401JSONResponse) VisitListOrgMembershipsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgMemberships403JSONResponse Error
+
+func (response ListOrgMemberships403JSONResponse) VisitListOrgMembershipsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgMemberships404JSONResponse Error
+
+func (response ListOrgMemberships404JSONResponse) VisitListOrgMembershipsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -1859,6 +2308,15 @@ type StrictServerInterface interface {
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(ctx context.Context, request ClaimNotificationRequestObject) (ClaimNotificationResponseObject, error)
+	// CreateOrg 共有 Org を作り、ユーザーを owner にする（運営者。realm の `org_creation` に関わらず作れる。4.11）
+	// (POST /v1/admin/orgs)
+	CreateOrg(ctx context.Context, request CreateOrgRequestObject) (CreateOrgResponseObject, error)
+	// GetOrg Org を返す
+	// (GET /v1/admin/orgs/{id})
+	GetOrg(ctx context.Context, request GetOrgRequestObject) (GetOrgResponseObject, error)
+	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
+	// (GET /v1/admin/orgs/{id}/memberships)
+	ListOrgMemberships(ctx context.Context, request ListOrgMembershipsRequestObject) (ListOrgMembershipsResponseObject, error)
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(ctx context.Context, request RevokeSessionRequestObject) (RevokeSessionResponseObject, error)
@@ -2010,6 +2468,90 @@ func (sh *strictHandler) ClaimNotification(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ClaimNotificationResponseObject); ok {
 		if err := validResponse.VisitClaimNotificationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateOrg operation middleware
+func (sh *strictHandler) CreateOrg(w http.ResponseWriter, r *http.Request) {
+	var request CreateOrgRequestObject
+
+	var body CreateOrgJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateOrg(ctx, request.(CreateOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateOrgResponseObject); ok {
+		if err := validResponse.VisitCreateOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOrg operation middleware
+func (sh *strictHandler) GetOrg(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetOrgRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOrg(ctx, request.(GetOrgRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOrg")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOrgResponseObject); ok {
+		if err := validResponse.VisitGetOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOrgMemberships operation middleware
+func (sh *strictHandler) ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams) {
+	var request ListOrgMembershipsRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrgMemberships(ctx, request.(ListOrgMembershipsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrgMemberships")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrgMembershipsResponseObject); ok {
+		if err := validResponse.VisitListOrgMembershipsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

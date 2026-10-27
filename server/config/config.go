@@ -117,7 +117,13 @@ type Realm struct {
 	// VerifiedVia はメールを「確認済み」とみなす経路（design.md 4.1）。
 	// メールを送れない環境では code を外し、OAuth と運営者による登録で運用する。
 	VerifiedVia []string `yaml:"verified_via"`
+	// OrgCreation は共有 Org を作れる人（design.md 4.11）：anyone / operators_only / invite_only。
+	// 運営者は管理 API からいつでも作れる。
+	OrgCreation string `yaml:"org_creation"`
 }
+
+// KnownOrgCreation は realm.org_creation の値。
+var KnownOrgCreation = []string{"anyone", "operators_only", "invite_only"}
 
 // KnownVerifiedVia は経路の名前。
 var KnownVerifiedVia = []string{"code", "oauth_provider", "sso", "invitation", "admin"}
@@ -289,7 +295,8 @@ func Default() Config {
 		EventSink:   Adapter{Driver: "stdout"},
 		Notifier:    Adapter{Driver: "dev"},
 		BreachCheck: Adapter{Driver: "hibp"},
-		Realm:       Realm{Slug: "default", Timezone: "UTC", VerifiedVia: []string{"code", "oauth_provider", "sso", "admin"}},
+		Realm: Realm{Slug: "default", Timezone: "UTC", VerifiedVia: []string{"code", "oauth_provider", "sso", "admin"},
+			OrgCreation: "anyone"},
 		Security: Security{Session: SessionRules{
 			AbsoluteLifetime: DurationRule{Default: Duration(30 * day), Min: Duration(time.Hour), Max: Duration(90 * day)},
 			IdleTimeout:      DurationRule{Default: Duration(7 * day), Min: Duration(5 * time.Minute), Max: Duration(30 * day)},
@@ -400,6 +407,9 @@ func (c Config) Validate() error {
 	}
 	if c.Realm.Slug == "" {
 		problems = append(problems, "realm.slug is required")
+	}
+	if !slices.Contains(KnownOrgCreation, c.Realm.OrgCreation) {
+		problems = append(problems, fmt.Sprintf("realm.org_creation: unknown %q (known: %v)", c.Realm.OrgCreation, KnownOrgCreation))
 	}
 	for _, v := range c.Realm.VerifiedVia {
 		if !slices.Contains(KnownVerifiedVia, v) {

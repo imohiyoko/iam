@@ -61,6 +61,8 @@ type state struct {
 	accounts        map[string]port.ServiceAccount
 	credentials     map[string]port.ServiceAccountCredential
 	roleBindings    map[string]port.RoleBinding
+	orgs            map[string]port.Org
+	memberships     map[string]port.Membership
 }
 
 // Storage はインメモリの Storage。
@@ -84,7 +86,7 @@ func New(clk clock.Clock) *Storage {
 		scheduled: map[string]port.ScheduledEvent{}, recoveryCodes: map[string]port.RecoveryCode{},
 		connections: map[string]port.Connection{}, sessions: map[string]port.Session{},
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
-		roleBindings: map[string]port.RoleBinding{},
+		roleBindings: map[string]port.RoleBinding{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 	}}
 }
 
@@ -140,6 +142,8 @@ func (t *tx) Suspensions() port.SuspensionRepo         { return suspensions{t} }
 func (t *tx) ScheduledEvents() port.ScheduledEventRepo { return scheduledEvents{t} }
 func (t *tx) Connections() port.ConnectionRepo         { return connections{t} }
 func (t *tx) Sessions() port.SessionRepo               { return sessions{t} }
+func (t *tx) Orgs() port.OrgRepo                       { return orgs{t} }
+func (t *tx) Memberships() port.MembershipRepo         { return memberships{t} }
 func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t} }
 func (t *tx) RoleBindings() port.RoleBindingRepo       { return roleBindings{t} }
 

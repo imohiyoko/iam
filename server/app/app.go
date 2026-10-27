@@ -23,6 +23,7 @@ import (
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
+	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/recovery"
@@ -56,18 +57,22 @@ type Deps struct {
 
 // App は組み立て済みの IAM。
 type App struct {
-	cfg   config.Config
-	deps  Deps
-	plan  feature.Plan
-	realm port.Realm
-	relay *eventlog.Relay
-	pii   *pii.Crypter
+	cfg  config.Config
+	deps Deps
+	plan feature.Plan
+	// binary はこのバイナリに含まれるフィーチャー（EnableFeature で使う）。
+	binary []feature.Feature
+	realm  port.Realm
+	relay  *eventlog.Relay
+	pii    *pii.Crypter
 	// sessions はセッションの発行・検証（authn/session）。
 	sessions *session.Manager
 	accounts *account.Service
-	notify   *notify.Service
-	email    *emailflow.Service
-	oauth    *oauth.Service
+	// orgs は Org と Membership（4.4、11.13）。フィーチャー org が動いていなければ nil。
+	orgs   *org.Service
+	notify *notify.Service
+	email  *emailflow.Service
+	oauth  *oauth.Service
 	// passkeys は passkey の登録とログイン。Relying Party が決まらない構成（public_url も rp_id も無い）では nil。
 	passkeys *passkey.Service
 	// totp は TOTP の登録と照合（2要素目）。
@@ -127,7 +132,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		d.Logger.Warn("feature", "message", w)
 	}
 
-	a := &App{cfg: cfg, deps: d, plan: plan}
+	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary}
 	a.checkClockSkew(ctx)
 	if a.realm, err = a.ensureRealm(ctx); err != nil {
 		return nil, err
@@ -161,6 +166,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		d.Logger.Warn("realm.verified_via does not include code: email codes and links are disabled, and email recovery is unavailable")
 	}
 	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via, ExtraCategories: cfg.Security.SuspensionCategories}
+	if plan.IsActive(feature.Org) {
+		a.orgs = &org.Service{Clock: d.Clock, Policy: org.CreationPolicy(cfg.Realm.OrgCreation)}
+		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
+	}
 	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
 	a.email = &emailflow.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
