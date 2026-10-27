@@ -317,23 +317,54 @@ func (r sessions) MoveOrg(ctx context.Context, realmID, userID, fromOrgID, toOrg
 
 type accounts struct{ q *db.Queries }
 
+func toServiceAccount(r db.AuthnServiceAccount) (port.ServiceAccount, error) {
+	var p times
+	a := port.ServiceAccount{ID: r.ID, RealmID: r.RealmID, OrgID: r.OrgID, Name: r.Name, ValidFrom: p.null(r.ValidFrom),
+		ValidUntil: p.null(r.ValidUntil), DeletedAt: p.null(r.DeletedAt), CreatedBy: r.CreatedBy, CreatedAt: p.at(r.CreatedAt)}
+	return a, p.err
+}
+
 func toCredential(r db.AuthnServiceAccountCredential) (port.ServiceAccountCredential, error) {
 	var p times
 	c := port.ServiceAccountCredential{ID: r.ID, RealmID: r.RealmID, ServiceAccountID: r.ServiceAccountID, Type: r.Type,
-		SecretHash: r.SecretHash, CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.null(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt)}
+		SecretHash: nilEmpty(r.SecretHash), PublicKey: nilEmpty(r.PublicKey), Alg: r.Alg, CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.null(r.ExpiresAt),
+		RevokedAt: p.null(r.RevokedAt)}
 	return c, p.err
 }
 
+// nilEmpty は空の列を nil に戻す（書くときは nonNil で空にする）。
+func nilEmpty(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
+}
+
+func toSAToken(r db.AuthnServiceAccountToken) (port.ServiceAccountToken, error) {
+	var p times
+	t := port.ServiceAccountToken{ID: r.ID, RealmID: r.RealmID, ServiceAccountID: r.ServiceAccountID, CredentialID: r.CredentialID,
+		Hash: r.TokenHash, CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.at(r.ExpiresAt)}
+	return t, p.err
+}
+
 func (r accounts) Create(ctx context.Context, a port.ServiceAccount) error {
-	return mapErr(r.q.CreateServiceAccount(ctx, db.CreateServiceAccountParams{ID: a.ID, RealmID: a.RealmID, Name: a.Name, CreatedAt: formatTime(a.CreatedAt)}))
+	return mapErr(r.q.CreateServiceAccount(ctx, db.CreateServiceAccountParams{ID: a.ID, RealmID: a.RealmID, OrgID: a.OrgID, Name: a.Name,
+		ValidFrom: nullTime(a.ValidFrom), ValidUntil: nullTime(a.ValidUntil), CreatedBy: a.CreatedBy, CreatedAt: formatTime(a.CreatedAt)}))
 }
 
 func (r accounts) Get(ctx context.Context, realmID, id string) (port.ServiceAccount, error) {
 	row, err := r.q.GetServiceAccount(ctx, db.GetServiceAccountParams{RealmID: realmID, ID: id})
-	return one(row, err, func(r db.AuthnServiceAccount) (port.ServiceAccount, error) {
-		t, err := parseTime(r.CreatedAt)
-		return port.ServiceAccount{ID: r.ID, RealmID: r.RealmID, Name: r.Name, CreatedAt: t}, err
-	})
+	return one(row, err, toServiceAccount)
+}
+
+func (r accounts) List(ctx context.Context, realmID, afterID string, limit int) ([]port.ServiceAccount, error) {
+	rs, err := r.q.ListServiceAccounts(ctx, db.ListServiceAccountsParams{RealmID: realmID, After: afterID, Lim: int64(limit)})
+	return rows(rs, err, toServiceAccount)
+}
+
+func (r accounts) SetDeleted(ctx context.Context, realmID, id string, at time.Time) error {
+	n, err := r.q.DeleteServiceAccount(ctx, db.DeleteServiceAccountParams{At: nullTime(&at), RealmID: realmID, ID: id})
+	return affected(n, err, "service account")
 }
 
 func (r accounts) CreateCredential(ctx context.Context, c port.ServiceAccountCredential) error {
@@ -342,8 +373,8 @@ func (r accounts) CreateCredential(ctx context.Context, c port.ServiceAccountCre
 		return err
 	}
 	return mapErr(r.q.CreateServiceAccountCredential(ctx, db.CreateServiceAccountCredentialParams{ID: c.ID, RealmID: c.RealmID,
-		ServiceAccountID: c.ServiceAccountID, Type: c.Type, SecretHash: nonNil(c.SecretHash), CreatedAt: formatTime(c.CreatedAt),
-		ExpiresAt: nullTime(c.ExpiresAt), RevokedAt: nullTime(c.RevokedAt)}))
+		ServiceAccountID: c.ServiceAccountID, Type: c.Type, SecretHash: nonNil(c.SecretHash), PublicKey: nonNil(c.PublicKey), Alg: c.Alg,
+		CreatedAt: formatTime(c.CreatedAt), ExpiresAt: nullTime(c.ExpiresAt), RevokedAt: nullTime(c.RevokedAt)}))
 }
 
 func (r accounts) GetCredential(ctx context.Context, realmID, id string) (port.ServiceAccountCredential, error) {
@@ -351,9 +382,30 @@ func (r accounts) GetCredential(ctx context.Context, realmID, id string) (port.S
 	return one(row, err, toCredential)
 }
 
+func (r accounts) ListCredentials(ctx context.Context, realmID, serviceAccountID string) ([]port.ServiceAccountCredential, error) {
+	rs, err := r.q.ListServiceAccountCredentials(ctx, db.ListServiceAccountCredentialsParams{RealmID: realmID, ServiceAccountID: serviceAccountID})
+	return rows(rs, err, toCredential)
+}
+
 func (r accounts) RevokeCredential(ctx context.Context, realmID, id string, at time.Time) error {
 	n, err := r.q.RevokeServiceAccountCredential(ctx, db.RevokeServiceAccountCredentialParams{At: nullTime(&at), RealmID: realmID, ID: id})
 	return affected(n, err, "credential")
+}
+
+func (r accounts) CreateToken(ctx context.Context, t port.ServiceAccountToken) error {
+	return mapErr(r.q.CreateServiceAccountToken(ctx, db.CreateServiceAccountTokenParams{ID: t.ID, RealmID: t.RealmID,
+		ServiceAccountID: t.ServiceAccountID, CredentialID: t.CredentialID, TokenHash: nonNil(t.Hash), CreatedAt: formatTime(t.CreatedAt),
+		ExpiresAt: formatTime(t.ExpiresAt)}))
+}
+
+func (r accounts) GetToken(ctx context.Context, realmID, id string) (port.ServiceAccountToken, error) {
+	row, err := r.q.GetServiceAccountToken(ctx, db.GetServiceAccountTokenParams{RealmID: realmID, ID: id})
+	return one(row, err, toSAToken)
+}
+
+func (r accounts) DeleteExpiredTokens(ctx context.Context, before time.Time, limit int) (int, error) {
+	n, err := r.q.DeleteExpiredServiceAccountTokens(ctx, db.DeleteExpiredServiceAccountTokensParams{Before: formatTime(before), Lim: int64(limit)})
+	return int(n), mapErr(err)
 }
 
 // ---------------------------------------------------------------------------

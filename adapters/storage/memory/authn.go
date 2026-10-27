@@ -5,6 +5,7 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/errs"
@@ -406,21 +407,87 @@ func (r sessions) MoveOrg(_ context.Context, realmID, userID, fromOrgID, toOrgID
 type accounts struct{ t *tx }
 
 func cloneCredential(c port.ServiceAccountCredential) port.ServiceAccountCredential {
-	c.SecretHash = bytes.Clone(c.SecretHash)
+	c.SecretHash, c.PublicKey = bytes.Clone(c.SecretHash), bytes.Clone(c.PublicKey)
 	c.ExpiresAt, c.RevokedAt = cloneTime(c.ExpiresAt), cloneTime(c.RevokedAt)
 	return c
+}
+
+func cloneAccount(a port.ServiceAccount) port.ServiceAccount {
+	a.ValidFrom, a.ValidUntil, a.DeletedAt = cloneTime(a.ValidFrom), cloneTime(a.ValidUntil), cloneTime(a.DeletedAt)
+	return a
 }
 
 func (r accounts) Create(_ context.Context, a port.ServiceAccount) error {
 	if _, ok := r.t.s.accounts[a.ID]; ok {
 		return errs.New(errs.KindConflict, "service account %s exists", a.ID)
 	}
-	setKey(r.t, r.t.s.accounts, a.ID, a)
+	setKey(r.t, r.t.s.accounts, a.ID, cloneAccount(a))
 	return nil
 }
 
 func (r accounts) Get(_ context.Context, realmID, id string) (port.ServiceAccount, error) {
-	return get(r.t.s.accounts, realmID, id, func(a port.ServiceAccount) string { return a.RealmID }, "service account")
+	a, err := get(r.t.s.accounts, realmID, id, func(a port.ServiceAccount) string { return a.RealmID }, "service account")
+	return cloneAccount(a), err
+}
+
+func (r accounts) List(_ context.Context, realmID, afterID string, limit int) ([]port.ServiceAccount, error) {
+	var out []port.ServiceAccount
+	for _, a := range r.t.s.accounts {
+		if a.RealmID == realmID && a.ID > afterID {
+			out = append(out, cloneAccount(a))
+		}
+	}
+	slices.SortFunc(out, func(a, b port.ServiceAccount) int { return strings.Compare(a.ID, b.ID) })
+	return out[:min(limit, len(out))], nil
+}
+
+func (r accounts) SetDeleted(_ context.Context, realmID, id string, at time.Time) error {
+	a, err := r.Get(context.Background(), realmID, id)
+	if err != nil {
+		return err
+	}
+	if a.DeletedAt == nil {
+		a.DeletedAt = &at
+		setKey(r.t, r.t.s.accounts, id, a)
+	}
+	return nil
+}
+
+func (r accounts) ListCredentials(_ context.Context, realmID, serviceAccountID string) ([]port.ServiceAccountCredential, error) {
+	var out []port.ServiceAccountCredential
+	for _, c := range r.t.s.credentials {
+		if c.RealmID == realmID && c.ServiceAccountID == serviceAccountID {
+			out = append(out, cloneCredential(c))
+		}
+	}
+	sortByCreated(out, func(c port.ServiceAccountCredential) (time.Time, string) { return c.CreatedAt, c.ID })
+	return out, nil
+}
+
+func (r accounts) CreateToken(_ context.Context, t port.ServiceAccountToken) error {
+	if _, ok := r.t.s.saTokens[t.ID]; ok {
+		return errs.New(errs.KindConflict, "token %s exists", t.ID)
+	}
+	t.Hash = bytes.Clone(t.Hash)
+	setKey(r.t, r.t.s.saTokens, t.ID, t)
+	return nil
+}
+
+func (r accounts) GetToken(_ context.Context, realmID, id string) (port.ServiceAccountToken, error) {
+	t, err := get(r.t.s.saTokens, realmID, id, func(t port.ServiceAccountToken) string { return t.RealmID }, "token")
+	t.Hash = bytes.Clone(t.Hash)
+	return t, err
+}
+
+func (r accounts) DeleteExpiredTokens(_ context.Context, before time.Time, limit int) (int, error) {
+	n := 0
+	for id, t := range r.t.s.saTokens {
+		if n < limit && t.ExpiresAt.Before(before) {
+			deleteKey(r.t, r.t.s.saTokens, id)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (r accounts) CreateCredential(_ context.Context, c port.ServiceAccountCredential) error {

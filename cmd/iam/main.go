@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/adapters/keystore/file"
+	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/app"
 	"github.com/imohiyoko/iam/server/buildspec"
 	"github.com/imohiyoko/iam/server/config"
@@ -51,6 +52,8 @@ commands:
   keys generate -out keys.json      KeyStore（file）用の鍵を作る
   operator create -config iam.yaml -email <address> [-role realm:owner] [-ttl 15m]
                                     運営者を作り、1回限りのログイン用リンクのトークンを表示する
+  service-account create -config iam.yaml -name <name> [-role system:notification_delivery]
+                                    サービスアカウントを作り、API キーを1回だけ表示する
 `
 
 func main() {
@@ -78,6 +81,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return operator(ctx, args[1:], stdout, stderr)
 	case "features":
 		return features(ctx, args[1:], stdout, stderr)
+	case "service-account":
+		return serviceAccountCmd(ctx, args[1:], stdout, stderr)
 	case "storage":
 		return storageCmd(ctx, args[1:], stdout, stderr)
 	case "build":
@@ -201,6 +206,36 @@ func migrate(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 	fmt.Fprintln(stdout, "migrations applied")
 	return s.Close()
+}
+
+// serviceAccountCmd はサービスアカウントを作り、API キーを1回だけ表示する（2.4、ADR 0074）。
+func serviceAccountCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	use := "usage: iam service-account create -config iam.yaml -name <name> [-role system:notification_delivery]"
+	if len(args) == 0 || args[0] != "create" {
+		return errors.New(use)
+	}
+	fs := flag.NewFlagSet("service-account create", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	name := fs.String("name", "", "サービスアカウントの名前")
+	roleName := fs.String("role", role.NotificationDelivery, "付与するロール（フィーチャー service_accounts が動いていなければ配信用だけ）")
+	cfg, err := loadConfig(fs, args[1:])
+	if err != nil {
+		return err
+	}
+	if *name == "" {
+		return errors.New("-name is required")
+	}
+	a, closeFn, err := openApp(ctx, cfg, stdout, stderr)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	sa, err := a.CreateServiceAccount(ctx, *name, *roleName)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "created service account %s (%s)\nAPI key (shown once; use as Authorization: Bearer):\n%s\n", sa.ID, *roleName, sa.APIKey)
+	return nil
 }
 
 func operator(ctx context.Context, args []string, stdout, stderr io.Writer) error {

@@ -28,6 +28,7 @@ import (
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/recovery"
+	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/totp"
 	"github.com/imohiyoko/iam/authn/warning"
@@ -91,6 +92,8 @@ type App struct {
 	notifier *eventlog.Relay
 	// logout は Back-Channel Logout を送る（ADR 0066）。
 	logout *eventlog.Relay
+	// serviceAccounts はサービスアカウントの管理と client credentials（ADR 0074）。
+	serviceAccounts *serviceaccount.Service
 	// clients と keys は OIDC Provider の連携先と ID トークンの署名鍵（5.5、9.3）。
 	clients *provider.Clients
 	keys    *provider.Keys
@@ -215,6 +218,8 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if a.issuer == "" {
 		d.Logger.Info("the OIDC provider is disabled: set server.public_url")
 	}
+	a.serviceAccounts = &serviceaccount.Service{Clock: d.Clock, Replay: d.Ephemeral, Audience: a.issuer,
+		TokenTTL: cfg.ServiceAccounts.TokenTTL.D(), Authenticator: serviceaccount.Authenticator{Enabled: plan.IsActive(feature.ServiceAccounts), DeliveryOnly: deliveryOnly}}
 	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D()}
 	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Issuer: a.issuer,
 		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D()}

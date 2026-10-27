@@ -65,6 +65,7 @@ type state struct {
 	sessions        map[string]port.Session
 	accounts        map[string]port.ServiceAccount
 	credentials     map[string]port.ServiceAccountCredential
+	saTokens        map[string]port.ServiceAccountToken
 	roleBindings    map[string]port.RoleBinding
 	roles           map[string]port.Role
 	groups          map[string]port.Group
@@ -101,6 +102,7 @@ func New(clk clock.Clock) *Storage {
 		scheduled: map[string]port.ScheduledEvent{}, recoveryCodes: map[string]port.RecoveryCode{},
 		connections: map[string]port.Connection{}, sessions: map[string]port.Session{},
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
+		saTokens:     map[string]port.ServiceAccountToken{},
 		roleBindings: map[string]port.RoleBinding{}, roles: map[string]port.Role{}, groups: map[string]port.Group{},
 		groupMembers: map[string]port.GroupMember{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 		invitations: map[string]port.Invitation{}, quotaGrants: map[string]port.QuotaGrant{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},

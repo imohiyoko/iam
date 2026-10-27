@@ -8,6 +8,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/org"
+	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
@@ -83,6 +84,9 @@ func (s adminServer) subjectOf(ctx context.Context, tx port.Tx, sp port.Suspensi
 	case port.SuspensionTargetOrg:
 		o, err := tx.Orgs().Get(ctx, s.a.realm.ID, sp.TargetID)
 		return subject{target: org.OrgTarget(o)}, err
+	case port.SuspensionTargetServiceAccount:
+		sa, err := tx.ServiceAccounts().Get(ctx, s.a.realm.ID, sp.TargetID)
+		return subject{target: serviceaccount.Target(sa)}, err
 	case port.SuspensionTargetMembership:
 		m, err := tx.Memberships().Get(ctx, s.a.realm.ID, sp.TargetID)
 		if err != nil {

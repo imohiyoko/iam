@@ -45,6 +45,7 @@ var authnTests = []struct {
 	{"SessionMoveOrg", testSessionMoveOrg},
 	{"UserDeletion", testUserDeletion},
 	{"ServiceAccounts", testServiceAccounts},
+	{"ServiceAccountsM7", testServiceAccountsM7},
 	{"RoleBindings", testRoleBindings},
 	{"Roles", testRoles},
 	{"Groups", testGroups},
@@ -651,6 +652,86 @@ func testServiceAccounts(t *testing.T, h Harness) {
 	})
 }
 
+// testServiceAccountsM7 は Org・有効期間・論理削除・公開鍵・アクセストークン（ADR 0074）。
+func testServiceAccountsM7(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r := id.New(id.Realm)
+	a := port.ServiceAccount{ID: "sva_00000000000000000000000001", RealmID: r, OrgID: id.New(id.Org), Name: "ci", ValidFrom: ptr(T0),
+		ValidUntil: ptr(T0.Add(24 * time.Hour)), CreatedBy: "usr_x", CreatedAt: T0}
+	b := port.ServiceAccount{ID: "sva_00000000000000000000000002", RealmID: r, Name: "batch", CreatedAt: T0}
+	k := port.ServiceAccountCredential{ID: id.New(id.SACredential), RealmID: r, ServiceAccountID: a.ID, Type: "private_key_jwt",
+		PublicKey: []byte(`{"kty":"OKP"}`), Alg: "EdDSA", CreatedAt: T0.Add(time.Second)}
+	c := port.ServiceAccountCredential{ID: id.New(id.SACredential), RealmID: r, ServiceAccountID: a.ID, Type: "client_secret",
+		SecretHash: []byte("h"), CreatedAt: T0}
+	tok := port.ServiceAccountToken{ID: id.New(id.SAToken), RealmID: r, ServiceAccountID: a.ID, CredentialID: c.ID, Hash: []byte("t"),
+		CreatedAt: T0, ExpiresAt: T0.Add(10 * time.Minute)}
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.ServiceAccounts()
+		for _, x := range []port.ServiceAccount{b, a} {
+			if err := repo.Create(ctx, x); err != nil {
+				return err
+			}
+		}
+		for _, x := range []port.ServiceAccountCredential{k, c} {
+			if err := repo.CreateCredential(ctx, x); err != nil {
+				return err
+			}
+		}
+		if got, err := repo.Get(ctx, r, a.ID); err != nil || !reflect.DeepEqual(got, a) {
+			return fmt.Errorf("serviceAccounts.Get = %+v, %v", got, err)
+		}
+		l, err := repo.List(ctx, r, "", 1)
+		if err != nil || len(l) != 1 || l[0].ID != a.ID {
+			return fmt.Errorf("serviceAccounts.List = %+v, %v", l, err)
+		}
+		if l, err = repo.List(ctx, r, a.ID, 10); err != nil || len(l) != 1 || !reflect.DeepEqual(l[0], b) {
+			return fmt.Errorf("serviceAccounts.List after = %+v, %v", l, err)
+		}
+		cs, err := repo.ListCredentials(ctx, r, a.ID)
+		if err != nil || !reflect.DeepEqual(cs, []port.ServiceAccountCredential{c, k}) {
+			return fmt.Errorf("serviceAccounts.ListCredentials = %+v, %v", cs, err)
+		}
+		if err := repo.SetDeleted(ctx, r, a.ID, T0.Add(time.Hour)); err != nil {
+			return err
+		}
+		if err := repo.SetDeleted(ctx, r, a.ID, T0.Add(2*time.Hour)); err != nil {
+			return err
+		}
+		if got, _ := repo.Get(ctx, r, a.ID); got.DeletedAt == nil || !got.DeletedAt.Equal(T0.Add(time.Hour)) {
+			return fmt.Errorf("deleted_at = %v", got.DeletedAt)
+		}
+		if err := notFound("SetDeleted missing", repo.SetDeleted(ctx, r, id.New(id.ServiceAccount), T0)); err != nil {
+			return err
+		}
+		if err := notFound("SetDeleted from another realm", repo.SetDeleted(ctx, id.New(id.Realm), b.ID, T0)); err != nil {
+			return err
+		}
+		if err := repo.CreateToken(ctx, tok); err != nil {
+			return err
+		}
+		later := tok
+		later.ID, later.ExpiresAt = id.New(id.SAToken), T0.Add(time.Hour)
+		if err := repo.CreateToken(ctx, later); err != nil {
+			return err
+		}
+		if got, err := repo.GetToken(ctx, r, tok.ID); err != nil || !reflect.DeepEqual(got, tok) {
+			return fmt.Errorf("serviceAccounts.GetToken = %+v, %v", got, err)
+		}
+		if _, err := repo.GetToken(ctx, id.New(id.Realm), tok.ID); notFound("GetToken from another realm", err) != nil {
+			return notFound("GetToken from another realm", err)
+		}
+		n, err := repo.DeleteExpiredTokens(ctx, T0.Add(30*time.Minute), 10)
+		if err != nil || n != 1 {
+			return fmt.Errorf("serviceAccounts.DeleteExpiredTokens = %d, %v", n, err)
+		}
+		if _, err := repo.GetToken(ctx, r, tok.ID); notFound("expired token", err) != nil {
+			return notFound("expired token", err)
+		}
+		_, err = repo.GetToken(ctx, r, later.ID)
+		return err
+	})
+}
+
 // ---------------------------------------------------------------------------
 
 // seedUser は realm にユーザー1人と、そのメール・外部 ID・セッション・ロールを入れる。
@@ -779,7 +860,15 @@ var authnIsolationCases = []IsolationCase{
 				return 0, err
 			}
 			m, err := countOne(tx.ServiceAccounts().GetCredential(ctx, r, isoCred))
-			return n + m, err
+			if err != nil {
+				return 0, err
+			}
+			l, err := count(tx.ServiceAccounts().List(ctx, r, "", 10))
+			if err != nil {
+				return 0, err
+			}
+			c, err := count(tx.ServiceAccounts().ListCredentials(ctx, r, isoAccount))
+			return n + m + l + c, err
 		},
 	},
 	{

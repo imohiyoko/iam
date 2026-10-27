@@ -420,9 +420,17 @@ type SessionRepo interface {
 // M1 では通知の配信用（権限は notifications:claim に固定）だけを作る。
 // 行の数が少なく外に出る ID なので、内部 ID を別に持たず、ID に外部 ID を使う（ADR 0045）。
 type ServiceAccount struct {
-	ID        string
-	RealmID   string
-	Name      string
+	ID      string
+	RealmID string
+	// OrgID は所属する Org の内部 ID。空なら realm に属する（design.md 11.2）。
+	OrgID      string
+	Name       string
+	ValidFrom  *time.Time
+	ValidUntil *time.Time
+	// DeletedAt は削除した時刻（論理削除。以後は認証できない）。
+	DeletedAt *time.Time
+	// CreatedBy は作った主体の公開 ID（CLI で作ったものは空）。
+	CreatedBy string
 	CreatedAt time.Time
 }
 
@@ -432,19 +440,42 @@ type ServiceAccountCredential struct {
 	RealmID          string
 	ServiceAccountID string
 	Type             string // api_key / client_secret / private_key_jwt
-	SecretHash       []byte
+	SecretHash       []byte // api_key と client_secret
+	PublicKey        []byte // private_key_jwt の公開鍵（JWK）
+	Alg              string // private_key_jwt の署名方式（ES256 / EdDSA / ML-DSA-65）
 	CreatedAt        time.Time
 	ExpiresAt        *time.Time
 	RevokedAt        *time.Time
 }
 
-// ServiceAccountRepo は service_accounts と service_account_credentials の Repository。
+// ServiceAccountToken は client credentials で発行したアクセストークン（ADR 0074）。秘密は SHA-256 だけを持つ。
+type ServiceAccountToken struct {
+	ID               string
+	RealmID          string
+	ServiceAccountID string
+	CredentialID     string
+	Hash             []byte
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+}
+
+// ServiceAccountRepo は service_accounts と service_account_credentials、アクセストークンの Repository。
 type ServiceAccountRepo interface {
 	Create(ctx context.Context, a ServiceAccount) error
 	Get(ctx context.Context, realmID, id string) (ServiceAccount, error)
+	// List は realm のサービスアカウント（削除済みを含む）を ID の順に、afterID の次から最大 limit 件返す。
+	List(ctx context.Context, realmID, afterID string, limit int) ([]ServiceAccount, error)
+	// SetDeleted は at に削除する。既に削除していれば何もしない。無ければ errs.NotFound。
+	SetDeleted(ctx context.Context, realmID, id string, at time.Time) error
 	CreateCredential(ctx context.Context, c ServiceAccountCredential) error
 	GetCredential(ctx context.Context, realmID, id string) (ServiceAccountCredential, error)
+	// ListCredentials はサービスアカウントの認証情報（無効化したものを含む）を作成の順（同時刻は ID の順）に返す。
+	ListCredentials(ctx context.Context, realmID, serviceAccountID string) ([]ServiceAccountCredential, error)
 	RevokeCredential(ctx context.Context, realmID, id string, at time.Time) error
+	CreateToken(ctx context.Context, t ServiceAccountToken) error
+	GetToken(ctx context.Context, realmID, id string) (ServiceAccountToken, error)
+	// DeleteExpiredTokens は before より前に期限が切れたトークンを全 realm から最大 limit 件消し、消した件数を返す（9.6）。
+	DeleteExpiredTokens(ctx context.Context, before time.Time, limit int) (int, error)
 }
 
 // OrgKind は Org の種類（design.md 11.13）。

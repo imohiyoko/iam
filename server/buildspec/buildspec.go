@@ -17,6 +17,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/password"
+	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/plugin"
@@ -29,11 +30,12 @@ var featureCatalog = map[string]struct {
 	decl feature.Feature
 	pkg  string
 }{
-	feature.Org:            {org.Feature, module + "/features/org"},
-	feature.OrgLoginPolicy: {org.PolicyFeature, module + "/features/orgloginpolicy"},
-	feature.Quota:          {org.QuotaFeature, module + "/features/quota"},
-	feature.Warnings:       {warning.Feature, module + "/features/warnings"},
-	feature.Password:       {password.Feature, module + "/features/password"},
+	feature.Org:             {org.Feature, module + "/features/org"},
+	feature.OrgLoginPolicy:  {org.PolicyFeature, module + "/features/orgloginpolicy"},
+	feature.Quota:           {org.QuotaFeature, module + "/features/quota"},
+	feature.Warnings:        {warning.Feature, module + "/features/warnings"},
+	feature.Password:        {password.Feature, module + "/features/password"},
+	feature.ServiceAccounts: {serviceaccount.Feature, module + "/features/serviceaccounts"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

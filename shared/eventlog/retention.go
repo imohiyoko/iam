@@ -26,7 +26,7 @@ type Retention struct {
 	RealmID string
 	// Audit は監査ログの保持期間。0 なら切り詰めない。
 	Audit time.Duration
-	// Ended は失効・期限切れのセッション、配送済みの outbox、発火済みの予約イベントを残す期間。0 なら消さない。
+	// Ended は失効・期限切れのセッション、配送済みの outbox、発火済みの予約イベント、期限の切れたサービスアカウントのトークンを残す期間。0 なら消さない。
 	Ended time.Duration
 	// IndexOnlyRealms はメールの最小化モード（index_only）の realm。残っているアドレスの暗号文を消す。
 	IndexOnlyRealms []string
@@ -37,7 +37,7 @@ type Retention struct {
 
 // Swept は1回の掃除で消した件数。
 type Swept struct {
-	Audit, Sessions, Outbox, Scheduled, Emails int
+	Audit, Sessions, Outbox, Scheduled, Emails, Tokens int
 }
 
 // Run は ctx が終わるまで掃除を繰り返す。
@@ -48,7 +48,8 @@ func (r *Retention) Run(ctx context.Context) {
 		if n, err := r.Sweep(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			r.logger().Warn("retention sweep failed", "error", err)
 		} else if n != (Swept{}) {
-			r.logger().Info("retention sweep", "audit", n.Audit, "sessions", n.Sessions, "outbox", n.Outbox, "scheduled", n.Scheduled, "emails", n.Emails)
+			r.logger().Info("retention sweep", "audit", n.Audit, "sessions", n.Sessions, "outbox", n.Outbox, "scheduled", n.Scheduled, "emails", n.Emails,
+				"tokens", n.Tokens)
 		}
 		select {
 		case <-ctx.Done():
@@ -88,6 +89,9 @@ func (r *Retention) Sweep(ctx context.Context) (Swept, error) {
 			}},
 			{&n.Scheduled, func(ctx context.Context, tx port.Tx) (int, error) {
 				return tx.ScheduledEvents().DeleteFired(ctx, before, r.batch())
+			}},
+			{&n.Tokens, func(ctx context.Context, tx port.Tx) (int, error) {
+				return tx.ServiceAccounts().DeleteExpiredTokens(ctx, before, r.batch())
 			}},
 		}
 		for _, s := range steps {

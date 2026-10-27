@@ -89,19 +89,19 @@ func (e ClientInputIdTokenSignedResponseAlg) Valid() bool {
 
 // Defines values for ClientInputTokenEndpointAuthMethod.
 const (
-	ClientSecret  ClientInputTokenEndpointAuthMethod = "client_secret"
-	None          ClientInputTokenEndpointAuthMethod = "none"
-	PrivateKeyJwt ClientInputTokenEndpointAuthMethod = "private_key_jwt"
+	ClientInputTokenEndpointAuthMethodClientSecret  ClientInputTokenEndpointAuthMethod = "client_secret"
+	ClientInputTokenEndpointAuthMethodNone          ClientInputTokenEndpointAuthMethod = "none"
+	ClientInputTokenEndpointAuthMethodPrivateKeyJwt ClientInputTokenEndpointAuthMethod = "private_key_jwt"
 )
 
 // Valid indicates whether the value is a known member of the ClientInputTokenEndpointAuthMethod enum.
 func (e ClientInputTokenEndpointAuthMethod) Valid() bool {
 	switch e {
-	case ClientSecret:
+	case ClientInputTokenEndpointAuthMethodClientSecret:
 		return true
-	case None:
+	case ClientInputTokenEndpointAuthMethodNone:
 		return true
-	case PrivateKeyJwt:
+	case ClientInputTokenEndpointAuthMethodPrivateKeyJwt:
 		return true
 	default:
 		return false
@@ -318,11 +318,75 @@ func (e QuotaGrantInputKind) Valid() bool {
 	}
 }
 
+// Defines values for ServiceAccountCredentialType.
+const (
+	ServiceAccountCredentialTypeApiKey        ServiceAccountCredentialType = "api_key"
+	ServiceAccountCredentialTypeClientSecret  ServiceAccountCredentialType = "client_secret"
+	ServiceAccountCredentialTypePrivateKeyJwt ServiceAccountCredentialType = "private_key_jwt"
+)
+
+// Valid indicates whether the value is a known member of the ServiceAccountCredentialType enum.
+func (e ServiceAccountCredentialType) Valid() bool {
+	switch e {
+	case ServiceAccountCredentialTypeApiKey:
+		return true
+	case ServiceAccountCredentialTypeClientSecret:
+		return true
+	case ServiceAccountCredentialTypePrivateKeyJwt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ServiceAccountCredentialInputAlg.
+const (
+	ServiceAccountCredentialInputAlgES256   ServiceAccountCredentialInputAlg = "ES256"
+	ServiceAccountCredentialInputAlgEdDSA   ServiceAccountCredentialInputAlg = "EdDSA"
+	ServiceAccountCredentialInputAlgMLDSA65 ServiceAccountCredentialInputAlg = "ML-DSA-65"
+)
+
+// Valid indicates whether the value is a known member of the ServiceAccountCredentialInputAlg enum.
+func (e ServiceAccountCredentialInputAlg) Valid() bool {
+	switch e {
+	case ServiceAccountCredentialInputAlgES256:
+		return true
+	case ServiceAccountCredentialInputAlgEdDSA:
+		return true
+	case ServiceAccountCredentialInputAlgMLDSA65:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ServiceAccountCredentialInputType.
+const (
+	ServiceAccountCredentialInputTypeApiKey        ServiceAccountCredentialInputType = "api_key"
+	ServiceAccountCredentialInputTypeClientSecret  ServiceAccountCredentialInputType = "client_secret"
+	ServiceAccountCredentialInputTypePrivateKeyJwt ServiceAccountCredentialInputType = "private_key_jwt"
+)
+
+// Valid indicates whether the value is a known member of the ServiceAccountCredentialInputType enum.
+func (e ServiceAccountCredentialInputType) Valid() bool {
+	switch e {
+	case ServiceAccountCredentialInputTypeApiKey:
+		return true
+	case ServiceAccountCredentialInputTypeClientSecret:
+		return true
+	case ServiceAccountCredentialInputTypePrivateKeyJwt:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SuspensionTargetType.
 const (
-	SuspensionTargetTypeMembership SuspensionTargetType = "membership"
-	SuspensionTargetTypeOrg        SuspensionTargetType = "org"
-	SuspensionTargetTypeUser       SuspensionTargetType = "user"
+	SuspensionTargetTypeMembership     SuspensionTargetType = "membership"
+	SuspensionTargetTypeOrg            SuspensionTargetType = "org"
+	SuspensionTargetTypeServiceAccount SuspensionTargetType = "service_account"
+	SuspensionTargetTypeUser           SuspensionTargetType = "user"
 )
 
 // Valid indicates whether the value is a known member of the SuspensionTargetType enum.
@@ -331,6 +395,8 @@ func (e SuspensionTargetType) Valid() bool {
 	case SuspensionTargetTypeMembership:
 		return true
 	case SuspensionTargetTypeOrg:
+		return true
+	case SuspensionTargetTypeServiceAccount:
 		return true
 	case SuspensionTargetTypeUser:
 		return true
@@ -351,6 +417,21 @@ func (e RotateSigningKeyJSONBodyAlg) Valid() bool {
 	case RotateSigningKeyJSONBodyAlgES256:
 		return true
 	case RotateSigningKeyJSONBodyAlgMLDSA65:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IssueServiceAccountToken200JSONResponseBodyTokenType.
+const (
+	Bearer IssueServiceAccountToken200JSONResponseBodyTokenType = "Bearer"
+)
+
+// Valid indicates whether the value is a known member of the IssueServiceAccountToken200JSONResponseBodyTokenType enum.
+func (e IssueServiceAccountToken200JSONResponseBodyTokenType) Valid() bool {
+	switch e {
+	case Bearer:
 		return true
 	default:
 		return false
@@ -721,7 +802,7 @@ type RoleBinding struct {
 	// PrincipalId 主体の公開 ID
 	PrincipalId string `json:"principal_id"`
 
-	// PrincipalType user / group
+	// PrincipalType user / group / service_account
 	PrincipalType string  `json:"principal_type"`
 	ResourceId    *string `json:"resource_id,omitempty"`
 	ResourceType  *string `json:"resource_type,omitempty"`
@@ -734,7 +815,7 @@ type RoleBinding struct {
 type RoleBindingInput struct {
 	PrincipalId string `json:"principal_id"`
 
-	// PrincipalType user / group
+	// PrincipalType user / group / service_account
 	PrincipalType string  `json:"principal_type"`
 	ResourceId    *string `json:"resource_id,omitempty"`
 	ResourceType  *string `json:"resource_type,omitempty"`
@@ -755,6 +836,70 @@ type RoleInput struct {
 // Roles defines model for Roles.
 type Roles struct {
 	Roles []Role `json:"roles"`
+}
+
+// ServiceAccount defines model for ServiceAccount.
+type ServiceAccount struct {
+	CreatedAt time.Time  `json:"created_at"`
+	CreatedBy *string    `json:"created_by,omitempty"`
+	Deleted   bool       `json:"deleted"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+
+	// Id client credentials の client_id にもなる
+	Id   string `json:"id"`
+	Name string `json:"name"`
+
+	// OrgId 所属する Org の公開 ID
+	OrgId      *string    `json:"org_id,omitempty"`
+	ValidFrom  *time.Time `json:"valid_from,omitempty"`
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+}
+
+// ServiceAccountCredential defines model for ServiceAccountCredential.
+type ServiceAccountCredential struct {
+	// Active 今使えるか
+	Active    bool       `json:"active"`
+	Alg       *string    `json:"alg,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Id        string     `json:"id"`
+
+	// PublicKey private_key_jwt の公開鍵（JWK）
+	PublicKey *map[string]interface{} `json:"public_key,omitempty"`
+	RevokedAt *time.Time              `json:"revoked_at,omitempty"`
+
+	// Secret api_key と client_secret を作ったときだけ、1度だけ返す
+	Secret *string                      `json:"secret,omitempty"`
+	Type   ServiceAccountCredentialType `json:"type"`
+}
+
+// ServiceAccountCredentialType defines model for ServiceAccountCredential.Type.
+type ServiceAccountCredentialType string
+
+// ServiceAccountCredentialInput defines model for ServiceAccountCredentialInput.
+type ServiceAccountCredentialInput struct {
+	Alg       *ServiceAccountCredentialInputAlg `json:"alg,omitempty"`
+	ExpiresAt *time.Time                        `json:"expires_at,omitempty"`
+
+	// PublicKey private_key_jwt の公開鍵（JWK）
+	PublicKey *map[string]interface{}           `json:"public_key,omitempty"`
+	Type      ServiceAccountCredentialInputType `json:"type"`
+}
+
+// ServiceAccountCredentialInputAlg defines model for ServiceAccountCredentialInput.Alg.
+type ServiceAccountCredentialInputAlg string
+
+// ServiceAccountCredentialInputType defines model for ServiceAccountCredentialInput.Type.
+type ServiceAccountCredentialInputType string
+
+// ServiceAccountInput defines model for ServiceAccountInput.
+type ServiceAccountInput struct {
+	Name string `json:"name"`
+
+	// OrgId 共有 Org の公開 ID
+	OrgId      *string    `json:"org_id,omitempty"`
+	ValidFrom  *time.Time `json:"valid_from,omitempty"`
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
 }
 
 // SuspendRequest defines model for SuspendRequest.
@@ -879,6 +1024,12 @@ type DeleteOrgJSONBody struct {
 	Immediate *bool `json:"immediate,omitempty"`
 }
 
+// ListServiceAccountsParams defines parameters for ListServiceAccounts.
+type ListServiceAccountsParams struct {
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // RotateSigningKeyJSONBody defines parameters for RotateSigningKey.
 type RotateSigningKeyJSONBody struct {
 	Alg RotateSigningKeyJSONBodyAlg `json:"alg"`
@@ -886,6 +1037,26 @@ type RotateSigningKeyJSONBody struct {
 
 // RotateSigningKeyJSONBodyAlg defines parameters for RotateSigningKey.
 type RotateSigningKeyJSONBodyAlg string
+
+// IssueServiceAccountTokenFormdataBody defines parameters for IssueServiceAccountToken.
+type IssueServiceAccountTokenFormdataBody struct {
+	ClientAssertion     *string `form:"client_assertion,omitempty" json:"client_assertion,omitempty"`
+	ClientAssertionType *string `form:"client_assertion_type,omitempty" json:"client_assertion_type,omitempty"`
+	ClientId            *string `form:"client_id,omitempty" json:"client_id,omitempty"`
+	ClientSecret        *string `form:"client_secret,omitempty" json:"client_secret,omitempty"`
+	GrantType           string  `form:"grant_type" json:"grant_type"`
+
+	// Scope 使わない（権限はロールの付与で決まる）
+	Scope *string `form:"scope,omitempty" json:"scope,omitempty"`
+}
+
+// IssueServiceAccountTokenParams defines parameters for IssueServiceAccountToken.
+type IssueServiceAccountTokenParams struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+// IssueServiceAccountToken200JSONResponseBodyTokenType defines parameters for IssueServiceAccountToken.
+type IssueServiceAccountToken200JSONResponseBodyTokenType string
 
 // CreateUserJSONBody defines parameters for CreateUser.
 type CreateUserJSONBody struct {
@@ -973,11 +1144,23 @@ type CreateRoleJSONRequestBody = RoleInput
 // UpdateRoleJSONRequestBody defines body for UpdateRole for application/json ContentType.
 type UpdateRoleJSONRequestBody = RoleInput
 
+// CreateServiceAccountJSONRequestBody defines body for CreateServiceAccount for application/json ContentType.
+type CreateServiceAccountJSONRequestBody = ServiceAccountInput
+
+// CreateServiceAccountCredentialJSONRequestBody defines body for CreateServiceAccountCredential for application/json ContentType.
+type CreateServiceAccountCredentialJSONRequestBody = ServiceAccountCredentialInput
+
+// SuspendServiceAccountJSONRequestBody defines body for SuspendServiceAccount for application/json ContentType.
+type SuspendServiceAccountJSONRequestBody = SuspendRequest
+
 // RotateSigningKeyJSONRequestBody defines body for RotateSigningKey for application/json ContentType.
 type RotateSigningKeyJSONRequestBody RotateSigningKeyJSONBody
 
 // LiftSuspensionJSONRequestBody defines body for LiftSuspension for application/json ContentType.
 type LiftSuspensionJSONRequestBody = LiftRequest
+
+// IssueServiceAccountTokenFormdataRequestBody defines body for IssueServiceAccountToken for application/x-www-form-urlencoded ContentType.
+type IssueServiceAccountTokenFormdataRequestBody IssueServiceAccountTokenFormdataBody
 
 // CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
 type CreateUserJSONRequestBody CreateUserJSONBody
@@ -1125,6 +1308,33 @@ type ServerInterface interface {
 	// DeleteRole 独自のロールと、その付与を消す
 	// (POST /v1/admin/roles/{role_id}:delete)
 	DeleteRole(w http.ResponseWriter, r *http.Request, roleId string)
+	// ListServiceAccounts サービスアカウントの一覧（削除したものも含む。ADR 0074）
+	// (GET /v1/admin/service-accounts)
+	ListServiceAccounts(w http.ResponseWriter, r *http.Request, params ListServiceAccountsParams)
+	// CreateServiceAccount サービスアカウントを作る（design.md 11.2、ADR 0074）
+	// (POST /v1/admin/service-accounts)
+	CreateServiceAccount(w http.ResponseWriter, r *http.Request)
+	// GetServiceAccount サービスアカウントを返す
+	// (GET /v1/admin/service-accounts/{id})
+	GetServiceAccount(w http.ResponseWriter, r *http.Request, id string)
+	// ListServiceAccountCredentials サービスアカウントの認証情報の一覧（無効化したものも含む）
+	// (GET /v1/admin/service-accounts/{id}/credentials)
+	ListServiceAccountCredentials(w http.ResponseWriter, r *http.Request, id string)
+	// CreateServiceAccountCredential 認証情報を足す（ADR 0074）
+	// (POST /v1/admin/service-accounts/{id}/credentials)
+	CreateServiceAccountCredential(w http.ResponseWriter, r *http.Request, id string)
+	// RevokeServiceAccountCredential 認証情報を無効化する
+	// (POST /v1/admin/service-accounts/{id}/credentials/{credential_id}:revoke)
+	RevokeServiceAccountCredential(w http.ResponseWriter, r *http.Request, id string, credentialId string)
+	// ListServiceAccountSuspensions サービスアカウントの停止の一覧（解除・終了したものも含む）
+	// (GET /v1/admin/service-accounts/{id}/suspensions)
+	ListServiceAccountSuspensions(w http.ResponseWriter, r *http.Request, id string)
+	// SuspendServiceAccount サービスアカウントを停止する（4.7）
+	// (POST /v1/admin/service-accounts/{id}/suspensions)
+	SuspendServiceAccount(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteServiceAccount サービスアカウントを削除する（論理削除）
+	// (POST /v1/admin/service-accounts/{id}:delete)
+	DeleteServiceAccount(w http.ResponseWriter, r *http.Request, id string)
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(w http.ResponseWriter, r *http.Request, id string)
@@ -1134,6 +1344,9 @@ type ServerInterface interface {
 	// LiftSuspension 停止を解除する
 	// (POST /v1/admin/suspensions/{id}:lift)
 	LiftSuspension(w http.ResponseWriter, r *http.Request, id string)
+	// IssueServiceAccountToken client credentials でアクセストークンを発行する（RFC 6749 4.4、ADR 0074）
+	// (POST /v1/admin/token)
+	IssueServiceAccountToken(w http.ResponseWriter, r *http.Request, params IssueServiceAccountTokenParams)
 	// CreateUser ユーザーを登録する（確認の経路 `admin`。4.1）
 	// (POST /v1/admin/users)
 	CreateUser(w http.ResponseWriter, r *http.Request)
@@ -2153,6 +2366,257 @@ func (siw *ServerInterfaceWrapper) DeleteRole(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListServiceAccounts operation middleware
+func (siw *ServerInterfaceWrapper) ListServiceAccounts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListServiceAccountsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListServiceAccounts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateServiceAccount operation middleware
+func (siw *ServerInterfaceWrapper) CreateServiceAccount(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateServiceAccount(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetServiceAccount operation middleware
+func (siw *ServerInterfaceWrapper) GetServiceAccount(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetServiceAccount(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListServiceAccountCredentials operation middleware
+func (siw *ServerInterfaceWrapper) ListServiceAccountCredentials(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListServiceAccountCredentials(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateServiceAccountCredential operation middleware
+func (siw *ServerInterfaceWrapper) CreateServiceAccountCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateServiceAccountCredential(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeServiceAccountCredential operation middleware
+func (siw *ServerInterfaceWrapper) RevokeServiceAccountCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "credential_id" -------------
+	var credentialId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "credential_id", r.PathValue("credential_id"), &credentialId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "credential_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeServiceAccountCredential(w, r, id, credentialId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListServiceAccountSuspensions operation middleware
+func (siw *ServerInterfaceWrapper) ListServiceAccountSuspensions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListServiceAccountSuspensions(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SuspendServiceAccount operation middleware
+func (siw *ServerInterfaceWrapper) SuspendServiceAccount(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SuspendServiceAccount(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteServiceAccount operation middleware
+func (siw *ServerInterfaceWrapper) DeleteServiceAccount(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteServiceAccount(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RevokeSession operation middleware
 func (siw *ServerInterfaceWrapper) RevokeSession(w http.ResponseWriter, r *http.Request) {
 
@@ -2210,6 +2674,47 @@ func (siw *ServerInterfaceWrapper) LiftSuspension(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.LiftSuspension(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IssueServiceAccountToken operation middleware
+func (siw *ServerInterfaceWrapper) IssueServiceAccountToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params IssueServiceAccountTokenParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Authorization" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Authorization")]; found {
+		var Authorization string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Authorization", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Authorization", valueList[0], &Authorization, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Authorization", Err: err})
+			return
+		}
+
+		params.Authorization = &Authorization
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IssueServiceAccountToken(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2731,6 +3236,16 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients/{id}:rotate-secret", wrapper.RotateClientSecret)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients/{id}:delete", wrapper.DeleteClient)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/signing-keys:rotate", wrapper.RotateSigningKey)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts", wrapper.ListServiceAccounts)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/service-accounts", wrapper.CreateServiceAccount)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts/{id}", wrapper.GetServiceAccount)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/service-accounts/{id}:delete", wrapper.DeleteServiceAccount)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/credentials", wrapper.ListServiceAccountCredentials)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/credentials", wrapper.CreateServiceAccountCredential)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/credentials/{credential_id}:revoke", wrapper.RevokeServiceAccountCredential)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/suspensions", wrapper.ListServiceAccountSuspensions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/suspensions", wrapper.SuspendServiceAccount)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/token", wrapper.IssueServiceAccountToken)
 
 	return m
 }
@@ -5872,6 +6387,689 @@ func (response DeleteRole404JSONResponse) VisitDeleteRoleResponse(w http.Respons
 	return err
 }
 
+type ListServiceAccountsRequestObject struct {
+	Params ListServiceAccountsParams
+}
+
+type ListServiceAccountsResponseObject interface {
+	VisitListServiceAccountsResponse(w http.ResponseWriter) error
+}
+
+type ListServiceAccounts200JSONResponse struct {
+	// NextCursor 続きがあるときだけ
+	NextCursor      *string          `json:"next_cursor,omitempty"`
+	ServiceAccounts []ServiceAccount `json:"service_accounts"`
+}
+
+func (response ListServiceAccounts200JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccounts400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListServiceAccounts400JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccounts401JSONResponse Error
+
+func (response ListServiceAccounts401JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccounts403JSONResponse Error
+
+func (response ListServiceAccounts403JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccounts404JSONResponse Error
+
+func (response ListServiceAccounts404JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccountRequestObject struct {
+	Body *CreateServiceAccountJSONRequestBody
+}
+
+type CreateServiceAccountResponseObject interface {
+	VisitCreateServiceAccountResponse(w http.ResponseWriter) error
+}
+
+type CreateServiceAccount201JSONResponse ServiceAccount
+
+func (response CreateServiceAccount201JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateServiceAccount400JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount401JSONResponse Error
+
+func (response CreateServiceAccount401JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount403JSONResponse Error
+
+func (response CreateServiceAccount403JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount404JSONResponse Error
+
+func (response CreateServiceAccount404JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceAccountRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetServiceAccountResponseObject interface {
+	VisitGetServiceAccountResponse(w http.ResponseWriter) error
+}
+
+type GetServiceAccount200JSONResponse ServiceAccount
+
+func (response GetServiceAccount200JSONResponse) VisitGetServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceAccount401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetServiceAccount401JSONResponse) VisitGetServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceAccount403JSONResponse Error
+
+func (response GetServiceAccount403JSONResponse) VisitGetServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceAccount404JSONResponse Error
+
+func (response GetServiceAccount404JSONResponse) VisitGetServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountCredentialsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListServiceAccountCredentialsResponseObject interface {
+	VisitListServiceAccountCredentialsResponse(w http.ResponseWriter) error
+}
+
+type ListServiceAccountCredentials200JSONResponse struct {
+	Credentials []ServiceAccountCredential `json:"credentials"`
+}
+
+func (response ListServiceAccountCredentials200JSONResponse) VisitListServiceAccountCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountCredentials401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListServiceAccountCredentials401JSONResponse) VisitListServiceAccountCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountCredentials403JSONResponse Error
+
+func (response ListServiceAccountCredentials403JSONResponse) VisitListServiceAccountCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountCredentials404JSONResponse Error
+
+func (response ListServiceAccountCredentials404JSONResponse) VisitListServiceAccountCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccountCredentialRequestObject struct {
+	Id   string `json:"id"`
+	Body *CreateServiceAccountCredentialJSONRequestBody
+}
+
+type CreateServiceAccountCredentialResponseObject interface {
+	VisitCreateServiceAccountCredentialResponse(w http.ResponseWriter) error
+}
+
+type CreateServiceAccountCredential201JSONResponse ServiceAccountCredential
+
+func (response CreateServiceAccountCredential201JSONResponse) VisitCreateServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccountCredential400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateServiceAccountCredential400JSONResponse) VisitCreateServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccountCredential401JSONResponse Error
+
+func (response CreateServiceAccountCredential401JSONResponse) VisitCreateServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccountCredential403JSONResponse Error
+
+func (response CreateServiceAccountCredential403JSONResponse) VisitCreateServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccountCredential404JSONResponse Error
+
+func (response CreateServiceAccountCredential404JSONResponse) VisitCreateServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccountCredential409JSONResponse Error
+
+func (response CreateServiceAccountCredential409JSONResponse) VisitCreateServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeServiceAccountCredentialRequestObject struct {
+	Id           string `json:"id"`
+	CredentialId string `json:"credential_id"`
+}
+
+type RevokeServiceAccountCredentialResponseObject interface {
+	VisitRevokeServiceAccountCredentialResponse(w http.ResponseWriter) error
+}
+
+type RevokeServiceAccountCredential200JSONResponse ServiceAccountCredential
+
+func (response RevokeServiceAccountCredential200JSONResponse) VisitRevokeServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeServiceAccountCredential401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RevokeServiceAccountCredential401JSONResponse) VisitRevokeServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeServiceAccountCredential403JSONResponse Error
+
+func (response RevokeServiceAccountCredential403JSONResponse) VisitRevokeServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeServiceAccountCredential404JSONResponse Error
+
+func (response RevokeServiceAccountCredential404JSONResponse) VisitRevokeServiceAccountCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountSuspensionsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListServiceAccountSuspensionsResponseObject interface {
+	VisitListServiceAccountSuspensionsResponse(w http.ResponseWriter) error
+}
+
+type ListServiceAccountSuspensions200JSONResponse Suspensions
+
+func (response ListServiceAccountSuspensions200JSONResponse) VisitListServiceAccountSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountSuspensions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListServiceAccountSuspensions401JSONResponse) VisitListServiceAccountSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountSuspensions403JSONResponse Error
+
+func (response ListServiceAccountSuspensions403JSONResponse) VisitListServiceAccountSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountSuspensions404JSONResponse Error
+
+func (response ListServiceAccountSuspensions404JSONResponse) VisitListServiceAccountSuspensionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendServiceAccountRequestObject struct {
+	Id   string `json:"id"`
+	Body *SuspendServiceAccountJSONRequestBody
+}
+
+type SuspendServiceAccountResponseObject interface {
+	VisitSuspendServiceAccountResponse(w http.ResponseWriter) error
+}
+
+type SuspendServiceAccount200JSONResponse Suspension
+
+func (response SuspendServiceAccount200JSONResponse) VisitSuspendServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendServiceAccount201JSONResponse Suspension
+
+func (response SuspendServiceAccount201JSONResponse) VisitSuspendServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendServiceAccount400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SuspendServiceAccount400JSONResponse) VisitSuspendServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendServiceAccount401JSONResponse Error
+
+func (response SuspendServiceAccount401JSONResponse) VisitSuspendServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendServiceAccount403JSONResponse Error
+
+func (response SuspendServiceAccount403JSONResponse) VisitSuspendServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendServiceAccount404JSONResponse Error
+
+func (response SuspendServiceAccount404JSONResponse) VisitSuspendServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendServiceAccount409JSONResponse Error
+
+func (response SuspendServiceAccount409JSONResponse) VisitSuspendServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteServiceAccountRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteServiceAccountResponseObject interface {
+	VisitDeleteServiceAccountResponse(w http.ResponseWriter) error
+}
+
+type DeleteServiceAccount200JSONResponse ServiceAccount
+
+func (response DeleteServiceAccount200JSONResponse) VisitDeleteServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteServiceAccount401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteServiceAccount401JSONResponse) VisitDeleteServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteServiceAccount403JSONResponse Error
+
+func (response DeleteServiceAccount403JSONResponse) VisitDeleteServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteServiceAccount404JSONResponse Error
+
+func (response DeleteServiceAccount404JSONResponse) VisitDeleteServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RevokeSessionRequestObject struct {
 	Id string `json:"id"`
 }
@@ -6065,6 +7263,85 @@ func (response LiftSuspension403JSONResponse) VisitLiftSuspensionResponse(w http
 type LiftSuspension404JSONResponse Error
 
 func (response LiftSuspension404JSONResponse) VisitLiftSuspensionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueServiceAccountTokenRequestObject struct {
+	Params IssueServiceAccountTokenParams
+	Body   *IssueServiceAccountTokenFormdataRequestBody
+}
+
+type IssueServiceAccountTokenResponseObject interface {
+	VisitIssueServiceAccountTokenResponse(w http.ResponseWriter) error
+}
+
+type IssueServiceAccountToken200ResponseHeaders struct {
+	CacheControl *string
+}
+
+type IssueServiceAccountToken200JSONResponse struct {
+	Body struct {
+		AccessToken string                                               `json:"access_token"`
+		ExpiresIn   int                                                  `json:"expires_in"`
+		TokenType   IssueServiceAccountToken200JSONResponseBodyTokenType `json:"token_type"`
+	}
+	Headers IssueServiceAccountToken200ResponseHeaders
+}
+
+func (response IssueServiceAccountToken200JSONResponse) VisitIssueServiceAccountTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.CacheControl != nil {
+		w.Header().Set("Cache-Control", fmt.Sprint(*response.Headers.CacheControl))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueServiceAccountToken400JSONResponse struct{ ErrorJSONResponse }
+
+func (response IssueServiceAccountToken400JSONResponse) VisitIssueServiceAccountTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueServiceAccountToken401JSONResponse Error
+
+func (response IssueServiceAccountToken401JSONResponse) VisitIssueServiceAccountTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueServiceAccountToken404JSONResponse Error
+
+func (response IssueServiceAccountToken404JSONResponse) VisitIssueServiceAccountTokenResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -7157,6 +8434,33 @@ type StrictServerInterface interface {
 	// DeleteRole 独自のロールと、その付与を消す
 	// (POST /v1/admin/roles/{role_id}:delete)
 	DeleteRole(ctx context.Context, request DeleteRoleRequestObject) (DeleteRoleResponseObject, error)
+	// ListServiceAccounts サービスアカウントの一覧（削除したものも含む。ADR 0074）
+	// (GET /v1/admin/service-accounts)
+	ListServiceAccounts(ctx context.Context, request ListServiceAccountsRequestObject) (ListServiceAccountsResponseObject, error)
+	// CreateServiceAccount サービスアカウントを作る（design.md 11.2、ADR 0074）
+	// (POST /v1/admin/service-accounts)
+	CreateServiceAccount(ctx context.Context, request CreateServiceAccountRequestObject) (CreateServiceAccountResponseObject, error)
+	// GetServiceAccount サービスアカウントを返す
+	// (GET /v1/admin/service-accounts/{id})
+	GetServiceAccount(ctx context.Context, request GetServiceAccountRequestObject) (GetServiceAccountResponseObject, error)
+	// ListServiceAccountCredentials サービスアカウントの認証情報の一覧（無効化したものも含む）
+	// (GET /v1/admin/service-accounts/{id}/credentials)
+	ListServiceAccountCredentials(ctx context.Context, request ListServiceAccountCredentialsRequestObject) (ListServiceAccountCredentialsResponseObject, error)
+	// CreateServiceAccountCredential 認証情報を足す（ADR 0074）
+	// (POST /v1/admin/service-accounts/{id}/credentials)
+	CreateServiceAccountCredential(ctx context.Context, request CreateServiceAccountCredentialRequestObject) (CreateServiceAccountCredentialResponseObject, error)
+	// RevokeServiceAccountCredential 認証情報を無効化する
+	// (POST /v1/admin/service-accounts/{id}/credentials/{credential_id}:revoke)
+	RevokeServiceAccountCredential(ctx context.Context, request RevokeServiceAccountCredentialRequestObject) (RevokeServiceAccountCredentialResponseObject, error)
+	// ListServiceAccountSuspensions サービスアカウントの停止の一覧（解除・終了したものも含む）
+	// (GET /v1/admin/service-accounts/{id}/suspensions)
+	ListServiceAccountSuspensions(ctx context.Context, request ListServiceAccountSuspensionsRequestObject) (ListServiceAccountSuspensionsResponseObject, error)
+	// SuspendServiceAccount サービスアカウントを停止する（4.7）
+	// (POST /v1/admin/service-accounts/{id}/suspensions)
+	SuspendServiceAccount(ctx context.Context, request SuspendServiceAccountRequestObject) (SuspendServiceAccountResponseObject, error)
+	// DeleteServiceAccount サービスアカウントを削除する（論理削除）
+	// (POST /v1/admin/service-accounts/{id}:delete)
+	DeleteServiceAccount(ctx context.Context, request DeleteServiceAccountRequestObject) (DeleteServiceAccountResponseObject, error)
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(ctx context.Context, request RevokeSessionRequestObject) (RevokeSessionResponseObject, error)
@@ -7166,6 +8470,9 @@ type StrictServerInterface interface {
 	// LiftSuspension 停止を解除する
 	// (POST /v1/admin/suspensions/{id}:lift)
 	LiftSuspension(ctx context.Context, request LiftSuspensionRequestObject) (LiftSuspensionResponseObject, error)
+	// IssueServiceAccountToken client credentials でアクセストークンを発行する（RFC 6749 4.4、ADR 0074）
+	// (POST /v1/admin/token)
+	IssueServiceAccountToken(ctx context.Context, request IssueServiceAccountTokenRequestObject) (IssueServiceAccountTokenResponseObject, error)
 	// CreateUser ユーザーを登録する（確認の経路 `admin`。4.1）
 	// (POST /v1/admin/users)
 	CreateUser(ctx context.Context, request CreateUserRequestObject) (CreateUserResponseObject, error)
@@ -8434,6 +9741,260 @@ func (sh *strictHandler) DeleteRole(w http.ResponseWriter, r *http.Request, role
 	}
 }
 
+// ListServiceAccounts operation middleware
+func (sh *strictHandler) ListServiceAccounts(w http.ResponseWriter, r *http.Request, params ListServiceAccountsParams) {
+	var request ListServiceAccountsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListServiceAccounts(ctx, request.(ListServiceAccountsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListServiceAccounts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListServiceAccountsResponseObject); ok {
+		if err := validResponse.VisitListServiceAccountsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateServiceAccount operation middleware
+func (sh *strictHandler) CreateServiceAccount(w http.ResponseWriter, r *http.Request) {
+	var request CreateServiceAccountRequestObject
+
+	var body CreateServiceAccountJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateServiceAccount(ctx, request.(CreateServiceAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateServiceAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateServiceAccountResponseObject); ok {
+		if err := validResponse.VisitCreateServiceAccountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetServiceAccount operation middleware
+func (sh *strictHandler) GetServiceAccount(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetServiceAccountRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetServiceAccount(ctx, request.(GetServiceAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetServiceAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetServiceAccountResponseObject); ok {
+		if err := validResponse.VisitGetServiceAccountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListServiceAccountCredentials operation middleware
+func (sh *strictHandler) ListServiceAccountCredentials(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListServiceAccountCredentialsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListServiceAccountCredentials(ctx, request.(ListServiceAccountCredentialsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListServiceAccountCredentials")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListServiceAccountCredentialsResponseObject); ok {
+		if err := validResponse.VisitListServiceAccountCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateServiceAccountCredential operation middleware
+func (sh *strictHandler) CreateServiceAccountCredential(w http.ResponseWriter, r *http.Request, id string) {
+	var request CreateServiceAccountCredentialRequestObject
+
+	request.Id = id
+
+	var body CreateServiceAccountCredentialJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateServiceAccountCredential(ctx, request.(CreateServiceAccountCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateServiceAccountCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateServiceAccountCredentialResponseObject); ok {
+		if err := validResponse.VisitCreateServiceAccountCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeServiceAccountCredential operation middleware
+func (sh *strictHandler) RevokeServiceAccountCredential(w http.ResponseWriter, r *http.Request, id string, credentialId string) {
+	var request RevokeServiceAccountCredentialRequestObject
+
+	request.Id = id
+	request.CredentialId = credentialId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeServiceAccountCredential(ctx, request.(RevokeServiceAccountCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeServiceAccountCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeServiceAccountCredentialResponseObject); ok {
+		if err := validResponse.VisitRevokeServiceAccountCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListServiceAccountSuspensions operation middleware
+func (sh *strictHandler) ListServiceAccountSuspensions(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListServiceAccountSuspensionsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListServiceAccountSuspensions(ctx, request.(ListServiceAccountSuspensionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListServiceAccountSuspensions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListServiceAccountSuspensionsResponseObject); ok {
+		if err := validResponse.VisitListServiceAccountSuspensionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SuspendServiceAccount operation middleware
+func (sh *strictHandler) SuspendServiceAccount(w http.ResponseWriter, r *http.Request, id string) {
+	var request SuspendServiceAccountRequestObject
+
+	request.Id = id
+
+	var body SuspendServiceAccountJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SuspendServiceAccount(ctx, request.(SuspendServiceAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SuspendServiceAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SuspendServiceAccountResponseObject); ok {
+		if err := validResponse.VisitSuspendServiceAccountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteServiceAccount operation middleware
+func (sh *strictHandler) DeleteServiceAccount(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteServiceAccountRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteServiceAccount(ctx, request.(DeleteServiceAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteServiceAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteServiceAccountResponseObject); ok {
+		if err := validResponse.VisitDeleteServiceAccountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RevokeSession operation middleware
 func (sh *strictHandler) RevokeSession(w http.ResponseWriter, r *http.Request, id string) {
 	var request RevokeSessionRequestObject
@@ -8517,6 +10078,43 @@ func (sh *strictHandler) LiftSuspension(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(LiftSuspensionResponseObject); ok {
 		if err := validResponse.VisitLiftSuspensionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// IssueServiceAccountToken operation middleware
+func (sh *strictHandler) IssueServiceAccountToken(w http.ResponseWriter, r *http.Request, params IssueServiceAccountTokenParams) {
+	var request IssueServiceAccountTokenRequestObject
+
+	request.Params = params
+
+	if err := r.ParseForm(); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode formdata: %w", err))
+		return
+	}
+	var body IssueServiceAccountTokenFormdataRequestBody
+	if err := runtime.BindForm(&body, r.Form, nil, nil); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't bind formdata: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.IssueServiceAccountToken(ctx, request.(IssueServiceAccountTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "IssueServiceAccountToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(IssueServiceAccountTokenResponseObject); ok {
+		if err := validResponse.VisitIssueServiceAccountTokenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

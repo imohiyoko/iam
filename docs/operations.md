@@ -18,6 +18,12 @@
 - 公式イメージは全部入り（`ghcr.io/imohiyoko/iam`）と最小構成（`-minimal`）。自分の構成は `iam build` で作る（README、ADR 0073）。
   署名は `cosign verify ghcr.io/imohiyoko/iam@<digest> --certificate-identity-regexp 'https://github.com/imohiyoko/iam/' --certificate-oidc-issuer https://token.actions.githubusercontent.com` で確かめる
 
+### 通知の配信とサービスアカウント
+
+外部の配信側（メールの送信など）は、配信用のサービスアカウントの API キーで `POST /v1/admin/notifications/{id}:claim` を呼ぶ（design.md 2.4）。
+`iam service-account create -config iam.yaml -name delivery` で作り、表示された API キーを配信側の秘密の管理に置く（表示は1回だけ）。
+汎用のサービスアカウント（フィーチャー `service_accounts`）は管理 API で作り、client credentials で短命のトークンを使う（ADR 0074）。
+
 ## 2. 鍵のバックアップ
 
 KeyStore（`file` または `env`）には次の鍵がある。**鍵を失うと、メールアドレスなどの個人情報と監査ログの全文は復元できない**（9.5）。
@@ -76,7 +82,7 @@ dump.jsonl には暗号化した個人情報が入る。移行が終わったら
 ## 6. 保持期間
 
 - 監査ログは `realm.audit_retention`（既定 90 日）を過ぎたら先頭から消す。長期保管は SIEM で行う。消した位置は `audit.truncated` として SIEM に届く
-- 失効したセッション、配送済みの outbox、発火済みの予約イベントは `realm.ended_retention`（既定 7 日）の後に消す
+- 失効したセッション、配送済みの outbox、発火済みの予約イベント、期限の切れたサービスアカウントのトークンは `realm.ended_retention`（既定 7 日）の後に消す
 - メールのアドレスを持たない構成は `realm.email_storage: index_only`（9.6、ADR 0072）
 
 ## 7. 障害時の手順

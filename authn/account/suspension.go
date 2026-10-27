@@ -194,6 +194,9 @@ func TargetPublicID(ctx context.Context, tx port.Tx, realmID string, sp port.Sus
 	case port.SuspensionTargetMembership:
 		m, err := tx.Memberships().Get(ctx, realmID, sp.TargetID)
 		return m.PublicID, err
+	case port.SuspensionTargetServiceAccount:
+		// サービスアカウントの ID は外部 ID（ADR 0045）。
+		return sp.TargetID, nil
 	}
 	return "", errs.New(errs.KindInternal, "unknown suspension target %q", sp.TargetType)
 }

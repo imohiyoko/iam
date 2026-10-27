@@ -5,7 +5,8 @@ info:
   description: |
     管理 API。公開 API とはポートを分ける（design.md 2.5）。
 
-    認証：`Authorization: Bearer <トークン>`。サービスアカウントの API キーか、運営者のセッションのトークン（design.md 4.11）。
+    認証：`Authorization: Bearer <トークン>`。サービスアカウントの API キーかアクセストークン（`POST /v1/admin/token`。ADR 0074）、
+    運営者のセッションのトークン（design.md 4.11）。
     運営者のセッションでは、直近の認証（`security.session.max_auth_age` 以内）を求める。過ぎていれば
     `401 reauthentication_required`。権限は組み込みのロール（`realm:owner` など）で判定する。
 security:
@@ -925,7 +926,7 @@ paths:
       summary: ロールを付与する（4.11）
       description: |
         権限 `roles:manage`。ロールの IAM 自身の権限をすべて自分が持っていなければならない。`role` は組み込みのロールの名前か、独自のロールの ID。
-        運営者ロールの付与は `realm:owner` だけ（`roles:manage`）。主体はユーザーか realm 全体の Group。
+        運営者ロールの付与は `realm:owner` だけ（`roles:manage`）。主体はユーザー、realm 全体の Group、サービスアカウント（`service_account`。ID はサービスアカウントの ID）。
         `resource_type`・`resource_id` を渡せば、そのリソースだけに効く。同じ付与は `409 binding_exists`。`role.granted` を監査ログに残す。
       requestBody:
         required: true
@@ -1269,6 +1270,252 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/service-accounts:
+    get:
+      operationId: listServiceAccounts
+      summary: サービスアカウントの一覧（削除したものも含む。ADR 0074）
+      description: |
+        権限 `service_accounts:manage`。ID の順に、`limit` 件ずつ返す。続きは `next_cursor` を `after` に渡す。
+        フィーチャー service_accounts が動いていなければ `404 service_accounts_disabled`。
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+        - { name: after, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: ID の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service_accounts]
+                properties:
+                  service_accounts:
+                    type: array
+                    items: { $ref: "#/components/schemas/ServiceAccount" }
+                  next_cursor: { type: string, description: 続きがあるときだけ }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createServiceAccount
+      summary: サービスアカウントを作る（design.md 11.2、ADR 0074）
+      description: |
+        権限 `service_accounts:manage`。`org_id`（共有 Org の公開 ID）を渡せば、その Org に属する（Org が削除・停止・有効期間の外なら使えない。
+        フィーチャー org が要る）。認証情報は `…/credentials` で足し、権限は `/v1/admin/role-bindings`（`principal_type: service_account`）で付ける。
+        `service_account.created` を監査ログに残す。フィーチャー service_accounts が動いていなければ `404 service_accounts_disabled`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServiceAccountInput" }
+      responses:
+        "201":
+          description: 作った
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceAccount" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/service-accounts/{id}:
+    get:
+      operationId: getServiceAccount
+      summary: サービスアカウントを返す
+      description: 権限 `service_accounts:manage`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: サービスアカウント
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceAccount" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/service-accounts/{id}:delete:
+    post:
+      operationId: deleteServiceAccount
+      summary: サービスアカウントを削除する（論理削除）
+      description: |
+        権限 `service_accounts:manage`。すぐに認証できなくなり、発行済みのアクセストークンも使えない。取り消せない。
+        `service_account.deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 削除した（削除済みならそのまま）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceAccount" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/service-accounts/{id}/credentials:
+    get:
+      operationId: listServiceAccountCredentials
+      summary: サービスアカウントの認証情報の一覧（無効化したものも含む）
+      description: 権限 `service_accounts:manage`。作成の順。秘密は返さない。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [credentials]
+                properties:
+                  credentials:
+                    type: array
+                    items: { $ref: "#/components/schemas/ServiceAccountCredential" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createServiceAccountCredential
+      summary: 認証情報を足す（ADR 0074）
+      description: |
+        権限 `service_accounts:manage`。`api_key` は `Authorization: Bearer` でそのまま使う。`client_secret` と `private_key_jwt` は
+        `POST /v1/admin/token` でアクセストークンに替える（`client_id` はサービスアカウントの ID）。
+        `api_key` と `client_secret` は応答の `secret` を1度だけ返す（保存するのはハッシュだけ）。`private_key_jwt` は公開鍵の JWK
+        （`public_key`）と `alg`（`ES256`・`EdDSA`・`ML-DSA-65`）が要る。使える認証情報は 10 個まで（`409 too_many_credentials`）。
+        削除したサービスアカウントは `409 service_account_deleted`。`service_account.credential_created` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServiceAccountCredentialInput" }
+      responses:
+        "201":
+          description: 足した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceAccountCredential" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/service-accounts/{id}/credentials/{credential_id}:revoke:
+    post:
+      operationId: revokeServiceAccountCredential
+      summary: 認証情報を無効化する
+      description: |
+        権限 `service_accounts:manage`。その認証情報で発行したアクセストークンも使えなくなる。`service_account.credential_revoked` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: credential_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 無効化した（無効化済みならそのまま）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceAccountCredential" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/service-accounts/{id}/suspensions:
+    post:
+      operationId: suspendServiceAccount
+      summary: サービスアカウントを停止する（4.7）
+      description: |
+        権限と `external_ref` の扱いはユーザーの停止と同じ。停止中は認証できない（発行済みのアクセストークンも）。解除すれば戻る。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SuspendRequest" }
+      responses:
+        "200":
+          description: 同じ external_ref の停止が既にある
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspension" }
+        "201":
+          description: 停止した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspension" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      operationId: listServiceAccountSuspensions
+      summary: サービスアカウントの停止の一覧（解除・終了したものも含む）
+      description: 権限 `suspensions:read`。開始の時刻の順。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 一覧
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Suspensions" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/token:
+    post:
+      operationId: issueServiceAccountToken
+      summary: client credentials でアクセストークンを発行する（RFC 6749 4.4、ADR 0074）
+      description: |
+        認証はこの要求の中で行う（Bearer は要らない）。`client_secret` は `Authorization: Basic`（client_id と client_secret）か form の
+        `client_id`・`client_secret` で、`private_key_jwt` は `client_assertion_type`（`urn:ietf:params:oauth:client-assertion-type:jwt-bearer`）と
+        `client_assertion`（RFC 7523。`iss`・`sub` は client_id、`aud` は issuer、`exp` は 5 分以内、`jti` は1回だけ）で渡す。
+        発行するのは不透明なトークンで、`Authorization: Bearer` で管理 API に使う。寿命は `service_accounts.token_ttl`。
+        認証の失敗は理由を区別せず `401 invalid_client`。`service_account.token_issued` を監査ログに残す。
+        フィーチャー service_accounts が動いていなければ `404 service_accounts_disabled`。
+      security: []
+      parameters:
+        - { name: Authorization, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type]
+              properties:
+                grant_type: { type: string }
+                client_id: { type: string }
+                client_secret: { type: string }
+                client_assertion_type: { type: string }
+                client_assertion: { type: string }
+                scope: { type: string, description: 使わない（権限はロールの付与で決まる） }
+      responses:
+        "200":
+          description: 発行した
+          headers:
+            Cache-Control: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, token_type, expires_in]
+                properties:
+                  access_token: { type: string }
+                  token_type: { type: string, enum: [Bearer] }
+                  expires_in: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1282,6 +1529,48 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    ServiceAccount:
+      type: object
+      required: [id, name, created_at, deleted]
+      properties:
+        id: { type: string, description: client credentials の client_id にもなる }
+        name: { type: string }
+        org_id: { type: string, description: 所属する Org の公開 ID }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        deleted: { type: boolean }
+        deleted_at: { type: string, format: date-time }
+    ServiceAccountInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 400 }
+        org_id: { type: string, description: 共有 Org の公開 ID }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+    ServiceAccountCredential:
+      type: object
+      required: [id, type, created_at, active]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [api_key, client_secret, private_key_jwt] }
+        alg: { type: string }
+        public_key: { type: object, additionalProperties: true, description: private_key_jwt の公開鍵（JWK） }
+        secret: { type: string, description: api_key と client_secret を作ったときだけ、1度だけ返す }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        active: { type: boolean, description: 今使えるか }
+    ServiceAccountCredentialInput:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [api_key, client_secret, private_key_jwt] }
+        public_key: { type: object, additionalProperties: true, description: private_key_jwt の公開鍵（JWK） }
+        alg: { type: string, enum: [ES256, EdDSA, ML-DSA-65] }
+        expires_at: { type: string, format: date-time }
     Health:
       type: object
       required: [status]
@@ -1514,7 +1803,7 @@ components:
       required: [id, target_type, target_id, category, reason, starts_at, active, created_at]
       properties:
         id: { type: string }
-        target_type: { type: string, enum: [user, org, membership] }
+        target_type: { type: string, enum: [user, org, membership, service_account] }
         target_id: { type: string, description: 対象の公開 ID }
         user_id: { type: string, description: ユーザーと Membership の停止で、本人の公開 ID }
         category: { type: string }
@@ -1567,7 +1856,7 @@ components:
       properties:
         id: { type: string }
         role: { type: string, description: 組み込みのロールの名前か、独自のロールの ID }
-        principal_type: { type: string, description: user / group }
+        principal_type: { type: string, description: user / group / service_account }
         principal_id: { type: string, description: 主体の公開 ID }
         resource_type: { type: string }
         resource_id: { type: string }
@@ -1584,7 +1873,7 @@ components:
       required: [role, principal_type, principal_id]
       properties:
         role: { type: string }
-        principal_type: { type: string, description: user / group }
+        principal_type: { type: string, description: user / group / service_account }
         principal_id: { type: string }
         resource_type: { type: string, maxLength: 64 }
         resource_id: { type: string, maxLength: 256 }

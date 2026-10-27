@@ -701,6 +701,13 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 
 Org に属する機械の主体。ロール付与・Group 所属はユーザーと同じ principal として扱う。認証は client credentials（`client_secret` / `private_key_jwt`。鍵は ES256 / EdDSA / ML-DSA）と API キー。
 
+実装（ADR 0074）：
+
+- 管理 API の `/v1/admin/service-accounts` で作る（権限 `service_accounts:manage`）。realm か Org（`org_id`）に属し、有効期間・停止（4.7）・論理削除を持つ。Org が削除・停止・有効期間の外なら使えない
+- `POST /v1/admin/token`（管理 API）が client credentials で不透明なアクセストークン（`sat_…`、既定 10 分）を発行する。検証のたびに状態を確かめるので、停止・削除・認証情報の無効化は次の要求から効く
+- 配信用（2.4）は `iam service-account create` で作る。フィーチャーがオフでも作れ、認証できるのは配信用だけ
+- Org の管理者が公開 API で扱う口は後に回す
+
 ### 11.3 Org 管理ユーザーと Org 専用 SSO
 
 - 個人ユーザーは本人が所有し、Org は所属から外すことしかできない。Org 管理ユーザーは Org が所有し、停止・削除・ログイン方法の強制ができる

@@ -56,6 +56,15 @@ type Config struct {
 
 	// OIDC は OIDC Provider（design.md 5.1、9.3）。issuer は server.public_url。
 	OIDC OIDC `yaml:"oidc"`
+
+	// ServiceAccounts は汎用サービスアカウント（フィーチャー service_accounts。ADR 0074）。
+	ServiceAccounts ServiceAccounts `yaml:"service_accounts"`
+}
+
+// ServiceAccounts はサービスアカウントの設定。
+type ServiceAccounts struct {
+	// TokenTTL は client credentials で発行するアクセストークンの寿命（1 時間以下）。
+	TokenTTL Duration `yaml:"token_ttl"`
 }
 
 // OIDC は OIDC Provider のトークンと鍵の設定。
@@ -359,6 +368,7 @@ func Default() Config {
 		IDs:    IDs{Internal: "uuidv7", External: "random"},
 		OIDC: OIDC{CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
 			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day)},
+		ServiceAccounts: ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
 	}
 }
 
@@ -478,6 +488,9 @@ func (c Config) Validate() error {
 	}
 	if o.RetiredKeyTTL <= o.IDTokenTTL {
 		problems = append(problems, "oidc.retired_key_ttl must be longer than oidc.id_token_ttl")
+	}
+	if t := c.ServiceAccounts.TokenTTL; t <= 0 || t > Duration(time.Hour) {
+		problems = append(problems, "service_accounts.token_ttl must be positive and at most 1h")
 	}
 	if !slices.Contains(KnownOrgCreation, c.Realm.OrgCreation) {
 		problems = append(problems, fmt.Sprintf("realm.org_creation: unknown %q (known: %v)", c.Realm.OrgCreation, KnownOrgCreation))
