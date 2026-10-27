@@ -54,6 +54,27 @@ func (q *Queries) AppendAuditEvent(ctx context.Context, arg AppendAuditEventPara
 	return err
 }
 
+const createAuditKey = `-- name: CreateAuditKey :exec
+INSERT INTO shared_audit_client_keys (owner, wrapped_key, key_id, created_at) VALUES (?, ?, ?, ?)
+`
+
+type CreateAuditKeyParams struct {
+	Owner      string
+	WrappedKey []byte
+	KeyID      string
+	CreatedAt  string
+}
+
+func (q *Queries) CreateAuditKey(ctx context.Context, arg CreateAuditKeyParams) error {
+	_, err := q.db.ExecContext(ctx, createAuditKey,
+		arg.Owner,
+		arg.WrappedKey,
+		arg.KeyID,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const createDataKey = `-- name: CreateDataKey :exec
 INSERT INTO authn_user_data_keys (user_id, wrapped_key, key_id, created_at) VALUES (?, ?, ?, ?)
 `
@@ -96,6 +117,15 @@ func (q *Queries) CreateRealm(ctx context.Context, arg CreateRealmParams) error 
 	return err
 }
 
+const deleteAuditKey = `-- name: DeleteAuditKey :exec
+DELETE FROM shared_audit_client_keys WHERE owner = ?
+`
+
+func (q *Queries) DeleteAuditKey(ctx context.Context, owner string) error {
+	_, err := q.db.ExecContext(ctx, deleteAuditKey, owner)
+	return err
+}
+
 const deleteDataKey = `-- name: DeleteDataKey :exec
 DELETE FROM authn_user_data_keys WHERE user_id = ?
 `
@@ -112,6 +142,22 @@ DELETE FROM shared_installed_features WHERE feature = ?
 func (q *Queries) DeleteFeature(ctx context.Context, feature string) error {
 	_, err := q.db.ExecContext(ctx, deleteFeature, feature)
 	return err
+}
+
+const getAuditKey = `-- name: GetAuditKey :one
+SELECT owner, wrapped_key, key_id, created_at FROM shared_audit_client_keys WHERE owner = ?
+`
+
+func (q *Queries) GetAuditKey(ctx context.Context, owner string) (SharedAuditClientKey, error) {
+	row := q.db.QueryRowContext(ctx, getAuditKey, owner)
+	var i SharedAuditClientKey
+	err := row.Scan(
+		&i.Owner,
+		&i.WrappedKey,
+		&i.KeyID,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getDataKey = `-- name: GetDataKey :one

@@ -258,6 +258,13 @@ type ScheduledEvent struct {
 	CreatedAt string
 }
 
+type SharedAuditClientKey struct {
+	Owner      string
+	WrappedKey []byte
+	KeyID      string
+	CreatedAt  string
+}
+
 type SharedAuditEvent struct {
 	Seq      int64
 	RealmID  string

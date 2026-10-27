@@ -62,9 +62,11 @@ type App struct {
 	plan feature.Plan
 	// binary はこのバイナリに含まれるフィーチャー（EnableFeature で使う）。
 	binary []feature.Feature
-	realm  port.Realm
-	relay  *eventlog.Relay
-	pii    *pii.Crypter
+	// clientSealer は監査ログの IP と User-Agent の全文を暗号化する（ADR 0063）。
+	clientSealer *eventlog.ClientSealer
+	realm        port.Realm
+	relay        *eventlog.Relay
+	pii          *pii.Crypter
 	// sessions はセッションの発行・検証（authn/session）。
 	sessions *session.Manager
 	accounts *account.Service
@@ -132,7 +134,11 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		d.Logger.Warn("feature", "message", w)
 	}
 
-	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary}
+	// 監査ログの IP と User-Agent の全文は、本人のデータ鍵と日ごとの鍵で暗号化する（ADR 0063）。
+	crypter := pii.New(d.KeyStore)
+	clientSealer := &eventlog.ClientSealer{Crypter: crypter, Clock: d.Clock, Retention: cfg.Realm.ClientDataRetention.D()}
+	d.Storage = clientSealer.Storage(d.Storage)
+	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary, clientSealer: clientSealer}
 	a.checkClockSkew(ctx)
 	if a.realm, err = a.ensureRealm(ctx); err != nil {
 		return nil, err
@@ -141,7 +147,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		Storage: d.Storage, Sink: d.EventSink, Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
 	}
-	a.pii = pii.New(d.KeyStore)
+	a.pii = crypter
 	ss := cfg.Security.Session
 	var warnings *warning.Evaluator
 	if plan.IsActive(feature.Warnings) {
@@ -236,7 +242,8 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		})
 	}
 	a.scheduler = &eventlog.Scheduler{Storage: d.Storage, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger}
-	a.scheduler.Handlers = map[string]eventlog.Handler{account.EventUserDeleted: a.accounts.PurgeDue}
+	a.scheduler.Handlers = map[string]eventlog.Handler{account.EventUserDeleted: a.accounts.PurgeDue,
+		eventlog.EventClientKeyExpired: clientSealer.Expire}
 	if a.orgs != nil {
 		a.scheduler.Handlers[org.EventOrgDeleted] = a.orgs.PurgeDue
 		a.scheduler.Handlers[org.EventInvitationExpired] = a.orgs.ExpireDue
