@@ -79,3 +79,4 @@
 | [0065](0065-oidc-clients-and-signing-keys.md) | OIDC の連携先の登録と ID トークンの署名鍵 | 承認 |
 | [0066](0066-oidc-authorization-code-flow.md) | OIDC の認可コードフローと、トークンをログインの系列に結び付けること | 承認 |
 | [0067](0067-postgres-adapter.md) | PostgreSQL のアダプタは SQLite のアダプタから作り、advisory lock で直列化する | 承認 |
+| [0068](0068-storage-export-import.md) | Storage の書き出しと読み込み（移行）は表ごとの行を JSON Lines で運ぶ | 承認 |

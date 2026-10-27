@@ -6,6 +6,7 @@ package port
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/audit"
@@ -216,4 +217,11 @@ type KeyStore interface {
 // 受け取るイベントは audit.External で個人情報を外したもの。
 type EventSink interface {
 	Emit(ctx context.Context, events []audit.Event) error
+}
+
+// Dumper は中身をアダプタに依らない形で書き出し・読み込める Storage（`iam storage export / import`。shared/sqldump）。
+// 書き出しは一貫した時点の中身。読み込み先はマイグレーション済みで空でなければならず、全部を1つのトランザクションで入れる。
+type Dumper interface {
+	Export(ctx context.Context, w io.Writer) (map[string]int, error)
+	Import(ctx context.Context, r io.Reader) (map[string]int, error)
 }
