@@ -758,6 +758,8 @@ realm ごとに型・検証・本人による編集可否・トークンへの�
 
 Go インターフェースか Webhook で実装する。タイムアウト必須、失敗時の fail-closed / fail-open はフックごとに設定する。ホットパスには置かない。
 
+実装（ADR 0081）：フィーチャー `flow_hooks`。設定の `hooks` に名前ごとに、Webhook（`url`・`secret_env`。署名は通知の Webhook と同じ形）か、組み込む側の Go の実装を置く。タイムアウトは既定 2 秒・上限 5 秒、失敗は既定で止める（`fail_open` で通す）。止めれば 403 と `hook_denied.<hook>`（`pre_membership_end` は 409 `membership_end_held`、`pre_token` は `invalid_grant`）。`pre_token` は IAM が決めるクレームを上書きできない。フックは操作のトランザクションの中で呼ぶ。非同期のイベントは EventSink で受け取る。
+
 ### 11.9 （2.8 に統合）
 
 ### 11.10 公開する契約

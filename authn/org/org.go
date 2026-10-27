@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/notify"
 
 	"github.com/imohiyoko/iam/shared/audit"
@@ -76,6 +77,8 @@ type Service struct {
 	// Hierarchy はフィーチャー org_hierarchy（Org 階層。ADR 0078）が動いているか。
 	Hierarchy bool
 	Resolver  TXTResolver
+	// Hooks はフロー フック（11.8）。nil ならフィーチャー flow_hooks が動いておらず、呼ばない。
+	Hooks *hook.Runner
 }
 
 // NormalizeName は名前の前後の空白を除き、形式を確かめる。

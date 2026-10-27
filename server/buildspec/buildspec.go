@@ -16,6 +16,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/imohiyoko/iam/authn/attribute"
+	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
@@ -42,6 +43,7 @@ var featureCatalog = map[string]struct {
 	feature.ServiceAccounts:  {serviceaccount.Feature, module + "/features/serviceaccounts"},
 	feature.NestedGroups:     {manage.NestedGroupsFeature, module + "/features/nestedgroups"},
 	feature.CustomAttributes: {attribute.Feature, module + "/features/customattributes"},
+	feature.FlowHooks:        {hook.Feature, module + "/features/flowhooks"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

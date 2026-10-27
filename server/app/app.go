@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/emailflow"
+	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
@@ -57,7 +59,9 @@ type Deps struct {
 	// BreachCheck は漏洩済みパスワードの確認。nil なら確認しない。
 	BreachCheck port.BreachChecker
 	// DNS は Org のドメインの証明で TXT を引く。nil なら net.DefaultResolver。
-	DNS    org.TXTResolver
+	DNS org.TXTResolver
+	// Hooks は Go のインターフェースで実装したフロー フック（11.8）。設定の hooks で url の無いものに使う。
+	Hooks  map[string]port.FlowHook
 	Clock  clock.Clock
 	Logger *slog.Logger
 }
@@ -321,6 +325,18 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Clock, d.Logger), Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
 	}
+	if plan.IsActive(feature.FlowHooks) {
+		runner, err := flowHooks(cfg, d, a.realm.Slug)
+		if err != nil {
+			return nil, err
+		}
+		a.accounts.Hooks, a.sessions.Hooks, a.tokens.Hooks = runner, runner, runner
+		if a.orgs != nil {
+			a.orgs.Hooks = runner
+		}
+	} else if len(cfg.Hooks) > 0 {
+		d.Logger.Warn("hooks are configured but the flow_hooks feature is not active")
+	}
 	login, err := newHosted(a, cfg.Server.LoginTemplates)
 	if err != nil {
 		return nil, err
@@ -532,4 +548,26 @@ func newHTTPServer(h http.Handler) *http.Server {
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    64 << 10,
 	}
+}
+
+// flowHooks は設定の hooks からフロー フックの Runner を作る（11.8、ADR 0081）。url の無いフックは d.Hooks から取る。
+func flowHooks(cfg config.Config, d Deps, realm string) (*hook.Runner, error) {
+	r := &hook.Runner{Entries: map[string]hook.Entry{}, Realm: realm, Log: d.Logger}
+	for name, h := range cfg.Hooks {
+		e := hook.Entry{Timeout: h.Timeout.D(), FailOpen: h.FailOpen}
+		if h.URL == "" {
+			if e.Hook = d.Hooks[name]; e.Hook == nil {
+				return nil, fmt.Errorf("app: hooks.%s has no url and no Go implementation", name)
+			}
+		} else {
+			secret := os.Getenv(h.SecretEnv)
+			if len(secret) < 32 {
+				return nil, fmt.Errorf("app: hooks.%s: %s must hold a secret of at least 32 bytes", name, h.SecretEnv)
+			}
+			_ = os.Unsetenv(h.SecretEnv)
+			e.Hook = &hook.Webhook{URL: h.URL, Secret: []byte(secret), Clock: d.Clock}
+		}
+		r.Entries[name] = e
+	}
+	return r, nil
 }
