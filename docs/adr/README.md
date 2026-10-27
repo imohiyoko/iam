@@ -72,3 +72,4 @@
 | [0058](0058-org-and-membership-suspension.md) | Org と Membership の停止と有効期間 | 承認 |
 | [0059](0059-leaving-removal-and-transfer.md) | 退会・除名・オーナーの譲渡 | 承認 |
 | [0060](0060-org-deletion-and-scheduled-cleanup.md) | Org の削除と、予約した後始末 | 承認 |
+| [0061](0061-account-deletion.md) | アカウントの削除 | 承認 |

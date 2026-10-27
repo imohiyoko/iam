@@ -139,14 +139,16 @@ type AuthnTotpCredential struct {
 }
 
 type AuthnUser struct {
-	ID         string
-	PublicID   string
-	RealmID    string
-	Status     string
-	ValidFrom  sql.NullString
-	ValidUntil sql.NullString
-	CreatedAt  string
-	UpdatedAt  string
+	ID                  string
+	PublicID            string
+	RealmID             string
+	Status              string
+	ValidFrom           sql.NullString
+	ValidUntil          sql.NullString
+	CreatedAt           string
+	UpdatedAt           string
+	DeletionScheduledAt sql.NullString
+	LegalHold           int64
 }
 
 type AuthnUserDataKey struct {

@@ -38,14 +38,17 @@ func (e HealthStatus) Valid() bool {
 
 // Defines values for LoginResultNext.
 const (
-	Enroll       LoginResultNext = "enroll"
-	Recovery     LoginResultNext = "recovery"
-	SecondFactor LoginResultNext = "second_factor"
+	CancelDeletion LoginResultNext = "cancel_deletion"
+	Enroll         LoginResultNext = "enroll"
+	Recovery       LoginResultNext = "recovery"
+	SecondFactor   LoginResultNext = "second_factor"
 )
 
 // Valid indicates whether the value is a known member of the LoginResultNext enum.
 func (e LoginResultNext) Valid() bool {
 	switch e {
+	case CancelDeletion:
+		return true
 	case Enroll:
 		return true
 	case Recovery:
@@ -282,7 +285,8 @@ type LoginResult struct {
 	ExpiresAt time.Time `json:"expires_at"`
 
 	// Next セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-	// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+	// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。`cancel_deletion` はアカウントの削除の
+	// 猶予期間の間で、`/v1/me/account:cancel-deletion` とログアウトだけができる（4.10）。制限つきのセッションは短い期限で失効し、
 	// 決まった API にしか使えない（他は未ログインの扱い）。
 	Next *LoginResultNext `json:"next,omitempty"`
 
@@ -308,7 +312,8 @@ type LoginResult struct {
 }
 
 // LoginResultNext セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。`cancel_deletion` はアカウントの削除の
+// 猶予期間の間で、`/v1/me/account:cancel-deletion` とログアウトだけができる（4.10）。制限つきのセッションは短い期限で失効し、
 // 決まった API にしか使えない（他は未ログインの扱い）。
 type LoginResultNext string
 
@@ -585,6 +590,11 @@ type VerifySecondFactorJSONBody struct {
 	TotpCode    *string                 `json:"totp_code,omitempty"`
 }
 
+// CancelMyAccountDeletionJSONBody defines parameters for CancelMyAccountDeletion.
+type CancelMyAccountDeletionJSONBody struct {
+	ReturnToken *bool `json:"return_token,omitempty"`
+}
+
 // StartAddEmailJSONBody defines parameters for StartAddEmail.
 type StartAddEmailJSONBody struct {
 	Email string `json:"email"`
@@ -754,6 +764,9 @@ type PasswordLoginJSONRequestBody PasswordLoginJSONBody
 // VerifySecondFactorJSONRequestBody defines body for VerifySecondFactor for application/json ContentType.
 type VerifySecondFactorJSONRequestBody VerifySecondFactorJSONBody
 
+// CancelMyAccountDeletionJSONRequestBody defines body for CancelMyAccountDeletion for application/json ContentType.
+type CancelMyAccountDeletionJSONRequestBody CancelMyAccountDeletionJSONBody
+
 // StartAddEmailJSONRequestBody defines body for StartAddEmail for application/json ContentType.
 type StartAddEmailJSONRequestBody StartAddEmailJSONBody
 
@@ -864,6 +877,12 @@ type ServerInterface interface {
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// CancelMyAccountDeletion アカウントの削除の予定を取り消す
+	// (POST /v1/me/account:cancel-deletion)
+	CancelMyAccountDeletion(w http.ResponseWriter, r *http.Request)
+	// DeleteMyAccount アカウントを削除する（4.10）
+	// (POST /v1/me/account:delete)
+	DeleteMyAccount(w http.ResponseWriter, r *http.Request)
 	// MakeMyEmailPrimary 確認済みのメールを primary にする
 	// (POST /v1/me/emails/{id}:make-primary)
 	MakeMyEmailPrimary(w http.ResponseWriter, r *http.Request, id string)
@@ -1203,6 +1222,34 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelMyAccountDeletion operation middleware
+func (siw *ServerInterfaceWrapper) CancelMyAccountDeletion(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelMyAccountDeletion(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMyAccount operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMyAccount(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMyAccount(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2324,6 +2371,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/recovery:complete", wrapper.CompleteRecovery)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/recovery-codes:regenerate", wrapper.RegenerateMyRecoveryCodes)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/logout", wrapper.Logout)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/account:delete", wrapper.DeleteMyAccount)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/account:cancel-deletion", wrapper.CancelMyAccountDeletion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/sessions", wrapper.ListMySessions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/sessions/{id}:revoke", wrapper.RevokeMySession)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/methods", wrapper.ListMyMethods)
@@ -3214,6 +3263,111 @@ func (response Logout204Response) VisitLogoutResponse(w http.ResponseWriter) err
 	}
 	w.WriteHeader(204)
 	return nil
+}
+
+type CancelMyAccountDeletionRequestObject struct {
+	Body *CancelMyAccountDeletionJSONRequestBody
+}
+
+type CancelMyAccountDeletionResponseObject interface {
+	VisitCancelMyAccountDeletionResponse(w http.ResponseWriter) error
+}
+
+type CancelMyAccountDeletion200JSONResponse LoginResult
+
+func (response CancelMyAccountDeletion200JSONResponse) VisitCancelMyAccountDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelMyAccountDeletion401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CancelMyAccountDeletion401JSONResponse) VisitCancelMyAccountDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelMyAccountDeletion409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CancelMyAccountDeletion409JSONResponse) VisitCancelMyAccountDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyAccountRequestObject struct {
+}
+
+type DeleteMyAccountResponseObject interface {
+	VisitDeleteMyAccountResponse(w http.ResponseWriter) error
+}
+
+type DeleteMyAccount200JSONResponse struct {
+	// Deleted もう削除したか
+	Deleted bool `json:"deleted"`
+
+	// DeletesAt 予約したとき
+	DeletesAt *time.Time `json:"deletes_at,omitempty"`
+}
+
+func (response DeleteMyAccount200JSONResponse) VisitDeleteMyAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyAccount401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteMyAccount401JSONResponse) VisitDeleteMyAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyAccount409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteMyAccount409JSONResponse) VisitDeleteMyAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type MakeMyEmailPrimaryRequestObject struct {
@@ -6090,6 +6244,12 @@ type StrictServerInterface interface {
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
+	// CancelMyAccountDeletion アカウントの削除の予定を取り消す
+	// (POST /v1/me/account:cancel-deletion)
+	CancelMyAccountDeletion(ctx context.Context, request CancelMyAccountDeletionRequestObject) (CancelMyAccountDeletionResponseObject, error)
+	// DeleteMyAccount アカウントを削除する（4.10）
+	// (POST /v1/me/account:delete)
+	DeleteMyAccount(ctx context.Context, request DeleteMyAccountRequestObject) (DeleteMyAccountResponseObject, error)
 	// MakeMyEmailPrimary 確認済みのメールを primary にする
 	// (POST /v1/me/emails/{id}:make-primary)
 	MakeMyEmailPrimary(ctx context.Context, request MakeMyEmailPrimaryRequestObject) (MakeMyEmailPrimaryResponseObject, error)
@@ -6657,6 +6817,64 @@ func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(LogoutResponseObject); ok {
 		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelMyAccountDeletion operation middleware
+func (sh *strictHandler) CancelMyAccountDeletion(w http.ResponseWriter, r *http.Request) {
+	var request CancelMyAccountDeletionRequestObject
+
+	var body CancelMyAccountDeletionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelMyAccountDeletion(ctx, request.(CancelMyAccountDeletionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelMyAccountDeletion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelMyAccountDeletionResponseObject); ok {
+		if err := validResponse.VisitCancelMyAccountDeletionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteMyAccount operation middleware
+func (sh *strictHandler) DeleteMyAccount(w http.ResponseWriter, r *http.Request) {
+	var request DeleteMyAccountRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteMyAccount(ctx, request.(DeleteMyAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteMyAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteMyAccountResponseObject); ok {
+		if err := validResponse.VisitDeleteMyAccountResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

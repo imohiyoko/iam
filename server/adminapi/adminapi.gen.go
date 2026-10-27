@@ -140,10 +140,13 @@ func (e SuspensionTargetType) Valid() bool {
 
 // AdminUser defines model for AdminUser.
 type AdminUser struct {
-	Id         string          `json:"id"`
-	Status     AdminUserStatus `json:"status"`
-	ValidFrom  *time.Time      `json:"valid_from,omitempty"`
-	ValidUntil *time.Time      `json:"valid_until,omitempty"`
+	// DeletionScheduledAt 削除の予定（猶予期間の終わり）
+	DeletionScheduledAt *time.Time      `json:"deletion_scheduled_at,omitempty"`
+	Id                  string          `json:"id"`
+	LegalHold           *bool           `json:"legal_hold,omitempty"`
+	Status              AdminUserStatus `json:"status"`
+	ValidFrom           *time.Time      `json:"valid_from,omitempty"`
+	ValidUntil          *time.Time      `json:"valid_until,omitempty"`
 }
 
 // AdminUserStatus defines model for AdminUser.Status.
@@ -377,6 +380,16 @@ type CreateUserJSONBody struct {
 	Email string `json:"email"`
 }
 
+// DeleteUserJSONBody defines parameters for DeleteUser.
+type DeleteUserJSONBody struct {
+	Immediate *bool `json:"immediate,omitempty"`
+}
+
+// SetUserLegalHoldJSONBody defines parameters for SetUserLegalHold.
+type SetUserLegalHoldJSONBody struct {
+	Hold bool `json:"hold"`
+}
+
 // IssueLoginLinkJSONBody defines parameters for IssueLoginLink.
 type IssueLoginLinkJSONBody struct {
 	TtlSeconds *int `json:"ttl_seconds,omitempty"`
@@ -420,6 +433,12 @@ type UpdateUserJSONRequestBody = UpdateUser
 
 // SuspendUserJSONRequestBody defines body for SuspendUser for application/json ContentType.
 type SuspendUserJSONRequestBody = SuspendRequest
+
+// DeleteUserJSONRequestBody defines body for DeleteUser for application/json ContentType.
+type DeleteUserJSONRequestBody DeleteUserJSONBody
+
+// SetUserLegalHoldJSONRequestBody defines body for SetUserLegalHold for application/json ContentType.
+type SetUserLegalHoldJSONRequestBody SetUserLegalHoldJSONBody
 
 // IssueLoginLinkJSONRequestBody defines body for IssueLoginLink for application/json ContentType.
 type IssueLoginLinkJSONRequestBody IssueLoginLinkJSONBody
@@ -501,6 +520,15 @@ type ServerInterface interface {
 	// SuspendUser ユーザーを停止する（4.7）
 	// (POST /v1/admin/users/{id}/suspensions)
 	SuspendUser(w http.ResponseWriter, r *http.Request, id string)
+	// CancelUserDeletion ユーザーの削除の予定を取り消す
+	// (POST /v1/admin/users/{id}:cancel-deletion)
+	CancelUserDeletion(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteUser ユーザーを削除する（4.10）
+	// (POST /v1/admin/users/{id}:delete)
+	DeleteUser(w http.ResponseWriter, r *http.Request, id string)
+	// SetUserLegalHold ユーザーの消去を保留する・保留を解く（4.10）
+	// (POST /v1/admin/users/{id}:legal-hold)
+	SetUserLegalHold(w http.ResponseWriter, r *http.Request, id string)
 	// IssueLoginLink 1回限りのログイン用リンクのトークンを発行する
 	// (POST /v1/admin/users/{id}:login_link)
 	IssueLoginLink(w http.ResponseWriter, r *http.Request, id string)
@@ -1132,6 +1160,84 @@ func (siw *ServerInterfaceWrapper) SuspendUser(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// CancelUserDeletion operation middleware
+func (siw *ServerInterfaceWrapper) CancelUserDeletion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelUserDeletion(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteUser operation middleware
+func (siw *ServerInterfaceWrapper) DeleteUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteUser(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetUserLegalHold operation middleware
+func (siw *ServerInterfaceWrapper) SetUserLegalHold(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetUserLegalHold(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // IssueLoginLink operation middleware
 func (siw *ServerInterfaceWrapper) IssueLoginLink(w http.ResponseWriter, r *http.Request) {
 
@@ -1314,6 +1420,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/password:revoke", wrapper.RevokeUserPassword)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials:revoke-all", wrapper.RevokeAllUserCredentials)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/users/{id}", wrapper.UpdateUser)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:delete", wrapper.DeleteUser)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:cancel-deletion", wrapper.CancelUserDeletion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:legal-hold", wrapper.SetUserLegalHold)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/suspensions", wrapper.ListUserSuspensions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/suspensions", wrapper.SuspendUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/suspensions/{id}:lift", wrapper.LiftSuspension)
@@ -3126,6 +3235,242 @@ func (response SuspendUser404JSONResponse) VisitSuspendUserResponse(w http.Respo
 	return err
 }
 
+type CancelUserDeletionRequestObject struct {
+	Id string `json:"id"`
+}
+
+type CancelUserDeletionResponseObject interface {
+	VisitCancelUserDeletionResponse(w http.ResponseWriter) error
+}
+
+type CancelUserDeletion200JSONResponse AdminUser
+
+func (response CancelUserDeletion200JSONResponse) VisitCancelUserDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelUserDeletion401JSONResponse struct{ ErrorJSONResponse }
+
+func (response CancelUserDeletion401JSONResponse) VisitCancelUserDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelUserDeletion403JSONResponse Error
+
+func (response CancelUserDeletion403JSONResponse) VisitCancelUserDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelUserDeletion404JSONResponse Error
+
+func (response CancelUserDeletion404JSONResponse) VisitCancelUserDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelUserDeletion409JSONResponse Error
+
+func (response CancelUserDeletion409JSONResponse) VisitCancelUserDeletionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUserRequestObject struct {
+	Id   string `json:"id"`
+	Body *DeleteUserJSONRequestBody
+}
+
+type DeleteUserResponseObject interface {
+	VisitDeleteUserResponse(w http.ResponseWriter) error
+}
+
+type DeleteUser200JSONResponse AdminUser
+
+func (response DeleteUser200JSONResponse) VisitDeleteUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUser401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteUser401JSONResponse) VisitDeleteUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUser403JSONResponse Error
+
+func (response DeleteUser403JSONResponse) VisitDeleteUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUser404JSONResponse Error
+
+func (response DeleteUser404JSONResponse) VisitDeleteUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUser409JSONResponse Error
+
+func (response DeleteUser409JSONResponse) VisitDeleteUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserLegalHoldRequestObject struct {
+	Id   string `json:"id"`
+	Body *SetUserLegalHoldJSONRequestBody
+}
+
+type SetUserLegalHoldResponseObject interface {
+	VisitSetUserLegalHoldResponse(w http.ResponseWriter) error
+}
+
+type SetUserLegalHold200JSONResponse AdminUser
+
+func (response SetUserLegalHold200JSONResponse) VisitSetUserLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserLegalHold400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SetUserLegalHold400JSONResponse) VisitSetUserLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserLegalHold401JSONResponse Error
+
+func (response SetUserLegalHold401JSONResponse) VisitSetUserLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserLegalHold403JSONResponse Error
+
+func (response SetUserLegalHold403JSONResponse) VisitSetUserLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserLegalHold404JSONResponse Error
+
+func (response SetUserLegalHold404JSONResponse) VisitSetUserLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type IssueLoginLinkRequestObject struct {
 	Id   string `json:"id"`
 	Body *IssueLoginLinkJSONRequestBody
@@ -3358,6 +3703,15 @@ type StrictServerInterface interface {
 	// SuspendUser ユーザーを停止する（4.7）
 	// (POST /v1/admin/users/{id}/suspensions)
 	SuspendUser(ctx context.Context, request SuspendUserRequestObject) (SuspendUserResponseObject, error)
+	// CancelUserDeletion ユーザーの削除の予定を取り消す
+	// (POST /v1/admin/users/{id}:cancel-deletion)
+	CancelUserDeletion(ctx context.Context, request CancelUserDeletionRequestObject) (CancelUserDeletionResponseObject, error)
+	// DeleteUser ユーザーを削除する（4.10）
+	// (POST /v1/admin/users/{id}:delete)
+	DeleteUser(ctx context.Context, request DeleteUserRequestObject) (DeleteUserResponseObject, error)
+	// SetUserLegalHold ユーザーの消去を保留する・保留を解く（4.10）
+	// (POST /v1/admin/users/{id}:legal-hold)
+	SetUserLegalHold(ctx context.Context, request SetUserLegalHoldRequestObject) (SetUserLegalHoldResponseObject, error)
 	// IssueLoginLink 1回限りのログイン用リンクのトークンを発行する
 	// (POST /v1/admin/users/{id}:login_link)
 	IssueLoginLink(ctx context.Context, request IssueLoginLinkRequestObject) (IssueLoginLinkResponseObject, error)
@@ -4096,6 +4450,101 @@ func (sh *strictHandler) SuspendUser(w http.ResponseWriter, r *http.Request, id 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SuspendUserResponseObject); ok {
 		if err := validResponse.VisitSuspendUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelUserDeletion operation middleware
+func (sh *strictHandler) CancelUserDeletion(w http.ResponseWriter, r *http.Request, id string) {
+	var request CancelUserDeletionRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelUserDeletion(ctx, request.(CancelUserDeletionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelUserDeletion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelUserDeletionResponseObject); ok {
+		if err := validResponse.VisitCancelUserDeletionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteUser operation middleware
+func (sh *strictHandler) DeleteUser(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteUserRequestObject
+
+	request.Id = id
+
+	var body DeleteUserJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteUser(ctx, request.(DeleteUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteUserResponseObject); ok {
+		if err := validResponse.VisitDeleteUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetUserLegalHold operation middleware
+func (sh *strictHandler) SetUserLegalHold(w http.ResponseWriter, r *http.Request, id string) {
+	var request SetUserLegalHoldRequestObject
+
+	request.Id = id
+
+	var body SetUserLegalHoldJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetUserLegalHold(ctx, request.(SetUserLegalHoldRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetUserLegalHold")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetUserLegalHoldResponseObject); ok {
+		if err := validResponse.VisitSetUserLegalHoldResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

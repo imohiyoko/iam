@@ -102,13 +102,13 @@ func (s *Service) PurgeDue(ctx context.Context, tx port.Tx, e port.ScheduledEven
 	publicID, _ := details["org_id"].(string)
 	o, err := tx.Orgs().GetByPublicID(ctx, e.RealmID, publicID)
 	if errors.Is(err, errs.NotFound) {
-		return nil
+		return eventlog.ErrSkip
 	}
 	if err != nil {
 		return err
 	}
 	if o.DeletedAt != nil || o.DeletionScheduledAt == nil || o.DeletionScheduledAt.After(s.Clock.Now()) {
-		return nil
+		return eventlog.ErrSkip
 	}
 	return s.purge(ctx, tx, o, audit.Actor{Type: "system"}, "")
 }

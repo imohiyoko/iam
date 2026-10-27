@@ -29,8 +29,12 @@ type User struct {
 	Status     UserStatus
 	ValidFrom  *time.Time // 有効期間（design.md 4.8）。nil は制限なし
 	ValidUntil *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// DeletionScheduledAt はアカウントの削除の予定の時刻（猶予期間の終わり。4.10）。nil なら予定なし。
+	DeletionScheduledAt *time.Time
+	// LegalHold は運営者による消去の保留（4.10）。立っている間は猶予が終わっても消さない。
+	LegalHold bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // UserRepo は users の Repository。
@@ -42,6 +46,14 @@ type UserRepo interface {
 	List(ctx context.Context, realmID, afterID string, limit int) ([]User, error)
 	// SetValidity は有効期間（design.md 4.8）を置き換える。無ければ errs.NotFound。
 	SetValidity(ctx context.Context, realmID, id string, from, until *time.Time, updatedAt time.Time) error
+	// SetDeletion は削除の予定を置き換える（nil で取り消し）。無ければ errs.NotFound。
+	SetDeletion(ctx context.Context, realmID, id string, scheduledAt *time.Time, updatedAt time.Time) error
+	// SetLegalHold は消去の保留を置き換える。無ければ errs.NotFound。
+	SetLegalHold(ctx context.Context, realmID, id string, hold bool, updatedAt time.Time) error
+	// Erase はユーザーを削除済み（墓標）にし、メール（インデックスごと。再登録できるように）・外部 ID の紐付け・passkey・
+	// TOTP・パスワード・リカバリーコード・セッション・ロールの付与を消す（4.10）。データ鍵、Membership、個人 Org、停止の記録は
+	// 呼び出し側が扱う。無ければ errs.NotFound。
+	Erase(ctx context.Context, realmID, id string, at time.Time) error
 }
 
 // VerifiedVia はメールを確認済みとみなした経路（design.md 4.1）。
@@ -369,6 +381,8 @@ const (
 	RestrictionEnroll SessionRestriction = "enroll"
 	// RestrictionRecovery はアカウントの復旧で、新しい認証手段の登録と復旧の完了だけができる（4.12）。
 	RestrictionRecovery SessionRestriction = "recovery"
+	// RestrictionDeletion はアカウントの削除の猶予期間の間のログインで、削除の取り消しだけができる（4.10）。
+	RestrictionDeletion SessionRestriction = "deletion_pending"
 )
 
 // SessionRepo は sessions の Repository。

@@ -444,5 +444,5 @@ func (s adminServer) UpdateUser(ctx context.Context, req adminapi.UpdateUserRequ
 		return nil, err
 	}
 	s.a.sessions.Forget(ctx, s.a.realm.ID, u.ID)
-	return adminapi.UpdateUser200JSONResponse{Id: u.PublicID, Status: adminapi.AdminUserStatus(u.Status), ValidFrom: u.ValidFrom, ValidUntil: u.ValidUntil}, nil
+	return adminapi.UpdateUser200JSONResponse(adminUser(u)), nil
 }

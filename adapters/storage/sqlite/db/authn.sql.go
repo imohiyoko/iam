@@ -544,6 +544,118 @@ func (q *Queries) DueScheduledEvents(ctx context.Context, arg DueScheduledEvents
 	return items, nil
 }
 
+const eraseUserEmails = `-- name: EraseUserEmails :exec
+DELETE FROM authn_user_emails WHERE realm_id = ? AND user_id = ?
+`
+
+type EraseUserEmailsParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) EraseUserEmails(ctx context.Context, arg EraseUserEmailsParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserEmails, arg.RealmID, arg.UserID)
+	return err
+}
+
+const eraseUserIdentities = `-- name: EraseUserIdentities :exec
+DELETE FROM authn_user_identities WHERE realm_id = ? AND user_id = ?
+`
+
+type EraseUserIdentitiesParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) EraseUserIdentities(ctx context.Context, arg EraseUserIdentitiesParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserIdentities, arg.RealmID, arg.UserID)
+	return err
+}
+
+const eraseUserPasskeys = `-- name: EraseUserPasskeys :exec
+DELETE FROM authn_passkeys WHERE realm_id = ? AND user_id = ?
+`
+
+type EraseUserPasskeysParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) EraseUserPasskeys(ctx context.Context, arg EraseUserPasskeysParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserPasskeys, arg.RealmID, arg.UserID)
+	return err
+}
+
+const eraseUserPasswords = `-- name: EraseUserPasswords :exec
+DELETE FROM authn_password_credentials WHERE realm_id = ? AND user_id = ?
+`
+
+type EraseUserPasswordsParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) EraseUserPasswords(ctx context.Context, arg EraseUserPasswordsParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserPasswords, arg.RealmID, arg.UserID)
+	return err
+}
+
+const eraseUserRecoveryCodes = `-- name: EraseUserRecoveryCodes :exec
+DELETE FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ?
+`
+
+type EraseUserRecoveryCodesParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) EraseUserRecoveryCodes(ctx context.Context, arg EraseUserRecoveryCodesParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserRecoveryCodes, arg.RealmID, arg.UserID)
+	return err
+}
+
+const eraseUserRoleBindings = `-- name: EraseUserRoleBindings :exec
+DELETE FROM authz_role_bindings WHERE realm_id = ? AND principal_type = 'user' AND principal_id = ?
+`
+
+type EraseUserRoleBindingsParams struct {
+	RealmID     string
+	PrincipalID string
+}
+
+func (q *Queries) EraseUserRoleBindings(ctx context.Context, arg EraseUserRoleBindingsParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserRoleBindings, arg.RealmID, arg.PrincipalID)
+	return err
+}
+
+const eraseUserSessions = `-- name: EraseUserSessions :exec
+DELETE FROM authn_sessions WHERE realm_id = ? AND principal_type = 'user' AND principal_id = ?
+`
+
+type EraseUserSessionsParams struct {
+	RealmID     string
+	PrincipalID string
+}
+
+func (q *Queries) EraseUserSessions(ctx context.Context, arg EraseUserSessionsParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserSessions, arg.RealmID, arg.PrincipalID)
+	return err
+}
+
+const eraseUserTOTP = `-- name: EraseUserTOTP :exec
+DELETE FROM authn_totp_credentials WHERE realm_id = ? AND user_id = ?
+`
+
+type EraseUserTOTPParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) EraseUserTOTP(ctx context.Context, arg EraseUserTOTPParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserTOTP, arg.RealmID, arg.UserID)
+	return err
+}
+
 const getActivePassword = `-- name: GetActivePassword :one
 SELECT id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason FROM authn_password_credentials WHERE realm_id = ? AND user_id = ? AND revoked_at IS NULL
 `
@@ -1102,7 +1214,7 @@ func (q *Queries) GetTOTPByPublicID(ctx context.Context, arg GetTOTPByPublicIDPa
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at FROM authn_users WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold FROM authn_users WHERE realm_id = ? AND id = ?
 `
 
 type GetUserParams struct {
@@ -1122,12 +1234,14 @@ func (q *Queries) GetUser(ctx context.Context, arg GetUserParams) (AuthnUser, er
 		&i.ValidUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionScheduledAt,
+		&i.LegalHold,
 	)
 	return i, err
 }
 
 const getUserByPublicID = `-- name: GetUserByPublicID :one
-SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at FROM authn_users WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold FROM authn_users WHERE realm_id = ? AND public_id = ?
 `
 
 type GetUserByPublicIDParams struct {
@@ -1147,6 +1261,8 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, arg GetUserByPublicIDPa
 		&i.ValidUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletionScheduledAt,
+		&i.LegalHold,
 	)
 	return i, err
 }
@@ -1623,7 +1739,7 @@ func (q *Queries) ListTOTPByUser(ctx context.Context, arg ListTOTPByUserParams) 
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at FROM authn_users WHERE realm_id = ? AND id > ?2 ORDER BY id LIMIT ?3
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold FROM authn_users WHERE realm_id = ? AND id > ?2 ORDER BY id LIMIT ?3
 `
 
 type ListUsersParams struct {
@@ -1650,6 +1766,8 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]AuthnUs
 			&i.ValidUntil,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DeletionScheduledAt,
+			&i.LegalHold,
 		); err != nil {
 			return nil, err
 		}
@@ -1676,6 +1794,24 @@ type MarkScheduledEventFiredParams struct {
 
 func (q *Queries) MarkScheduledEventFired(ctx context.Context, arg MarkScheduledEventFiredParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, markScheduledEventFired, arg.FiredAt, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const markUserDeleted = `-- name: MarkUserDeleted :execrows
+UPDATE authn_users SET status = 'deleted', deletion_scheduled_at = NULL, updated_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type MarkUserDeletedParams struct {
+	UpdatedAt string
+	RealmID   string
+	ID        string
+}
+
+func (q *Queries) MarkUserDeleted(ctx context.Context, arg MarkUserDeletedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markUserDeleted, arg.UpdatedAt, arg.RealmID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -1976,6 +2112,54 @@ type SetPrimaryEmailParams struct {
 func (q *Queries) SetPrimaryEmail(ctx context.Context, arg SetPrimaryEmailParams) error {
 	_, err := q.db.ExecContext(ctx, setPrimaryEmail, arg.ID, arg.RealmID, arg.UserID)
 	return err
+}
+
+const setUserDeletion = `-- name: SetUserDeletion :execrows
+UPDATE authn_users SET deletion_scheduled_at = ?, updated_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type SetUserDeletionParams struct {
+	DeletionScheduledAt sql.NullString
+	UpdatedAt           string
+	RealmID             string
+	ID                  string
+}
+
+func (q *Queries) SetUserDeletion(ctx context.Context, arg SetUserDeletionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setUserDeletion,
+		arg.DeletionScheduledAt,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setUserLegalHold = `-- name: SetUserLegalHold :execrows
+UPDATE authn_users SET legal_hold = ?, updated_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type SetUserLegalHoldParams struct {
+	LegalHold int64
+	UpdatedAt string
+	RealmID   string
+	ID        string
+}
+
+func (q *Queries) SetUserLegalHold(ctx context.Context, arg SetUserLegalHoldParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setUserLegalHold,
+		arg.LegalHold,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setUserValidity = `-- name: SetUserValidity :execrows

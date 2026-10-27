@@ -63,6 +63,8 @@ const (
 	ReasonCredentialChanged = "credential_changed" // #nosec G101 -- 失効の理由で、秘密ではない
 	// ReasonSecondFactor は2要素目の確認で、制限つきのセッションを通常のセッションに替えたこと。
 	ReasonSecondFactor = "second_factor_completed"
+	// ReasonDeletionCancelled は削除の取り消しで、取り消し専用のセッションを通常のセッションに替えたこと（4.10）。
+	ReasonDeletionCancelled = "deletion_cancelled"
 	// ReasonRecovered はアカウントの復旧の完了で、全セッションを失効させたこと（4.12）。
 	ReasonRecovered = "account_recovered"
 	// ReasonOrgSwitched は Org の切り替えで ID を入れ替えたこと（4.4）。
@@ -192,6 +194,14 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	if in.Recovery {
 		restriction, methods = port.RestrictionRecovery, nil
 	}
+	u, err := tx.Users().Get(ctx, in.RealmID, in.UserID)
+	if err != nil {
+		return Issued{}, err
+	}
+	// 削除の猶予期間の間は、本人確認（2要素目まで）の後に取り消しだけができる（4.10）。
+	if restriction == port.RestrictionNone && u.DeletionScheduledAt != nil {
+		restriction = port.RestrictionDeletion
+	}
 	ev := in.Evidence
 	ev.AMR = in.AuthMethods
 	warnings, err := m.Warnings.Evaluate(ev)
@@ -236,10 +246,6 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	s.TokenHash = hash
-	u, err := tx.Users().Get(ctx, in.RealmID, in.UserID)
-	if err != nil {
-		return Issued{}, err
-	}
 	actor := audit.Actor{Type: "user", ID: u.PublicID}
 	var choices []string
 	if m.Orgs != nil {
@@ -413,6 +419,41 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
 		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt,
 		OrgID: old.ActiveOrgID,
+	})
+	if err != nil {
+		return Issued{}, err
+	}
+	is.Replaced = old.ID
+	return is, nil
+}
+
+// DeletionCancelled は、削除の取り消し専用のセッション（RestrictionDeletion）を失効させ、同じ本人確認の通常のセッションを
+// 発行する（4.10）。削除の予定を取り消したのと同じトランザクションで呼び、確定の後に Committed を呼ぶ。
+func (m *Manager) DeletionCancelled(ctx context.Context, tx port.Tx, realmID, sessionID, ip, userAgent, requestID string) (Issued, error) {
+	now := m.Clock.Now()
+	old, err := tx.Sessions().Get(ctx, realmID, sessionID)
+	if err != nil {
+		return Issued{}, err
+	}
+	if old.Restriction != port.RestrictionDeletion || (old.RevokedAt != nil && !now.Before(*old.RevokedAt)) || !now.Before(old.ExpiresAt) {
+		return Issued{}, ErrNotRestricted
+	}
+	actor, err := userActor(ctx, tx, realmID, old.PrincipalID)
+	if err != nil {
+		return Issued{}, err
+	}
+	if err := m.revokeInTx(ctx, tx, old, ReasonDeletionCancelled, actor, requestID); err != nil {
+		return Issued{}, err
+	}
+	var carried []warning.Warning
+	if len(old.Warnings) > 0 {
+		if err := json.Unmarshal(old.Warnings, &carried); err != nil {
+			return Issued{}, err
+		}
+	}
+	is, err := m.Issue(ctx, tx, Issue{
+		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: old.AuthMethods, Credentials: old.AuthCredentialIDs,
+		IP: ip, UserAgent: userAgent, RequestID: requestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt, OrgID: old.ActiveOrgID,
 	})
 	if err != nil {
 		return Issued{}, err
@@ -620,6 +661,10 @@ func (m *Manager) check(ctx context.Context, tx port.Tx, s port.Session, now tim
 	var ignore []string
 	if s.Restriction == port.RestrictionRecovery {
 		ignore = account.RecoveryIgnores
+	}
+	// 削除の予定があれば、取り消し専用（と、そこへ至る途中の段）のセッションだけが使える（4.10）。
+	if u.DeletionScheduledAt != nil && s.Restriction == port.RestrictionNone {
+		return time.Time{}, port.User{}, rejected("deletion scheduled")
 	}
 	at, err := account.Check(ctx, tx, u, s.AuthenticatedAt, now, ignore...)
 	if err != nil {

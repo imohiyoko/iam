@@ -22,7 +22,8 @@ import (
 var restrictedAllowed = map[string][]port.SessionRestriction{
 	"POST /v1/login/second-factor/passkey:start": {port.RestrictionSecondFactor, port.RestrictionEnroll},
 	"POST /v1/login/second-factor:verify":        {port.RestrictionSecondFactor, port.RestrictionEnroll},
-	"POST /v1/logout":                            {port.RestrictionSecondFactor, port.RestrictionEnroll, port.RestrictionRecovery},
+	"POST /v1/logout":                            {port.RestrictionSecondFactor, port.RestrictionEnroll, port.RestrictionRecovery, port.RestrictionDeletion},
+	"POST /v1/me/account:cancel-deletion":        {port.RestrictionDeletion},
 	"GET /v1/me/methods":                         {port.RestrictionEnroll, port.RestrictionRecovery},
 	"POST /v1/me/passkeys:start":                 {port.RestrictionEnroll, port.RestrictionRecovery},
 	"POST /v1/me/passkeys:finish":                {port.RestrictionEnroll, port.RestrictionRecovery},
@@ -56,6 +57,9 @@ func (s publicServer) loginResult(ctx context.Context, is session.Issued, userID
 		out.Next = &next
 	case port.RestrictionRecovery:
 		next := publicapi.Recovery
+		out.Next = &next
+	case port.RestrictionDeletion:
+		next := publicapi.CancelDeletion
 		out.Next = &next
 	}
 	if deref(returnToken) {

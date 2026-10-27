@@ -34,7 +34,7 @@ func get[V any](m map[string]V, realmID, id string, realmOf func(V) string, what
 type users struct{ t *tx }
 
 func cloneUser(u port.User) port.User {
-	u.ValidFrom, u.ValidUntil = cloneTime(u.ValidFrom), cloneTime(u.ValidUntil)
+	u.ValidFrom, u.ValidUntil, u.DeletionScheduledAt = cloneTime(u.ValidFrom), cloneTime(u.ValidUntil), cloneTime(u.DeletionScheduledAt)
 	return u
 }
 
@@ -471,4 +471,55 @@ func (r users) SetValidity(_ context.Context, realmID, id string, from, until *t
 	u.ValidFrom, u.ValidUntil, u.UpdatedAt = cloneTime(from), cloneTime(until), updatedAt
 	setKey(r.t, r.t.s.users, id, u)
 	return nil
+}
+
+func (r users) SetDeletion(_ context.Context, realmID, id string, scheduledAt *time.Time, updatedAt time.Time) error {
+	return r.change(realmID, id, func(u *port.User) { u.DeletionScheduledAt, u.UpdatedAt = cloneTime(scheduledAt), updatedAt })
+}
+
+func (r users) SetLegalHold(_ context.Context, realmID, id string, hold bool, updatedAt time.Time) error {
+	return r.change(realmID, id, func(u *port.User) { u.LegalHold, u.UpdatedAt = hold, updatedAt })
+}
+
+func (r users) change(realmID, id string, fn func(*port.User)) error {
+	u, err := get(r.t.s.users, realmID, id, func(u port.User) string { return u.RealmID }, "user")
+	if err != nil {
+		return err
+	}
+	u = cloneUser(u)
+	fn(&u)
+	setKey(r.t, r.t.s.users, id, u)
+	return nil
+}
+
+func (r users) Erase(_ context.Context, realmID, id string, at time.Time) error {
+	if err := r.change(realmID, id, func(u *port.User) { u.Status, u.DeletionScheduledAt, u.UpdatedAt = port.UserDeleted, nil, at }); err != nil {
+		return err
+	}
+	s := r.t.s
+	eraseWhere(r.t, s.emails, func(x port.UserEmail) bool { return x.RealmID == realmID && x.UserID == id })
+	eraseWhere(r.t, s.identities, func(x port.Identity) bool { return x.RealmID == realmID && x.UserID == id })
+	eraseWhere(r.t, s.passkeys, func(x port.Passkey) bool { return x.RealmID == realmID && x.UserID == id })
+	eraseWhere(r.t, s.totps, func(x port.TOTPCredential) bool { return x.RealmID == realmID && x.UserID == id })
+	eraseWhere(r.t, s.passwords, func(x port.PasswordCredential) bool { return x.RealmID == realmID && x.UserID == id })
+	eraseWhere(r.t, s.recoveryCodes, func(x port.RecoveryCode) bool { return x.RealmID == realmID && x.UserID == id })
+	eraseWhere(r.t, s.sessions, func(x port.Session) bool {
+		return x.RealmID == realmID && x.PrincipalType == port.PrincipalUser && x.PrincipalID == id
+	})
+	eraseWhere(r.t, s.roleBindings, func(x port.RoleBinding) bool {
+		return x.RealmID == realmID && x.PrincipalType == port.PrincipalUser && x.PrincipalID == id
+	})
+	return nil
+}
+
+func eraseWhere[V any](t *tx, m map[string]V, match func(V) bool) {
+	var keys []string
+	for k, v := range m {
+		if match(v) {
+			keys = append(keys, k)
+		}
+	}
+	for _, k := range keys {
+		deleteKey(t, m, k)
+	}
 }
