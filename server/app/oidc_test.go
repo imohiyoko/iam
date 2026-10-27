@@ -401,3 +401,145 @@ func TestOIDCPrivateKeyJWT(t *testing.T) {
 		}
 	}
 }
+
+// post は連携先として token・introspect・revoke を呼ぶ（client_secret_basic）。
+func (p *rp) post(t *testing.T, path string, form url.Values) (int, map[string]any) {
+	t.Helper()
+	var hdr []string
+	if p.secret != "" {
+		hdr = []string{"Authorization", "Basic " + base64.StdEncoding.EncodeToString([]byte(url.QueryEscape(p.clientID)+":"+url.QueryEscape(p.secret)))}
+	} else {
+		form.Set("client_id", p.clientID)
+	}
+	w := p.l.oidcDo(t, "POST", path, form, "", hdr...)
+	var out map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &out)
+	return w.Code, out
+}
+
+func (p *rp) refresh(t *testing.T, token string) (int, map[string]any) {
+	t.Helper()
+	return p.post(t, oidcToken, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {token}})
+}
+
+func (p *rp) introspect(t *testing.T, token string) map[string]any {
+	t.Helper()
+	status, out := p.post(t, oidcIntrospect, url.Values{"token": {token}})
+	if status != 200 {
+		t.Fatalf("introspect: %d %v", status, out)
+	}
+	return out
+}
+
+func TestOIDCRefreshIntrospectRevoke(t *testing.T) {
+	l := newLoginEnvWith(t, withIssuer, nil)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+
+	w := l.oidcDo(t, "GET", "/.well-known/openid-configuration", nil, "")
+	var disc map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &disc)
+	if disc["introspection_endpoint"] != testIssuer+oidcIntrospect || disc["revocation_endpoint"] != testIssuer+oidcRevoke {
+		t.Fatalf("discovery: %v", disc)
+	}
+	if gt, _ := disc["grant_types_supported"].([]any); !slices.Contains(gt, any("refresh_token")) {
+		t.Fatalf("grant types: %v", gt)
+	}
+
+	code, _ := p.login(t, "alice@example.com", nil)
+	_, tok := p.exchange(t, code, nil)
+	rt, _ := tok["refresh_token"].(string)
+	if !strings.HasPrefix(rt, "rtk_") {
+		t.Fatalf("refresh token: %v", tok)
+	}
+	alice := l.userID(t, "alice@example.com")
+	if in := p.introspect(t, tok["access_token"].(string)); in["active"] != true || in["sub"] != alice || in["client_id"] != p.clientID ||
+		in["token_type"] != "access_token" || in["scope"] != "openid email" || in["iss"] != testIssuer {
+		t.Fatalf("introspect access: %v", in)
+	}
+
+	// リフレッシュするたびに新しいリフレッシュトークンに替わる。ID トークンの sid は変わらない。
+	l.advance(time.Minute)
+	status, tok2 := p.refresh(t, rt)
+	if status != 200 || tok2["refresh_token"] == rt || tok2["access_token"] == tok["access_token"] || tok2["id_token"] == nil {
+		t.Fatalf("refresh: %d %v", status, tok2)
+	}
+	if c1, c2 := l.idClaims(t, tok["id_token"].(string), port.AlgES256), l.idClaims(t, tok2["id_token"].(string), port.AlgES256); c1["sid"] != c2["sid"] ||
+		c2["nonce"] != nil {
+		t.Fatalf("refreshed id token: %v", c2)
+	}
+	if in := p.introspect(t, rt); in["active"] != false || len(in) != 1 {
+		t.Fatalf("used refresh token: %v", in)
+	}
+	// 使用済みのリフレッシュトークンが再び来たら、認可ごと失効させる（新しいトークンも使えない）。
+	if status, out := p.refresh(t, rt); status != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("reuse: %d %v", status, out)
+	}
+	if status, out := p.refresh(t, tok2["refresh_token"].(string)); status != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("after reuse: %d %v", status, out)
+	}
+	if status, _ := l.userinfo(t, tok2["access_token"].(string)); status != 401 {
+		t.Fatalf("access token after reuse: %d", status)
+	}
+
+	// 失効（RFC 7009）。知らないトークンも 200。失効させた認可のトークンは非アクティブ。
+	code, _ = p.login(t, "alice@example.com", nil)
+	_, tok3 := p.exchange(t, code, nil)
+	if status, _ := p.post(t, oidcRevoke, url.Values{"token": {"rtk_unknown.x"}}); status != 200 {
+		t.Fatalf("revoke unknown: %d", status)
+	}
+	other := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	if status, _ := other.post(t, oidcRevoke, url.Values{"token": {tok3["refresh_token"].(string)}}); status != 200 {
+		t.Fatalf("revoke by other: %d", status)
+	}
+	if in := p.introspect(t, tok3["access_token"].(string)); in["active"] != true {
+		t.Fatalf("revoked by another client: %v", in)
+	}
+	// 別の連携先（リソースサーバー）も確認できる。
+	if in := other.introspect(t, tok3["access_token"].(string)); in["active"] != true || in["client_id"] != p.clientID {
+		t.Fatalf("introspect by resource server: %v", in)
+	}
+	if status, _ := p.post(t, oidcRevoke, url.Values{"token": {tok3["access_token"].(string)}}); status != 200 {
+		t.Fatalf("revoke: %d", status)
+	}
+	if in := p.introspect(t, tok3["refresh_token"].(string)); in["active"] != false {
+		t.Fatalf("after revoke: %v", in)
+	}
+
+	// 停止はイントロスペクションにすぐ反映される。
+	code, _ = p.login(t, "alice@example.com", nil)
+	_, tok4 := p.exchange(t, code, nil)
+	if in := p.introspect(t, tok4["access_token"].(string)); in["active"] != true {
+		t.Fatalf("before suspension: %v", in)
+	}
+	if status, out := l.admin(t, "/v1/admin/users/"+alice+"/suspensions", owner, map[string]any{"category": "tos_violation", "reason": "x"}); status != 201 {
+		t.Fatalf("suspend: %d %v", status, out)
+	}
+	if in := p.introspect(t, tok4["access_token"].(string)); in["active"] != false {
+		t.Fatalf("after suspension: %v", in)
+	}
+	if status, out := p.refresh(t, tok4["refresh_token"].(string)); status != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("refresh after suspension: %d %v", status, out)
+	}
+
+	// イントロスペクションは機密の連携先だけ。公開クライアントは invalid_client、誤った秘密は 401。
+	pub := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "none"})
+	if status, out := pub.post(t, oidcIntrospect, url.Values{"token": {tok4["access_token"].(string)}}); status != 400 || out["error"] != "invalid_client" {
+		t.Fatalf("public introspect: %d %v", status, out)
+	}
+	bad := &rp{l: l, clientID: p.clientID, secret: "wrong"}
+	if status, out := bad.post(t, oidcIntrospect, url.Values{"token": {tok4["access_token"].(string)}}); status != 401 || out["error"] != "invalid_client" {
+		t.Fatalf("bad secret introspect: %d %v", status, out)
+	}
+
+	types := map[string]int{}
+	for _, e := range l.auditTypes(t) {
+		types[e.Type]++
+	}
+	if types["oidc.refresh_reused"] != 1 || types["oidc.grant_revoked"] != 1 {
+		t.Fatalf("audit: %v", types)
+	}
+	if strings.Contains(l.out.String(), l.internalUserID(t, alice)) {
+		t.Fatal("internal user id leaked")
+	}
+}
