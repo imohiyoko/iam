@@ -41,6 +41,10 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.QuotaGrants().Purge(ctx, limit)
 		}},
+	feature.OrgManagedUsers: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.OrgDomains().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return tx.OrgDomains().Purge(ctx, limit)
+		}},
 	feature.ServiceAccounts: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		return eachServiceAccount(ctx, tx, -1, func(port.ServiceAccount) (bool, error) { return true, nil })
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {

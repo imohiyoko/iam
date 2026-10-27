@@ -230,3 +230,62 @@ func (r quotaGrants) Delete(ctx context.Context, realmID, id string) error {
 	}
 	return mapErr(err)
 }
+
+// ---------------------------------------------------------------------------
+
+type orgDomains struct{ q *db.Queries }
+
+func toOrgDomain(r db.OrgDomain) (port.OrgDomain, error) {
+	var p times
+	d := port.OrgDomain{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, OrgID: r.OrgID, Domain: r.Domain, Token: r.Token,
+		VerifiedAt: p.null(r.VerifiedAt), CheckedAt: p.null(r.CheckedAt), CreatedBy: r.CreatedBy, CreatedAt: p.at(r.CreatedAt)}
+	return d, p.err
+}
+
+func (r orgDomains) Create(ctx context.Context, d port.OrgDomain) error {
+	return mapErr(r.q.CreateOrgDomain(ctx, db.CreateOrgDomainParams{ID: d.ID, PublicID: d.PublicID, RealmID: d.RealmID, OrgID: d.OrgID,
+		Domain: d.Domain, Token: d.Token, VerifiedAt: nullTime(d.VerifiedAt), CheckedAt: nullTime(d.CheckedAt), CreatedBy: d.CreatedBy,
+		CreatedAt: formatTime(d.CreatedAt)}))
+}
+
+func (r orgDomains) GetByPublicID(ctx context.Context, realmID, publicID string) (port.OrgDomain, error) {
+	row, err := r.q.GetOrgDomainByPublicID(ctx, db.GetOrgDomainByPublicIDParams{RealmID: realmID, PublicID: publicID})
+	return one(row, err, toOrgDomain)
+}
+
+func (r orgDomains) GetVerified(ctx context.Context, realmID, domain string) (port.OrgDomain, error) {
+	row, err := r.q.GetVerifiedOrgDomain(ctx, db.GetVerifiedOrgDomainParams{RealmID: realmID, Domain: domain})
+	return one(row, err, toOrgDomain)
+}
+
+func (r orgDomains) ListByOrg(ctx context.Context, realmID, orgID string) ([]port.OrgDomain, error) {
+	rs, err := r.q.ListOrgDomainsByOrg(ctx, db.ListOrgDomainsByOrgParams{RealmID: realmID, OrgID: orgID})
+	return rows(rs, err, toOrgDomain)
+}
+
+func (r orgDomains) Update(ctx context.Context, d port.OrgDomain) error {
+	n, err := r.q.UpdateOrgDomain(ctx, db.UpdateOrgDomainParams{VerifiedAt: nullTime(d.VerifiedAt), CheckedAt: nullTime(d.CheckedAt),
+		RealmID: d.RealmID, ID: d.ID})
+	if err == nil && n == 0 {
+		return errs.New(errs.KindNotFound, "org domain %s", d.ID)
+	}
+	return mapErr(err)
+}
+
+func (r orgDomains) Delete(ctx context.Context, realmID, id string) error {
+	n, err := r.q.DeleteOrgDomain(ctx, db.DeleteOrgDomainParams{RealmID: realmID, ID: id})
+	if err == nil && n == 0 {
+		return errs.New(errs.KindNotFound, "org domain %s", id)
+	}
+	return mapErr(err)
+}
+
+func (r orgDomains) Count(ctx context.Context) (int, error) {
+	n, err := r.q.CountOrgDomains(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r orgDomains) Purge(ctx context.Context, limit int) (int, error) {
+	n, err := r.q.PurgeOrgDomains(ctx, int64(limit))
+	return int(n), mapErr(err)
+}

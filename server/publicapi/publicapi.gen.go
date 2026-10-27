@@ -117,6 +117,24 @@ func (e MyOrgStatus) Valid() bool {
 	}
 }
 
+// Defines values for OrgDomainStatus.
+const (
+	OrgDomainStatusPending  OrgDomainStatus = "pending"
+	OrgDomainStatusVerified OrgDomainStatus = "verified"
+)
+
+// Valid indicates whether the value is a known member of the OrgDomainStatus enum.
+func (e OrgDomainStatus) Valid() bool {
+	switch e {
+	case OrgDomainStatusPending:
+		return true
+	case OrgDomainStatusVerified:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OrgInvitationRole.
 const (
 	OrgInvitationRoleAdmin  OrgInvitationRole = "admin"
@@ -140,22 +158,22 @@ func (e OrgInvitationRole) Valid() bool {
 
 // Defines values for OrgInvitationStatus.
 const (
-	Accepted OrgInvitationStatus = "accepted"
-	Expired  OrgInvitationStatus = "expired"
-	Pending  OrgInvitationStatus = "pending"
-	Revoked  OrgInvitationStatus = "revoked"
+	OrgInvitationStatusAccepted OrgInvitationStatus = "accepted"
+	OrgInvitationStatusExpired  OrgInvitationStatus = "expired"
+	OrgInvitationStatusPending  OrgInvitationStatus = "pending"
+	OrgInvitationStatusRevoked  OrgInvitationStatus = "revoked"
 )
 
 // Valid indicates whether the value is a known member of the OrgInvitationStatus enum.
 func (e OrgInvitationStatus) Valid() bool {
 	switch e {
-	case Accepted:
+	case OrgInvitationStatusAccepted:
 		return true
-	case Expired:
+	case OrgInvitationStatusExpired:
 		return true
-	case Pending:
+	case OrgInvitationStatusPending:
 		return true
-	case Revoked:
+	case OrgInvitationStatusRevoked:
 		return true
 	default:
 		return false
@@ -493,6 +511,28 @@ type MyTOTP struct {
 	// Id 公開の TOTP の ID（otp_…）
 	Id string `json:"id"`
 }
+
+// OrgDomain defines model for OrgDomain.
+type OrgDomain struct {
+	// CheckedAt 最後に TXT を確かめた時刻
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	Domain    string     `json:"domain"`
+
+	// Id 公開のドメイン ID（dom_…）
+	Id     string          `json:"id"`
+	Status OrgDomainStatus `json:"status"`
+
+	// TxtName TXT を置く名前（`_iam-challenge.<domain>`）
+	TxtName string `json:"txt_name"`
+
+	// TxtValue TXT の値（`iam-domain-verification=<token>`）
+	TxtValue   string     `json:"txt_value"`
+	VerifiedAt *time.Time `json:"verified_at,omitempty"`
+}
+
+// OrgDomainStatus defines model for OrgDomain.Status.
+type OrgDomainStatus string
 
 // OrgInvitation defines model for OrgInvitation.
 type OrgInvitation struct {
@@ -840,6 +880,11 @@ type CreateMyOrgJSONBody struct {
 	Name string `json:"name"`
 }
 
+// AddOrgDomainJSONBody defines parameters for AddOrgDomain.
+type AddOrgDomainJSONBody struct {
+	Domain string `json:"domain"`
+}
+
 // InviteToOrgJSONBody defines parameters for InviteToOrg.
 type InviteToOrgJSONBody struct {
 	Email      string                  `json:"email"`
@@ -997,6 +1042,9 @@ type CompleteLinkIdentityJSONRequestBody CompleteLinkIdentityJSONBody
 
 // CreateMyOrgJSONRequestBody defines body for CreateMyOrg for application/json ContentType.
 type CreateMyOrgJSONRequestBody CreateMyOrgJSONBody
+
+// AddOrgDomainJSONRequestBody defines body for AddOrgDomain for application/json ContentType.
+type AddOrgDomainJSONRequestBody AddOrgDomainJSONBody
 
 // CreateMyOrgGroupJSONRequestBody defines body for CreateMyOrgGroup for application/json ContentType.
 type CreateMyOrgGroupJSONRequestBody = GroupInput
@@ -1156,6 +1204,18 @@ type ServerInterface interface {
 	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
 	// (POST /v1/me/orgs)
 	CreateMyOrg(w http.ResponseWriter, r *http.Request)
+	// ListOrgDomains Org のドメインの一覧（Org の owner。11.3）
+	// (GET /v1/me/orgs/{id}/domains)
+	ListOrgDomains(w http.ResponseWriter, r *http.Request, id string)
+	// AddOrgDomain Org にドメインを登録する（Org の owner。11.3、ADR 0075）
+	// (POST /v1/me/orgs/{id}/domains)
+	AddOrgDomain(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteOrgDomain ドメインを消す（Org の owner）
+	// (POST /v1/me/orgs/{id}/domains/{domain_id}:delete)
+	DeleteOrgDomain(w http.ResponseWriter, r *http.Request, id string, domainId string)
+	// VerifyOrgDomain ドメインの TXT を確かめ、証明済みにする（Org の owner）
+	// (POST /v1/me/orgs/{id}/domains/{domain_id}:verify)
+	VerifyOrgDomain(w http.ResponseWriter, r *http.Request, id string, domainId string)
 	// ListMyOrgGroups この Org の範囲の Group の一覧（3.2）
 	// (GET /v1/me/orgs/{id}/groups)
 	ListMyOrgGroups(w http.ResponseWriter, r *http.Request, id string)
@@ -1732,6 +1792,128 @@ func (siw *ServerInterfaceWrapper) CreateMyOrg(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateMyOrg(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOrgDomains operation middleware
+func (siw *ServerInterfaceWrapper) ListOrgDomains(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrgDomains(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddOrgDomain operation middleware
+func (siw *ServerInterfaceWrapper) AddOrgDomain(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddOrgDomain(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteOrgDomain operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOrgDomain(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "domain_id" -------------
+	var domainId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domain_id", r.PathValue("domain_id"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "domain_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteOrgDomain(w, r, id, domainId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyOrgDomain operation middleware
+func (siw *ServerInterfaceWrapper) VerifyOrgDomain(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "domain_id" -------------
+	var domainId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "domain_id", r.PathValue("domain_id"), &domainId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "domain_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyOrgDomain(w, r, id, domainId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3205,6 +3387,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/invitations", wrapper.ListOrgInvitations)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/invitations", wrapper.InviteToOrg)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/invitations/{invitation_id}:revoke", wrapper.RevokeOrgInvitation)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/domains", wrapper.ListOrgDomains)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains", wrapper.AddOrgDomain)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains/{domain_id}:verify", wrapper.VerifyOrgDomain)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains/{domain_id}:delete", wrapper.DeleteOrgDomain)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:bind-email", wrapper.BindMyOrgEmail)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/invitations:accept", wrapper.AcceptInvitation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:switch", wrapper.SwitchMyOrg)
@@ -4781,6 +4967,317 @@ func (response CreateMyOrg404JSONResponse) VisitCreateMyOrgResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgDomainsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListOrgDomainsResponseObject interface {
+	VisitListOrgDomainsResponse(w http.ResponseWriter) error
+}
+
+type ListOrgDomains200JSONResponse struct {
+	Domains []OrgDomain `json:"domains"`
+}
+
+func (response ListOrgDomains200JSONResponse) VisitListOrgDomainsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgDomains401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListOrgDomains401JSONResponse) VisitListOrgDomainsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgDomains403JSONResponse struct{ DeniedJSONResponse }
+
+func (response ListOrgDomains403JSONResponse) VisitListOrgDomainsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgDomains404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListOrgDomains404JSONResponse) VisitListOrgDomainsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgDomainRequestObject struct {
+	Id   string `json:"id"`
+	Body *AddOrgDomainJSONRequestBody
+}
+
+type AddOrgDomainResponseObject interface {
+	VisitAddOrgDomainResponse(w http.ResponseWriter) error
+}
+
+type AddOrgDomain201JSONResponse OrgDomain
+
+func (response AddOrgDomain201JSONResponse) VisitAddOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgDomain400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AddOrgDomain400JSONResponse) VisitAddOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgDomain401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AddOrgDomain401JSONResponse) VisitAddOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgDomain403JSONResponse struct{ DeniedJSONResponse }
+
+func (response AddOrgDomain403JSONResponse) VisitAddOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgDomain404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AddOrgDomain404JSONResponse) VisitAddOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgDomain409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddOrgDomain409JSONResponse) VisitAddOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgDomainRequestObject struct {
+	Id       string `json:"id"`
+	DomainId string `json:"domain_id"`
+}
+
+type DeleteOrgDomainResponseObject interface {
+	VisitDeleteOrgDomainResponse(w http.ResponseWriter) error
+}
+
+type DeleteOrgDomain204Response struct {
+}
+
+func (response DeleteOrgDomain204Response) VisitDeleteOrgDomainResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteOrgDomain401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteOrgDomain401JSONResponse) VisitDeleteOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgDomain403JSONResponse struct{ DeniedJSONResponse }
+
+func (response DeleteOrgDomain403JSONResponse) VisitDeleteOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgDomain404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteOrgDomain404JSONResponse) VisitDeleteOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrgDomainRequestObject struct {
+	Id       string `json:"id"`
+	DomainId string `json:"domain_id"`
+}
+
+type VerifyOrgDomainResponseObject interface {
+	VisitVerifyOrgDomainResponse(w http.ResponseWriter) error
+}
+
+type VerifyOrgDomain200JSONResponse OrgDomain
+
+func (response VerifyOrgDomain200JSONResponse) VisitVerifyOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrgDomain401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response VerifyOrgDomain401JSONResponse) VisitVerifyOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrgDomain403JSONResponse struct{ DeniedJSONResponse }
+
+func (response VerifyOrgDomain403JSONResponse) VisitVerifyOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrgDomain404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response VerifyOrgDomain404JSONResponse) VisitVerifyOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrgDomain409JSONResponse struct{ ConflictJSONResponse }
+
+func (response VerifyOrgDomain409JSONResponse) VisitVerifyOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrgDomain503JSONResponse Error
+
+func (response VerifyOrgDomain503JSONResponse) VisitVerifyOrgDomainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8377,6 +8874,18 @@ type StrictServerInterface interface {
 	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
 	// (POST /v1/me/orgs)
 	CreateMyOrg(ctx context.Context, request CreateMyOrgRequestObject) (CreateMyOrgResponseObject, error)
+	// ListOrgDomains Org のドメインの一覧（Org の owner。11.3）
+	// (GET /v1/me/orgs/{id}/domains)
+	ListOrgDomains(ctx context.Context, request ListOrgDomainsRequestObject) (ListOrgDomainsResponseObject, error)
+	// AddOrgDomain Org にドメインを登録する（Org の owner。11.3、ADR 0075）
+	// (POST /v1/me/orgs/{id}/domains)
+	AddOrgDomain(ctx context.Context, request AddOrgDomainRequestObject) (AddOrgDomainResponseObject, error)
+	// DeleteOrgDomain ドメインを消す（Org の owner）
+	// (POST /v1/me/orgs/{id}/domains/{domain_id}:delete)
+	DeleteOrgDomain(ctx context.Context, request DeleteOrgDomainRequestObject) (DeleteOrgDomainResponseObject, error)
+	// VerifyOrgDomain ドメインの TXT を確かめ、証明済みにする（Org の owner）
+	// (POST /v1/me/orgs/{id}/domains/{domain_id}:verify)
+	VerifyOrgDomain(ctx context.Context, request VerifyOrgDomainRequestObject) (VerifyOrgDomainResponseObject, error)
 	// ListMyOrgGroups この Org の範囲の Group の一覧（3.2）
 	// (GET /v1/me/orgs/{id}/groups)
 	ListMyOrgGroups(ctx context.Context, request ListMyOrgGroupsRequestObject) (ListMyOrgGroupsResponseObject, error)
@@ -9309,6 +9818,119 @@ func (sh *strictHandler) CreateMyOrg(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateMyOrgResponseObject); ok {
 		if err := validResponse.VisitCreateMyOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOrgDomains operation middleware
+func (sh *strictHandler) ListOrgDomains(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListOrgDomainsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrgDomains(ctx, request.(ListOrgDomainsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrgDomains")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrgDomainsResponseObject); ok {
+		if err := validResponse.VisitListOrgDomainsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddOrgDomain operation middleware
+func (sh *strictHandler) AddOrgDomain(w http.ResponseWriter, r *http.Request, id string) {
+	var request AddOrgDomainRequestObject
+
+	request.Id = id
+
+	var body AddOrgDomainJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddOrgDomain(ctx, request.(AddOrgDomainRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddOrgDomain")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddOrgDomainResponseObject); ok {
+		if err := validResponse.VisitAddOrgDomainResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteOrgDomain operation middleware
+func (sh *strictHandler) DeleteOrgDomain(w http.ResponseWriter, r *http.Request, id string, domainId string) {
+	var request DeleteOrgDomainRequestObject
+
+	request.Id = id
+	request.DomainId = domainId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteOrgDomain(ctx, request.(DeleteOrgDomainRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteOrgDomain")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteOrgDomainResponseObject); ok {
+		if err := validResponse.VisitDeleteOrgDomainResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyOrgDomain operation middleware
+func (sh *strictHandler) VerifyOrgDomain(w http.ResponseWriter, r *http.Request, id string, domainId string) {
+	var request VerifyOrgDomainRequestObject
+
+	request.Id = id
+	request.DomainId = domainId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyOrgDomain(ctx, request.(VerifyOrgDomainRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyOrgDomain")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyOrgDomainResponseObject); ok {
+		if err := validResponse.VisitVerifyOrgDomainResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -53,6 +53,17 @@ func (q *Queries) CountActiveMemberships(ctx context.Context, arg CountActiveMem
 	return count, err
 }
 
+const countOrgDomains = `-- name: CountOrgDomains :one
+SELECT count(*) FROM org_domains
+`
+
+func (q *Queries) CountOrgDomains(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countOrgDomains)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countQuotaGrants = `-- name: CountQuotaGrants :one
 SELECT count(*) FROM org_quota_grants
 `
@@ -188,6 +199,40 @@ func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) error {
 	return err
 }
 
+const createOrgDomain = `-- name: CreateOrgDomain :exec
+INSERT INTO org_domains (id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateOrgDomainParams struct {
+	ID         string
+	PublicID   string
+	RealmID    string
+	OrgID      string
+	Domain     string
+	Token      string
+	VerifiedAt sql.NullString
+	CheckedAt  sql.NullString
+	CreatedBy  string
+	CreatedAt  string
+}
+
+func (q *Queries) CreateOrgDomain(ctx context.Context, arg CreateOrgDomainParams) error {
+	_, err := q.db.ExecContext(ctx, createOrgDomain,
+		arg.ID,
+		arg.PublicID,
+		arg.RealmID,
+		arg.OrgID,
+		arg.Domain,
+		arg.Token,
+		arg.VerifiedAt,
+		arg.CheckedAt,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const createQuotaGrant = `-- name: CreateQuotaGrant :exec
 INSERT INTO org_quota_grants (id, public_id, realm_id, org_id, quota_key, kind, quantity, starts_at, ends_at, source, external_ref,
     created_by, created_at, updated_at)
@@ -229,6 +274,23 @@ func (q *Queries) CreateQuotaGrant(ctx context.Context, arg CreateQuotaGrantPara
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const deleteOrgDomain = `-- name: DeleteOrgDomain :execrows
+DELETE FROM org_domains WHERE realm_id = ? AND id = ?
+`
+
+type DeleteOrgDomainParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) DeleteOrgDomain(ctx context.Context, arg DeleteOrgDomainParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOrgDomain, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteQuotaGrant = `-- name: DeleteQuotaGrant :execrows
@@ -467,6 +529,33 @@ func (q *Queries) GetOrgByPublicID(ctx context.Context, arg GetOrgByPublicIDPara
 	return i, err
 }
 
+const getOrgDomainByPublicID = `-- name: GetOrgDomainByPublicID :one
+SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at FROM org_domains WHERE realm_id = ? AND public_id = ?
+`
+
+type GetOrgDomainByPublicIDParams struct {
+	RealmID  string
+	PublicID string
+}
+
+func (q *Queries) GetOrgDomainByPublicID(ctx context.Context, arg GetOrgDomainByPublicIDParams) (OrgDomain, error) {
+	row := q.db.QueryRowContext(ctx, getOrgDomainByPublicID, arg.RealmID, arg.PublicID)
+	var i OrgDomain
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.OrgID,
+		&i.Domain,
+		&i.Token,
+		&i.VerifiedAt,
+		&i.CheckedAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getPersonalOrg = `-- name: GetPersonalOrg :one
 SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = ? AND kind = 'personal' AND personal_owner_id = ?
 `
@@ -562,6 +651,33 @@ func (q *Queries) GetQuotaGrantByPublicID(ctx context.Context, arg GetQuotaGrant
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getVerifiedOrgDomain = `-- name: GetVerifiedOrgDomain :one
+SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at FROM org_domains WHERE realm_id = ? AND domain = ? AND verified_at IS NOT NULL
+`
+
+type GetVerifiedOrgDomainParams struct {
+	RealmID string
+	Domain  string
+}
+
+func (q *Queries) GetVerifiedOrgDomain(ctx context.Context, arg GetVerifiedOrgDomainParams) (OrgDomain, error) {
+	row := q.db.QueryRowContext(ctx, getVerifiedOrgDomain, arg.RealmID, arg.Domain)
+	var i OrgDomain
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.RealmID,
+		&i.OrgID,
+		&i.Domain,
+		&i.Token,
+		&i.VerifiedAt,
+		&i.CheckedAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -715,6 +831,49 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, arg ListMemberships
 	return items, nil
 }
 
+const listOrgDomainsByOrg = `-- name: ListOrgDomainsByOrg :many
+SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at FROM org_domains WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id
+`
+
+type ListOrgDomainsByOrgParams struct {
+	RealmID string
+	OrgID   string
+}
+
+func (q *Queries) ListOrgDomainsByOrg(ctx context.Context, arg ListOrgDomainsByOrgParams) ([]OrgDomain, error) {
+	rows, err := q.db.QueryContext(ctx, listOrgDomainsByOrg, arg.RealmID, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrgDomain
+	for rows.Next() {
+		var i OrgDomain
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.OrgID,
+			&i.Domain,
+			&i.Token,
+			&i.VerifiedAt,
+			&i.CheckedAt,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgs = `-- name: ListOrgs :many
 SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = ? AND id > ?2 ORDER BY id LIMIT ?3
 `
@@ -808,6 +967,18 @@ func (q *Queries) ListQuotaGrantsByOrg(ctx context.Context, arg ListQuotaGrantsB
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeOrgDomains = `-- name: PurgeOrgDomains :execrows
+DELETE FROM org_domains WHERE id IN (SELECT d.id FROM org_domains d LIMIT ?1)
+`
+
+func (q *Queries) PurgeOrgDomains(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeOrgDomains, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const purgeQuotaGrants = `-- name: PurgeQuotaGrants :execrows
@@ -924,6 +1095,30 @@ func (q *Queries) UpdateMembership(ctx context.Context, arg UpdateMembershipPara
 		arg.ValidUntil,
 		arg.EndedReason,
 		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateOrgDomain = `-- name: UpdateOrgDomain :execrows
+UPDATE org_domains SET verified_at = ?, checked_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type UpdateOrgDomainParams struct {
+	VerifiedAt sql.NullString
+	CheckedAt  sql.NullString
+	RealmID    string
+	ID         string
+}
+
+func (q *Queries) UpdateOrgDomain(ctx context.Context, arg UpdateOrgDomainParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateOrgDomain,
+		arg.VerifiedAt,
+		arg.CheckedAt,
 		arg.RealmID,
 		arg.ID,
 	)

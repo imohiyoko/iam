@@ -350,6 +350,19 @@ type Org struct {
 	Settings            []byte
 }
 
+type OrgDomain struct {
+	ID         string
+	PublicID   string
+	RealmID    string
+	OrgID      string
+	Domain     string
+	Token      string
+	VerifiedAt sql.NullString
+	CheckedAt  sql.NullString
+	CreatedBy  string
+	CreatedAt  string
+}
+
 type OrgQuotaGrant struct {
 	ID          string
 	PublicID    string

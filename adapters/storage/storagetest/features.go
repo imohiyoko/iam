@@ -34,6 +34,9 @@ func testFeatureDataCountPurge(t *testing.T, h Harness) {
 			if err := tx.QuotaGrants().Create(ctx, newQuotaGrant(r, o.ID, port.QuotaBase, 5)); err != nil {
 				return err
 			}
+			if err := tx.OrgDomains().Create(ctx, newOrgDomain(r, o.ID, "example.com")); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -55,6 +58,18 @@ func testFeatureDataCountPurge(t *testing.T, h Harness) {
 		}
 		if n, err := tx.QuotaGrants().Purge(ctx, 10); err != nil || n != 1 {
 			return fmt.Errorf("quotaGrants.Purge = %d, %v", n, err)
+		}
+		if n, err := tx.OrgDomains().Count(ctx); err != nil || n != 3 {
+			return fmt.Errorf("orgDomains.Count = %d, %v", n, err)
+		}
+		if n, err := tx.OrgDomains().Purge(ctx, 2); err != nil || n != 2 {
+			return fmt.Errorf("orgDomains.Purge(2) = %d, %v", n, err)
+		}
+		if n, err := tx.OrgDomains().Purge(ctx, 10); err != nil || n != 1 {
+			return fmt.Errorf("orgDomains.Purge = %d, %v", n, err)
+		}
+		if n, err := tx.OrgDomains().Count(ctx); err != nil || n != 0 {
+			return fmt.Errorf("orgDomains.Count after purge = %d, %v", n, err)
 		}
 		if n, err := tx.Passwords().Count(ctx); err != nil || n != 0 {
 			return fmt.Errorf("passwords.Count after purge = %d, %v", n, err)

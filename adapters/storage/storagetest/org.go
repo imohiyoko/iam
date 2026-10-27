@@ -520,3 +520,102 @@ var quotaGrantIsolationCase = IsolationCase{
 		return a + b + c, err
 	},
 }
+
+func newOrgDomain(realmID, orgID, domain string) port.OrgDomain {
+	return port.OrgDomain{ID: id.New(id.OrgDomain), PublicID: id.NewExternal(id.OrgDomain), RealmID: realmID, OrgID: orgID, Domain: domain,
+		Token: "tok", CreatedBy: "usr_x", CreatedAt: T0}
+}
+
+func testOrgDomains(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, o1, o2 := id.New(id.Realm), id.New(id.Org), id.New(id.Org)
+	a := newOrgDomain(r, o1, "example.com")
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.OrgDomains()
+		if err := repo.Create(ctx, a); err != nil {
+			return err
+		}
+		if got, err := repo.GetByPublicID(ctx, r, a.PublicID); err != nil || !reflect.DeepEqual(got, a) {
+			return fmt.Errorf("GetByPublicID = %+v, %v", got, err)
+		}
+		dup := newOrgDomain(r, o1, "example.org")
+		dup.PublicID = a.PublicID
+		if err := conflict("same public id", repo.Create(ctx, dup)); err != nil {
+			return err
+		}
+		if err := conflict("same domain in org", repo.Create(ctx, newOrgDomain(r, o1, "example.com"))); err != nil {
+			return err
+		}
+		// 証明前なら、別の Org も同じドメインを登録できる。
+		b := newOrgDomain(r, o2, "example.com")
+		b.CreatedAt = T0.Add(time.Minute)
+		if err := repo.Create(ctx, b); err != nil {
+			return err
+		}
+		c := newOrgDomain(r, o1, "example.net")
+		c.CreatedAt = T0.Add(time.Minute)
+		if err := repo.Create(ctx, c); err != nil {
+			return err
+		}
+		if list, err := repo.ListByOrg(ctx, r, o1); err != nil || len(list) != 2 || list[0].ID != a.ID || list[1].ID != c.ID {
+			return fmt.Errorf("ListByOrg = %+v, %v", list, err)
+		}
+		if _, err := repo.GetVerified(ctx, r, "example.com"); notFound("not verified", err) != nil {
+			return notFound("not verified", err)
+		}
+		a.VerifiedAt, a.CheckedAt = ptr(T0.Add(time.Hour)), ptr(T0.Add(time.Hour))
+		if err := repo.Update(ctx, a); err != nil {
+			return err
+		}
+		if got, err := repo.GetVerified(ctx, r, "example.com"); err != nil || !reflect.DeepEqual(got, a) {
+			return fmt.Errorf("GetVerified = %+v, %v", got, err)
+		}
+		// 証明済みのドメインは realm で1つの Org だけ。
+		b.VerifiedAt, b.CheckedAt = ptr(T0.Add(2*time.Hour)), ptr(T0.Add(2*time.Hour))
+		if err := conflict("verified by another org", repo.Update(ctx, b)); err != nil {
+			return err
+		}
+		b.VerifiedAt = nil
+		if err := repo.Update(ctx, b); err != nil {
+			return err
+		}
+		other := a
+		other.RealmID = id.New(id.Realm)
+		if err := notFound("update in another realm", repo.Update(ctx, other)); err != nil {
+			return err
+		}
+		if err := notFound("delete in another realm", repo.Delete(ctx, other.RealmID, a.ID)); err != nil {
+			return err
+		}
+		if err := repo.Delete(ctx, r, a.ID); err != nil {
+			return err
+		}
+		if _, err := repo.GetByPublicID(ctx, r, a.PublicID); notFound("deleted", err) != nil {
+			return notFound("deleted", err)
+		}
+		return notFound("delete again", repo.Delete(ctx, r, a.ID))
+	})
+}
+
+const isoOrgDomain = "dom_00000000000000000000000009"
+
+var orgDomainIsolationCase = IsolationCase{
+	Name: "OrgDomains.GetByPublicID+GetVerified+ListByOrg",
+	Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
+		d := newOrgDomain(r, isoOrg, "iso.example")
+		d.PublicID, d.VerifiedAt = isoOrgDomain, ptr(T0)
+		return tx.OrgDomains().Create(ctx, d)
+	},
+	Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {
+		a, err := countOne(tx.OrgDomains().GetByPublicID(ctx, r, isoOrgDomain))
+		if err != nil {
+			return 0, err
+		}
+		b, err := countOne(tx.OrgDomains().GetVerified(ctx, r, "iso.example"))
+		if err != nil {
+			return 0, err
+		}
+		c, err := count(tx.OrgDomains().ListByOrg(ctx, r, isoOrg))
+		return a + b + c, err
+	},
+}

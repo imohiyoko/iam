@@ -636,6 +636,41 @@ type QuotaGrantRepo interface {
 	Purge(ctx context.Context, limit int) (int, error)
 }
 
+// OrgDomain は org_domains の1行（design.md 11.3、ADR 0075）。Org が DNS の TXT で所有を証明するドメイン。
+// ID は内部 ID で、API に出すのは PublicID。証明済み（VerifiedAt が非 nil）のドメインは realm で1つの Org だけが持てる。
+type OrgDomain struct {
+	ID         string
+	PublicID   string
+	RealmID    string
+	OrgID      string
+	Domain     string // 小文字の ASCII（IDN は A ラベル）で、末尾の点は無い
+	Token      string // TXT に置く値の一部。秘密ではない
+	VerifiedAt *time.Time
+	CheckedAt  *time.Time // 最後に TXT を確かめた時刻
+	CreatedBy  string     // 登録した主体の公開 ID
+	CreatedAt  time.Time
+}
+
+// OrgDomainRepo は org_domains の Repository。
+type OrgDomainRepo interface {
+	// Create は ID・(realm, PublicID)・(Org, Domain) が重複すれば errs.Conflict を返す。
+	Create(ctx context.Context, d OrgDomain) error
+	GetByPublicID(ctx context.Context, realmID, publicID string) (OrgDomain, error)
+	// GetVerified は realm で domain を証明済みの行を返す。無ければ errs.NotFound。
+	GetVerified(ctx context.Context, realmID, domain string) (OrgDomain, error)
+	// ListByOrg は Org のドメインを作成時刻の順（同時刻は ID の順）に返す。
+	ListByOrg(ctx context.Context, realmID, orgID string) ([]OrgDomain, error)
+	// Update は ID の行の VerifiedAt と CheckedAt を d の値に置き換える。無ければ errs.NotFound。
+	// 同じ realm で同じドメインを別の行が証明済みなら errs.Conflict。
+	Update(ctx context.Context, d OrgDomain) error
+	// Delete は行を消す。無ければ errs.NotFound。
+	Delete(ctx context.Context, realmID, id string) error
+	// Count は行の件数（全 realm）を返す（フィーチャーの無効化。11.12）。
+	Count(ctx context.Context) (int, error)
+	// Purge は行を全 realm から最大 limit 件消し、消した件数を返す。
+	Purge(ctx context.Context, limit int) (int, error)
+}
+
 // InvitationStatus は招待の状態。期限切れは ExpiresAt から計算し、行は pending のまま残してよい。
 type InvitationStatus string
 
