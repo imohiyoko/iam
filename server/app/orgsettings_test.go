@@ -125,6 +125,16 @@ func TestOrgSettingsLifetimes(t *testing.T) {
 	if code, body, _ := l.post(t, s, "/v1/me/recovery-codes:regenerate", nil); code != 401 || body["error"] != "reauthentication_required" {
 		t.Fatalf("regenerate after max_auth_age: %d %v", code, body)
 	}
+	// 認証手段の追加・削除も直近の認証を求める。
+	for path, body := range map[string]any{
+		"/v1/me/totp:start": nil, "/v1/me/passkeys:start": nil, "/v1/me/emails:start": map[string]string{"email": "new@acme.example"},
+		"/v1/me/identities/google:start": nil, "/v1/me/totp/x:revoke": nil, "/v1/me/passkeys/x:revoke": nil,
+		"/v1/me/emails/x:remove": nil, "/v1/me/identities/x:unlink": nil,
+	} {
+		if code, out, _ := l.post(t, s, path, body); code != 401 || out["error"] != "reauthentication_required" {
+			t.Fatalf("%s after max_auth_age: %d %v", path, code, out)
+		}
+	}
 	l.advance(11 * time.Minute)
 	if code, _ := l.me(t, s); code != 401 {
 		t.Fatalf("after org idle timeout: %d", code)
