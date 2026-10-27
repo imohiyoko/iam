@@ -8,6 +8,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/org"
+	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -186,6 +187,12 @@ func (s adminServer) suspend(ctx context.Context, body *adminapi.SuspendRequest,
 		var sp port.Suspension
 		if sp, created, err = s.a.accounts.Suspend(ctx, tx, s.a.realm.ID, sub.target, in, p.Actor, requestID(ctx)); err != nil {
 			return err
+		}
+		// 今から効くユーザーの停止は、ログインの系列を終える（Back-Channel Logout。予約は始まりの時刻に scheduler で）。
+		if created && sp.TargetType == port.SuspensionTargetUser && !sp.StartsAt.After(s.a.deps.Clock.Now()) {
+			if err := s.a.sessions.EndUserTx(ctx, tx, s.a.realm.ID, sp.TargetID, session.ReasonSuspended, requestID(ctx)); err != nil {
+				return err
+			}
 		}
 		out = s.suspensionView(sp, sub)
 		return nil
@@ -434,8 +441,13 @@ func (s adminServer) UpdateUser(ctx context.Context, req adminapi.UpdateUserRequ
 		if u, err = tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id); err != nil {
 			return err
 		}
-		u, err = s.a.accounts.SetValidity(ctx, tx, s.a.realm.ID, u, req.Body.ValidFrom, req.Body.ValidUntil, p.Actor, requestID(ctx))
-		return err
+		if u, err = s.a.accounts.SetValidity(ctx, tx, s.a.realm.ID, u, req.Body.ValidFrom, req.Body.ValidUntil, p.Actor, requestID(ctx)); err != nil {
+			return err
+		}
+		if !inValidity(u, s.a.deps.Clock.Now()) {
+			return s.a.sessions.EndUserTx(ctx, tx, s.a.realm.ID, u.ID, session.ReasonValidity, requestID(ctx))
+		}
+		return nil
 	})
 	switch {
 	case errors.Is(err, errs.NotFound):
