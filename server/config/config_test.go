@@ -65,6 +65,8 @@ func TestParseRejects(t *testing.T) {
 		"public_url empty query": "dev: true\nserver: {public_url: 'https://id.example.com/?'}\n",
 		"public_url fragment":    "dev: true\nserver: {public_url: 'https://id.example.com#a'}\n",
 		"public_url userinfo":    "dev: true\nserver: {public_url: 'https://u:p@id.example.com'}\n",
+		"email storage":          "dev: true\nrealm: {slug: x, email_storage: plain}\n",
+		"negative retention":     "dev: true\nrealm: {slug: x, audit_retention: -1h}\n",
 	}
 	for name, y := range cases {
 		if _, err := Parse([]byte(y)); err == nil {

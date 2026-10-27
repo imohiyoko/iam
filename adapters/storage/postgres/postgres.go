@@ -411,9 +411,33 @@ func (a auditRepo) ListByRealm(ctx context.Context, realmID string, fromSeq int6
 	return out, nil
 }
 
+func (a auditRepo) Checkpoint(ctx context.Context) (*audit.Checkpoint, error) {
+	row, err := a.q.GetAuditCheckpoint(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	t, err := parseTime(row.CreatedAt)
+	return &audit.Checkpoint{Seq: row.Seq, Hash: row.Hash, At: t}, err
+}
+
+func (a auditRepo) Truncate(ctx context.Context, cp audit.Checkpoint) error {
+	if err := a.q.TruncateAuditEvents(ctx, cp.Seq); err != nil {
+		return mapErr(err)
+	}
+	return mapErr(a.q.PutAuditCheckpoint(ctx, db.PutAuditCheckpointParams{Seq: cp.Seq, Hash: cp.Hash, CreatedAt: formatTime(cp.At)}))
+}
+
 // ---------------------------------------------------------------------------
 
 type outbox struct{ q *db.Queries }
+
+func (o outbox) DeleteDelivered(ctx context.Context, before time.Time, limit int) (int, error) {
+	n, err := o.q.DeleteDeliveredOutbox(ctx, db.DeleteDeliveredOutboxParams{Before: nullTime(&before), Lim: int64(limit)})
+	return int(n), mapErr(err)
+}
 
 func (o outbox) Add(ctx context.Context, m port.OutboxMessage) error {
 	return mapErr(o.q.AddOutbox(ctx, db.AddOutboxParams{ID: m.ID, Topic: m.Topic, Payload: nonNil(m.Payload), CreatedAt: formatTime(m.CreatedAt)}))

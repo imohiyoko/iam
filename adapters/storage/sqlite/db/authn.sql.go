@@ -40,6 +40,25 @@ func (q *Queries) CancelScheduledEvents(ctx context.Context, arg CancelScheduled
 	return err
 }
 
+const clearEmailCiphertexts = `-- name: ClearEmailCiphertexts :execrows
+UPDATE authn_user_emails SET ciphertext = ?1 WHERE id IN (
+    SELECT e.id FROM authn_user_emails e WHERE e.realm_id = ?2 AND length(e.ciphertext) > 0 LIMIT ?3)
+`
+
+type ClearEmailCiphertextsParams struct {
+	Empty   []byte
+	RealmID string
+	Lim     int64
+}
+
+func (q *Queries) ClearEmailCiphertexts(ctx context.Context, arg ClearEmailCiphertextsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, clearEmailCiphertexts, arg.Empty, arg.RealmID, arg.Lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const createConnection = `-- name: CreateConnection :exec
 INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at) VALUES (?, ?, ?, ?, ?, ?)
 `
@@ -458,6 +477,42 @@ type DeleteEmailParams struct {
 
 func (q *Queries) DeleteEmail(ctx context.Context, arg DeleteEmailParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteEmail, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteEndedSessions = `-- name: DeleteEndedSessions :execrows
+DELETE FROM authn_sessions WHERE id IN (
+    SELECT s.id FROM authn_sessions s WHERE s.expires_at < ?1 OR s.revoked_at < ?1 LIMIT ?2)
+`
+
+type DeleteEndedSessionsParams struct {
+	Before string
+	Lim    int64
+}
+
+func (q *Queries) DeleteEndedSessions(ctx context.Context, arg DeleteEndedSessionsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteEndedSessions, arg.Before, arg.Lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteFiredScheduledEvents = `-- name: DeleteFiredScheduledEvents :execrows
+DELETE FROM scheduled_events WHERE id IN (
+    SELECT e.id FROM scheduled_events e WHERE e.fired_at IS NOT NULL AND e.fired_at < ?1 LIMIT ?2)
+`
+
+type DeleteFiredScheduledEventsParams struct {
+	Before sql.NullString
+	Lim    int64
+}
+
+func (q *Queries) DeleteFiredScheduledEvents(ctx context.Context, arg DeleteFiredScheduledEventsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteFiredScheduledEvents, arg.Before, arg.Lim)
 	if err != nil {
 		return 0, err
 	}

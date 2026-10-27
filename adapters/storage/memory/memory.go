@@ -43,9 +43,12 @@ type state struct {
 	dataKeys map[string]port.DataKey
 	// auditKeys は監査ログの IP と UA の日ごとの鍵。
 	auditKeys map[string]port.DataKey
-	audit     []auditRow
-	outbox    []port.OutboxMessage
-	outboxIx  map[string]int
+	audit     []auditRow // seq は auditBase+1 から
+	auditBase int64
+	// checkpoint は監査ログを切り詰めた位置（auditBase と同じ seq）。
+	checkpoint *audit.Checkpoint
+	outbox     []port.OutboxMessage
+	outboxIx   map[string]int
 
 	users      map[string]port.User
 	emails     map[string]port.UserEmail
@@ -306,8 +309,8 @@ func (a auditRepo) Last(context.Context) (*audit.Record, error) {
 
 func (a auditRepo) Append(_ context.Context, r audit.Record) error {
 	s := a.t.s
-	if r.Seq != int64(len(s.audit))+1 {
-		return errs.New(errs.KindConflict, "audit seq %d: want %d", r.Seq, len(s.audit)+1)
+	if want := s.auditBase + int64(len(s.audit)) + 1; r.Seq != want {
+		return errs.New(errs.KindConflict, "audit seq %d: want %d", r.Seq, want)
 	}
 	s.audit = append(s.audit, auditRow{rec: cloneRecord(r)})
 	a.t.undo = append(a.t.undo, func() { s.audit = s.audit[:len(s.audit)-1] })
@@ -316,20 +319,44 @@ func (a auditRepo) Append(_ context.Context, r audit.Record) error {
 
 func (a auditRepo) Scan(_ context.Context, fromSeq int64, limit int) ([]audit.Record, error) {
 	var out []audit.Record
-	for i := max(fromSeq-1, 0); i < int64(len(a.t.s.audit)) && len(out) < limit; i++ {
-		out = append(out, cloneRecord(a.t.s.audit[i].rec))
+	s := a.t.s
+	for i := max(fromSeq-1-s.auditBase, 0); i < int64(len(s.audit)) && len(out) < limit; i++ {
+		out = append(out, cloneRecord(s.audit[i].rec))
 	}
 	return out, nil
 }
 
 func (a auditRepo) ListByRealm(_ context.Context, realmID string, fromSeq int64, limit int) ([]audit.Record, error) {
 	var out []audit.Record
-	for i := max(fromSeq-1, 0); i < int64(len(a.t.s.audit)) && len(out) < limit; i++ {
-		if row := a.t.s.audit[i]; row.rec.RealmID == realmID {
+	s := a.t.s
+	for i := max(fromSeq-1-s.auditBase, 0); i < int64(len(s.audit)) && len(out) < limit; i++ {
+		if row := s.audit[i]; row.rec.RealmID == realmID {
 			out = append(out, cloneRecord(row.rec))
 		}
 	}
 	return out, nil
+}
+
+func (a auditRepo) Checkpoint(context.Context) (*audit.Checkpoint, error) {
+	if a.t.s.checkpoint == nil {
+		return nil, nil
+	}
+	cp := *a.t.s.checkpoint
+	cp.Hash = bytes.Clone(cp.Hash)
+	return &cp, nil
+}
+
+func (a auditRepo) Truncate(_ context.Context, cp audit.Checkpoint) error {
+	s := a.t.s
+	oldAudit, oldBase, oldCP := s.audit, s.auditBase, s.checkpoint
+	if n := cp.Seq - s.auditBase; n > 0 {
+		s.audit = slices.Clone(s.audit[min(n, int64(len(s.audit))):])
+		s.auditBase = cp.Seq
+	}
+	cp.Hash = bytes.Clone(cp.Hash)
+	s.checkpoint = &cp
+	a.t.undo = append(a.t.undo, func() { s.audit, s.auditBase, s.checkpoint = oldAudit, oldBase, oldCP })
+	return nil
 }
 
 func cloneRecord(r audit.Record) audit.Record {
@@ -368,6 +395,29 @@ func (o outbox) Pending(_ context.Context, topic string, limit int) ([]port.Outb
 		}
 	}
 	return out, nil
+}
+
+func (o outbox) DeleteDelivered(_ context.Context, before time.Time, limit int) (int, error) {
+	s := o.t.s
+	oldOutbox, oldIx := s.outbox, s.outboxIx
+	kept := make([]port.OutboxMessage, 0, len(s.outbox))
+	n := 0
+	for _, m := range s.outbox {
+		if n < limit && m.DeliveredAt != nil && m.DeliveredAt.Before(before) {
+			n++
+			continue
+		}
+		kept = append(kept, m)
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	s.outbox, s.outboxIx = kept, make(map[string]int, len(kept))
+	for i, m := range kept {
+		s.outboxIx[m.ID] = i
+	}
+	o.t.undo = append(o.t.undo, func() { s.outbox, s.outboxIx = oldOutbox, oldIx })
+	return n, nil
 }
 
 func (o outbox) MarkDelivered(_ context.Context, ids []string, at time.Time) error {

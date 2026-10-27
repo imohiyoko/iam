@@ -567,7 +567,8 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 ### 6.5 保持期間
 
 - 監査ログはホスト先の保持期間（既定90日）を過ぎたら削除する。長期保管は SIEM に任せる
-- チェーンは先頭から切り詰め、最後に消したハッシュをチェックポイントとして残し SIEM にも送る
+- チェーンは先頭から切り詰め、最後に消したハッシュをチェックポイントとして残し SIEM にも送る（`audit.truncated`。ADR 0072）
+- 掃除は1時間ごと。期間は `realm.audit_retention`（既定90日）と `realm.ended_retention`（既定7日）
 - その他のデータの保持期間は 9.6
 
 ## 7. ロードマップ
@@ -636,6 +637,8 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 | `encrypted`（既定） | 暗号文 + インデックス | ― |
 | `index_only` | インデックス（+ 任意で伏せ字） | 操作起点でない通知の宛先解決（外部が user_id から解決する）、アドレスの表示 |
 
+- `realm.email_storage` で選ぶ。`index_only` に切り替えると、残っている暗号文は掃除で消す（ADR 0072）
+
 | データ | 保持期間（既定） | 期間後 |
 |---|---|---|
 | 監査ログ | 90日 | 削除（6.5） |
@@ -643,7 +646,7 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 | User-Agent | 30日 | ブラウザと OS の大分類のみ |
 | 失効・期限切れセッション | 7日 | 削除 |
 | 配送済みの outbox・予約イベント | 7日 | 削除 |
-| 無効化した認証情報 | 監査ログと同じ | 削除（passkey の拒否リストは残す） |
+| 無効化した認証情報 | 監査ログと同じ | 削除（passkey の拒否リストは残す。未実装） |
 
 ## 10. 認証の警告
 

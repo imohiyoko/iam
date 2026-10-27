@@ -497,7 +497,8 @@ func (s publicServer) orgMemberView(ctx context.Context, tx port.Tx, m port.Memb
 	v := publicapi.OrgMember{MembershipId: m.PublicID, UserId: u.PublicID, Role: publicapi.OrgMemberRole(m.Role), Status: publicapi.OrgMemberStatus(m.Status),
 		ValidFrom: m.ValidFrom, ValidUntil: m.ValidUntil}
 	e, err := org.BoundEmail(ctx, tx, m)
-	if errors.Is(err, errs.NotFound) {
+	// 結び付けたメールが無いか、アドレスを保存しない構成（index_only。9.6）なら出さない。
+	if errors.Is(err, errs.NotFound) || (err == nil && len(e.Ciphertext) == 0) {
 		return v, nil
 	}
 	if err != nil {

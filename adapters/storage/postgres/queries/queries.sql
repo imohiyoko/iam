@@ -52,6 +52,16 @@ SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE se
 -- name: ListAuditEventsByRealm :many
 SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE realm_id = sqlc.arg(realm_id) AND seq >= sqlc.arg(seq) ORDER BY seq LIMIT sqlc.arg('limit')::bigint;
 
+-- name: GetAuditCheckpoint :one
+SELECT seq, hash, created_at FROM shared_audit_checkpoint WHERE id = 1;
+
+-- name: PutAuditCheckpoint :exec
+INSERT INTO shared_audit_checkpoint (id, seq, hash, created_at) VALUES (1, $1, $2, $3)
+ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, hash = excluded.hash, created_at = excluded.created_at;
+
+-- name: TruncateAuditEvents :exec
+DELETE FROM shared_audit_events WHERE seq <= $1;
+
 -- name: AddOutbox :exec
 INSERT INTO shared_outbox (id, topic, payload, created_at) VALUES ($1, $2, $3, $4);
 
@@ -61,3 +71,7 @@ WHERE topic = sqlc.arg(topic) AND delivered_at IS NULL ORDER BY created_at, ord 
 
 -- name: MarkOutboxDelivered :exec
 UPDATE shared_outbox SET delivered_at = $1 WHERE id = $2 AND delivered_at IS NULL;
+
+-- name: DeleteDeliveredOutbox :execrows
+DELETE FROM shared_outbox WHERE id IN (
+    SELECT o.id FROM shared_outbox o WHERE o.delivered_at IS NOT NULL AND o.delivered_at < sqlc.arg(before) LIMIT sqlc.arg(lim)::bigint);

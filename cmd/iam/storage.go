@@ -86,7 +86,7 @@ func storageCmd(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		if err != nil {
 			return fmt.Errorf("imported, but the audit chain does not verify: %w", err)
 		}
-		fmt.Fprintf(stdout, "audit chain verified (%d events)\n", n)
+		fmt.Fprintf(stdout, "audit chain verified (through seq %d)\n", n)
 	}
 	names := make([]string, 0, len(stats))
 	total := 0

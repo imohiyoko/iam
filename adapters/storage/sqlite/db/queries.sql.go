@@ -135,6 +135,24 @@ func (q *Queries) DeleteDataKey(ctx context.Context, userID string) error {
 	return err
 }
 
+const deleteDeliveredOutbox = `-- name: DeleteDeliveredOutbox :execrows
+DELETE FROM shared_outbox WHERE id IN (
+    SELECT o.id FROM shared_outbox o WHERE o.delivered_at IS NOT NULL AND o.delivered_at < ?1 LIMIT ?2)
+`
+
+type DeleteDeliveredOutboxParams struct {
+	Before sql.NullString
+	Lim    int64
+}
+
+func (q *Queries) DeleteDeliveredOutbox(ctx context.Context, arg DeleteDeliveredOutboxParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteDeliveredOutbox, arg.Before, arg.Lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteFeature = `-- name: DeleteFeature :exec
 DELETE FROM shared_installed_features WHERE feature = ?
 `
@@ -142,6 +160,23 @@ DELETE FROM shared_installed_features WHERE feature = ?
 func (q *Queries) DeleteFeature(ctx context.Context, feature string) error {
 	_, err := q.db.ExecContext(ctx, deleteFeature, feature)
 	return err
+}
+
+const getAuditCheckpoint = `-- name: GetAuditCheckpoint :one
+SELECT seq, hash, created_at FROM shared_audit_checkpoint WHERE id = 1
+`
+
+type GetAuditCheckpointRow struct {
+	Seq       int64
+	Hash      []byte
+	CreatedAt string
+}
+
+func (q *Queries) GetAuditCheckpoint(ctx context.Context) (GetAuditCheckpointRow, error) {
+	row := q.db.QueryRowContext(ctx, getAuditCheckpoint)
+	var i GetAuditCheckpointRow
+	err := row.Scan(&i.Seq, &i.Hash, &i.CreatedAt)
+	return i, err
 }
 
 const getAuditKey = `-- name: GetAuditKey :one
@@ -381,6 +416,22 @@ func (q *Queries) PendingOutbox(ctx context.Context, arg PendingOutboxParams) ([
 	return items, nil
 }
 
+const putAuditCheckpoint = `-- name: PutAuditCheckpoint :exec
+INSERT INTO shared_audit_checkpoint (id, seq, hash, created_at) VALUES (1, ?, ?, ?)
+ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, hash = excluded.hash, created_at = excluded.created_at
+`
+
+type PutAuditCheckpointParams struct {
+	Seq       int64
+	Hash      []byte
+	CreatedAt string
+}
+
+func (q *Queries) PutAuditCheckpoint(ctx context.Context, arg PutAuditCheckpointParams) error {
+	_, err := q.db.ExecContext(ctx, putAuditCheckpoint, arg.Seq, arg.Hash, arg.CreatedAt)
+	return err
+}
+
 const putFeature = `-- name: PutFeature :exec
 INSERT INTO shared_installed_features (feature, state, data_version, updated_at) VALUES (?, ?, ?, ?)
 ON CONFLICT (feature) DO UPDATE SET state = excluded.state, data_version = excluded.data_version, updated_at = excluded.updated_at
@@ -439,4 +490,13 @@ func (q *Queries) ScanAuditEvents(ctx context.Context, arg ScanAuditEventsParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const truncateAuditEvents = `-- name: TruncateAuditEvents :exec
+DELETE FROM shared_audit_events WHERE seq <= ?
+`
+
+func (q *Queries) TruncateAuditEvents(ctx context.Context, seq int64) error {
+	_, err := q.db.ExecContext(ctx, truncateAuditEvents, seq)
+	return err
 }

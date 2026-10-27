@@ -53,6 +53,7 @@ func Run(t *testing.T, h Harness) {
 		{"RealmIsolation", testRealmIsolation},
 	}
 	tests = append(tests, authnTests...)
+	tests = append(tests, retentionTests...)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
 	}

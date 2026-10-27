@@ -55,11 +55,20 @@ func Record(ctx context.Context, tx port.Tx, clk clock.Clock, e audit.Event) (au
 	return e, err
 }
 
-// Verify はチェーン全体を先頭から検証する。最後のハッシュと件数を返す。
-// 保持期間による切り詰め（M6）の後はチェックポイントから検証する。
+// Verify はチェーンを先頭（保持期間で切り詰めた後はチェックポイント。design.md 6.5）から検証する。
+// 最後のハッシュと最後の seq を返す。
 func Verify(ctx context.Context, s port.Storage) (last []byte, n int64, err error) {
 	const page = 500
 	prev, next := audit.Genesis, int64(1)
+	if err := s.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		cp, err := tx.Audit().Checkpoint(ctx)
+		if cp != nil {
+			prev, next = cp.Hash, cp.Seq+1
+		}
+		return err
+	}); err != nil {
+		return nil, 0, err
+	}
 	for {
 		var rs []audit.Record
 		err := s.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
