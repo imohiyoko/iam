@@ -50,7 +50,7 @@ type logoutMessage struct {
 }
 
 // LineageEnded はログインの系列が終わったとき、その系列の認可を失効させ、Back-Channel Logout を積む（session.LineageHook）。
-// 期限の切れていない認可を持つ連携先に送る（連携先が自分で失効させた認可でも、連携先のログインは残りうるので送る）。
+// 系列の認可を持つ連携先に送る（認可が期限切れでも、連携先が自分で失効させた認可でも、連携先のログインは残りうるので送る）。
 // 停止が解けて同じ系列がまた終わっても、2度は送らない。
 func (t *Tokens) LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, reason, requestID string) error {
 	gs, err := tx.Grants().ListBySID(ctx, realmID, sid)
@@ -60,8 +60,8 @@ func (t *Tokens) LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, rea
 	now := t.Clock.Now()
 	sent := map[string]bool{}
 	for _, g := range gs {
-		// 期限切れの認可と、系列が終わったことで失効させた（送った）認可は飛ばす。
-		if !now.Before(g.ExpiresAt) || (g.RevokedAt != nil && g.RevokeReason == RevokeReasonLogout) {
+		// 系列が終わったことで失効させた（送った）認可は飛ばす。
+		if g.RevokedAt != nil && g.RevokeReason == RevokeReasonLogout {
 			continue
 		}
 		cl, err := tx.Clients().Get(ctx, realmID, g.ClientID)
