@@ -198,8 +198,7 @@ func TestExpiryAndIdleTimeout(t *testing.T) {
 func TestLoginReplacesSession(t *testing.T) {
 	k, m, u := setup(t)
 	old := issue(t, k, m, u, "")
-	k.Clock.Advance(time.Second) // 系列の今のセッションは作った時刻の新しい方
-	is := issue(t, k, m, u, old.Token)
+	is := issue(t, k, m, u, old.Token) // 同じ時刻でも、系列の今のセッションは継いだ方になる
 	if is.Session.ID == old.Session.ID {
 		t.Fatal("session ID must change on login")
 	}
@@ -227,7 +226,6 @@ func TestLoginReplacesSession(t *testing.T) {
 
 	// 入れ替えの後に今のセッションをログアウトしたら、猶予の残る古い Cookie からは系列を引き継がない。
 	ctx := context.Background()
-	k.Clock.Advance(time.Second)
 	rotated, err := m.Rotate(ctx, k.RealmID, fresh.Session.ID, "")
 	if err != nil {
 		t.Fatal(err)
@@ -241,14 +239,11 @@ func TestLoginReplacesSession(t *testing.T) {
 	}
 
 	// 猶予の内の古い Cookie でログインし直すと、系列を引き継ぎ、系列の今のセッションも置き換わる。
-	k.Clock.Advance(time.Second)
 	base := issue(t, k, m, u, "")
-	k.Clock.Advance(time.Second)
 	cur, err := m.Rotate(ctx, k.RealmID, base.Session.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.Clock.Advance(time.Second)
 	re := issue(t, k, m, u, base.Token)
 	if re.Session.SID != base.Session.SID {
 		t.Fatalf("sid = %q, want %q", re.Session.SID, base.Session.SID)

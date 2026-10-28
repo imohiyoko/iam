@@ -341,6 +341,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		switch {
 		case err == nil:
 			s.SID = old.SID
+			s.CreatedAt = successorTime(current.CreatedAt, now)
 		case errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) || errors.Is(err, ErrInvalid):
 		default:
 			return Issued{}, err
@@ -874,6 +875,15 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 	return nil
 }
 
+// successorTime は系列を継ぐセッションの作成時刻。系列の今のセッションは作成時刻の新しい方なので（GetCurrentBySID）、
+// 同じ時刻に作っても前のセッションより後になるようにする（時計の粒度が粗いときやテストの時計）。
+func successorTime(prev, now time.Time) time.Time {
+	if now.After(prev) {
+		return now
+	}
+	return prev.Add(time.Nanosecond)
+}
+
 func earliest(a, b time.Time) time.Time {
 	if b.Before(a) {
 		return b
@@ -926,7 +936,7 @@ func (m *Manager) Rotate(ctx context.Context, realmID, sessionID, requestID stri
 			return ErrNotRotated
 		}
 		s := old
-		s.ID, s.CreatedAt, s.LastSeenAt = id.NewExternal(id.Session), now, now
+		s.ID, s.CreatedAt, s.LastSeenAt = id.NewExternal(id.Session), successorTime(old.CreatedAt, now), now
 		if s.SID == "" {
 			s.SID = old.ID
 		}
@@ -1023,7 +1033,7 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requ
 			return err
 		}
 		s := old
-		s.ID, s.ActiveOrgID, s.CreatedAt, s.LastSeenAt, s.RevokedAt, s.RevokeReason = id.NewExternal(id.Session), picked.OrgID, now, now, nil, ""
+		s.ID, s.ActiveOrgID, s.CreatedAt, s.LastSeenAt, s.RevokedAt, s.RevokeReason = id.NewExternal(id.Session), picked.OrgID, successorTime(current.CreatedAt, now), now, nil, ""
 		if s.SID == "" {
 			s.SID = old.ID
 		}
