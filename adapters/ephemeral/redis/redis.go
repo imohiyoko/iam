@@ -66,6 +66,12 @@ func ttlErr(ttl time.Duration) error {
 	return nil
 }
 
+// ceilMS は ttl をミリ秒に切り上げる（Redis の期限はミリ秒単位。切り捨てると 1ms 未満が 0 になり、Set は拒まれ、
+// Incr は PEXPIRE 0 でキーがすぐ消える）。
+func ceilMS(ttl time.Duration) time.Duration {
+	return (ttl + time.Millisecond - 1).Truncate(time.Millisecond)
+}
+
 // mapErr は接続の失敗などを KindUnavailable にする（呼び出し側は 503 にする）。
 func mapErr(err error) error {
 	if _, ok := errors.AsType[*errs.Error](err); err == nil || ok {
@@ -92,7 +98,7 @@ func (s *Store) Set(ctx context.Context, key string, value []byte, ttl time.Dura
 	if value == nil {
 		value = []byte{}
 	}
-	return mapErr(s.c.Set(ctx, s.key(key), value, ttl).Err())
+	return mapErr(s.c.Set(ctx, s.key(key), value, ceilMS(ttl)).Err())
 }
 
 func (s *Store) Delete(ctx context.Context, key string) error {
@@ -120,7 +126,7 @@ func (s *Store) Incr(ctx context.Context, key string, ttl time.Duration) (int64,
 	if err := ttlErr(ttl); err != nil {
 		return 0, err
 	}
-	n, err := incrScript.Run(ctx, s.c, []string{s.key(key)}, ttl.Milliseconds()).Int64()
+	n, err := incrScript.Run(ctx, s.c, []string{s.key(key)}, ceilMS(ttl).Milliseconds()).Int64()
 	if err != nil && strings.Contains(err.Error(), "not an integer") {
 		return 0, errs.New(errs.KindInvalid, "ephemeral: %q is not a counter", key)
 	}
