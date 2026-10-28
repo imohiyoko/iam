@@ -118,7 +118,8 @@ func (d *LogoutDeliverer) logger() *slog.Logger {
 	return d.Log
 }
 
-// Deliver は送れたもの・送らなくてよいもの（連携先が消えた・送り先が外れた・読めない・あきらめた）・積み直したものの ID を返す。
+// Deliver は送れたもの・送らなくてよいもの（連携先が消えた・送り先が外れた・読めない・あきらめた）の ID を返す
+// （積み直したものは requeue が配送済みにする）。
 // 送れなかったものは、1件の失敗で残りを止めないよう、エラーにせず outbox の末尾に積み直して次の送出に回す
 // （先頭に残すと、送れないものが1回の取り出し件数を埋めて、後ろの送れるものを塞ぐ）。
 func (d *LogoutDeliverer) Deliver(ctx context.Context, msgs []port.OutboxMessage) ([]string, error) {
@@ -159,12 +160,12 @@ func (d *LogoutDeliverer) Deliver(ctx context.Context, msgs []port.OutboxMessage
 			continue
 		}
 		d.logger().InfoContext(ctx, "backchannel logout: will retry", "id", m.ID, "error", err)
-		done = append(done, m.ID)
 	}
 	return done, nil
 }
 
-// requeue は送れなかったメッセージを、最初に積んだ時刻を持たせて outbox の末尾に積み直す。
+// requeue は送れなかったメッセージを、最初に積んだ時刻を持たせて outbox の末尾に積み直す。積み直しと元のメッセージの
+// 配送済みは同じトランザクションで行う（片方だけ残って、同じものが2通り積まれることがない）。
 func (d *LogoutDeliverer) requeue(ctx context.Context, m port.OutboxMessage, x logoutMessage, first time.Time) error {
 	x.FirstAt = &first
 	b, err := json.Marshal(x)
@@ -172,7 +173,11 @@ func (d *LogoutDeliverer) requeue(ctx context.Context, m port.OutboxMessage, x l
 		return err
 	}
 	return d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		return tx.Outbox().Add(ctx, port.OutboxMessage{ID: id.NewExternal(id.Outbox), Topic: m.Topic, Payload: b, CreatedAt: d.Clock.Now()})
+		now := d.Clock.Now()
+		if err := tx.Outbox().Add(ctx, port.OutboxMessage{ID: id.NewExternal(id.Outbox), Topic: m.Topic, Payload: b, CreatedAt: now}); err != nil {
+			return err
+		}
+		return tx.Outbox().MarkDelivered(ctx, []string{m.ID}, now)
 	})
 }
 

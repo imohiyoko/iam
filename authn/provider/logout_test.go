@@ -42,26 +42,31 @@ func TestLogoutDelivererRetriesTransientErrors(t *testing.T) {
 // flakyStorage は連携先の読み出しだけが失敗し、outbox への追加は記録する保存先。
 type flakyStorage struct {
 	port.Storage
-	added *[]port.OutboxMessage
+	added     *[]port.OutboxMessage
+	delivered *[]string
 }
 
 type flakyTx struct {
 	port.Tx
-	added *[]port.OutboxMessage
+	added     *[]port.OutboxMessage
+	delivered *[]string
 }
 
 type flakyClients struct{ port.ClientRepo }
 
 type recordingOutbox struct {
 	port.OutboxRepo
-	added *[]port.OutboxMessage
+	added     *[]port.OutboxMessage
+	delivered *[]string
 }
 
 func (s flakyStorage) Tx(ctx context.Context, fn func(context.Context, port.Tx) error) error {
-	return fn(ctx, flakyTx{added: s.added})
+	return fn(ctx, flakyTx{added: s.added, delivered: s.delivered})
 }
 func (t flakyTx) Clients() port.ClientRepo { return flakyClients{} }
-func (t flakyTx) Outbox() port.OutboxRepo  { return recordingOutbox{added: t.added} }
+func (t flakyTx) Outbox() port.OutboxRepo {
+	return recordingOutbox{added: t.added, delivered: t.delivered}
+}
 func (flakyClients) Get(context.Context, string, string) (port.Client, error) {
 	return port.Client{}, errors.New("db timeout")
 }
@@ -69,26 +74,32 @@ func (o recordingOutbox) Add(_ context.Context, m port.OutboxMessage) error {
 	*o.added = append(*o.added, m)
 	return nil
 }
+func (o recordingOutbox) MarkDelivered(_ context.Context, ids []string, _ time.Time) error {
+	*o.delivered = append(*o.delivered, ids...)
+	return nil
+}
 
-// 送れなかったものは outbox の末尾に積み直し（先頭に残して後ろを塞がない）、最初に積んだ時刻からあきらめるまでを数える。
+// 送れなかったものは outbox の末尾に積み直し（先頭に残して後ろを塞がない）、元のものは同じトランザクションで配送済みにする。
+// あきらめるまでの時間は最初に積んだ時刻から数える。
 func TestLogoutDelivererRequeuesFailures(t *testing.T) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	c := clock.NewFake(start)
 	var added []port.OutboxMessage
-	d := &provider.LogoutDeliverer{Storage: flakyStorage{added: &added}, Clock: c, GiveUp: time.Hour}
+	var delivered []string
+	d := &provider.LogoutDeliverer{Storage: flakyStorage{added: &added, delivered: &delivered}, Clock: c, GiveUp: time.Hour}
 	m := port.OutboxMessage{ID: "m1", Topic: provider.LogoutTopic, Payload: []byte(`{"realm_id":"r","client_id":"c"}`), CreatedAt: start}
 	for i := range 2 {
 		c.Advance(30 * time.Minute)
 		done, err := d.Deliver(context.Background(), []port.OutboxMessage{m})
-		if err != nil || !slices.Equal(done, []string{m.ID}) {
-			t.Fatalf("attempt %d: done = %v, %v", i, done, err)
-		}
 		if i == 1 {
 			// 最初に積んでから1時間たったので、積み直さずにあきらめる。
-			if len(added) != 1 {
-				t.Fatalf("requeued after give up: %d", len(added))
+			if err != nil || !slices.Equal(done, []string{m.ID}) || len(added) != 1 {
+				t.Fatalf("give up: done = %v, %v, requeued %d", done, err, len(added))
 			}
 			break
+		}
+		if err != nil || len(done) != 0 || !slices.Equal(delivered, []string{m.ID}) {
+			t.Fatalf("requeue: done = %v, %v, delivered %v", done, err, delivered)
 		}
 		if len(added) != 1 || added[0].ID == m.ID || added[0].Topic != provider.LogoutTopic || !added[0].CreatedAt.Equal(c.Now()) {
 			t.Fatalf("requeued = %+v", added)
