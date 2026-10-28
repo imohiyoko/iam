@@ -36,6 +36,12 @@ func TestE2EM4OrgScope(t *testing.T) {
 	l.join(t, owner, acme, "sam@acme.example", "member")
 	l.join(t, owner, beta, "sam@acme.example", "member")
 	_, sam := l.login(t, "sam@acme.example")
+	// active な Org をはっきり Acme にする（ログインで選ばれる Org に頼らない）。
+	if code, sw, cookie := l.post(t, sam, "/v1/me/orgs/"+acme+":switch", nil); code != 200 || sw["org_id"] != acme {
+		t.Fatalf("switch: %d %v", code, sw)
+	} else {
+		sam = cookie
+	}
 	samID := l.userID(t, "sam@acme.example")
 	delay := l.e.cfg.Security.Session.ValidityMaxDelay.D()
 
