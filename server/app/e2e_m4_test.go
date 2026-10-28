@@ -104,6 +104,10 @@ func TestE2EM4OrgScope(t *testing.T) {
 			t.Errorf("self check in %s: %d %v, want %v", org, code, out, want)
 		}
 	}
+	// org_id を省けば active な Org（ログインで選ばれた Org）で判定し、その所属も確かめる。
+	if code, out := l.meDo(t, "POST", sam, "/v1/me:check", map[string]any{"action": role.PermSuspensionsRead}); code != 200 || out["allowed"] != false {
+		t.Errorf("self check in the active org: %d %v", code, out)
+	}
 	// 対象が Org なら、その Org が判定先（所属を確かめる）。org_id と食い違えば invalid_request。
 	if code, out := l.meDo(t, "POST", sam, "/v1/me:check", map[string]any{"action": role.PermSuspensionsRead, "resource_type": "org", "resource_id": acme}); code != 200 || out["allowed"] != false {
 		t.Errorf("self check on org resource: %d %v", code, out)

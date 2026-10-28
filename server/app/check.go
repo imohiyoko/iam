@@ -124,16 +124,19 @@ func (s publicServer) CheckMyAuthz(ctx context.Context, req publicapi.CheckMyAut
 		return publicapi.CheckMyAuthz400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
 	r := check.Request{Principal: check.Principal{Type: au.PrincipalType, ID: au.PrincipalID}, Action: b.Action, Resource: res, OrgID: au.ActiveOrgID}
-	if orgID != nil && s.a.orgs != nil {
+	// realm の範囲の付与は所属を見ないので、判定の文脈の Org（指定したか、active な Org）に使える所属があるかを確かめる。
+	if s.a.orgs != nil && (orgID != nil || r.OrgID != "") {
 		member := false
 		err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-			o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, *orgID)
-			if err != nil {
-				return err
+			if orgID != nil {
+				o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, *orgID)
+				if err != nil {
+					return err
+				}
+				r.OrgID = o.ID
 			}
-			r.OrgID = o.ID
-			// realm の範囲の付与は所属を見ないので、指定した Org に使える所属があるかをここで確かめる。
-			_, member, err = authzMembers{}.OrgRole(ctx, tx, s.a.realm.ID, r.Principal, o.ID, s.a.deps.Clock.Now())
+			var err error
+			_, member, err = authzMembers{}.OrgRole(ctx, tx, s.a.realm.ID, r.Principal, r.OrgID, s.a.deps.Clock.Now())
 			return err
 		})
 		if errors.Is(err, errs.NotFound) || (err == nil && !member) {
