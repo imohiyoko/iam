@@ -326,12 +326,16 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	s.SID = s.ID
 	if old != nil && old.PrincipalType == port.PrincipalUser && old.PrincipalID == s.PrincipalID && old.Restriction == port.RestrictionNone &&
 		restriction == port.RestrictionNone && old.SID != "" {
-		// 古いセッションが今も使える（寿命・無操作・停止などを Validate と同じに確かめる）ときだけ引き継ぐ。
+		// 古いセッションと、その系列の今のセッション（入れ替えの後なら新しい方）がどちらも使える（寿命・無操作・停止などを
+		// Validate と同じに確かめる）ときだけ引き継ぐ。今のセッションをログアウトした後に、猶予の残る古い Cookie で系列を蘇らせない。
 		_, _, _, err := m.check(ctx, tx, *old, now)
+		if err == nil {
+			_, _, err = m.CheckLineage(ctx, tx, in.RealmID, old.SID, now)
+		}
 		switch {
 		case err == nil:
 			s.SID = old.SID
-		case errors.Is(err, errRejected) || errors.Is(err, errs.NotFound):
+		case errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) || errors.Is(err, ErrInvalid):
 		default:
 			return Issued{}, err
 		}

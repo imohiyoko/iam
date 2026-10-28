@@ -198,6 +198,7 @@ func TestExpiryAndIdleTimeout(t *testing.T) {
 func TestLoginReplacesSession(t *testing.T) {
 	k, m, u := setup(t)
 	old := issue(t, k, m, u, "")
+	k.Clock.Advance(time.Second) // 系列の今のセッションは作った時刻の新しい方
 	is := issue(t, k, m, u, old.Token)
 	if is.Session.ID == old.Session.ID {
 		t.Fatal("session ID must change on login")
@@ -222,6 +223,21 @@ func TestLoginReplacesSession(t *testing.T) {
 	fresh := issue(t, k, m, u, cont.Token)
 	if fresh.Session.SID == cont.Session.SID {
 		t.Fatal("an idle-expired session must not pass on its sid")
+	}
+
+	// 入れ替えの後に今のセッションをログアウトしたら、猶予の残る古い Cookie からは系列を引き継がない。
+	ctx := context.Background()
+	k.Clock.Advance(time.Second)
+	rotated, err := m.Rotate(ctx, k.RealmID, fresh.Session.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Revoke(ctx, k.RealmID, rotated.Session.ID, u.ID, session.ReasonLogout, audit.Actor{Type: "user", ID: u.PublicID}, ""); err != nil {
+		t.Fatal(err)
+	}
+	mustValid(t, m, k.RealmID, fresh.Token) // 猶予の内
+	if again := issue(t, k, m, u, fresh.Token); again.Session.SID == fresh.Session.SID {
+		t.Fatal("a logged-out lineage must not be revived from a session in its rotation grace")
 	}
 }
 
