@@ -212,6 +212,17 @@ func TestLoginReplacesSession(t *testing.T) {
 	issue(t, k, m, u, sid)
 	issue(t, k, m, u, sid+"."+strings.Repeat("A", 43))
 	mustValid(t, m, k.RealmID, os.Token)
+
+	// 同じ本人の使えるセッションからはログインの系列（sid）を引き継ぎ、期限切れのセッションからは引き継がない。
+	cont := issue(t, k, m, u, is.Token)
+	if cont.Session.SID != is.Session.SID {
+		t.Fatalf("sid = %q, want %q", cont.Session.SID, is.Session.SID)
+	}
+	k.Clock.Advance(cfg.IdleTimeout)
+	fresh := issue(t, k, m, u, cont.Token)
+	if fresh.Session.SID == cont.Session.SID {
+		t.Fatal("an idle-expired session must not pass on its sid")
+	}
 }
 
 func TestRotate(t *testing.T) {

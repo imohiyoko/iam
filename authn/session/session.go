@@ -326,7 +326,15 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	s.SID = s.ID
 	if old != nil && old.PrincipalType == port.PrincipalUser && old.PrincipalID == s.PrincipalID && old.Restriction == port.RestrictionNone &&
 		restriction == port.RestrictionNone && old.SID != "" {
-		s.SID = old.SID
+		// 古いセッションが今も使える（寿命・無操作・停止などを Validate と同じに確かめる）ときだけ引き継ぐ。
+		_, _, _, err := m.check(ctx, tx, *old, now)
+		switch {
+		case err == nil:
+			s.SID = old.SID
+		case errors.Is(err, errRejected) || errors.Is(err, errs.NotFound):
+		default:
+			return Issued{}, err
+		}
 	}
 	if err := tx.Sessions().Create(ctx, s); err != nil {
 		return Issued{}, err
