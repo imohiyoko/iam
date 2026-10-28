@@ -1335,7 +1335,7 @@ components:
         principal_id: { type: string, description: 主体の公開 ID }
         action: { type: string, minLength: 1, maxLength: 130, description: "`<リソース>:<操作>`" }
         org_id: { type: string, description: 判定の文脈の Org の公開 ID }
-        resource_type: { type: string, maxLength: 64 }
+        resource_type: { type: string, maxLength: 64, description: "`org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`" }
         resource_id: { type: string, maxLength: 256 }
     CheckResult:
       type: object

@@ -411,8 +411,10 @@ type MyCheckRequest struct {
 	Action string `json:"action"`
 
 	// OrgId 判定の文脈の Org の公開 ID。省けば active な Org
-	OrgId        *string `json:"org_id,omitempty"`
-	ResourceId   *string `json:"resource_id,omitempty"`
+	OrgId      *string `json:"org_id,omitempty"`
+	ResourceId *string `json:"resource_id,omitempty"`
+
+	// ResourceType `org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`
 	ResourceType *string `json:"resource_type,omitempty"`
 }
 
