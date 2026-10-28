@@ -1635,7 +1635,7 @@ paths:
       operationId: createMyOrgRole
       summary: 独自のロールを作る（4.11）
       description: |
-        権限 `org:roles`。渡す権限はすべて自分がこの Org の範囲で持っていなければならない（`403 permission_denied`）。
+        権限 `org:roles`。渡す IAM 自身の権限（`org:`・`users:` など）はすべて自分がこの Org の範囲で持っていなければならない（`403 permission_denied`）。連携先の権限（`doc:read` など）は自由に入れられる。
         名前に組み込みの名前空間（`realm:`・`org:`・`system:`）は使えない（`400 invalid_name`）。権限の形は `<リソース>:<操作>`（`400 invalid_permission`）。
         IAM 自身の realm の管理の権限（`users:`・`orgs:` など）は Org のロールに入れられない。名前の重複は `409 role_exists`。`role.created` を監査ログに残す。
       security:
@@ -1665,7 +1665,7 @@ paths:
       operationId: updateMyOrgRole
       summary: 独自のロールの名前と権限を置き換える
       description: |
-        権限 `org:roles`。今の権限と新しい権限をすべて自分が持っていなければならない。`role.updated` を監査ログに残す。
+        権限 `org:roles`。今と新しい IAM 自身の権限をすべて自分が持っていなければならない。`role.updated` を監査ログに残す。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -1694,7 +1694,7 @@ paths:
       operationId: deleteMyOrgRole
       summary: 独自のロールと、その付与を消す
       description: |
-        権限 `org:roles`。ロールの権限をすべて自分が持っていなければならない。`role.deleted` を監査ログに残す。
+        権限 `org:roles`。ロールの IAM 自身の権限をすべて自分が持っていなければならない。`role.deleted` を監査ログに残す。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -1732,7 +1732,7 @@ paths:
       operationId: createMyOrgRoleBinding
       summary: ロールを付与する（4.11）
       description: |
-        権限 `org:roles`。ロールの権限をすべて自分が持っていなければならない。`role` は組み込みのロールの名前か、独自のロールの ID。
+        権限 `org:roles`。ロールの IAM 自身の権限をすべて自分が持っていなければならない。`role` は組み込みのロールの名前か、独自のロールの ID。
         主体はこの Org の使える所属を持つユーザーか、この Org の Group（`409 not_member`・`400 invalid_principal`）。運営者ロールは付与できない（`400 unknown_role`）。
         `resource_type`・`resource_id` を渡せば、そのリソースだけに効く。同じ付与は `409 binding_exists`。`role.granted` を監査ログに残す。
       security:
@@ -1762,7 +1762,7 @@ paths:
       operationId: deleteMyOrgRoleBinding
       summary: ロールの付与を消す
       description: |
-        権限 `org:roles`。ロールの権限をすべて自分が持っていなければならない。`role.revoked` を監査ログに残す。
+        権限 `org:roles`。ロールの IAM 自身の権限をすべて自分が持っていなければならない。`role.revoked` を監査ログに残す。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -1858,7 +1858,7 @@ paths:
       operationId: deleteMyOrgGroup
       summary: Group と、その所属と付与を消す
       description: |
-        権限 `org:groups`。Group に付与されたロールの権限をすべて自分が持っていなければならない。`group.deleted` を監査ログに残す。
+        権限 `org:groups`。Group に付与されたロールの IAM 自身の権限をすべて自分が持っていなければならない。`group.deleted` を監査ログに残す。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -1897,7 +1897,7 @@ paths:
       operationId: addMyOrgGroupMember
       summary: Group に主体を入れる
       description: |
-        権限 `org:groups`。Group に付与されたロールの権限をすべて自分が持っていなければならない。主体はユーザー（この Org の使える所属が要る。`409 not_member`）。
+        権限 `org:groups`。Group に付与されたロールの IAM 自身の権限をすべて自分が持っていなければならない。主体はユーザー（この Org の使える所属が要る。`409 not_member`）。
         既に所属していれば `409 member_exists`。`group.member_added` を監査ログに残す。
       security:
         - cookieAuth: []
@@ -1943,6 +1943,30 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me:check:
+    post:
+      operationId: checkMyAuthz
+      summary: 本人が操作をできるかを判定する（4.5）
+      description: |
+        画面の出し分けなどに使う。`org_id` を省けば、セッションの active な Org の範囲で判定する（Org がオフなら realm の範囲）。
+        所属していない Org や無い Org は `allowed: false`。`resource_type`・`resource_id` を渡せば、そのリソースを限った付与も効く。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MyCheckRequest" }
+      responses:
+        "200":
+          description: 判定の結果
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CheckResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
 
 components:
   securitySchemes:
@@ -2289,3 +2313,16 @@ components:
       properties:
         principal_type: { type: string, description: user }
         principal_id: { type: string }
+    MyCheckRequest:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, minLength: 1, maxLength: 130, description: "`<リソース>:<操作>`" }
+        org_id: { type: string, description: 判定の文脈の Org の公開 ID。省けば active な Org }
+        resource_type: { type: string, maxLength: 64, description: "`org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`" }
+        resource_id: { type: string, maxLength: 256 }
+    CheckResult:
+      type: object
+      required: [allowed]
+      properties:
+        allowed: { type: boolean }

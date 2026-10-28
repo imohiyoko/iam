@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 const addGroupMember = `-- name: AddGroupMember :exec
@@ -303,6 +304,88 @@ func (q *Queries) GetRoleByPublicID(ctx context.Context, arg GetRoleByPublicIDPa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listEffectiveRoleBindings = `-- name: ListEffectiveRoleBindings :many
+SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at,
+       COALESCE(g.org_id, '') AS group_org_id, r.public_id AS custom_public_id, r.org_id AS custom_org_id, r.name AS custom_name,
+       r.permissions AS custom_permissions, r.created_at AS custom_created_at, r.updated_at AS custom_updated_at
+FROM authz_role_bindings b
+LEFT JOIN authz_groups g ON b.principal_type = 'group' AND g.id = b.principal_id
+LEFT JOIN authz_roles r ON r.realm_id = b.realm_id AND r.id = b.role
+WHERE b.realm_id = ?1 AND b.id IN (
+    SELECT d.id FROM authz_role_bindings d WHERE d.realm_id = ?1 AND d.principal_type = ?2 AND d.principal_id = ?3
+    UNION ALL
+    SELECT x.id FROM authz_group_members m JOIN authz_role_bindings x ON x.realm_id = ?1 AND x.principal_type = 'group' AND x.principal_id = m.group_id
+    WHERE m.member_type = ?2 AND m.member_id = ?3)
+ORDER BY b.created_at, b.id
+`
+
+type ListEffectiveRoleBindingsParams struct {
+	RealmID       string
+	PrincipalType string
+	PrincipalID   string
+}
+
+type ListEffectiveRoleBindingsRow struct {
+	ID                string
+	PublicID          string
+	RealmID           string
+	Role              string
+	PrincipalType     string
+	PrincipalID       string
+	OrgID             string
+	ResourceType      string
+	ResourceID        string
+	CreatedAt         string
+	GroupOrgID        string
+	CustomPublicID    sql.NullString
+	CustomOrgID       sql.NullString
+	CustomName        sql.NullString
+	CustomPermissions sql.NullString
+	CustomCreatedAt   sql.NullString
+	CustomUpdatedAt   sql.NullString
+}
+
+func (q *Queries) ListEffectiveRoleBindings(ctx context.Context, arg ListEffectiveRoleBindingsParams) ([]ListEffectiveRoleBindingsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEffectiveRoleBindings, arg.RealmID, arg.PrincipalType, arg.PrincipalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEffectiveRoleBindingsRow
+	for rows.Next() {
+		var i ListEffectiveRoleBindingsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.Role,
+			&i.PrincipalType,
+			&i.PrincipalID,
+			&i.OrgID,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.CreatedAt,
+			&i.GroupOrgID,
+			&i.CustomPublicID,
+			&i.CustomOrgID,
+			&i.CustomName,
+			&i.CustomPermissions,
+			&i.CustomCreatedAt,
+			&i.CustomUpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGroupMembers = `-- name: ListGroupMembers :many

@@ -229,3 +229,55 @@ func testGroups(t *testing.T, h Harness) {
 		return notFound("members of a deleted group", second(repo.ListMembers(ctx, r, ops.ID)))
 	})
 }
+
+func testEffectiveBindings(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, other, org := id.New(id.Realm), id.New(id.Realm), id.New(id.Org)
+	u, v := id.New(id.User), id.New(id.User)
+	custom := port.Role{ID: id.New(id.Role), PublicID: id.NewExternal(id.Role), RealmID: r, OrgID: org, Name: "viewer",
+		Permissions: []string{"doc:read"}, CreatedAt: T0, UpdatedAt: T0}
+	og := port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r, OrgID: org, Name: "team", CreatedAt: T0, UpdatedAt: T0}
+	rg := port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r, Name: "all", CreatedAt: T0, UpdatedAt: T0}
+	direct := newBinding(r, "realm:support", port.PrincipalUser, u, "", T0)
+	viaOrg := newBinding(r, custom.ID, port.PrincipalGroup, og.ID, org, T0.Add(time.Second))
+	viaRealm := newBinding(r, "gone-role", port.PrincipalGroup, rg.ID, "", T0.Add(2*time.Second))
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		if err := tx.Roles().Create(ctx, custom); err != nil {
+			return err
+		}
+		for _, g := range []port.Group{og, rg} {
+			if err := tx.Groups().Create(ctx, g); err != nil {
+				return err
+			}
+			if err := tx.Groups().AddMember(ctx, r, port.GroupMember{GroupID: g.ID, MemberType: port.PrincipalUser, MemberID: u, CreatedAt: T0}); err != nil {
+				return err
+			}
+		}
+		for _, b := range []port.RoleBinding{viaRealm, direct, viaOrg, newBinding(r, "realm:admin", port.PrincipalUser, v, "", T0),
+			newBinding(other, "realm:admin", port.PrincipalUser, u, "", T0)} {
+			if err := tx.RoleBindings().Create(ctx, b); err != nil {
+				return err
+			}
+		}
+		got, err := tx.RoleBindings().ListEffective(ctx, r, port.PrincipalUser, u)
+		if err != nil {
+			return err
+		}
+		if len(got) != 3 || got[0].ID != direct.ID || got[1].ID != viaOrg.ID || got[2].ID != viaRealm.ID {
+			return fmt.Errorf("ListEffective = %+v", got)
+		}
+		if got[0].GroupOrgID != "" || got[0].Custom != nil || !reflect.DeepEqual(got[0].RoleBinding, direct) {
+			return fmt.Errorf("direct = %+v", got[0])
+		}
+		if got[1].GroupOrgID != org || got[1].Custom == nil || !reflect.DeepEqual(*got[1].Custom, custom) {
+			return fmt.Errorf("via org group = %+v (custom %+v)", got[1], got[1].Custom)
+		}
+		if got[2].GroupOrgID != "" || got[2].Custom != nil {
+			return fmt.Errorf("via realm group = %+v", got[2])
+		}
+		if none, err := tx.RoleBindings().ListEffective(ctx, r, port.PrincipalUser, id.New(id.User)); err != nil || len(none) != 0 {
+			return fmt.Errorf("ListEffective(stranger) = %+v, %v", none, err)
+		}
+		return nil
+	})
+}

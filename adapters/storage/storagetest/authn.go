@@ -48,6 +48,7 @@ var authnTests = []struct {
 	{"RoleBindings", testRoleBindings},
 	{"Roles", testRoles},
 	{"Groups", testGroups},
+	{"EffectiveBindings", testEffectiveBindings},
 	{"Orgs", testOrgs},
 	{"PersonalOrgUniqueConcurrent", testPersonalOrgUniqueConcurrent},
 	{"Memberships", testMemberships},

@@ -54,3 +54,18 @@ func TestAuthzOrgRoles(t *testing.T) {
 		}
 	}
 }
+
+// internalUserID は公開 ID のユーザーの内部 ID を返す。
+func (l *loginEnv) internalUserID(t *testing.T, userPublicID string) string {
+	t.Helper()
+	var uid string
+	err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+		u, err := tx.Users().GetByPublicID(ctx, l.a.realm.ID, userPublicID)
+		uid = u.ID
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uid
+}

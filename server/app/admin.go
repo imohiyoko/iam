@@ -84,6 +84,11 @@ type denial struct {
 // authorize は呼び出し元が perm を持つかを確かめる。未認証・再認証が要るなら 401、権限が無ければ 403。
 // 運営者のセッションには直近の認証を求める（max_auth_age。4.11）。
 func (a *App) authorize(ctx context.Context, perm string) (adminPrincipal, *denial, error) {
+	return a.authorizeWith(ctx, perm, false)
+}
+
+// authorizeWith は authorize で、cached なら判定の材料のキャッシュを使う（数の多い問い合わせ。check の API）。
+func (a *App) authorizeWith(ctx context.Context, perm string, cached bool) (adminPrincipal, *denial, error) {
 	p, ok := ctx.Value(adminKey{}).(adminPrincipal)
 	if !ok {
 		return p, &denial{http.StatusUnauthorized, adminapi.Error{Error: errs.CodeAuthenticationFailed}}, nil
@@ -94,12 +99,17 @@ func (a *App) authorize(ctx context.Context, perm string) (adminPrincipal, *deni
 		}
 	}
 	var allowed bool
-	err := a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		var err error
-		// 運営者の操作は数が少なく、取り消しをすぐに効かせたいので、キャッシュを使わずに判定する。
-		allowed, err = a.authz.CheckTx(ctx, tx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm})
-		return err
-	})
+	var err error
+	if cached {
+		allowed, err = a.authz.Check(ctx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm})
+	} else {
+		err = a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			var err error
+			// 運営者の操作は数が少なく、取り消しをすぐに効かせたいので、キャッシュを使わずに判定する。
+			allowed, err = a.authz.CheckTx(ctx, tx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm})
+			return err
+		})
+	}
 	if err != nil {
 		return p, nil, err
 	}

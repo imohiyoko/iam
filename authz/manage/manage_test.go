@@ -109,9 +109,15 @@ func TestRealmRolesAndEscalation(t *testing.T) {
 		return err
 	})
 	wantCode(t, err, "invalid_permission")
-	// 自分の持たない権限は渡せない（owner も、custom の権限を持たなければ作れない）。
-	err = e.run(func(ctx context.Context, tx port.Tx) error {
+	// 連携先の権限は自由に渡せる。IAM 自身の権限は、持たなければ渡せない（owner も users:* は持たない）。
+	if err := e.run(func(ctx context.Context, tx port.Tx) error {
 		_, err := e.s.CreateRole(ctx, tx, e.realm(), actor("owner"), "app", []string{"project:read"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err = e.run(func(ctx context.Context, tx port.Tx) error {
+		_, err := e.s.CreateRole(ctx, tx, e.realm(), actor("owner"), "users-all", []string{"users:*"})
 		return err
 	})
 	wantCode(t, err, errs.CodePermissionDenied)

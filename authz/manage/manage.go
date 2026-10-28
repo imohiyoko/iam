@@ -1,7 +1,8 @@
 // Package manage はロール・ロールの付与・Group の管理を行う（design.md 3.2、4.11、ADR 0064）。
 //
 // 管理の操作には、範囲ごとの管理の権限（realm は roles:manage・groups:manage、Org は org:roles・org:groups）に加え、
-// 渡す権限をすべて自分がその範囲で持っていることを求める（持っていない権限を人に渡して、権限を引き上げられないように）。
+// 渡す IAM 自身の権限（role.IAM）をすべて自分がその範囲で持っていることを求める（持っていない権限を人に渡して、権限を
+// 引き上げられないように）。連携先の権限は IAM の誰も持たないので、範囲の管理者が自由に渡せる。
 // 変更は監査ログに残し、判定の材料のキャッシュを捨てる。
 package manage
 
@@ -85,6 +86,7 @@ func (s *Service) authorize(ctx context.Context, tx port.Tx, sc Scope, a Actor, 
 	if !ok {
 		return errs.WithCode(errs.KindPermissionDenied, errs.CodePermissionDenied, "missing "+perm)
 	}
+	grants = slices.DeleteFunc(slices.Clone(grants), func(p string) bool { return !role.IAM(p) })
 	if len(grants) == 0 {
 		return nil
 	}
