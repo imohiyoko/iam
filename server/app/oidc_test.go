@@ -404,13 +404,14 @@ func TestOIDCOrgEmailIsBoundEmail(t *testing.T) {
 			t.Fatalf("%s: userinfo: %d %v", name, status, info)
 		}
 	}
-	// 仕事用のアドレスでログインして Acme にいる間は、仕事用のアドレスを渡す。
+	// 個人のアドレスでログインしても、Acme にいる間は結び付けた仕事用のアドレスを渡す。
 	l.advance(time.Second)
-	code, cookie := p.login(t, "sam@acme.example", nil)
-	if got := l.activeOrgPublic(t, cookie); got != acme {
-		t.Fatalf("active org = %s, want %s", got, acme)
+	_, cookie := l.login(t, "sam@home.example")
+	status, _, cookie := l.post(t, cookie, "/v1/me/orgs/"+acme+":switch", nil)
+	if status != 200 || l.activeOrgPublic(t, cookie) != acme {
+		t.Fatalf("switch to Acme: %d", status)
 	}
-	check("acme", code, "sam@acme.example")
+	check("acme", p.code(t, l.oidcDo(t, "GET", p.authorizeURL(nil), nil, cookie)), "sam@acme.example")
 	// 個人 Org に切り替えると、主のアドレスを渡す。
 	personal := ""
 	_, orgs := l.myOrgs(t, cookie)
@@ -419,7 +420,7 @@ func TestOIDCOrgEmailIsBoundEmail(t *testing.T) {
 			personal = o.ID
 		}
 	}
-	status, _, cookie := l.post(t, cookie, "/v1/me/orgs/"+personal+":switch", nil)
+	status, _, cookie = l.post(t, cookie, "/v1/me/orgs/"+personal+":switch", nil)
 	if status != 200 {
 		t.Fatalf("switch: %d", status)
 	}
