@@ -89,6 +89,9 @@ func (t *Tokens) LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, rea
 	return nil
 }
 
+// errBadLogoutMessage は読めない outbox のメッセージ（何度試しても送れないので、送らずに終える）。
+var errBadLogoutMessage = errors.New("provider: malformed logout message")
+
 // LogoutDeliverer は outbox の Back-Channel Logout を連携先に送る（eventlog.Relay の Deliver）。
 type LogoutDeliverer struct {
 	Storage port.Storage
@@ -123,16 +126,20 @@ func (d *LogoutDeliverer) Deliver(ctx context.Context, msgs []port.OutboxMessage
 	var done []string
 	for _, m := range msgs {
 		uri, token, err := d.token(ctx, m)
-		if err != nil {
+		if errors.Is(err, errBadLogoutMessage) {
 			d.logger().ErrorContext(ctx, "backchannel logout: skipping message", "id", m.ID, "error", err)
 			done = append(done, m.ID)
 			continue
 		}
-		if uri == "" {
+		if err == nil && uri == "" {
 			done = append(done, m.ID)
 			continue
 		}
-		if err := d.post(ctx, uri, token); err != nil {
+		// 保存先や署名の一時的な失敗は、送れなかったときと同じく、あきらめるまで次の送出でまた試す。
+		if err == nil {
+			err = d.post(ctx, uri, token)
+		}
+		if err != nil {
 			if d.Clock.Now().Sub(m.CreatedAt) >= giveUp {
 				d.logger().WarnContext(ctx, "backchannel logout: giving up", "id", m.ID, "error", err)
 				done = append(done, m.ID)
@@ -150,7 +157,7 @@ func (d *LogoutDeliverer) Deliver(ctx context.Context, msgs []port.OutboxMessage
 func (d *LogoutDeliverer) token(ctx context.Context, m port.OutboxMessage) (uri, token string, err error) {
 	var x logoutMessage
 	if err := json.Unmarshal(m.Payload, &x); err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("%w: %w", errBadLogoutMessage, err)
 	}
 	err = d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cl, err := tx.Clients().Get(ctx, x.RealmID, x.ClientID)
