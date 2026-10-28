@@ -149,6 +149,7 @@ func (s *Storage) Tx(ctx context.Context, fn func(context.Context, port.Tx) erro
 
 // stmtTx は書き込みの文を SAVEPOINT で囲む。PostgreSQL では文の失敗でトランザクション全体が使えなくなるが、
 // Storage ポートでは一意制約の違反（errs.Conflict）を受けてから同じトランザクションを続けてよい（SQLite と同じ）。
+// RETURNING つきの書き込み（QueryContext を通る）は囲まないので、一意制約に触れうる列を書き換えないこと。
 type stmtTx struct{ t *sql.Tx }
 
 func (s stmtTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
