@@ -185,9 +185,10 @@ Group のネスト、Org 階層（M7）。
 
 ### 完了条件
 
-- [ ] OpenID Foundation の適合試験（Basic OP 相当）に、既知の差異（RS256 なし）以外で合格
-- [ ] 停止・無効化がイントロスペクションの結果に上限の時間内で反映される
-- [ ] ML-DSA と ES256 の両方の RP で E2E が通る
+- [x] [適合性メモ](oidc-conformance.md)の観点を自動テストで確認し、既知の差異（RS256 なし、PKCE 必須、`query` 以外の
+  response_mode・request・claims・profile などのスコープ・同意画面・動的登録・offline_access を扱わない）を文書化する
+- [x] 停止・無効化がイントロスペクションの結果に上限の時間内で反映される
+- [x] ML-DSA と ES256 の両方の RP で E2E が通る
 - [ ] 連携先から、Membership に結び付けたメール以外が見えない
 
 ### 含まないもの
@@ -216,6 +217,8 @@ Group のネスト、Org 階層（M7）。
 - [ ] SQLite から PostgreSQL への移行の E2E が通る
 - [ ] 各フィーチャーの、データがある状態での有効化・無効化のテストが通る
 - [ ] Quota の時刻つき判定（期間が重ならない人の枠の共有、将来の減少）のテストが並行実行でも通る
+- [ ] OpenID Foundation の適合試験（Basic OP 相当）に、[適合性メモ](oidc-conformance.md)の既知の差異以外で合格
+  （公開した環境で実行し、結果を適合性メモに追記する）
 
 ---
 
