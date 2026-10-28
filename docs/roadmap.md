@@ -189,7 +189,7 @@ Group のネスト、Org 階層（M7）。
   response_mode・request・claims・profile などのスコープ・同意画面・動的登録・offline_access を扱わない）を文書化する
 - [x] 停止・無効化がイントロスペクションの結果に上限の時間内で反映される
 - [x] ML-DSA と ES256 の両方の RP で E2E が通る
-- [ ] 連携先から、Membership に結び付けたメール以外が見えない
+- [x] 連携先から、Membership に結び付けたメール以外が見えない
 
 ### 含まないもの
 
