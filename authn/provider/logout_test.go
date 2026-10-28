@@ -39,43 +39,52 @@ func TestLogoutDelivererRetriesTransientErrors(t *testing.T) {
 	}
 }
 
-// flakyStorage は連携先の読み出しだけが失敗し、outbox への追加は記録する保存先。
+// flakyStorage は連携先の読み出しだけが失敗し、outbox への書き込みは記録する保存先。fn が失敗すれば書き込みを捨てる
+// （ロールバック）。failMark なら MarkDelivered が失敗する。
 type flakyStorage struct {
 	port.Storage
 	added     *[]port.OutboxMessage
 	delivered *[]string
+	failMark  bool
 }
 
 type flakyTx struct {
 	port.Tx
-	added     *[]port.OutboxMessage
-	delivered *[]string
+	out *recordingOutbox
 }
 
 type flakyClients struct{ port.ClientRepo }
 
 type recordingOutbox struct {
 	port.OutboxRepo
-	added     *[]port.OutboxMessage
-	delivered *[]string
+	added     []port.OutboxMessage
+	delivered []string
+	failMark  bool
 }
 
 func (s flakyStorage) Tx(ctx context.Context, fn func(context.Context, port.Tx) error) error {
-	return fn(ctx, flakyTx{added: s.added, delivered: s.delivered})
+	out := &recordingOutbox{failMark: s.failMark}
+	if err := fn(ctx, flakyTx{out: out}); err != nil {
+		return err
+	}
+	*s.added = append(*s.added, out.added...)
+	*s.delivered = append(*s.delivered, out.delivered...)
+	return nil
 }
 func (t flakyTx) Clients() port.ClientRepo { return flakyClients{} }
-func (t flakyTx) Outbox() port.OutboxRepo {
-	return recordingOutbox{added: t.added, delivered: t.delivered}
-}
+func (t flakyTx) Outbox() port.OutboxRepo  { return t.out }
 func (flakyClients) Get(context.Context, string, string) (port.Client, error) {
 	return port.Client{}, errors.New("db timeout")
 }
-func (o recordingOutbox) Add(_ context.Context, m port.OutboxMessage) error {
-	*o.added = append(*o.added, m)
+func (o *recordingOutbox) Add(_ context.Context, m port.OutboxMessage) error {
+	o.added = append(o.added, m)
 	return nil
 }
-func (o recordingOutbox) MarkDelivered(_ context.Context, ids []string, _ time.Time) error {
-	*o.delivered = append(*o.delivered, ids...)
+func (o *recordingOutbox) MarkDelivered(_ context.Context, ids []string, _ time.Time) error {
+	if o.failMark {
+		return errors.New("db timeout")
+	}
+	o.delivered = append(o.delivered, ids...)
 	return nil
 }
 
@@ -112,5 +121,18 @@ func TestLogoutDelivererRequeuesFailures(t *testing.T) {
 			t.Fatalf("requeued payload = %s", added[0].Payload)
 		}
 		m = added[0]
+	}
+}
+
+// 元のメッセージを配送済みにできなければ、積み直しも残さない（同じものが2通り積まれない）。元のものは次の送出でまた試す。
+func TestLogoutDelivererRequeueIsAtomic(t *testing.T) {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var added []port.OutboxMessage
+	var delivered []string
+	d := &provider.LogoutDeliverer{Storage: flakyStorage{added: &added, delivered: &delivered, failMark: true}, Clock: clock.NewFake(start), GiveUp: time.Hour}
+	m := port.OutboxMessage{ID: "m1", Topic: provider.LogoutTopic, Payload: []byte(`{"realm_id":"r","client_id":"c"}`), CreatedAt: start}
+	done, err := d.Deliver(context.Background(), []port.OutboxMessage{m})
+	if err != nil || len(done) != 0 || len(added) != 0 || len(delivered) != 0 {
+		t.Fatalf("done = %v, %v, added %d, delivered %v", done, err, len(added), delivered)
 	}
 }
