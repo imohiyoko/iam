@@ -373,7 +373,8 @@ type LoginResult struct {
 	ExpiresAt time.Time `json:"expires_at"`
 
 	// Next セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-	// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+	// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。`cancel_deletion` はアカウントの削除の
+	// 猶予期間の間で、`/v1/me/account:cancel-deletion` とログアウトだけができる（4.10）。制限つきのセッションは短い期限で失効し、
 	// 決まった API にしか使えない（他は未ログインの扱い）。
 	Next *LoginResultNext `json:"next,omitempty"`
 
@@ -399,7 +400,8 @@ type LoginResult struct {
 }
 
 // LoginResultNext セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。`cancel_deletion` はアカウントの削除の
+// 猶予期間の間で、`/v1/me/account:cancel-deletion` とログアウトだけができる（4.10）。制限つきのセッションは短い期限で失効し、
 // 決まった API にしか使えない（他は未ログインの扱い）。
 type LoginResultNext string
 

@@ -36,7 +36,13 @@ type Store struct {
 	mu    sync.Mutex
 	m     map[string]entry
 	clock clock.Clock
+	// nextSweep は、書き込みのついでに期限切れのエントリをまとめて消す次の時刻。
+	nextSweep time.Time
 }
+
+// sweepInterval は期限切れのエントリをまとめて消す間隔。読まれないまま期限が切れたエントリで
+// メモリが増え続けないようにする（正しさには影響しない）。
+const sweepInterval = time.Minute
 
 var _ port.EphemeralStore = (*Store)(nil)
 
@@ -77,7 +83,9 @@ func (s *Store) Set(_ context.Context, key string, value []byte, ttl time.Durati
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.m[key] = entry{value: bytes.Clone(value), expiresAt: s.clock.Now().Add(ttl)}
+	now := s.clock.Now()
+	s.maybeSweep(now)
+	s.m[key] = entry{value: bytes.Clone(value), expiresAt: now.Add(ttl)}
 	return nil
 }
 
@@ -106,6 +114,7 @@ func (s *Store) Incr(_ context.Context, key string, ttl time.Duration) (int64, e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock.Now()
+	s.maybeSweep(now)
 	e, ok := s.live(key, now)
 	var n int64
 	if ok {
@@ -128,11 +137,25 @@ func (s *Store) Shared() bool { return false }
 func (s *Store) Sweep() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now, n := s.clock.Now(), 0
+	return s.sweep(s.clock.Now())
+}
+
+// maybeSweep は前回から sweepInterval を過ぎていれば期限切れのエントリを消す。mu を持って呼ぶ。
+func (s *Store) maybeSweep(now time.Time) {
+	if now.Before(s.nextSweep) {
+		return
+	}
+	s.sweep(now)
+}
+
+// sweep は期限切れのエントリを消し、消した数を返す。mu を持って呼ぶ。
+func (s *Store) sweep(now time.Time) int {
+	n := 0
 	for k := range s.m {
 		if _, ok := s.live(k, now); !ok {
 			n++
 		}
 	}
+	s.nextSweep = now.Add(sweepInterval)
 	return n
 }

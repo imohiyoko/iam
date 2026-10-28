@@ -528,6 +528,12 @@ func testUserDeletion(t *testing.T, h Harness) {
 	ses, os := newSession(r, u.ID, T0), newSession(r, other.ID, T0)
 	pk, pw, tp, rc := newPasskey(r, u.ID, "cred-u"), newPassword(r, u.ID), newTOTP(r, u.ID), newRecoveryCode(r, u.ID, "l1")
 	rb := port.RoleBinding{ID: id.New(id.RoleBinding), PublicID: id.NewExternal(id.RoleBinding), RealmID: r, Role: "realm:admin", PrincipalType: port.PrincipalUser, PrincipalID: u.ID, CreatedAt: T0}
+	r2 := id.New(id.Realm)
+	g := port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r, Name: "team", CreatedAt: T0, UpdatedAt: T0}
+	g2 := port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r2, Name: "team", CreatedAt: T0, UpdatedAt: T0}
+	member := func(gid, uid string) port.GroupMember {
+		return port.GroupMember{GroupID: gid, MemberType: port.PrincipalUser, MemberID: uid, CreatedAt: T0}
+	}
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		for _, x := range []port.User{u, other} {
 			if err := tx.Users().Create(ctx, x); err != nil {
@@ -536,7 +542,9 @@ func testUserDeletion(t *testing.T, h Harness) {
 		}
 		for _, err := range []error{tx.Emails().Create(ctx, e), tx.Emails().Create(ctx, oe), tx.Sessions().Create(ctx, ses), tx.Sessions().Create(ctx, os),
 			tx.Passkeys().Create(ctx, pk), tx.Passwords().Create(ctx, pw), tx.TOTP().Create(ctx, tp), tx.RecoveryCodes().Replace(ctx, r, u.ID, []port.RecoveryCode{rc}),
-			tx.RoleBindings().Create(ctx, rb)} {
+			tx.RoleBindings().Create(ctx, rb), tx.Groups().Create(ctx, g), tx.Groups().Create(ctx, g2),
+			tx.Groups().AddMember(ctx, r, member(g.ID, u.ID)), tx.Groups().AddMember(ctx, r, member(g.ID, other.ID)),
+			tx.Groups().AddMember(ctx, r2, member(g2.ID, u.ID))} {
 			if err != nil {
 				return err
 			}
@@ -578,6 +586,7 @@ func testUserDeletion(t *testing.T, h Harness) {
 			"totp":     func() (int, error) { return count(tx.TOTP().ListByUser(ctx, r, u.ID)) },
 			"recovery": func() (int, error) { return count(tx.RecoveryCodes().ListByUser(ctx, r, u.ID)) },
 			"roles":    func() (int, error) { return count(tx.RoleBindings().ListByPrincipal(ctx, r, port.PrincipalUser, u.ID)) },
+			"groups":   func() (int, error) { return count(tx.Groups().ListByMember(ctx, r, port.PrincipalUser, u.ID)) },
 		} {
 			if got, err := n(); err != nil || got != 0 {
 				return fmt.Errorf("%s after erase = %d, %v", name, got, err)
@@ -589,6 +598,13 @@ func testUserDeletion(t *testing.T, h Harness) {
 		}
 		if _, err := tx.Sessions().Get(ctx, r, os.ID); err != nil {
 			return fmt.Errorf("other session: %v", err)
+		}
+		// 別のユーザーの所属と、別の realm の所属は残る。
+		if n, err := count(tx.Groups().ListByMember(ctx, r, port.PrincipalUser, other.ID)); err != nil || n != 1 {
+			return fmt.Errorf("other user's groups = %d, %v", n, err)
+		}
+		if n, err := count(tx.Groups().ListByMember(ctx, r2, port.PrincipalUser, u.ID)); err != nil || n != 1 {
+			return fmt.Errorf("groups in another realm = %d, %v", n, err)
 		}
 		if err := notFound("erase in another realm", tx.Users().Erase(ctx, id.New(id.Realm), other.ID, at)); err != nil {
 			return err

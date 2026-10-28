@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -79,6 +80,30 @@ func TestSweep(t *testing.T) {
 	clk.Advance(time.Minute)
 	if n := s.Sweep(); n != 1 {
 		t.Fatalf("Sweep = %d", n)
+	}
+}
+
+// 読まれないまま期限が切れたエントリも、書き込みのついでに間隔ごとに消える（メモリが増え続けない）。
+func TestWritesSweepExpired(t *testing.T) {
+	ctx := context.Background()
+	clk := clock.NewFake(t0)
+	s := New(clk)
+	for i := range 100 {
+		s.Set(ctx, "k"+strconv.Itoa(i), nil, time.Second)
+	}
+	s.Set(ctx, "keep", nil, time.Hour)
+	clk.Advance(sweepInterval - time.Nanosecond)
+	s.Incr(ctx, "c", time.Hour)
+	if len(s.m) != 102 {
+		t.Fatalf("swept before the interval: %d", len(s.m))
+	}
+	clk.Advance(time.Nanosecond)
+	s.Set(ctx, "x", nil, time.Hour)
+	if len(s.m) != 3 {
+		t.Fatalf("entries after sweep = %d", len(s.m))
+	}
+	if _, ok, _ := s.Get(ctx, "keep"); !ok {
+		t.Fatal("live entry swept")
 	}
 }
 

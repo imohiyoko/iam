@@ -108,6 +108,9 @@ func (s publicServer) StartAddEmail(ctx context.Context, req publicapi.StartAddE
 	if !ok {
 		return publicapi.StartAddEmail401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
+	if s.stale(au) {
+		return publicapi.StartAddEmail401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
 	if req.Body == nil {
 		return publicapi.StartAddEmail400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
@@ -139,6 +142,9 @@ func (s publicServer) VerifyAddEmail(ctx context.Context, req publicapi.VerifyAd
 	if !ok || req.Body == nil {
 		return fail, nil
 	}
+	if s.stale(au) {
+		return publicapi.VerifyAddEmail401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
 	in := emailflow.Verify{FlowID: deref(req.Body.FlowId), Code: deref(req.Body.Code), LinkToken: deref(req.Body.Token), Client: s.a.clientOf(ctx)}
 	if in.FlowID == "" {
 		in.FlowID = cookie(ctx, flowCookie)
@@ -167,6 +173,16 @@ func (s publicServer) VerifyAddEmail(ctx context.Context, req publicapi.VerifyAd
 }
 
 // change は本人の認証手段を1つのトランザクションで変える。理由を返せる拒否は (code, true)。
+// stale は通常のセッションで直近の認証が切れていること。認証手段の追加・削除で使う（5.4）。
+// 登録待ち・復旧中の制限つきセッションは、それ自体が直前の本人確認なので対象にしない。
+func (s publicServer) stale(au auth) bool {
+	return au.Restriction == port.RestrictionNone && !s.recent(au)
+}
+
+func reauthRequired() publicapi.UnauthenticatedJSONResponse {
+	return publicapi.UnauthenticatedJSONResponse{Error: "reauthentication_required"}
+}
+
 func (s publicServer) change(ctx context.Context, fn func(ctx context.Context, tx port.Tx, au auth) error) (notFound bool, code string, err error) {
 	au, _ := authFrom(ctx)
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return fn(ctx, tx, au) })
@@ -198,8 +214,10 @@ func (s publicServer) MakeMyEmailPrimary(ctx context.Context, req publicapi.Make
 }
 
 func (s publicServer) RemoveMyEmail(ctx context.Context, req publicapi.RemoveMyEmailRequestObject) (publicapi.RemoveMyEmailResponseObject, error) {
-	if _, ok := authFrom(ctx); !ok {
+	if au, ok := authFrom(ctx); !ok {
 		return publicapi.RemoveMyEmail401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	} else if s.stale(au) {
+		return publicapi.RemoveMyEmail401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	nf, code, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
 		return s.a.accounts.RemoveEmail(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Id, au.Actor(), requestID(ctx))
@@ -219,6 +237,9 @@ func (s publicServer) StartLinkIdentity(ctx context.Context, req publicapi.Start
 	au, ok := authFrom(ctx)
 	if !ok {
 		return publicapi.StartLinkIdentity401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	if s.stale(au) {
+		return publicapi.StartLinkIdentity401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	var redirectURI string
 	if req.Body != nil {
@@ -244,6 +265,9 @@ func (s publicServer) CompleteLinkIdentity(ctx context.Context, req publicapi.Co
 	au, ok := authFrom(ctx)
 	if !ok || req.Body == nil {
 		return fail, nil
+	}
+	if s.stale(au) {
+		return publicapi.CompleteLinkIdentity401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	c := s.a.clientOf(ctx)
 	in := oauth.Complete{FlowID: deref(req.Body.FlowId), State: req.Body.State, Code: req.Body.Code,
@@ -274,8 +298,10 @@ func (s publicServer) CompleteLinkIdentity(ctx context.Context, req publicapi.Co
 }
 
 func (s publicServer) UnlinkMyIdentity(ctx context.Context, req publicapi.UnlinkMyIdentityRequestObject) (publicapi.UnlinkMyIdentityResponseObject, error) {
-	if _, ok := authFrom(ctx); !ok {
+	if au, ok := authFrom(ctx); !ok {
 		return publicapi.UnlinkMyIdentity401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	} else if s.stale(au) {
+		return publicapi.UnlinkMyIdentity401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	nf, code, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
 		_, err := s.a.accounts.UnlinkIdentity(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Id, au.Actor(), requestID(ctx))
