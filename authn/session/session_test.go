@@ -239,6 +239,23 @@ func TestLoginReplacesSession(t *testing.T) {
 	if again := issue(t, k, m, u, fresh.Token); again.Session.SID == fresh.Session.SID {
 		t.Fatal("a logged-out lineage must not be revived from a session in its rotation grace")
 	}
+
+	// 猶予の内の古い Cookie でログインし直すと、系列を引き継ぎ、系列の今のセッションも置き換わる。
+	k.Clock.Advance(time.Second)
+	base := issue(t, k, m, u, "")
+	k.Clock.Advance(time.Second)
+	cur, err := m.Rotate(ctx, k.RealmID, base.Session.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.Clock.Advance(time.Second)
+	re := issue(t, k, m, u, base.Token)
+	if re.Session.SID != base.Session.SID {
+		t.Fatalf("sid = %q, want %q", re.Session.SID, base.Session.SID)
+	}
+	m.Committed(ctx, k.RealmID, re)
+	mustInvalid(t, m, k.RealmID, cur.Token)
+	mustValid(t, m, k.RealmID, re.Token)
 }
 
 func TestRotate(t *testing.T) {

@@ -222,6 +222,8 @@ type Issued struct {
 	OrgChoices []string
 	// OrgPublicID は active な Org の公開 ID（Org がオフなら空）。
 	OrgPublicID string
+	// current は、古いセッションが入れ替えの猶予の内だったときに一緒に失効させた、系列の今のセッションの ID。
+	current string
 }
 
 // Committed は Issue を呼んだトランザクションが確定した後に呼ぶ。入れ替えた古いセッションの
@@ -229,6 +231,9 @@ type Issued struct {
 func (m *Manager) Committed(ctx context.Context, realmID string, is Issued) {
 	if is.Replaced != "" {
 		m.forget(ctx, realmID, is.Replaced)
+	}
+	if is.current != "" {
+		m.forget(ctx, realmID, is.current)
 	}
 }
 
@@ -317,6 +322,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	warnings, _ := m.Warnings.Apply(hits, lim.Warnings)
 	// 同じブラウザの古いセッション。同じ本人の通常のセッションなら、ログインの系列（sid）を引き継ぐ（連携先の認可が続く。5.1）。
 	var old *port.Session
+	var current port.Session // 引き継ぐ系列の今のセッション
 	if sid, secret, ok := SplitToken(in.ReplaceToken); ok {
 		o, err := tx.Sessions().Get(ctx, in.RealmID, sid)
 		if err == nil && (o.RevokedAt == nil || now.Before(*o.RevokedAt)) && subtle.ConstantTimeCompare(o.TokenHash, hashSecret(secret)) == 1 {
@@ -330,7 +336,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		// Validate と同じに確かめる）ときだけ引き継ぐ。今のセッションをログアウトした後に、猶予の残る古い Cookie で系列を蘇らせない。
 		_, _, _, err := m.check(ctx, tx, *old, now)
 		if err == nil {
-			_, _, err = m.CheckLineage(ctx, tx, in.RealmID, old.SID, now)
+			current, _, err = m.CheckLineage(ctx, tx, in.RealmID, old.SID, now)
 		}
 		switch {
 		case err == nil:
@@ -362,6 +368,14 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		details["replaced"] = old.ID
 		replaced = old.ID
 	}
+	// 古いセッションが入れ替えの猶予の内なら、系列の今のセッションも置き換わる（同じ系列の使えるセッションを2つ残さない）。
+	var retired string
+	if current.ID != "" && old != nil && current.ID != old.ID {
+		if err := m.revokeInTx(ctx, tx, current, ReasonReplacedByLogin, actor, in.RequestID); err != nil {
+			return Issued{}, err
+		}
+		retired = current.ID
+	}
 	var orgPublicID string
 	if s.ActiveOrgID != "" {
 		o, err := tx.Orgs().Get(ctx, in.RealmID, s.ActiveOrgID)
@@ -376,7 +390,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		RequestID: in.RequestID, Details: details,
 	})
 	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced, SecondFactorMethods: methods, OrgChoices: choices,
-		OrgPublicID: orgPublicID}, err
+		OrgPublicID: orgPublicID, current: retired}, err
 }
 
 // carry は前の段の警告のうち、新しい評価に無いコードのものを足す。
@@ -960,6 +974,7 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requ
 	}
 	now := m.Clock.Now()
 	var out Issued
+	var retired string // 一緒に失効させた系列の今のセッション
 	err := m.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		old, err := tx.Sessions().Get(ctx, realmID, sessionID)
 		if err != nil {
@@ -967,6 +982,19 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requ
 		}
 		if (old.RevokedAt != nil && !now.Before(*old.RevokedAt)) || !now.Before(old.ExpiresAt) || old.Restriction != port.RestrictionNone {
 			return ErrNotSwitchable
+		}
+		// 系列の今のセッション（入れ替えの後なら新しい方）も使えなければ切り替えない。ログアウトした系列を、猶予の残る
+		// 古いセッションから蘇らせない。
+		lineage := old.SID
+		if lineage == "" {
+			lineage = old.ID
+		}
+		current, _, err := m.CheckLineage(ctx, tx, realmID, lineage, now)
+		if errors.Is(err, ErrInvalid) {
+			return ErrNotSwitchable
+		}
+		if err != nil {
+			return err
 		}
 		u, err := tx.Users().Get(ctx, realmID, old.PrincipalID)
 		if err != nil {
@@ -1011,6 +1039,12 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requ
 		if err := tx.Sessions().Revoke(ctx, realmID, old.ID, now, ReasonOrgSwitched); err != nil {
 			return err
 		}
+		if current.ID != old.ID {
+			if err := tx.Sessions().Revoke(ctx, realmID, current.ID, now, ReasonOrgSwitched); err != nil {
+				return err
+			}
+			retired = current.ID
+		}
 		if _, err := eventlog.Record(ctx, tx, m.Clock, audit.Event{
 			Type: "session.org_switched", Result: audit.ResultSuccess, RealmID: realmID, OrgID: o.PublicID,
 			Actor: audit.Actor{Type: "user", ID: u.PublicID}, SessionID: s.ID, RequestID: requestID,
@@ -1025,6 +1059,9 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requ
 		return Issued{}, err
 	}
 	m.forget(ctx, realmID, sessionID)
+	if retired != "" {
+		m.forget(ctx, realmID, retired)
+	}
 	return out, nil
 }
 
