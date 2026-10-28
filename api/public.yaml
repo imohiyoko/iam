@@ -1610,6 +1610,340 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}/roles:
+    get:
+      operationId: listMyOrgRoles
+      summary: この Org の範囲で使えるロールの一覧（4.11）
+      description: |
+        権限 `org:roles`。付与できる組み込みのロールと、独自のロールを返す。
+        組み込みの Org のロール（`org:owner` など）は Membership の `org_role` から効くもので、付与はできないが一覧には含める。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Roles" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createMyOrgRole
+      summary: 独自のロールを作る（4.11）
+      description: |
+        権限 `org:roles`。渡す権限はすべて自分がこの Org の範囲で持っていなければならない（`403 permission_denied`）。
+        名前に組み込みの名前空間（`realm:`・`org:`・`system:`）は使えない（`400 invalid_name`）。権限の形は `<リソース>:<操作>`（`400 invalid_permission`）。
+        IAM 自身の realm の管理の権限（`users:`・`orgs:` など）は Org のロールに入れられない。名前の重複は `409 role_exists`。`role.created` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleInput" }
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/roles/{role_id}:
+    put:
+      operationId: updateMyOrgRole
+      summary: 独自のロールの名前と権限を置き換える
+      description: |
+        権限 `org:roles`。今の権限と新しい権限をすべて自分が持っていなければならない。`role.updated` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: role_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleInput" }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/roles/{role_id}:delete:
+    post:
+      operationId: deleteMyOrgRole
+      summary: 独自のロールと、その付与を消す
+      description: |
+        権限 `org:roles`。ロールの権限をすべて自分が持っていなければならない。`role.deleted` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: role_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/orgs/{id}/role-bindings:
+    get:
+      operationId: listMyOrgRoleBindings
+      summary: この Org の範囲のロールの付与の一覧
+      description: |
+        権限 `org:roles`。作成の順。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleBindings" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createMyOrgRoleBinding
+      summary: ロールを付与する（4.11）
+      description: |
+        権限 `org:roles`。ロールの権限をすべて自分が持っていなければならない。`role` は組み込みのロールの名前か、独自のロールの ID。
+        主体はこの Org の使える所属を持つユーザーか、この Org の Group（`409 not_member`・`400 invalid_principal`）。運営者ロールは付与できない（`400 unknown_role`）。
+        `resource_type`・`resource_id` を渡せば、そのリソースだけに効く。同じ付与は `409 binding_exists`。`role.granted` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleBindingInput" }
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleBinding" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/role-bindings/{binding_id}:delete:
+    post:
+      operationId: deleteMyOrgRoleBinding
+      summary: ロールの付与を消す
+      description: |
+        権限 `org:roles`。ロールの権限をすべて自分が持っていなければならない。`role.revoked` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: binding_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/groups:
+    get:
+      operationId: listMyOrgGroups
+      summary: この Org の範囲の Group の一覧（3.2）
+      description: |
+        権限 `org:groups`。名前の順。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Groups" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createMyOrgGroup
+      summary: Group を作る
+      description: |
+        権限 `org:groups`。名前の重複は `409 group_exists`。`group.created` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupInput" }
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/groups/{group_id}:
+    patch:
+      operationId: renameMyOrgGroup
+      summary: Group の名前を変える
+      description: |
+        権限 `org:groups`。`group.renamed` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupInput" }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/groups/{group_id}:delete:
+    post:
+      operationId: deleteMyOrgGroup
+      summary: Group と、その所属と付与を消す
+      description: |
+        権限 `org:groups`。Group に付与されたロールの権限をすべて自分が持っていなければならない。`group.deleted` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 成功
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/orgs/{id}/groups/{group_id}/members:
+    get:
+      operationId: listMyOrgGroupMembers
+      summary: Group の所属の一覧
+      description: |
+        権限 `org:groups`。作成の順。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GroupMembers" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: addMyOrgGroupMember
+      summary: Group に主体を入れる
+      description: |
+        権限 `org:groups`。Group に付与されたロールの権限をすべて自分が持っていなければならない。主体はユーザー（この Org の使える所属が要る。`409 not_member`）。
+        既に所属していれば `409 member_exists`。`group.member_added` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupMemberInput" }
+      responses:
+        "204":
+          description: 成功
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/groups/{group_id}/members:remove:
+    post:
+      operationId: removeMyOrgGroupMember
+      summary: Group から主体を外す
+      description: |
+        権限 `org:groups`。`group.member_removed` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupMemberInput" }
+      responses:
+        "204":
+          description: 成功
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -1862,3 +2196,96 @@ components:
           additionalProperties: true
           description: "`{\"publicKey\": …}`。WebAuthn の options の JSON の形"
         expires_at: { type: string, format: date-time }
+    Role:
+      type: object
+      required: [id, name, permissions, builtin, assignable]
+      properties:
+        id: { type: string, description: 組み込みのロールは名前、独自のロールは公開 ID }
+        name: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+        builtin: { type: boolean }
+        assignable: { type: boolean, description: 付与の API で付与できるか（組み込みの Org のロールは org_role から効くので false） }
+    Roles:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+    RoleInput:
+      type: object
+      required: [name, permissions]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        permissions:
+          type: array
+          maxItems: 100
+          items: { type: string }
+    RoleBinding:
+      type: object
+      required: [id, role, principal_type, principal_id, created_at]
+      properties:
+        id: { type: string }
+        role: { type: string, description: 組み込みのロールの名前か、独自のロールの ID }
+        principal_type: { type: string, description: user / group }
+        principal_id: { type: string, description: 主体の公開 ID }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        created_at: { type: string, format: date-time }
+    RoleBindings:
+      type: object
+      required: [bindings]
+      properties:
+        bindings:
+          type: array
+          items: { $ref: "#/components/schemas/RoleBinding" }
+    RoleBindingInput:
+      type: object
+      required: [role, principal_type, principal_id]
+      properties:
+        role: { type: string }
+        principal_type: { type: string, description: user / group }
+        principal_id: { type: string }
+        resource_type: { type: string, maxLength: 64 }
+        resource_id: { type: string, maxLength: 256 }
+    Group:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+    Groups:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items: { $ref: "#/components/schemas/Group" }
+    GroupInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+    GroupMember:
+      type: object
+      required: [principal_type, principal_id, created_at]
+      properties:
+        principal_type: { type: string, description: user }
+        principal_id: { type: string, description: 主体の公開 ID }
+        created_at: { type: string, format: date-time }
+    GroupMembers:
+      type: object
+      required: [members]
+      properties:
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/GroupMember" }
+    GroupMemberInput:
+      type: object
+      required: [principal_type, principal_id]
+      properties:
+        principal_type: { type: string, description: user }
+        principal_id: { type: string }

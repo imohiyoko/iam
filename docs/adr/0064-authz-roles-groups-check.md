@@ -42,6 +42,17 @@ M4 で認可を組み込む。design.md は次を求める。
   - 最後の `realm:owner` のユーザーの付与は消せない
   - 同じ理由で、最後の `realm:owner` のユーザーは削除できない（`409 last_owner`）。猶予の間に最後になったら、猶予が終わっても消さず `user.deletion_held` を残す。数えるのは使える owner だけ（削除済み・削除の予約中は数えない）
   - 変更は監査ログに残す（`role.*`・`group.*`）。応答と監査ログには公開 ID だけを出す（0045）
+  - Membership が終わると（退会・除名・アカウントの削除）、その Org の範囲の付与と Org の Group の所属を消す
+    （戻ってきたときに古い権限が蘇らないように）
+- API
+  - realm の範囲は管理 API の `/v1/admin/roles`・`/role-bindings`・`/groups`、Org の範囲は公開 API の
+    `/v1/me/orgs/{id}/roles`・`/role-bindings`・`/groups`。同じ処理で、形も同じ
+  - 主体はユーザーと Group（サービスアカウントは公開 ID を持たないので、M4 では API から付与しない）
+- 既存の判定の置き換え
+  - 管理 API の認可と、なりすませる操作の前の「対象の権限をすべて持つか」は判定を使う。運営者の操作は数が少なく、
+    取り消しをすぐ効かせたいので、キャッシュを使わない（`CheckTx`）
+  - Org の操作（招待・除名・設定など）は Org の範囲の判定を使う。独自のロールで `org:invite` などを渡せる
+  - Org の削除とその取り消しだけは `org_role` で見る（削除の予定がある Org は使えないので、Org の範囲の付与は効かない）
 
 ## 理由
 
@@ -52,4 +63,4 @@ M4 で認可を組み込む。design.md は次を求める。
 ## 影響
 
 - 既存の `role_bindings` の行には公開 ID を振る（マイグレーション 00016）
-- これまでの `role.OrgAllows`・`role.Allowed` は、続く変更（#69、#70）で判定に置き換える
+- `role.Allowed`・`role.Covers` は無くした。`role.OrgAllows` は Org の削除だけに残る

@@ -15,7 +15,8 @@ import (
 // Org の削除（design.md 4.10、ADR 0060）。
 
 // orgOwner は本人が perm（org:delete）を持つ Org を返す。削除の予定がある Org は使えない（deletion_scheduled）ので、
-// 可否（停止・有効期間）は見ない。
+// 可否（停止・有効期間）は見ない。使えない Org では authz の判定の Org の範囲の付与が効かないため、ここは org_role の
+// 組み込みのロールだけで判定する（削除とその取り消しは org:owner。ADR 0064）。
 func (s publicServer) orgOwner(ctx context.Context, tx port.Tx, au auth, orgPublicID, perm string) (port.Org, error) {
 	o, m, err := s.membership(ctx, tx, au, orgPublicID)
 	if err != nil {

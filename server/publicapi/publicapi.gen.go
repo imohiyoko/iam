@@ -312,6 +312,47 @@ type Error struct {
 	Reasons *[]string `json:"reasons,omitempty"`
 }
 
+// Group defines model for Group.
+type Group struct {
+	CreatedAt time.Time `json:"created_at"`
+	Id        string    `json:"id"`
+	Name      string    `json:"name"`
+}
+
+// GroupInput defines model for GroupInput.
+type GroupInput struct {
+	Name string `json:"name"`
+}
+
+// GroupMember defines model for GroupMember.
+type GroupMember struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// PrincipalId 主体の公開 ID
+	PrincipalId string `json:"principal_id"`
+
+	// PrincipalType user
+	PrincipalType string `json:"principal_type"`
+}
+
+// GroupMemberInput defines model for GroupMemberInput.
+type GroupMemberInput struct {
+	PrincipalId string `json:"principal_id"`
+
+	// PrincipalType user
+	PrincipalType string `json:"principal_type"`
+}
+
+// GroupMembers defines model for GroupMembers.
+type GroupMembers struct {
+	Members []GroupMember `json:"members"`
+}
+
+// Groups defines model for Groups.
+type Groups struct {
+	Groups []Group `json:"groups"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -544,6 +585,62 @@ type RegisteredPasskey struct {
 
 	// RecoveryCodes 最初の強い認証手段なら、リカバリーコード（表示は1回だけ。4.12）
 	RecoveryCodes *[]string `json:"recovery_codes,omitempty"`
+}
+
+// Role defines model for Role.
+type Role struct {
+	// Assignable 付与の API で付与できるか（組み込みの Org のロールは org_role から効くので false）
+	Assignable bool `json:"assignable"`
+	Builtin    bool `json:"builtin"`
+
+	// Id 組み込みのロールは名前、独自のロールは公開 ID
+	Id          string   `json:"id"`
+	Name        string   `json:"name"`
+	Permissions []string `json:"permissions"`
+}
+
+// RoleBinding defines model for RoleBinding.
+type RoleBinding struct {
+	CreatedAt time.Time `json:"created_at"`
+	Id        string    `json:"id"`
+
+	// PrincipalId 主体の公開 ID
+	PrincipalId string `json:"principal_id"`
+
+	// PrincipalType user / group
+	PrincipalType string  `json:"principal_type"`
+	ResourceId    *string `json:"resource_id,omitempty"`
+	ResourceType  *string `json:"resource_type,omitempty"`
+
+	// Role 組み込みのロールの名前か、独自のロールの ID
+	Role string `json:"role"`
+}
+
+// RoleBindingInput defines model for RoleBindingInput.
+type RoleBindingInput struct {
+	PrincipalId string `json:"principal_id"`
+
+	// PrincipalType user / group
+	PrincipalType string  `json:"principal_type"`
+	ResourceId    *string `json:"resource_id,omitempty"`
+	ResourceType  *string `json:"resource_type,omitempty"`
+	Role          string  `json:"role"`
+}
+
+// RoleBindings defines model for RoleBindings.
+type RoleBindings struct {
+	Bindings []RoleBinding `json:"bindings"`
+}
+
+// RoleInput defines model for RoleInput.
+type RoleInput struct {
+	Name        string   `json:"name"`
+	Permissions []string `json:"permissions"`
+}
+
+// Roles defines model for Roles.
+type Roles struct {
+	Roles []Role `json:"roles"`
 }
 
 // Session defines model for Session.
@@ -858,6 +955,18 @@ type CompleteLinkIdentityJSONRequestBody CompleteLinkIdentityJSONBody
 // CreateMyOrgJSONRequestBody defines body for CreateMyOrg for application/json ContentType.
 type CreateMyOrgJSONRequestBody CreateMyOrgJSONBody
 
+// CreateMyOrgGroupJSONRequestBody defines body for CreateMyOrgGroup for application/json ContentType.
+type CreateMyOrgGroupJSONRequestBody = GroupInput
+
+// RenameMyOrgGroupJSONRequestBody defines body for RenameMyOrgGroup for application/json ContentType.
+type RenameMyOrgGroupJSONRequestBody = GroupInput
+
+// AddMyOrgGroupMemberJSONRequestBody defines body for AddMyOrgGroupMember for application/json ContentType.
+type AddMyOrgGroupMemberJSONRequestBody = GroupMemberInput
+
+// RemoveMyOrgGroupMemberJSONRequestBody defines body for RemoveMyOrgGroupMember for application/json ContentType.
+type RemoveMyOrgGroupMemberJSONRequestBody = GroupMemberInput
+
 // InviteToOrgJSONRequestBody defines body for InviteToOrg for application/json ContentType.
 type InviteToOrgJSONRequestBody InviteToOrgJSONBody
 
@@ -866,6 +975,15 @@ type UpdateOrgMemberJSONRequestBody UpdateOrgMemberJSONBody
 
 // SuspendOrgMemberJSONRequestBody defines body for SuspendOrgMember for application/json ContentType.
 type SuspendOrgMemberJSONRequestBody SuspendOrgMemberJSONBody
+
+// CreateMyOrgRoleBindingJSONRequestBody defines body for CreateMyOrgRoleBinding for application/json ContentType.
+type CreateMyOrgRoleBindingJSONRequestBody = RoleBindingInput
+
+// CreateMyOrgRoleJSONRequestBody defines body for CreateMyOrgRole for application/json ContentType.
+type CreateMyOrgRoleJSONRequestBody = RoleInput
+
+// UpdateMyOrgRoleJSONRequestBody defines body for UpdateMyOrgRole for application/json ContentType.
+type UpdateMyOrgRoleJSONRequestBody = RoleInput
 
 // PutMyOrgSettingsJSONRequestBody defines body for PutMyOrgSettings for application/json ContentType.
 type PutMyOrgSettingsJSONRequestBody = OrgSettings
@@ -992,6 +1110,27 @@ type ServerInterface interface {
 	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
 	// (POST /v1/me/orgs)
 	CreateMyOrg(w http.ResponseWriter, r *http.Request)
+	// ListMyOrgGroups この Org の範囲の Group の一覧（3.2）
+	// (GET /v1/me/orgs/{id}/groups)
+	ListMyOrgGroups(w http.ResponseWriter, r *http.Request, id string)
+	// CreateMyOrgGroup Group を作る
+	// (POST /v1/me/orgs/{id}/groups)
+	CreateMyOrgGroup(w http.ResponseWriter, r *http.Request, id string)
+	// RenameMyOrgGroup Group の名前を変える
+	// (PATCH /v1/me/orgs/{id}/groups/{group_id})
+	RenameMyOrgGroup(w http.ResponseWriter, r *http.Request, id string, groupId string)
+	// ListMyOrgGroupMembers Group の所属の一覧
+	// (GET /v1/me/orgs/{id}/groups/{group_id}/members)
+	ListMyOrgGroupMembers(w http.ResponseWriter, r *http.Request, id string, groupId string)
+	// AddMyOrgGroupMember Group に主体を入れる
+	// (POST /v1/me/orgs/{id}/groups/{group_id}/members)
+	AddMyOrgGroupMember(w http.ResponseWriter, r *http.Request, id string, groupId string)
+	// RemoveMyOrgGroupMember Group から主体を外す
+	// (POST /v1/me/orgs/{id}/groups/{group_id}/members:remove)
+	RemoveMyOrgGroupMember(w http.ResponseWriter, r *http.Request, id string, groupId string)
+	// DeleteMyOrgGroup Group と、その所属と付与を消す
+	// (POST /v1/me/orgs/{id}/groups/{group_id}:delete)
+	DeleteMyOrgGroup(w http.ResponseWriter, r *http.Request, id string, groupId string)
 	// ListOrgInvitations Org の招待の一覧（Org の owner と admin）
 	// (GET /v1/me/orgs/{id}/invitations)
 	ListOrgInvitations(w http.ResponseWriter, r *http.Request, id string)
@@ -1016,6 +1155,27 @@ type ServerInterface interface {
 	// RemoveOrgMember メンバーを除名する（Org の owner と admin。4.10）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}:remove)
 	RemoveOrgMember(w http.ResponseWriter, r *http.Request, id string, membershipId string)
+	// ListMyOrgRoleBindings この Org の範囲のロールの付与の一覧
+	// (GET /v1/me/orgs/{id}/role-bindings)
+	ListMyOrgRoleBindings(w http.ResponseWriter, r *http.Request, id string)
+	// CreateMyOrgRoleBinding ロールを付与する（4.11）
+	// (POST /v1/me/orgs/{id}/role-bindings)
+	CreateMyOrgRoleBinding(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteMyOrgRoleBinding ロールの付与を消す
+	// (POST /v1/me/orgs/{id}/role-bindings/{binding_id}:delete)
+	DeleteMyOrgRoleBinding(w http.ResponseWriter, r *http.Request, id string, bindingId string)
+	// ListMyOrgRoles この Org の範囲で使えるロールの一覧（4.11）
+	// (GET /v1/me/orgs/{id}/roles)
+	ListMyOrgRoles(w http.ResponseWriter, r *http.Request, id string)
+	// CreateMyOrgRole 独自のロールを作る（4.11）
+	// (POST /v1/me/orgs/{id}/roles)
+	CreateMyOrgRole(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateMyOrgRole 独自のロールの名前と権限を置き換える
+	// (PUT /v1/me/orgs/{id}/roles/{role_id})
+	UpdateMyOrgRole(w http.ResponseWriter, r *http.Request, id string, roleId string)
+	// DeleteMyOrgRole 独自のロールと、その付与を消す
+	// (POST /v1/me/orgs/{id}/roles/{role_id}:delete)
+	DeleteMyOrgRole(w http.ResponseWriter, r *http.Request, id string, roleId string)
 	// GetMyOrgSettings Org の段のセキュリティ設定を返す（2.8）
 	// (GET /v1/me/orgs/{id}/settings)
 	GetMyOrgSettings(w http.ResponseWriter, r *http.Request, id string)
@@ -1532,6 +1692,233 @@ func (siw *ServerInterfaceWrapper) CreateMyOrg(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// ListMyOrgGroups operation middleware
+func (siw *ServerInterfaceWrapper) ListMyOrgGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyOrgGroups(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMyOrgGroup operation middleware
+func (siw *ServerInterfaceWrapper) CreateMyOrgGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMyOrgGroup(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameMyOrgGroup operation middleware
+func (siw *ServerInterfaceWrapper) RenameMyOrgGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group_id" -------------
+	var groupId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group_id", r.PathValue("group_id"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameMyOrgGroup(w, r, id, groupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyOrgGroupMembers operation middleware
+func (siw *ServerInterfaceWrapper) ListMyOrgGroupMembers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group_id" -------------
+	var groupId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group_id", r.PathValue("group_id"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyOrgGroupMembers(w, r, id, groupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddMyOrgGroupMember operation middleware
+func (siw *ServerInterfaceWrapper) AddMyOrgGroupMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group_id" -------------
+	var groupId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group_id", r.PathValue("group_id"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddMyOrgGroupMember(w, r, id, groupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveMyOrgGroupMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveMyOrgGroupMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group_id" -------------
+	var groupId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group_id", r.PathValue("group_id"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveMyOrgGroupMember(w, r, id, groupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMyOrgGroup operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMyOrgGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group_id" -------------
+	var groupId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group_id", r.PathValue("group_id"), &groupId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMyOrgGroup(w, r, id, groupId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListOrgInvitations operation middleware
 func (siw *ServerInterfaceWrapper) ListOrgInvitations(w http.ResponseWriter, r *http.Request) {
 
@@ -1805,6 +2192,215 @@ func (siw *ServerInterfaceWrapper) RemoveOrgMember(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RemoveOrgMember(w, r, id, membershipId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyOrgRoleBindings operation middleware
+func (siw *ServerInterfaceWrapper) ListMyOrgRoleBindings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyOrgRoleBindings(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMyOrgRoleBinding operation middleware
+func (siw *ServerInterfaceWrapper) CreateMyOrgRoleBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMyOrgRoleBinding(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMyOrgRoleBinding operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMyOrgRoleBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding_id" -------------
+	var bindingId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding_id", r.PathValue("binding_id"), &bindingId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMyOrgRoleBinding(w, r, id, bindingId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyOrgRoles operation middleware
+func (siw *ServerInterfaceWrapper) ListMyOrgRoles(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyOrgRoles(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMyOrgRole operation middleware
+func (siw *ServerInterfaceWrapper) CreateMyOrgRole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMyOrgRole(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateMyOrgRole operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMyOrgRole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "role_id" -------------
+	var roleId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "role_id", r.PathValue("role_id"), &roleId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "role_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMyOrgRole(w, r, id, roleId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMyOrgRole operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMyOrgRole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "role_id" -------------
+	var roleId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "role_id", r.PathValue("role_id"), &roleId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "role_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMyOrgRole(w, r, id, roleId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2550,6 +3146,20 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/invitations:accept", wrapper.AcceptInvitation)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}:switch", wrapper.SwitchMyOrg)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys/{id}:set-org", wrapper.SetMyPasskeyOrg)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/roles", wrapper.ListMyOrgRoles)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/roles", wrapper.CreateMyOrgRole)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/me/orgs/{id}/roles/{role_id}", wrapper.UpdateMyOrgRole)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/roles/{role_id}:delete", wrapper.DeleteMyOrgRole)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/role-bindings", wrapper.ListMyOrgRoleBindings)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/role-bindings", wrapper.CreateMyOrgRoleBinding)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/role-bindings/{binding_id}:delete", wrapper.DeleteMyOrgRoleBinding)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/groups", wrapper.ListMyOrgGroups)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/groups", wrapper.CreateMyOrgGroup)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}", wrapper.RenameMyOrgGroup)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}:delete", wrapper.DeleteMyOrgGroup)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}/members", wrapper.ListMyOrgGroupMembers)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}/members", wrapper.AddMyOrgGroupMember)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}/members:remove", wrapper.RemoveMyOrgGroupMember)
 
 	return m
 }
@@ -4111,6 +4721,543 @@ func (response CreateMyOrg404JSONResponse) VisitCreateMyOrgResponse(w http.Respo
 	return err
 }
 
+type ListMyOrgGroupsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListMyOrgGroupsResponseObject interface {
+	VisitListMyOrgGroupsResponse(w http.ResponseWriter) error
+}
+
+type ListMyOrgGroups200JSONResponse Groups
+
+func (response ListMyOrgGroups200JSONResponse) VisitListMyOrgGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgGroups401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyOrgGroups401JSONResponse) VisitListMyOrgGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgGroups403JSONResponse struct{ DeniedJSONResponse }
+
+func (response ListMyOrgGroups403JSONResponse) VisitListMyOrgGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgGroups404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyOrgGroups404JSONResponse) VisitListMyOrgGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgGroupRequestObject struct {
+	Id   string `json:"id"`
+	Body *CreateMyOrgGroupJSONRequestBody
+}
+
+type CreateMyOrgGroupResponseObject interface {
+	VisitCreateMyOrgGroupResponse(w http.ResponseWriter) error
+}
+
+type CreateMyOrgGroup201JSONResponse Group
+
+func (response CreateMyOrgGroup201JSONResponse) VisitCreateMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgGroup400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateMyOrgGroup400JSONResponse) VisitCreateMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateMyOrgGroup401JSONResponse) VisitCreateMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgGroup403JSONResponse struct{ DeniedJSONResponse }
+
+func (response CreateMyOrgGroup403JSONResponse) VisitCreateMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateMyOrgGroup404JSONResponse) VisitCreateMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateMyOrgGroup409JSONResponse) VisitCreateMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameMyOrgGroupRequestObject struct {
+	Id      string `json:"id"`
+	GroupId string `json:"group_id"`
+	Body    *RenameMyOrgGroupJSONRequestBody
+}
+
+type RenameMyOrgGroupResponseObject interface {
+	VisitRenameMyOrgGroupResponse(w http.ResponseWriter) error
+}
+
+type RenameMyOrgGroup200JSONResponse Group
+
+func (response RenameMyOrgGroup200JSONResponse) VisitRenameMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameMyOrgGroup400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RenameMyOrgGroup400JSONResponse) VisitRenameMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameMyOrgGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RenameMyOrgGroup401JSONResponse) VisitRenameMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameMyOrgGroup403JSONResponse struct{ DeniedJSONResponse }
+
+func (response RenameMyOrgGroup403JSONResponse) VisitRenameMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameMyOrgGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RenameMyOrgGroup404JSONResponse) VisitRenameMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameMyOrgGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RenameMyOrgGroup409JSONResponse) VisitRenameMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgGroupMembersRequestObject struct {
+	Id      string `json:"id"`
+	GroupId string `json:"group_id"`
+}
+
+type ListMyOrgGroupMembersResponseObject interface {
+	VisitListMyOrgGroupMembersResponse(w http.ResponseWriter) error
+}
+
+type ListMyOrgGroupMembers200JSONResponse GroupMembers
+
+func (response ListMyOrgGroupMembers200JSONResponse) VisitListMyOrgGroupMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgGroupMembers401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyOrgGroupMembers401JSONResponse) VisitListMyOrgGroupMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgGroupMembers403JSONResponse struct{ DeniedJSONResponse }
+
+func (response ListMyOrgGroupMembers403JSONResponse) VisitListMyOrgGroupMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgGroupMembers404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyOrgGroupMembers404JSONResponse) VisitListMyOrgGroupMembersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMyOrgGroupMemberRequestObject struct {
+	Id      string `json:"id"`
+	GroupId string `json:"group_id"`
+	Body    *AddMyOrgGroupMemberJSONRequestBody
+}
+
+type AddMyOrgGroupMemberResponseObject interface {
+	VisitAddMyOrgGroupMemberResponse(w http.ResponseWriter) error
+}
+
+type AddMyOrgGroupMember204Response struct {
+}
+
+func (response AddMyOrgGroupMember204Response) VisitAddMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type AddMyOrgGroupMember400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AddMyOrgGroupMember400JSONResponse) VisitAddMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMyOrgGroupMember401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AddMyOrgGroupMember401JSONResponse) VisitAddMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMyOrgGroupMember403JSONResponse struct{ DeniedJSONResponse }
+
+func (response AddMyOrgGroupMember403JSONResponse) VisitAddMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMyOrgGroupMember404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AddMyOrgGroupMember404JSONResponse) VisitAddMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddMyOrgGroupMember409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddMyOrgGroupMember409JSONResponse) VisitAddMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyOrgGroupMemberRequestObject struct {
+	Id      string `json:"id"`
+	GroupId string `json:"group_id"`
+	Body    *RemoveMyOrgGroupMemberJSONRequestBody
+}
+
+type RemoveMyOrgGroupMemberResponseObject interface {
+	VisitRemoveMyOrgGroupMemberResponse(w http.ResponseWriter) error
+}
+
+type RemoveMyOrgGroupMember204Response struct {
+}
+
+func (response RemoveMyOrgGroupMember204Response) VisitRemoveMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveMyOrgGroupMember400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RemoveMyOrgGroupMember400JSONResponse) VisitRemoveMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyOrgGroupMember401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RemoveMyOrgGroupMember401JSONResponse) VisitRemoveMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyOrgGroupMember403JSONResponse struct{ DeniedJSONResponse }
+
+func (response RemoveMyOrgGroupMember403JSONResponse) VisitRemoveMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveMyOrgGroupMember404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RemoveMyOrgGroupMember404JSONResponse) VisitRemoveMyOrgGroupMemberResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgGroupRequestObject struct {
+	Id      string `json:"id"`
+	GroupId string `json:"group_id"`
+}
+
+type DeleteMyOrgGroupResponseObject interface {
+	VisitDeleteMyOrgGroupResponse(w http.ResponseWriter) error
+}
+
+type DeleteMyOrgGroup204Response struct {
+}
+
+func (response DeleteMyOrgGroup204Response) VisitDeleteMyOrgGroupResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteMyOrgGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteMyOrgGroup401JSONResponse) VisitDeleteMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgGroup403JSONResponse struct{ DeniedJSONResponse }
+
+func (response DeleteMyOrgGroup403JSONResponse) VisitDeleteMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteMyOrgGroup404JSONResponse) VisitDeleteMyOrgGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListOrgInvitationsRequestObject struct {
 	Id string `json:"id"`
 }
@@ -4737,6 +5884,546 @@ func (response RemoveOrgMember409JSONResponse) VisitRemoveOrgMemberResponse(w ht
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgRoleBindingsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListMyOrgRoleBindingsResponseObject interface {
+	VisitListMyOrgRoleBindingsResponse(w http.ResponseWriter) error
+}
+
+type ListMyOrgRoleBindings200JSONResponse RoleBindings
+
+func (response ListMyOrgRoleBindings200JSONResponse) VisitListMyOrgRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgRoleBindings401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyOrgRoleBindings401JSONResponse) VisitListMyOrgRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgRoleBindings403JSONResponse struct{ DeniedJSONResponse }
+
+func (response ListMyOrgRoleBindings403JSONResponse) VisitListMyOrgRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgRoleBindings404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyOrgRoleBindings404JSONResponse) VisitListMyOrgRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRoleBindingRequestObject struct {
+	Id   string `json:"id"`
+	Body *CreateMyOrgRoleBindingJSONRequestBody
+}
+
+type CreateMyOrgRoleBindingResponseObject interface {
+	VisitCreateMyOrgRoleBindingResponse(w http.ResponseWriter) error
+}
+
+type CreateMyOrgRoleBinding201JSONResponse RoleBinding
+
+func (response CreateMyOrgRoleBinding201JSONResponse) VisitCreateMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRoleBinding400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateMyOrgRoleBinding400JSONResponse) VisitCreateMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRoleBinding401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateMyOrgRoleBinding401JSONResponse) VisitCreateMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRoleBinding403JSONResponse struct{ DeniedJSONResponse }
+
+func (response CreateMyOrgRoleBinding403JSONResponse) VisitCreateMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRoleBinding404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateMyOrgRoleBinding404JSONResponse) VisitCreateMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRoleBinding409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateMyOrgRoleBinding409JSONResponse) VisitCreateMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgRoleBindingRequestObject struct {
+	Id        string `json:"id"`
+	BindingId string `json:"binding_id"`
+}
+
+type DeleteMyOrgRoleBindingResponseObject interface {
+	VisitDeleteMyOrgRoleBindingResponse(w http.ResponseWriter) error
+}
+
+type DeleteMyOrgRoleBinding204Response struct {
+}
+
+func (response DeleteMyOrgRoleBinding204Response) VisitDeleteMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteMyOrgRoleBinding401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteMyOrgRoleBinding401JSONResponse) VisitDeleteMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgRoleBinding403JSONResponse struct{ DeniedJSONResponse }
+
+func (response DeleteMyOrgRoleBinding403JSONResponse) VisitDeleteMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgRoleBinding404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteMyOrgRoleBinding404JSONResponse) VisitDeleteMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgRoleBinding409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteMyOrgRoleBinding409JSONResponse) VisitDeleteMyOrgRoleBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgRolesRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListMyOrgRolesResponseObject interface {
+	VisitListMyOrgRolesResponse(w http.ResponseWriter) error
+}
+
+type ListMyOrgRoles200JSONResponse Roles
+
+func (response ListMyOrgRoles200JSONResponse) VisitListMyOrgRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgRoles401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyOrgRoles401JSONResponse) VisitListMyOrgRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgRoles403JSONResponse struct{ DeniedJSONResponse }
+
+func (response ListMyOrgRoles403JSONResponse) VisitListMyOrgRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgRoles404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyOrgRoles404JSONResponse) VisitListMyOrgRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRoleRequestObject struct {
+	Id   string `json:"id"`
+	Body *CreateMyOrgRoleJSONRequestBody
+}
+
+type CreateMyOrgRoleResponseObject interface {
+	VisitCreateMyOrgRoleResponse(w http.ResponseWriter) error
+}
+
+type CreateMyOrgRole201JSONResponse Role
+
+func (response CreateMyOrgRole201JSONResponse) VisitCreateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRole400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateMyOrgRole400JSONResponse) VisitCreateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRole401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateMyOrgRole401JSONResponse) VisitCreateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRole403JSONResponse struct{ DeniedJSONResponse }
+
+func (response CreateMyOrgRole403JSONResponse) VisitCreateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRole404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateMyOrgRole404JSONResponse) VisitCreateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyOrgRole409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateMyOrgRole409JSONResponse) VisitCreateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyOrgRoleRequestObject struct {
+	Id     string `json:"id"`
+	RoleId string `json:"role_id"`
+	Body   *UpdateMyOrgRoleJSONRequestBody
+}
+
+type UpdateMyOrgRoleResponseObject interface {
+	VisitUpdateMyOrgRoleResponse(w http.ResponseWriter) error
+}
+
+type UpdateMyOrgRole200JSONResponse Role
+
+func (response UpdateMyOrgRole200JSONResponse) VisitUpdateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyOrgRole400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateMyOrgRole400JSONResponse) VisitUpdateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyOrgRole401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateMyOrgRole401JSONResponse) VisitUpdateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyOrgRole403JSONResponse struct{ DeniedJSONResponse }
+
+func (response UpdateMyOrgRole403JSONResponse) VisitUpdateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyOrgRole404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateMyOrgRole404JSONResponse) VisitUpdateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyOrgRole409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateMyOrgRole409JSONResponse) VisitUpdateMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgRoleRequestObject struct {
+	Id     string `json:"id"`
+	RoleId string `json:"role_id"`
+}
+
+type DeleteMyOrgRoleResponseObject interface {
+	VisitDeleteMyOrgRoleResponse(w http.ResponseWriter) error
+}
+
+type DeleteMyOrgRole204Response struct {
+}
+
+func (response DeleteMyOrgRole204Response) VisitDeleteMyOrgRoleResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteMyOrgRole401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteMyOrgRole401JSONResponse) VisitDeleteMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgRole403JSONResponse struct{ DeniedJSONResponse }
+
+func (response DeleteMyOrgRole403JSONResponse) VisitDeleteMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyOrgRole404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteMyOrgRole404JSONResponse) VisitDeleteMyOrgRoleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6576,6 +8263,27 @@ type StrictServerInterface interface {
 	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
 	// (POST /v1/me/orgs)
 	CreateMyOrg(ctx context.Context, request CreateMyOrgRequestObject) (CreateMyOrgResponseObject, error)
+	// ListMyOrgGroups この Org の範囲の Group の一覧（3.2）
+	// (GET /v1/me/orgs/{id}/groups)
+	ListMyOrgGroups(ctx context.Context, request ListMyOrgGroupsRequestObject) (ListMyOrgGroupsResponseObject, error)
+	// CreateMyOrgGroup Group を作る
+	// (POST /v1/me/orgs/{id}/groups)
+	CreateMyOrgGroup(ctx context.Context, request CreateMyOrgGroupRequestObject) (CreateMyOrgGroupResponseObject, error)
+	// RenameMyOrgGroup Group の名前を変える
+	// (PATCH /v1/me/orgs/{id}/groups/{group_id})
+	RenameMyOrgGroup(ctx context.Context, request RenameMyOrgGroupRequestObject) (RenameMyOrgGroupResponseObject, error)
+	// ListMyOrgGroupMembers Group の所属の一覧
+	// (GET /v1/me/orgs/{id}/groups/{group_id}/members)
+	ListMyOrgGroupMembers(ctx context.Context, request ListMyOrgGroupMembersRequestObject) (ListMyOrgGroupMembersResponseObject, error)
+	// AddMyOrgGroupMember Group に主体を入れる
+	// (POST /v1/me/orgs/{id}/groups/{group_id}/members)
+	AddMyOrgGroupMember(ctx context.Context, request AddMyOrgGroupMemberRequestObject) (AddMyOrgGroupMemberResponseObject, error)
+	// RemoveMyOrgGroupMember Group から主体を外す
+	// (POST /v1/me/orgs/{id}/groups/{group_id}/members:remove)
+	RemoveMyOrgGroupMember(ctx context.Context, request RemoveMyOrgGroupMemberRequestObject) (RemoveMyOrgGroupMemberResponseObject, error)
+	// DeleteMyOrgGroup Group と、その所属と付与を消す
+	// (POST /v1/me/orgs/{id}/groups/{group_id}:delete)
+	DeleteMyOrgGroup(ctx context.Context, request DeleteMyOrgGroupRequestObject) (DeleteMyOrgGroupResponseObject, error)
 	// ListOrgInvitations Org の招待の一覧（Org の owner と admin）
 	// (GET /v1/me/orgs/{id}/invitations)
 	ListOrgInvitations(ctx context.Context, request ListOrgInvitationsRequestObject) (ListOrgInvitationsResponseObject, error)
@@ -6600,6 +8308,27 @@ type StrictServerInterface interface {
 	// RemoveOrgMember メンバーを除名する（Org の owner と admin。4.10）
 	// (POST /v1/me/orgs/{id}/members/{membership_id}:remove)
 	RemoveOrgMember(ctx context.Context, request RemoveOrgMemberRequestObject) (RemoveOrgMemberResponseObject, error)
+	// ListMyOrgRoleBindings この Org の範囲のロールの付与の一覧
+	// (GET /v1/me/orgs/{id}/role-bindings)
+	ListMyOrgRoleBindings(ctx context.Context, request ListMyOrgRoleBindingsRequestObject) (ListMyOrgRoleBindingsResponseObject, error)
+	// CreateMyOrgRoleBinding ロールを付与する（4.11）
+	// (POST /v1/me/orgs/{id}/role-bindings)
+	CreateMyOrgRoleBinding(ctx context.Context, request CreateMyOrgRoleBindingRequestObject) (CreateMyOrgRoleBindingResponseObject, error)
+	// DeleteMyOrgRoleBinding ロールの付与を消す
+	// (POST /v1/me/orgs/{id}/role-bindings/{binding_id}:delete)
+	DeleteMyOrgRoleBinding(ctx context.Context, request DeleteMyOrgRoleBindingRequestObject) (DeleteMyOrgRoleBindingResponseObject, error)
+	// ListMyOrgRoles この Org の範囲で使えるロールの一覧（4.11）
+	// (GET /v1/me/orgs/{id}/roles)
+	ListMyOrgRoles(ctx context.Context, request ListMyOrgRolesRequestObject) (ListMyOrgRolesResponseObject, error)
+	// CreateMyOrgRole 独自のロールを作る（4.11）
+	// (POST /v1/me/orgs/{id}/roles)
+	CreateMyOrgRole(ctx context.Context, request CreateMyOrgRoleRequestObject) (CreateMyOrgRoleResponseObject, error)
+	// UpdateMyOrgRole 独自のロールの名前と権限を置き換える
+	// (PUT /v1/me/orgs/{id}/roles/{role_id})
+	UpdateMyOrgRole(ctx context.Context, request UpdateMyOrgRoleRequestObject) (UpdateMyOrgRoleResponseObject, error)
+	// DeleteMyOrgRole 独自のロールと、その付与を消す
+	// (POST /v1/me/orgs/{id}/roles/{role_id}:delete)
+	DeleteMyOrgRole(ctx context.Context, request DeleteMyOrgRoleRequestObject) (DeleteMyOrgRoleResponseObject, error)
 	// GetMyOrgSettings Org の段のセキュリティ設定を返す（2.8）
 	// (GET /v1/me/orgs/{id}/settings)
 	GetMyOrgSettings(ctx context.Context, request GetMyOrgSettingsRequestObject) (GetMyOrgSettingsResponseObject, error)
@@ -7470,6 +9199,221 @@ func (sh *strictHandler) CreateMyOrg(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ListMyOrgGroups operation middleware
+func (sh *strictHandler) ListMyOrgGroups(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListMyOrgGroupsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyOrgGroups(ctx, request.(ListMyOrgGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyOrgGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyOrgGroupsResponseObject); ok {
+		if err := validResponse.VisitListMyOrgGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateMyOrgGroup operation middleware
+func (sh *strictHandler) CreateMyOrgGroup(w http.ResponseWriter, r *http.Request, id string) {
+	var request CreateMyOrgGroupRequestObject
+
+	request.Id = id
+
+	var body CreateMyOrgGroupJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMyOrgGroup(ctx, request.(CreateMyOrgGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMyOrgGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMyOrgGroupResponseObject); ok {
+		if err := validResponse.VisitCreateMyOrgGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenameMyOrgGroup operation middleware
+func (sh *strictHandler) RenameMyOrgGroup(w http.ResponseWriter, r *http.Request, id string, groupId string) {
+	var request RenameMyOrgGroupRequestObject
+
+	request.Id = id
+	request.GroupId = groupId
+
+	var body RenameMyOrgGroupJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameMyOrgGroup(ctx, request.(RenameMyOrgGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameMyOrgGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameMyOrgGroupResponseObject); ok {
+		if err := validResponse.VisitRenameMyOrgGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyOrgGroupMembers operation middleware
+func (sh *strictHandler) ListMyOrgGroupMembers(w http.ResponseWriter, r *http.Request, id string, groupId string) {
+	var request ListMyOrgGroupMembersRequestObject
+
+	request.Id = id
+	request.GroupId = groupId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyOrgGroupMembers(ctx, request.(ListMyOrgGroupMembersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyOrgGroupMembers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyOrgGroupMembersResponseObject); ok {
+		if err := validResponse.VisitListMyOrgGroupMembersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddMyOrgGroupMember operation middleware
+func (sh *strictHandler) AddMyOrgGroupMember(w http.ResponseWriter, r *http.Request, id string, groupId string) {
+	var request AddMyOrgGroupMemberRequestObject
+
+	request.Id = id
+	request.GroupId = groupId
+
+	var body AddMyOrgGroupMemberJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddMyOrgGroupMember(ctx, request.(AddMyOrgGroupMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddMyOrgGroupMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddMyOrgGroupMemberResponseObject); ok {
+		if err := validResponse.VisitAddMyOrgGroupMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveMyOrgGroupMember operation middleware
+func (sh *strictHandler) RemoveMyOrgGroupMember(w http.ResponseWriter, r *http.Request, id string, groupId string) {
+	var request RemoveMyOrgGroupMemberRequestObject
+
+	request.Id = id
+	request.GroupId = groupId
+
+	var body RemoveMyOrgGroupMemberJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveMyOrgGroupMember(ctx, request.(RemoveMyOrgGroupMemberRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveMyOrgGroupMember")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveMyOrgGroupMemberResponseObject); ok {
+		if err := validResponse.VisitRemoveMyOrgGroupMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteMyOrgGroup operation middleware
+func (sh *strictHandler) DeleteMyOrgGroup(w http.ResponseWriter, r *http.Request, id string, groupId string) {
+	var request DeleteMyOrgGroupRequestObject
+
+	request.Id = id
+	request.GroupId = groupId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteMyOrgGroup(ctx, request.(DeleteMyOrgGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteMyOrgGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteMyOrgGroupResponseObject); ok {
+		if err := validResponse.VisitDeleteMyOrgGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListOrgInvitations operation middleware
 func (sh *strictHandler) ListOrgInvitations(w http.ResponseWriter, r *http.Request, id string) {
 	var request ListOrgInvitationsRequestObject
@@ -7698,6 +9642,212 @@ func (sh *strictHandler) RemoveOrgMember(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RemoveOrgMemberResponseObject); ok {
 		if err := validResponse.VisitRemoveOrgMemberResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyOrgRoleBindings operation middleware
+func (sh *strictHandler) ListMyOrgRoleBindings(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListMyOrgRoleBindingsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyOrgRoleBindings(ctx, request.(ListMyOrgRoleBindingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyOrgRoleBindings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyOrgRoleBindingsResponseObject); ok {
+		if err := validResponse.VisitListMyOrgRoleBindingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateMyOrgRoleBinding operation middleware
+func (sh *strictHandler) CreateMyOrgRoleBinding(w http.ResponseWriter, r *http.Request, id string) {
+	var request CreateMyOrgRoleBindingRequestObject
+
+	request.Id = id
+
+	var body CreateMyOrgRoleBindingJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMyOrgRoleBinding(ctx, request.(CreateMyOrgRoleBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMyOrgRoleBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMyOrgRoleBindingResponseObject); ok {
+		if err := validResponse.VisitCreateMyOrgRoleBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteMyOrgRoleBinding operation middleware
+func (sh *strictHandler) DeleteMyOrgRoleBinding(w http.ResponseWriter, r *http.Request, id string, bindingId string) {
+	var request DeleteMyOrgRoleBindingRequestObject
+
+	request.Id = id
+	request.BindingId = bindingId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteMyOrgRoleBinding(ctx, request.(DeleteMyOrgRoleBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteMyOrgRoleBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteMyOrgRoleBindingResponseObject); ok {
+		if err := validResponse.VisitDeleteMyOrgRoleBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyOrgRoles operation middleware
+func (sh *strictHandler) ListMyOrgRoles(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListMyOrgRolesRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyOrgRoles(ctx, request.(ListMyOrgRolesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyOrgRoles")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyOrgRolesResponseObject); ok {
+		if err := validResponse.VisitListMyOrgRolesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateMyOrgRole operation middleware
+func (sh *strictHandler) CreateMyOrgRole(w http.ResponseWriter, r *http.Request, id string) {
+	var request CreateMyOrgRoleRequestObject
+
+	request.Id = id
+
+	var body CreateMyOrgRoleJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMyOrgRole(ctx, request.(CreateMyOrgRoleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMyOrgRole")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMyOrgRoleResponseObject); ok {
+		if err := validResponse.VisitCreateMyOrgRoleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateMyOrgRole operation middleware
+func (sh *strictHandler) UpdateMyOrgRole(w http.ResponseWriter, r *http.Request, id string, roleId string) {
+	var request UpdateMyOrgRoleRequestObject
+
+	request.Id = id
+	request.RoleId = roleId
+
+	var body UpdateMyOrgRoleJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateMyOrgRole(ctx, request.(UpdateMyOrgRoleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateMyOrgRole")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateMyOrgRoleResponseObject); ok {
+		if err := validResponse.VisitUpdateMyOrgRoleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteMyOrgRole operation middleware
+func (sh *strictHandler) DeleteMyOrgRole(w http.ResponseWriter, r *http.Request, id string, roleId string) {
+	var request DeleteMyOrgRoleRequestObject
+
+	request.Id = id
+	request.RoleId = roleId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteMyOrgRole(ctx, request.(DeleteMyOrgRoleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteMyOrgRole")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteMyOrgRoleResponseObject); ok {
+		if err := validResponse.VisitDeleteMyOrgRoleResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

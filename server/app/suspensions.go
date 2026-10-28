@@ -143,6 +143,8 @@ func outcomeOf(d *denial, err error) (outcome, bool, error) {
 		return failed(http.StatusNotFound, "not_found"), false, nil
 	case errors.Is(err, errs.Invalid):
 		return failed(http.StatusBadRequest, errCode(err)), false, nil
+	case errors.Is(err, errs.PermissionDenied):
+		return failed(http.StatusForbidden, errCodeOr(err, errs.CodePermissionDenied)), false, nil
 	case err != nil:
 		return outcome{}, false, err
 	}

@@ -732,6 +732,278 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/roles:
+    get:
+      operationId: listRoles
+      summary: realm の範囲で使えるロールの一覧（4.11）
+      description: |
+        権限 `roles:manage`。付与できる組み込みのロール（運営者ロール）と、独自のロールを返す。
+        システムのロールは含めない。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Roles" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createRole
+      summary: 独自のロールを作る（4.11）
+      description: |
+        権限 `roles:manage`。渡す権限はすべて自分がrealm の範囲で持っていなければならない（`403 permission_denied`）。
+        名前に組み込みの名前空間（`realm:`・`org:`・`system:`）は使えない（`400 invalid_name`）。権限の形は `<リソース>:<操作>`（`400 invalid_permission`）。
+        名前の重複は `409 role_exists`。`role.created` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleInput" }
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/roles/{role_id}:
+    put:
+      operationId: updateRole
+      summary: 独自のロールの名前と権限を置き換える
+      description: |
+        権限 `roles:manage`。今の権限と新しい権限をすべて自分が持っていなければならない。`role.updated` を監査ログに残す。
+      parameters:
+        - { name: role_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleInput" }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/roles/{role_id}:delete:
+    post:
+      operationId: deleteRole
+      summary: 独自のロールと、その付与を消す
+      description: |
+        権限 `roles:manage`。ロールの権限をすべて自分が持っていなければならない。`role.deleted` を監査ログに残す。
+      parameters:
+        - { name: role_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 成功
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/role-bindings:
+    get:
+      operationId: listRoleBindings
+      summary: realm の範囲のロールの付与の一覧
+      description: |
+        権限 `roles:manage`。作成の順。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleBindings" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createRoleBinding
+      summary: ロールを付与する（4.11）
+      description: |
+        権限 `roles:manage`。ロールの権限をすべて自分が持っていなければならない。`role` は組み込みのロールの名前か、独自のロールの ID。
+        運営者ロールの付与は `realm:owner` だけ（`roles:manage`）。主体はユーザーか realm 全体の Group。
+        `resource_type`・`resource_id` を渡せば、そのリソースだけに効く。同じ付与は `409 binding_exists`。`role.granted` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoleBindingInput" }
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoleBinding" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/role-bindings/{binding_id}:delete:
+    post:
+      operationId: deleteRoleBinding
+      summary: ロールの付与を消す
+      description: |
+        権限 `roles:manage`。ロールの権限をすべて自分が持っていなければならない。最後の `realm:owner` のユーザーの付与は消せない（`409 last_owner`）。`role.revoked` を監査ログに残す。
+      parameters:
+        - { name: binding_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 成功
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/groups:
+    get:
+      operationId: listGroups
+      summary: realm の範囲の Group の一覧（3.2）
+      description: |
+        権限 `groups:manage`。名前の順。
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Groups" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createGroup
+      summary: Group を作る
+      description: |
+        権限 `groups:manage`。名前の重複は `409 group_exists`。`group.created` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupInput" }
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/groups/{group_id}:
+    patch:
+      operationId: renameGroup
+      summary: Group の名前を変える
+      description: |
+        権限 `groups:manage`。`group.renamed` を監査ログに残す。
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupInput" }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Group" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/groups/{group_id}:delete:
+    post:
+      operationId: deleteGroup
+      summary: Group と、その所属と付与を消す
+      description: |
+        権限 `groups:manage`。Group に付与されたロールの権限をすべて自分が持っていなければならない。`group.deleted` を監査ログに残す。
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 成功
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/groups/{group_id}/members:
+    get:
+      operationId: listGroupMembers
+      summary: Group の所属の一覧
+      description: |
+        権限 `groups:manage`。作成の順。
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GroupMembers" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: addGroupMember
+      summary: Group に主体を入れる
+      description: |
+        権限 `groups:manage`。Group に付与されたロールの権限をすべて自分が持っていなければならない。主体はユーザー。
+        既に所属していれば `409 member_exists`。`group.member_added` を監査ログに残す。
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupMemberInput" }
+      responses:
+        "204":
+          description: 成功
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/groups/{group_id}/members:remove:
+    post:
+      operationId: removeGroupMember
+      summary: Group から主体を外す
+      description: |
+        権限 `groups:manage`。`group.member_removed` を監査ログに残す。
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GroupMemberInput" }
+      responses:
+        "204":
+          description: 成功
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -935,3 +1207,96 @@ components:
         suspensions:
           type: array
           items: { $ref: "#/components/schemas/Suspension" }
+    Role:
+      type: object
+      required: [id, name, permissions, builtin, assignable]
+      properties:
+        id: { type: string, description: 組み込みのロールは名前、独自のロールは公開 ID }
+        name: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+        builtin: { type: boolean }
+        assignable: { type: boolean, description: 付与の API で付与できるか（組み込みの Org のロールは org_role から効くので false） }
+    Roles:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/Role" }
+    RoleInput:
+      type: object
+      required: [name, permissions]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        permissions:
+          type: array
+          maxItems: 100
+          items: { type: string }
+    RoleBinding:
+      type: object
+      required: [id, role, principal_type, principal_id, created_at]
+      properties:
+        id: { type: string }
+        role: { type: string, description: 組み込みのロールの名前か、独自のロールの ID }
+        principal_type: { type: string, description: user / group }
+        principal_id: { type: string, description: 主体の公開 ID }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        created_at: { type: string, format: date-time }
+    RoleBindings:
+      type: object
+      required: [bindings]
+      properties:
+        bindings:
+          type: array
+          items: { $ref: "#/components/schemas/RoleBinding" }
+    RoleBindingInput:
+      type: object
+      required: [role, principal_type, principal_id]
+      properties:
+        role: { type: string }
+        principal_type: { type: string, description: user / group }
+        principal_id: { type: string }
+        resource_type: { type: string, maxLength: 64 }
+        resource_id: { type: string, maxLength: 256 }
+    Group:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+    Groups:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items: { $ref: "#/components/schemas/Group" }
+    GroupInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+    GroupMember:
+      type: object
+      required: [principal_type, principal_id, created_at]
+      properties:
+        principal_type: { type: string, description: user }
+        principal_id: { type: string, description: 主体の公開 ID }
+        created_at: { type: string, format: date-time }
+    GroupMembers:
+      type: object
+      required: [members]
+      properties:
+        members:
+          type: array
+          items: { $ref: "#/components/schemas/GroupMember" }
+    GroupMemberInput:
+      type: object
+      required: [principal_type, principal_id]
+      properties:
+        principal_type: { type: string, description: user }
+        principal_id: { type: string }

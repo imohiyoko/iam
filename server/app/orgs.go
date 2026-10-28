@@ -8,6 +8,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/server/publicapi"
@@ -348,7 +349,7 @@ func (s adminServer) UpdateMembership(ctx context.Context, req adminapi.UpdateMe
 }
 
 // ---------------------------------------------------------------------------
-// 招待とメンバー（4.4）。Org の中の操作は、その Org の active な Membership と org_role の固定の権限で判定する。
+// 招待とメンバー（4.4）。Org の中の操作は、その Org の使える Membership と、authz の判定（org_role と Org の範囲の付与）で決める。
 
 // errOrgPermission は org_role に権限が無いこと。
 var errOrgPermission = errs.WithCode(errs.KindPermissionDenied, errs.CodePermissionDenied, "org permission denied")
@@ -379,8 +380,16 @@ func (s publicServer) orgMember(ctx context.Context, tx port.Tx, au auth, orgPub
 		}
 		return port.Org{}, port.Membership{}, err
 	}
-	if perm != "" && !role.OrgAllows(m, perm) {
-		return port.Org{}, port.Membership{}, errOrgPermission
+	if perm != "" {
+		// org_role の組み込みのロールと、Org の範囲の付与（Group を含む）から判定する（ADR 0064）。
+		ok, err := s.a.authz.CheckTx(ctx, tx, s.a.realm.ID, check.Request{Principal: check.Principal{Type: port.PrincipalUser, ID: au.PrincipalID},
+			Action: perm, OrgID: o.ID})
+		if err != nil {
+			return port.Org{}, port.Membership{}, err
+		}
+		if !ok {
+			return port.Org{}, port.Membership{}, errOrgPermission
+		}
 	}
 	return o, m, nil
 }

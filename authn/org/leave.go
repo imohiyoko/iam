@@ -48,7 +48,8 @@ func (s *Service) Remove(ctx context.Context, tx port.Tx, o port.Org, by, target
 }
 
 // end は Membership を終える。終了の時刻を有効期間の終わりにし、結び付けたメールを外し、
-// その Org を active にしているセッションを個人 Org に移す（4.10）。Group 所属とロール付与は M4 で外す。
+// その Org を active にしているセッションを個人 Org に移す（4.10）。その Org の範囲のロールの付与と Org の Group の所属も外す
+// （戻ってきたときに古い権限が蘇らないように。ADR 0064）。
 func (s *Service) end(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, reason string, actor audit.Actor, requestID string) (Ended, error) {
 	if err := Suspendable(o); err != nil {
 		return Ended{}, err
@@ -77,6 +78,10 @@ func (s *Service) end(ctx context.Context, tx port.Tx, o port.Org, m port.Member
 	if err != nil {
 		return Ended{}, err
 	}
+	bindings, groups, err := dropOrgAuthz(ctx, tx, o, u.ID)
+	if err != nil {
+		return Ended{}, err
+	}
 	var moved []string
 	if reason != EndedAccountDeleted { // 削除するユーザーのセッションは消える
 		p, err := s.EnsurePersonal(ctx, tx, u, requestID)
@@ -89,9 +94,41 @@ func (s *Service) end(ctx context.Context, tx port.Tx, o port.Org, m port.Member
 	}
 	_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
 		Type: "membership.ended", Result: audit.ResultSuccess, RealmID: o.RealmID, OrgID: o.PublicID, Actor: actor, RequestID: requestID,
-		Details: map[string]any{"membership_id": m.PublicID, "user_id": u.PublicID, "reason": reason},
+		Details: map[string]any{"membership_id": m.PublicID, "user_id": u.PublicID, "reason": reason, "bindings_removed": bindings,
+			"groups_left": groups},
 	})
 	return Ended{Membership: m, Sessions: moved}, err
+}
+
+// dropOrgAuthz はユーザーの、Org の範囲のロールの付与と、Org の Group の所属を消し、その数を返す。
+func dropOrgAuthz(ctx context.Context, tx port.Tx, o port.Org, userID string) (int, int, error) {
+	bs, err := tx.RoleBindings().ListByPrincipal(ctx, o.RealmID, port.PrincipalUser, userID)
+	if err != nil {
+		return 0, 0, err
+	}
+	nb := 0
+	for _, b := range bs {
+		if b.OrgID == o.ID {
+			if err := tx.RoleBindings().Delete(ctx, o.RealmID, b.ID); err != nil {
+				return 0, 0, err
+			}
+			nb++
+		}
+	}
+	gs, err := tx.Groups().ListByMember(ctx, o.RealmID, port.PrincipalUser, userID)
+	if err != nil {
+		return 0, 0, err
+	}
+	ng := 0
+	for _, g := range gs {
+		if g.OrgID == o.ID {
+			if err := tx.Groups().RemoveMember(ctx, o.RealmID, g.ID, port.PrincipalUser, userID); err != nil {
+				return 0, 0, err
+			}
+			ng++
+		}
+	}
+	return nb, ng, nil
 }
 
 // Transfer は owner の from から、同じ Org の active なメンバー to にオーナーを譲る（4.10）。to は owner に、from は admin になる。

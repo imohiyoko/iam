@@ -10,6 +10,7 @@ import (
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -95,7 +96,8 @@ func (a *App) authorize(ctx context.Context, perm string) (adminPrincipal, *deni
 	var allowed bool
 	err := a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		allowed, err = role.Allowed(ctx, tx, a.realm.ID, p.Type, p.ID, perm)
+		// 運営者の操作は数が少なく、取り消しをすぐに効かせたいので、キャッシュを使わずに判定する。
+		allowed, err = a.authz.CheckTx(ctx, tx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm})
 		return err
 	})
 	if err != nil {
