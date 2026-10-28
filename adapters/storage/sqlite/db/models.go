@@ -8,6 +8,23 @@ import (
 	"database/sql"
 )
 
+type AuthnClient struct {
+	ID                     string
+	PublicID               string
+	RealmID                string
+	Name                   string
+	TrustLevel             string
+	RedirectUris           string
+	PostLogoutRedirectUris string
+	AuthMethod             string
+	SecretHash             []byte
+	Jwks                   []byte
+	IDTokenAlg             string
+	BackchannelLogoutUri   string
+	CreatedAt              string
+	UpdatedAt              string
+}
+
 type AuthnConnection struct {
 	ID        string
 	RealmID   string
@@ -107,6 +124,16 @@ type AuthnSession struct {
 	RevokedAt         sql.NullString
 	RevokeReason      string
 	Restriction       string
+}
+
+type AuthnSigningKey struct {
+	ID         string
+	RealmID    string
+	Alg        string
+	PublicKey  []byte
+	PrivateKey []byte
+	CreatedAt  string
+	RetiredAt  sql.NullString
 }
 
 type AuthnSuspension struct {

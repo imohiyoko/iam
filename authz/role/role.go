@@ -59,6 +59,10 @@ const (
 	PermGroupsManage = "groups:manage"
 	// PermAuthzCheck は他の主体についての判定の問い合わせ（連携先・サービスアカウント向け）。
 	PermAuthzCheck = "authz:check"
+	// PermClientsManage は連携先（OIDC のクライアント）の登録・変更・削除（5.5）。
+	PermClientsManage = "clients:manage"
+	// PermSigningKeysRotate は ID トークンの署名鍵のローテーション（9.3）。
+	PermSigningKeysRotate = "signing_keys:rotate"
 )
 
 // SuspensionPerm は停止の種別ごとの停止・解除の権限（`suspensions:<category>`。4.11）。
@@ -74,7 +78,7 @@ func suspend(categories ...string) []string {
 }
 
 var builtin = map[string][]string{
-	RealmOwner: append([]string{PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
+	RealmOwner: append([]string{PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
 		PermCredentialsRevoke, PermSuspensionsAny}, suspend("tos_violation", "customer_request", "security_risk", "billing")...),
 	RealmAdmin: append([]string{PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke},
 		suspend("tos_violation", "customer_request")...),

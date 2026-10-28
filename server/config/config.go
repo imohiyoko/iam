@@ -53,6 +53,23 @@ type Config struct {
 
 	// Passkey は passkey（WebAuthn）の Relying Party（design.md 2.5）。
 	Passkey Passkey `yaml:"passkey"`
+
+	// OIDC は OIDC Provider（design.md 5.1、9.3）。issuer は server.public_url。
+	OIDC OIDC `yaml:"oidc"`
+}
+
+// OIDC は OIDC Provider のトークンと鍵の設定。
+type OIDC struct {
+	// CodeTTL は認可コードの寿命。
+	CodeTTL Duration `yaml:"code_ttl"`
+	// IDTokenTTL は ID トークンの寿命。
+	IDTokenTTL Duration `yaml:"id_token_ttl"`
+	// AccessTokenTTL は不透明なアクセストークンの寿命（失効はイントロスペクションに validity_max_delay の内に効く）。
+	AccessTokenTTL Duration `yaml:"access_token_ttl"`
+	// RefreshTokenTTL はリフレッシュトークンのファミリーの寿命（ログインのセッションより長くはならない）。
+	RefreshTokenTTL Duration `yaml:"refresh_token_ttl"`
+	// RetiredKeyTTL はローテーションで退役した署名鍵を JWKS に残す期間（id_token_ttl より長くする）。
+	RetiredKeyTTL Duration `yaml:"retired_key_ttl"`
 }
 
 // Passkey は passkey の Relying Party の設定。省略した項目は server.public_url から決める。
@@ -320,6 +337,8 @@ func Default() Config {
 		},
 		Outbox: Outbox{Interval: Duration(time.Second), Batch: 100},
 		IDs:    IDs{Internal: "uuidv7", External: "random"},
+		OIDC: OIDC{CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
+			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day)},
 	}
 }
 
@@ -423,6 +442,16 @@ func (c Config) Validate() error {
 	}
 	if c.Realm.ClientDataRetention <= 0 {
 		problems = append(problems, "realm.client_data_retention must be positive")
+	}
+	o := c.OIDC
+	if o.CodeTTL <= 0 || o.CodeTTL > Duration(10*time.Minute) {
+		problems = append(problems, "oidc.code_ttl must be positive and at most 10m")
+	}
+	if o.IDTokenTTL <= 0 || o.AccessTokenTTL <= 0 || o.RefreshTokenTTL <= 0 {
+		problems = append(problems, "oidc: token ttls must be positive")
+	}
+	if o.RetiredKeyTTL <= o.IDTokenTTL {
+		problems = append(problems, "oidc.retired_key_ttl must be longer than oidc.id_token_ttl")
 	}
 	if !slices.Contains(KnownOrgCreation, c.Realm.OrgCreation) {
 		problems = append(problems, fmt.Sprintf("realm.org_creation: unknown %q (known: %v)", c.Realm.OrgCreation, KnownOrgCreation))

@@ -1031,6 +1031,151 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/clients:
+    get:
+      operationId: listClients
+      summary: 連携先（OIDC のクライアント）の一覧（5.5）
+      description: 権限 `clients:manage`。作成の順。秘密は返さない。
+      responses:
+        "200":
+          description: 連携先
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Clients" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+    post:
+      operationId: createClient
+      summary: 連携先を登録する（5.5、ADR 0026）
+      description: |
+        権限 `clients:manage`。ファーストパーティだけ（同意画面を出さない）。`redirect_uris` は https か loopback の http（フラグメントなし）。
+        `token_endpoint_auth_method` が `client_secret` なら、応答の `client_secret` を1度だけ返す（保存するのはハッシュだけ）。
+        `private_key_jwt` なら公開鍵だけの `jwks` が要る。`id_token_signed_response_alg` は `ES256`（既定）か `ML-DSA-65`。
+        内容が正しくなければ `400 invalid_client_metadata`。`client.created` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClientInput" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/clients/{id}:
+    get:
+      operationId: getClient
+      summary: 連携先を返す
+      description: 権限 `clients:manage`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 連携先
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateClient
+      summary: 連携先の内容を置き換える
+      description: |
+        権限 `clients:manage`。認証方式を `client_secret` に変えたときだけ、新しい `client_secret` を返す。`client.updated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClientInput" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/clients/{id}:rotate-secret:
+    post:
+      operationId: rotateClientSecret
+      summary: client_secret を新しくする
+      description: |
+        権限 `clients:manage`。古い秘密はすぐに使えなくなる。`client_secret` を使わない連携先は `409 no_client_secret`。
+        `client.secret_rotated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 新しい秘密（1度だけ返す）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [client_secret]
+                properties:
+                  client_secret: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/clients/{id}:delete:
+    post:
+      operationId: deleteClient
+      summary: 連携先を消す
+      description: 権限 `clients:manage`。`client.deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 消した
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/signing-keys:rotate:
+    post:
+      operationId: rotateSigningKey
+      summary: ID トークンの署名鍵を新しくする（9.3）
+      description: |
+        権限 `signing_keys:rotate`（realm:owner）。新しい鍵で署名を始め、古い鍵は `oidc.retired_key_ttl` の間 JWKS に残す。
+        `signing_key.rotated` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [alg]
+              properties:
+                alg: { type: string, enum: [ES256, ML-DSA-65] }
+      responses:
+        "200":
+          description: 新しい鍵
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [kid, alg]
+                properties:
+                  kid: { type: string }
+                  alg: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1346,3 +1491,53 @@ components:
           type: array
           items: { type: string }
           description: 主体が使えないときの理由のコード（4.9）
+    ClientInput:
+      type: object
+      required: [name, redirect_uris, token_endpoint_auth_method]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        redirect_uris:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { type: string }
+        post_logout_redirect_uris:
+          type: array
+          maxItems: 20
+          items: { type: string }
+        token_endpoint_auth_method: { type: string, enum: [client_secret, private_key_jwt, none] }
+        jwks:
+          type: object
+          additionalProperties: true
+          description: "`private_key_jwt` の公開鍵（JWKS）"
+        id_token_signed_response_alg: { type: string, enum: [ES256, ML-DSA-65] }
+        backchannel_logout_uri: { type: string }
+    Client:
+      type: object
+      required: [client_id, name, redirect_uris, post_logout_redirect_uris, token_endpoint_auth_method, id_token_signed_response_alg, trust_level, created_at, updated_at]
+      properties:
+        client_id: { type: string }
+        name: { type: string }
+        trust_level: { type: string, enum: [first_party] }
+        redirect_uris:
+          type: array
+          items: { type: string }
+        post_logout_redirect_uris:
+          type: array
+          items: { type: string }
+        token_endpoint_auth_method: { type: string }
+        jwks:
+          type: object
+          additionalProperties: true
+        id_token_signed_response_alg: { type: string }
+        backchannel_logout_uri: { type: string }
+        client_secret: { type: string, description: 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す） }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Clients:
+      type: object
+      required: [clients]
+      properties:
+        clients:
+          type: array
+          items: { $ref: "#/components/schemas/Client" }

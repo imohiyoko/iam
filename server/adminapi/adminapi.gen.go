@@ -54,6 +54,60 @@ func (e CheckRequestPrincipalType) Valid() bool {
 	}
 }
 
+// Defines values for ClientTrustLevel.
+const (
+	FirstParty ClientTrustLevel = "first_party"
+)
+
+// Valid indicates whether the value is a known member of the ClientTrustLevel enum.
+func (e ClientTrustLevel) Valid() bool {
+	switch e {
+	case FirstParty:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ClientInputIdTokenSignedResponseAlg.
+const (
+	ClientInputIdTokenSignedResponseAlgES256   ClientInputIdTokenSignedResponseAlg = "ES256"
+	ClientInputIdTokenSignedResponseAlgMLDSA65 ClientInputIdTokenSignedResponseAlg = "ML-DSA-65"
+)
+
+// Valid indicates whether the value is a known member of the ClientInputIdTokenSignedResponseAlg enum.
+func (e ClientInputIdTokenSignedResponseAlg) Valid() bool {
+	switch e {
+	case ClientInputIdTokenSignedResponseAlgES256:
+		return true
+	case ClientInputIdTokenSignedResponseAlgMLDSA65:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ClientInputTokenEndpointAuthMethod.
+const (
+	ClientSecret  ClientInputTokenEndpointAuthMethod = "client_secret"
+	None          ClientInputTokenEndpointAuthMethod = "none"
+	PrivateKeyJwt ClientInputTokenEndpointAuthMethod = "private_key_jwt"
+)
+
+// Valid indicates whether the value is a known member of the ClientInputTokenEndpointAuthMethod enum.
+func (e ClientInputTokenEndpointAuthMethod) Valid() bool {
+	switch e {
+	case ClientSecret:
+		return true
+	case None:
+		return true
+	case PrivateKeyJwt:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthStatus.
 const (
 	Ok          HealthStatus = "ok"
@@ -195,6 +249,24 @@ func (e SuspensionTargetType) Valid() bool {
 	}
 }
 
+// Defines values for RotateSigningKeyJSONBodyAlg.
+const (
+	RotateSigningKeyJSONBodyAlgES256   RotateSigningKeyJSONBodyAlg = "ES256"
+	RotateSigningKeyJSONBodyAlgMLDSA65 RotateSigningKeyJSONBodyAlg = "ML-DSA-65"
+)
+
+// Valid indicates whether the value is a known member of the RotateSigningKeyJSONBodyAlg enum.
+func (e RotateSigningKeyJSONBodyAlg) Valid() bool {
+	switch e {
+	case RotateSigningKeyJSONBodyAlgES256:
+		return true
+	case RotateSigningKeyJSONBodyAlgMLDSA65:
+		return true
+	default:
+		return false
+	}
+}
+
 // AdminUser defines model for AdminUser.
 type AdminUser struct {
 	// DeletionScheduledAt 削除の予定（猶予期間の終わり）
@@ -248,6 +320,51 @@ type ClaimedNotification struct {
 
 	// Token マジックリンクのトークン（リンク先のアプリが verify に渡す）
 	Token *string `json:"token,omitempty"`
+}
+
+// Client defines model for Client.
+type Client struct {
+	BackchannelLogoutUri *string `json:"backchannel_logout_uri,omitempty"`
+	ClientId             string  `json:"client_id"`
+
+	// ClientSecret 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す）
+	ClientSecret             *string                 `json:"client_secret,omitempty"`
+	CreatedAt                time.Time               `json:"created_at"`
+	IdTokenSignedResponseAlg string                  `json:"id_token_signed_response_alg"`
+	Jwks                     *map[string]interface{} `json:"jwks,omitempty"`
+	Name                     string                  `json:"name"`
+	PostLogoutRedirectUris   []string                `json:"post_logout_redirect_uris"`
+	RedirectUris             []string                `json:"redirect_uris"`
+	TokenEndpointAuthMethod  string                  `json:"token_endpoint_auth_method"`
+	TrustLevel               ClientTrustLevel        `json:"trust_level"`
+	UpdatedAt                time.Time               `json:"updated_at"`
+}
+
+// ClientTrustLevel defines model for Client.TrustLevel.
+type ClientTrustLevel string
+
+// ClientInput defines model for ClientInput.
+type ClientInput struct {
+	BackchannelLogoutUri     *string                              `json:"backchannel_logout_uri,omitempty"`
+	IdTokenSignedResponseAlg *ClientInputIdTokenSignedResponseAlg `json:"id_token_signed_response_alg,omitempty"`
+
+	// Jwks `private_key_jwt` の公開鍵（JWKS）
+	Jwks                    *map[string]interface{}            `json:"jwks,omitempty"`
+	Name                    string                             `json:"name"`
+	PostLogoutRedirectUris  *[]string                          `json:"post_logout_redirect_uris,omitempty"`
+	RedirectUris            []string                           `json:"redirect_uris"`
+	TokenEndpointAuthMethod ClientInputTokenEndpointAuthMethod `json:"token_endpoint_auth_method"`
+}
+
+// ClientInputIdTokenSignedResponseAlg defines model for ClientInput.IdTokenSignedResponseAlg.
+type ClientInputIdTokenSignedResponseAlg string
+
+// ClientInputTokenEndpointAuthMethod defines model for ClientInput.TokenEndpointAuthMethod.
+type ClientInputTokenEndpointAuthMethod string
+
+// Clients defines model for Clients.
+type Clients struct {
+	Clients []Client `json:"clients"`
 }
 
 // Error defines model for Error.
@@ -591,6 +708,14 @@ type DeleteOrgJSONBody struct {
 	Immediate *bool `json:"immediate,omitempty"`
 }
 
+// RotateSigningKeyJSONBody defines parameters for RotateSigningKey.
+type RotateSigningKeyJSONBody struct {
+	Alg RotateSigningKeyJSONBodyAlg `json:"alg"`
+}
+
+// RotateSigningKeyJSONBodyAlg defines parameters for RotateSigningKey.
+type RotateSigningKeyJSONBodyAlg string
+
 // CreateUserJSONBody defines parameters for CreateUser.
 type CreateUserJSONBody struct {
 	Email string `json:"email"`
@@ -619,6 +744,12 @@ type IssueRecoveryLinkJSONBody struct {
 
 // CheckAuthzJSONRequestBody defines body for CheckAuthz for application/json ContentType.
 type CheckAuthzJSONRequestBody = CheckRequest
+
+// CreateClientJSONRequestBody defines body for CreateClient for application/json ContentType.
+type CreateClientJSONRequestBody = ClientInput
+
+// UpdateClientJSONRequestBody defines body for UpdateClient for application/json ContentType.
+type UpdateClientJSONRequestBody = ClientInput
 
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody CreateConnectionJSONBody
@@ -665,6 +796,9 @@ type CreateRoleJSONRequestBody = RoleInput
 // UpdateRoleJSONRequestBody defines body for UpdateRole for application/json ContentType.
 type UpdateRoleJSONRequestBody = RoleInput
 
+// RotateSigningKeyJSONRequestBody defines body for RotateSigningKey for application/json ContentType.
+type RotateSigningKeyJSONRequestBody RotateSigningKeyJSONBody
+
 // LiftSuspensionJSONRequestBody defines body for LiftSuspension for application/json ContentType.
 type LiftSuspensionJSONRequestBody = LiftRequest
 
@@ -697,6 +831,24 @@ type ServerInterface interface {
 	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
 	// (POST /v1/admin/authz:check)
 	CheckAuthz(w http.ResponseWriter, r *http.Request)
+	// ListClients 連携先（OIDC のクライアント）の一覧（5.5）
+	// (GET /v1/admin/clients)
+	ListClients(w http.ResponseWriter, r *http.Request)
+	// CreateClient 連携先を登録する（5.5、ADR 0026）
+	// (POST /v1/admin/clients)
+	CreateClient(w http.ResponseWriter, r *http.Request)
+	// GetClient 連携先を返す
+	// (GET /v1/admin/clients/{id})
+	GetClient(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateClient 連携先の内容を置き換える
+	// (PUT /v1/admin/clients/{id})
+	UpdateClient(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteClient 連携先を消す
+	// (POST /v1/admin/clients/{id}:delete)
+	DeleteClient(w http.ResponseWriter, r *http.Request, id string)
+	// RotateClientSecret client_secret を新しくする
+	// (POST /v1/admin/clients/{id}:rotate-secret)
+	RotateClientSecret(w http.ResponseWriter, r *http.Request, id string)
 	// CreateConnection IdP 接続（OAuth / OIDC）を登録する
 	// (POST /v1/admin/connections)
 	CreateConnection(w http.ResponseWriter, r *http.Request)
@@ -787,6 +939,9 @@ type ServerInterface interface {
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(w http.ResponseWriter, r *http.Request, id string)
+	// RotateSigningKey ID トークンの署名鍵を新しくする（9.3）
+	// (POST /v1/admin/signing-keys:rotate)
+	RotateSigningKey(w http.ResponseWriter, r *http.Request)
 	// LiftSuspension 停止を解除する
 	// (POST /v1/admin/suspensions/{id}:lift)
 	LiftSuspension(w http.ResponseWriter, r *http.Request, id string)
@@ -859,6 +1014,138 @@ func (siw *ServerInterfaceWrapper) CheckAuthz(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CheckAuthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListClients operation middleware
+func (siw *ServerInterfaceWrapper) ListClients(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListClients(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateClient operation middleware
+func (siw *ServerInterfaceWrapper) CreateClient(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateClient(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClient operation middleware
+func (siw *ServerInterfaceWrapper) GetClient(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClient(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateClient operation middleware
+func (siw *ServerInterfaceWrapper) UpdateClient(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateClient(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteClient operation middleware
+func (siw *ServerInterfaceWrapper) DeleteClient(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteClient(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateClientSecret operation middleware
+func (siw *ServerInterfaceWrapper) RotateClientSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateClientSecret(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1581,6 +1868,20 @@ func (siw *ServerInterfaceWrapper) RevokeSession(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// RotateSigningKey operation middleware
+func (siw *ServerInterfaceWrapper) RotateSigningKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateSigningKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // LiftSuspension operation middleware
 func (siw *ServerInterfaceWrapper) LiftSuspension(w http.ResponseWriter, r *http.Request) {
 
@@ -2108,6 +2409,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/groups/{group_id}/members", wrapper.AddGroupMember)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/groups/{group_id}/members:remove", wrapper.RemoveGroupMember)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/authz:check", wrapper.CheckAuthz)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/clients", wrapper.ListClients)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients", wrapper.CreateClient)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/clients/{id}", wrapper.GetClient)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/clients/{id}", wrapper.UpdateClient)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients/{id}:rotate-secret", wrapper.RotateClientSecret)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients/{id}:delete", wrapper.DeleteClient)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/signing-keys:rotate", wrapper.RotateSigningKey)
 
 	return m
 }
@@ -2223,6 +2531,400 @@ func (response CheckAuthz404JSONResponse) VisitCheckAuthzResponse(w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListClientsRequestObject struct {
+}
+
+type ListClientsResponseObject interface {
+	VisitListClientsResponse(w http.ResponseWriter) error
+}
+
+type ListClients200JSONResponse Clients
+
+func (response ListClients200JSONResponse) VisitListClientsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListClients401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListClients401JSONResponse) VisitListClientsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListClients403JSONResponse Error
+
+func (response ListClients403JSONResponse) VisitListClientsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateClientRequestObject struct {
+	Body *CreateClientJSONRequestBody
+}
+
+type CreateClientResponseObject interface {
+	VisitCreateClientResponse(w http.ResponseWriter) error
+}
+
+type CreateClient201JSONResponse Client
+
+func (response CreateClient201JSONResponse) VisitCreateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateClient400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateClient400JSONResponse) VisitCreateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateClient401JSONResponse Error
+
+func (response CreateClient401JSONResponse) VisitCreateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateClient403JSONResponse Error
+
+func (response CreateClient403JSONResponse) VisitCreateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetClientRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetClientResponseObject interface {
+	VisitGetClientResponse(w http.ResponseWriter) error
+}
+
+type GetClient200JSONResponse Client
+
+func (response GetClient200JSONResponse) VisitGetClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetClient401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetClient401JSONResponse) VisitGetClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetClient403JSONResponse Error
+
+func (response GetClient403JSONResponse) VisitGetClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetClient404JSONResponse Error
+
+func (response GetClient404JSONResponse) VisitGetClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateClientRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateClientJSONRequestBody
+}
+
+type UpdateClientResponseObject interface {
+	VisitUpdateClientResponse(w http.ResponseWriter) error
+}
+
+type UpdateClient200JSONResponse Client
+
+func (response UpdateClient200JSONResponse) VisitUpdateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateClient400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateClient400JSONResponse) VisitUpdateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateClient401JSONResponse Error
+
+func (response UpdateClient401JSONResponse) VisitUpdateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateClient403JSONResponse Error
+
+func (response UpdateClient403JSONResponse) VisitUpdateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateClient404JSONResponse Error
+
+func (response UpdateClient404JSONResponse) VisitUpdateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteClientRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteClientResponseObject interface {
+	VisitDeleteClientResponse(w http.ResponseWriter) error
+}
+
+type DeleteClient204Response struct {
+}
+
+func (response DeleteClient204Response) VisitDeleteClientResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteClient401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteClient401JSONResponse) VisitDeleteClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteClient403JSONResponse Error
+
+func (response DeleteClient403JSONResponse) VisitDeleteClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteClient404JSONResponse Error
+
+func (response DeleteClient404JSONResponse) VisitDeleteClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateClientSecretRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RotateClientSecretResponseObject interface {
+	VisitRotateClientSecretResponse(w http.ResponseWriter) error
+}
+
+type RotateClientSecret200JSONResponse struct {
+	ClientSecret string `json:"client_secret"`
+}
+
+func (response RotateClientSecret200JSONResponse) VisitRotateClientSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateClientSecret401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RotateClientSecret401JSONResponse) VisitRotateClientSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateClientSecret403JSONResponse Error
+
+func (response RotateClientSecret403JSONResponse) VisitRotateClientSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateClientSecret404JSONResponse Error
+
+func (response RotateClientSecret404JSONResponse) VisitRotateClientSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateClientSecret409JSONResponse Error
+
+func (response RotateClientSecret409JSONResponse) VisitRotateClientSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -4561,6 +5263,73 @@ func (response RevokeSession404JSONResponse) VisitRevokeSessionResponse(w http.R
 	return err
 }
 
+type RotateSigningKeyRequestObject struct {
+	Body *RotateSigningKeyJSONRequestBody
+}
+
+type RotateSigningKeyResponseObject interface {
+	VisitRotateSigningKeyResponse(w http.ResponseWriter) error
+}
+
+type RotateSigningKey200JSONResponse struct {
+	Alg string `json:"alg"`
+	Kid string `json:"kid"`
+}
+
+func (response RotateSigningKey200JSONResponse) VisitRotateSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSigningKey400JSONResponse struct{ ErrorJSONResponse }
+
+func (response RotateSigningKey400JSONResponse) VisitRotateSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSigningKey401JSONResponse Error
+
+func (response RotateSigningKey401JSONResponse) VisitRotateSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSigningKey403JSONResponse Error
+
+func (response RotateSigningKey403JSONResponse) VisitRotateSigningKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type LiftSuspensionRequestObject struct {
 	Id   string `json:"id"`
 	Body *LiftSuspensionJSONRequestBody
@@ -5604,6 +6373,24 @@ type StrictServerInterface interface {
 	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
 	// (POST /v1/admin/authz:check)
 	CheckAuthz(ctx context.Context, request CheckAuthzRequestObject) (CheckAuthzResponseObject, error)
+	// ListClients 連携先（OIDC のクライアント）の一覧（5.5）
+	// (GET /v1/admin/clients)
+	ListClients(ctx context.Context, request ListClientsRequestObject) (ListClientsResponseObject, error)
+	// CreateClient 連携先を登録する（5.5、ADR 0026）
+	// (POST /v1/admin/clients)
+	CreateClient(ctx context.Context, request CreateClientRequestObject) (CreateClientResponseObject, error)
+	// GetClient 連携先を返す
+	// (GET /v1/admin/clients/{id})
+	GetClient(ctx context.Context, request GetClientRequestObject) (GetClientResponseObject, error)
+	// UpdateClient 連携先の内容を置き換える
+	// (PUT /v1/admin/clients/{id})
+	UpdateClient(ctx context.Context, request UpdateClientRequestObject) (UpdateClientResponseObject, error)
+	// DeleteClient 連携先を消す
+	// (POST /v1/admin/clients/{id}:delete)
+	DeleteClient(ctx context.Context, request DeleteClientRequestObject) (DeleteClientResponseObject, error)
+	// RotateClientSecret client_secret を新しくする
+	// (POST /v1/admin/clients/{id}:rotate-secret)
+	RotateClientSecret(ctx context.Context, request RotateClientSecretRequestObject) (RotateClientSecretResponseObject, error)
 	// CreateConnection IdP 接続（OAuth / OIDC）を登録する
 	// (POST /v1/admin/connections)
 	CreateConnection(ctx context.Context, request CreateConnectionRequestObject) (CreateConnectionResponseObject, error)
@@ -5694,6 +6481,9 @@ type StrictServerInterface interface {
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(ctx context.Context, request RevokeSessionRequestObject) (RevokeSessionResponseObject, error)
+	// RotateSigningKey ID トークンの署名鍵を新しくする（9.3）
+	// (POST /v1/admin/signing-keys:rotate)
+	RotateSigningKey(ctx context.Context, request RotateSigningKeyRequestObject) (RotateSigningKeyResponseObject, error)
 	// LiftSuspension 停止を解除する
 	// (POST /v1/admin/suspensions/{id}:lift)
 	LiftSuspension(ctx context.Context, request LiftSuspensionRequestObject) (LiftSuspensionResponseObject, error)
@@ -5825,6 +6615,172 @@ func (sh *strictHandler) CheckAuthz(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CheckAuthzResponseObject); ok {
 		if err := validResponse.VisitCheckAuthzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListClients operation middleware
+func (sh *strictHandler) ListClients(w http.ResponseWriter, r *http.Request) {
+	var request ListClientsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListClients(ctx, request.(ListClientsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListClients")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListClientsResponseObject); ok {
+		if err := validResponse.VisitListClientsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateClient operation middleware
+func (sh *strictHandler) CreateClient(w http.ResponseWriter, r *http.Request) {
+	var request CreateClientRequestObject
+
+	var body CreateClientJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateClient(ctx, request.(CreateClientRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateClient")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateClientResponseObject); ok {
+		if err := validResponse.VisitCreateClientResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetClient operation middleware
+func (sh *strictHandler) GetClient(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetClientRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetClient(ctx, request.(GetClientRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetClient")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetClientResponseObject); ok {
+		if err := validResponse.VisitGetClientResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateClient operation middleware
+func (sh *strictHandler) UpdateClient(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateClientRequestObject
+
+	request.Id = id
+
+	var body UpdateClientJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateClient(ctx, request.(UpdateClientRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateClient")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateClientResponseObject); ok {
+		if err := validResponse.VisitUpdateClientResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteClient operation middleware
+func (sh *strictHandler) DeleteClient(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteClientRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteClient(ctx, request.(DeleteClientRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteClient")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteClientResponseObject); ok {
+		if err := validResponse.VisitDeleteClientResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateClientSecret operation middleware
+func (sh *strictHandler) RotateClientSecret(w http.ResponseWriter, r *http.Request, id string) {
+	var request RotateClientSecretRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateClientSecret(ctx, request.(RotateClientSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateClientSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateClientSecretResponseObject); ok {
+		if err := validResponse.VisitRotateClientSecretResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -6698,6 +7654,37 @@ func (sh *strictHandler) RevokeSession(w http.ResponseWriter, r *http.Request, i
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeSessionResponseObject); ok {
 		if err := validResponse.VisitRevokeSessionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateSigningKey operation middleware
+func (sh *strictHandler) RotateSigningKey(w http.ResponseWriter, r *http.Request) {
+	var request RotateSigningKeyRequestObject
+
+	var body RotateSigningKeyJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateSigningKey(ctx, request.(RotateSigningKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateSigningKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateSigningKeyResponseObject); ok {
+		if err := validResponse.VisitRotateSigningKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
