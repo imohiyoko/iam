@@ -64,10 +64,12 @@ type Tokens struct {
 // Issued は token エンドポイントの応答の中身。
 type Issued struct {
 	AccessToken string
-	ExpiresIn   time.Duration
-	IDToken     string
-	Scopes      []string
-	Grant       port.Grant
+	// RefreshToken は1回だけ使える（使うたびに新しいものに替える。5.1）。
+	RefreshToken string
+	ExpiresIn    time.Duration
+	IDToken      string
+	Scopes       []string
+	Grant        port.Grant
 }
 
 func newOpaque(prefix id.Prefix) (tokenID, token string, hash []byte, err error) {
@@ -153,7 +155,15 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 	if err != nil {
 		return Issued{}, err
 	}
-	return Issued{AccessToken: token, ExpiresIn: ttl, IDToken: idToken, Scopes: g.Scopes, Grant: g}, nil
+	rid, refresh, rhash, err := newOpaque(id.RefreshToken)
+	if err != nil {
+		return Issued{}, err
+	}
+	if err := tx.OIDCTokens().Create(ctx, port.OIDCToken{ID: rid, RealmID: g.RealmID, GrantID: g.ID, Kind: port.TokenRefresh, Hash: rhash,
+		CreatedAt: now, ExpiresAt: g.ExpiresAt}); err != nil {
+		return Issued{}, err
+	}
+	return Issued{AccessToken: token, RefreshToken: refresh, ExpiresIn: ttl, IDToken: idToken, Scopes: g.Scopes, Grant: g}, nil
 }
 
 // userClaims は sub と、スコープで許したユーザーのクレーム（org_id、email）を返す。ID トークンと UserInfo で共通。
@@ -272,29 +282,12 @@ type Access struct {
 
 // Validate はアクセストークンを検証する。使えないトークンは ErrInvalidToken（理由は返さない）。
 func (t *Tokens) Validate(ctx context.Context, tx port.Tx, realmID, token string) (Access, error) {
-	tid, hash, ok := splitOpaque(token)
-	if !ok {
-		return Access{}, ErrInvalidToken
-	}
 	now := t.Clock.Now()
-	tok, err := tx.OIDCTokens().Get(ctx, realmID, tid)
-	if errors.Is(err, errs.NotFound) {
-		return Access{}, ErrInvalidToken
-	}
+	tok, g, err := t.token(ctx, tx, realmID, token, port.TokenAccess)
 	if err != nil {
 		return Access{}, err
 	}
-	if tok.Kind != port.TokenAccess || subtle.ConstantTimeCompare(tok.Hash, hash) != 1 || !now.Before(tok.ExpiresAt) {
-		return Access{}, ErrInvalidToken
-	}
-	g, err := tx.Grants().Get(ctx, realmID, tok.GrantID)
-	if errors.Is(err, errs.NotFound) {
-		return Access{}, ErrInvalidToken
-	}
-	if err != nil {
-		return Access{}, err
-	}
-	if (g.RevokedAt != nil && !now.Before(*g.RevokedAt)) || !now.Before(g.ExpiresAt) {
+	if !now.Before(tok.ExpiresAt) || revoked(g, now) {
 		return Access{}, ErrInvalidToken
 	}
 	cl, err := tx.Clients().Get(ctx, realmID, g.ClientID)
@@ -322,4 +315,187 @@ func (t *Tokens) Validate(ctx context.Context, tx port.Tx, realmID, token string
 // UserInfo はアクセストークンの認可で見せてよいユーザーのクレームを返す（OIDC Core 5.3）。
 func (t *Tokens) UserInfo(ctx context.Context, tx port.Tx, a Access) (map[string]any, error) {
 	return t.userClaims(ctx, tx, a.Grant)
+}
+
+// 認可の失効の理由。
+const (
+	RevokeReasonRefreshReuse = "refresh_reuse"
+	RevokeReasonClient       = "client_revoked"
+)
+
+// Refreshed はリフレッシュの結果。Reused なら使用済みのリフレッシュトークンが再び使われたので、認可ごと失効させた
+// （呼び出し側はトランザクションを確定してから invalid_grant を返す）。
+type Refreshed struct {
+	Issued
+	Reused bool
+}
+
+// token は不透明なトークンを、種類と秘密を確かめて返す。使えなければ ErrInvalidToken。
+func (t *Tokens) token(ctx context.Context, tx port.Tx, realmID, token, kind string) (port.OIDCToken, port.Grant, error) {
+	tid, hash, ok := splitOpaque(token)
+	if !ok {
+		return port.OIDCToken{}, port.Grant{}, ErrInvalidToken
+	}
+	tok, err := tx.OIDCTokens().Get(ctx, realmID, tid)
+	if errors.Is(err, errs.NotFound) {
+		return port.OIDCToken{}, port.Grant{}, ErrInvalidToken
+	}
+	if err != nil {
+		return port.OIDCToken{}, port.Grant{}, err
+	}
+	if (kind != "" && tok.Kind != kind) || subtle.ConstantTimeCompare(tok.Hash, hash) != 1 {
+		return port.OIDCToken{}, port.Grant{}, ErrInvalidToken
+	}
+	g, err := tx.Grants().Get(ctx, realmID, tok.GrantID)
+	if errors.Is(err, errs.NotFound) {
+		return port.OIDCToken{}, port.Grant{}, ErrInvalidToken
+	}
+	return tok, g, err
+}
+
+func revoked(g port.Grant, now time.Time) bool {
+	return (g.RevokedAt != nil && !now.Before(*g.RevokedAt)) || !now.Before(g.ExpiresAt)
+}
+
+// Refresh はリフレッシュトークンを使って新しいトークンを発行する（RFC 6749 6、OAuth 2.0 Security BCP 4.14）。
+// リフレッシュトークンは1回限りで、使用済みのものが再び来たら認可（ファミリー）ごと失効させる。ログインの系列の
+// 今のセッションの無操作の期限を延ばす（連携先での利用も利用とみなす）。使えないトークンは ErrInvalidGrant。
+func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refreshToken, requestID string) (Refreshed, error) {
+	now := t.Clock.Now()
+	tok, g, err := t.token(ctx, tx, cl.RealmID, refreshToken, port.TokenRefresh)
+	if errors.Is(err, ErrInvalidToken) {
+		return Refreshed{}, ErrInvalidGrant
+	}
+	if err != nil {
+		return Refreshed{}, err
+	}
+	if g.ClientID != cl.ID || revoked(g, now) || !now.Before(tok.ExpiresAt) {
+		return Refreshed{}, ErrInvalidGrant
+	}
+	fresh, err := tx.OIDCTokens().Use(ctx, cl.RealmID, tok.ID, now)
+	if err != nil {
+		return Refreshed{}, err
+	}
+	if !fresh {
+		if err := t.revoke(ctx, tx, cl, g, RevokeReasonRefreshReuse, requestID, now); err != nil {
+			return Refreshed{}, err
+		}
+		return Refreshed{Reused: true}, nil
+	}
+	s, _, err := t.Sessions.CheckLineage(ctx, tx, g.RealmID, g.SID, now)
+	if errors.Is(err, session.ErrInvalid) {
+		return Refreshed{}, ErrInvalidGrant
+	}
+	if err != nil {
+		return Refreshed{}, err
+	}
+	if err := t.alive(ctx, tx, g.RealmID, g.SID, g.UserID, g.OrgID, now); err != nil {
+		if errors.Is(err, ErrInvalidToken) {
+			return Refreshed{}, ErrInvalidGrant
+		}
+		return Refreshed{}, err
+	}
+	if err := tx.Sessions().Touch(ctx, g.RealmID, s.ID, now); err != nil {
+		return Refreshed{}, err
+	}
+	out, err := t.issue(ctx, tx, cl, g, "", now)
+	return Refreshed{Issued: out}, err
+}
+
+// revoke は認可を失効させ、監査ログに残す。
+func (t *Tokens) revoke(ctx context.Context, tx port.Tx, cl port.Client, g port.Grant, reason, requestID string, now time.Time) error {
+	if err := tx.Grants().Revoke(ctx, g.RealmID, g.ID, now, reason); err != nil {
+		return err
+	}
+	u, err := tx.Users().Get(ctx, g.RealmID, g.UserID)
+	if err != nil {
+		return err
+	}
+	typ, result := "oidc.grant_revoked", audit.ResultSuccess
+	if reason == RevokeReasonRefreshReuse {
+		typ, result = "oidc.refresh_reused", audit.ResultFailure
+	}
+	_, err = eventlog.Record(ctx, tx, t.Clock, audit.Event{
+		Type: typ, Result: result, RealmID: g.RealmID, Actor: audit.Actor{Type: "user", ID: u.PublicID}, SessionID: g.SID,
+		RequestID: requestID, Details: map[string]any{"client_id": cl.PublicID, "reason": reason},
+	})
+	return err
+}
+
+// Revoke は連携先が自分のトークンを失効させる（RFC 7009）。アクセストークンでもリフレッシュトークンでも、認可ごと失効させる。
+// 知らないトークン・別の連携先のトークンは何もしない（成功として扱う）。
+func (t *Tokens) Revoke(ctx context.Context, tx port.Tx, cl port.Client, token, requestID string) error {
+	now := t.Clock.Now()
+	_, g, err := t.token(ctx, tx, cl.RealmID, token, "")
+	if errors.Is(err, ErrInvalidToken) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if g.ClientID != cl.ID || revoked(g, now) {
+		return nil
+	}
+	return t.revoke(ctx, tx, cl, g, RevokeReasonClient, requestID, now)
+}
+
+// Introspection はイントロスペクションの結果（RFC 7662 2.2）。Active が false なら他は空。
+type Introspection struct {
+	Active    bool     `json:"active"`
+	Scope     string   `json:"scope,omitempty"`
+	ClientID  string   `json:"client_id,omitempty"`
+	TokenType string   `json:"token_type,omitempty"`
+	Exp       int64    `json:"exp,omitempty"`
+	Iat       int64    `json:"iat,omitempty"`
+	Sub       string   `json:"sub,omitempty"`
+	Aud       []string `json:"aud,omitempty"`
+	Iss       string   `json:"iss,omitempty"`
+	SID       string   `json:"sid,omitempty"`
+	OrgID     string   `json:"org_id,omitempty"`
+	AuthTime  int64    `json:"auth_time,omitempty"`
+	AMR       []string `json:"amr,omitempty"`
+}
+
+// Introspect はトークン（アクセストークンかリフレッシュトークン）が今使えるかを返す（RFC 7662）。
+// 使えるかの判定は Validate と同じ（ログインの系列・Org の状態を含む）。結果はキャッシュせず、停止・失効はすぐ反映される。
+func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token string) (Introspection, error) {
+	now := t.Clock.Now()
+	tok, g, err := t.token(ctx, tx, realmID, token, "")
+	if errors.Is(err, ErrInvalidToken) {
+		return Introspection{}, nil
+	}
+	if err != nil {
+		return Introspection{}, err
+	}
+	if revoked(g, now) || !now.Before(tok.ExpiresAt) || (tok.Kind == port.TokenRefresh && tok.UsedAt != nil) {
+		return Introspection{}, nil
+	}
+	cl, err := tx.Clients().Get(ctx, realmID, g.ClientID)
+	if errors.Is(err, errs.NotFound) {
+		return Introspection{}, nil
+	}
+	if err != nil {
+		return Introspection{}, err
+	}
+	if err := t.alive(ctx, tx, realmID, g.SID, g.UserID, g.OrgID, now); err != nil {
+		if errors.Is(err, ErrInvalidToken) {
+			return Introspection{}, nil
+		}
+		return Introspection{}, err
+	}
+	u, err := tx.Users().Get(ctx, realmID, g.UserID)
+	if err != nil {
+		return Introspection{}, err
+	}
+	orgPublicID, err := t.orgPublicID(ctx, tx, realmID, g.OrgID)
+	if err != nil {
+		return Introspection{}, err
+	}
+	typ := "access_token"
+	if tok.Kind == port.TokenRefresh {
+		typ = "refresh_token"
+	}
+	return Introspection{Active: true, Scope: strings.Join(g.Scopes, " "), ClientID: cl.PublicID, TokenType: typ, Exp: tok.ExpiresAt.Unix(),
+		Iat: tok.CreatedAt.Unix(), Sub: u.PublicID, Aud: []string{cl.PublicID}, Iss: t.Issuer, SID: g.SID, OrgID: orgPublicID,
+		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods}, nil
 }

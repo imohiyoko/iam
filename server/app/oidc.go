@@ -25,15 +25,19 @@ import (
 //	GET  /oauth2/keys                       JWKS（ML-DSA-65 と ES256）
 //	GET  /oauth2/authorize                  認可要求。ログインしていなければログイン画面へ
 //	GET  /oauth2/authorize/resume           ログイン画面から戻って認可コードを発行する
-//	POST /oauth2/token                      認可コードの交換
+//	POST /oauth2/token                      認可コードの交換とリフレッシュ
+//	POST /oauth2/introspect                 イントロスペクション（RFC 7662。機密の連携先だけ）
+//	POST /oauth2/revoke                     失効（RFC 7009）
 //	GET  /oauth2/userinfo                   UserInfo（POST も可）
 
 const (
-	oidcAuthorize = "/oauth2/authorize"
-	oidcResume    = "/oauth2/authorize/resume"
-	oidcToken     = "/oauth2/token" // #nosec G101 -- パス
-	oidcUserinfo  = "/oauth2/userinfo"
-	oidcKeys      = "/oauth2/keys"
+	oidcAuthorize  = "/oauth2/authorize"
+	oidcResume     = "/oauth2/authorize/resume"
+	oidcToken      = "/oauth2/token" // #nosec G101 -- パス
+	oidcUserinfo   = "/oauth2/userinfo"
+	oidcKeys       = "/oauth2/keys"
+	oidcIntrospect = "/oauth2/introspect"
+	oidcRevoke     = "/oauth2/revoke"
 )
 
 // isOIDC は OIDC Provider のパスかを返す。
@@ -51,11 +55,15 @@ func newOIDCHandler(a *App) http.Handler {
 		Authorization: op.NewEndpoint(oidcAuthorize),
 		Token:         op.NewEndpoint(oidcToken),
 		JwksURI:       op.NewEndpoint(oidcKeys),
+		Introspection: op.NewEndpoint(oidcIntrospect),
+		Revocation:    op.NewEndpoint(oidcRevoke),
 	}, op.WithServerCORSOptions(nil))
 	mux := http.NewServeMux()
 	mux.Handle(oidc.DiscoveryEndpoint, ops)
 	mux.Handle(oidcKeys, ops)
 	mux.Handle(oidcToken, ops)
+	mux.Handle(oidcIntrospect, ops)
+	mux.Handle(oidcRevoke, ops)
 	// 認可要求とその続きはブラウザのセッションを見る。
 	mux.Handle(oidcAuthorize, a.withSession(ops))
 	mux.Handle(oidcResume, a.withSession(http.HandlerFunc(srv.resume)))
@@ -88,6 +96,13 @@ func (s *oidcServer) fail(ctx context.Context, err error) error {
 	return oidc.ErrServerError()
 }
 
+var (
+	grantTypes              = []oidc.GrantType{oidc.GrantTypeCode, oidc.GrantTypeRefreshToken}
+	confidentialAuthMethods = []oidc.AuthMethod{oidc.AuthMethodBasic, oidc.AuthMethodPost, oidc.AuthMethodPrivateKeyJWT}
+	authMethods             = append(slices.Clone(confidentialAuthMethods), oidc.AuthMethodNone)
+	assertionAlgs           = []string{"ES256", "ES384", "EdDSA", "PS256", "RS256"}
+)
+
 func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Response, error) {
 	return op.NewResponse(&oidc.DiscoveryConfiguration{
 		Issuer:                            s.a.issuer,
@@ -98,15 +113,21 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		ScopesSupported:                   provider.Scopes,
 		ResponseTypesSupported:            []string{string(oidc.ResponseTypeCode)},
 		ResponseModesSupported:            []string{string(oidc.ResponseModeQuery)},
-		GrantTypesSupported:               []oidc.GrantType{oidc.GrantTypeCode},
+		GrantTypesSupported:               grantTypes,
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  provider.Algs,
-		TokenEndpointAuthMethodsSupported: []oidc.AuthMethod{oidc.AuthMethodBasic, oidc.AuthMethodPost, oidc.AuthMethodPrivateKeyJWT, oidc.AuthMethodNone},
-		TokenEndpointAuthSigningAlgValuesSupported: []string{"ES256", "ES384", "EdDSA", "PS256", "RS256"},
+		TokenEndpointAuthMethodsSupported: authMethods,
+		TokenEndpointAuthSigningAlgValuesSupported: assertionAlgs,
 		ClaimsSupported: []string{"iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "sid", "azp", "org_id", "email",
 			"email_verified"},
-		CodeChallengeMethodsSupported: []oidc.CodeChallengeMethod{oidc.CodeChallengeMethodS256},
-		ClaimTypesSupported:           []string{"normal"},
+		CodeChallengeMethodsSupported:                      []oidc.CodeChallengeMethod{oidc.CodeChallengeMethodS256},
+		ClaimTypesSupported:                                []string{"normal"},
+		IntrospectionEndpoint:                              s.endpoint(oidcIntrospect),
+		IntrospectionEndpointAuthMethodsSupported:          confidentialAuthMethods,
+		IntrospectionEndpointAuthSigningAlgValuesSupported: assertionAlgs,
+		RevocationEndpoint:                                 s.endpoint(oidcRevoke),
+		RevocationEndpointAuthMethodsSupported:             authMethods,
+		RevocationEndpointAuthSigningAlgValuesSupported:    assertionAlgs,
 	}), nil
 }
 
@@ -153,7 +174,7 @@ func (c opClient) AuthMethod() oidc.AuthMethod {
 func (opClient) ResponseTypes() []oidc.ResponseType {
 	return []oidc.ResponseType{oidc.ResponseTypeCode}
 }
-func (opClient) GrantTypes() []oidc.GrantType { return []oidc.GrantType{oidc.GrantTypeCode} }
+func (opClient) GrantTypes() []oidc.GrantType { return grantTypes }
 func (opClient) LoginURL(string) string       { return "" }
 func (opClient) AccessTokenType() op.AccessTokenType {
 	return op.AccessTokenTypeBearer
@@ -317,18 +338,32 @@ func (s *oidcServer) resume(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, red.URL, http.StatusFound)
 }
 
-// VerifyClient は token エンドポイントでの連携先の認証（client_secret_basic / post、private_key_jwt、none）。
+// VerifyClient は token エンドポイントと revoke エンドポイントでの連携先の認証（client_secret_basic / post、
+// private_key_jwt、none）。
 func (s *oidcServer) VerifyClient(ctx context.Context, r *op.Request[op.ClientCredentials]) (op.Client, error) {
-	cc := r.Data
+	aud := []string{s.endpoint(oidcToken), s.a.issuer}
+	if r.URL != nil && r.URL.Path == oidcRevoke {
+		aud = []string{s.endpoint(oidcRevoke), s.a.issuer}
+	}
+	cl, err := s.authenticate(ctx, r.Data, aud, false)
+	if err != nil {
+		return nil, err
+	}
+	return opClient{cl}, nil
+}
+
+// authenticate は連携先を認証する。confidential なら client_secret か private_key_jwt を求める。
+func (s *oidcServer) authenticate(ctx context.Context, cc *op.ClientCredentials, audiences []string, confidential bool) (port.Client, error) {
 	var cl port.Client
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
 		switch {
 		case cc.ClientAssertion != "":
-			cl, err = provider.AuthenticateAssertion(ctx, tx, s.a.deps.Ephemeral, s.a.deps.Clock, s.a.realm.ID, cc.ClientID, cc.ClientAssertion,
-				[]string{s.endpoint(oidcToken), s.a.issuer})
+			cl, err = provider.AuthenticateAssertion(ctx, tx, s.a.deps.Ephemeral, s.a.deps.Clock, s.a.realm.ID, cc.ClientID, cc.ClientAssertion, audiences)
 		case cc.ClientSecret != "":
 			cl, err = provider.AuthenticateSecret(ctx, tx, s.a.realm.ID, cc.ClientID, cc.ClientSecret)
+		case confidential:
+			err = provider.ErrClientAuth
 		default:
 			cl, err = tx.Clients().GetByPublicID(ctx, s.a.realm.ID, cc.ClientID)
 			if errors.Is(err, errs.NotFound) || (err == nil && cl.AuthMethod != port.ClientAuthNone) {
@@ -338,12 +373,12 @@ func (s *oidcServer) VerifyClient(ctx context.Context, r *op.Request[op.ClientCr
 		return err
 	})
 	if errors.Is(err, provider.ErrClientAuth) {
-		return nil, op.NewStatusError(oidc.ErrInvalidClient().WithDescription("client authentication failed"), http.StatusUnauthorized)
+		return port.Client{}, op.NewStatusError(oidc.ErrInvalidClient().WithDescription("client authentication failed"), http.StatusUnauthorized)
 	}
 	if err != nil {
-		return nil, s.fail(ctx, err)
+		return port.Client{}, s.fail(ctx, err)
 	}
-	return opClient{cl}, nil
+	return cl, nil
 }
 
 func (s *oidcServer) CodeExchange(ctx context.Context, r *op.ClientRequest[oidc.AccessTokenRequest]) (*op.Response, error) {
@@ -367,11 +402,63 @@ func (s *oidcServer) CodeExchange(ctx context.Context, r *op.ClientRequest[oidc.
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
+	return tokenResponse(out), nil
+}
+
+func tokenResponse(out provider.Issued) *op.Response {
 	// #nosec G115 -- ExpiresIn は設定の正の寿命
-	resp := op.NewResponse(&oidc.AccessTokenResponse{AccessToken: out.AccessToken, TokenType: oidc.BearerToken,
+	resp := op.NewResponse(&oidc.AccessTokenResponse{AccessToken: out.AccessToken, TokenType: oidc.BearerToken, RefreshToken: out.RefreshToken,
 		ExpiresIn: uint64(out.ExpiresIn / time.Second), IDToken: out.IDToken, Scope: out.Scopes})
 	resp.Header.Set("Pragma", "no-cache")
-	return resp, nil
+	return resp
+}
+
+// RefreshToken はリフレッシュトークンで新しいトークンを発行する。使用済みのトークンが再び来たら、認可ごと失効させたことを
+// 確定してから invalid_grant を返す。
+func (s *oidcServer) RefreshToken(ctx context.Context, r *op.ClientRequest[oidc.RefreshTokenRequest]) (*op.Response, error) {
+	cl := r.Client.(opClient).c
+	var out provider.Refreshed
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		out, err = s.a.tokens.Refresh(ctx, tx, cl, r.Data.RefreshToken, requestID(ctx))
+		return err
+	})
+	if errors.Is(err, provider.ErrInvalidGrant) || (err == nil && out.Reused) {
+		return nil, oidc.ErrInvalidGrant()
+	}
+	if err != nil {
+		return nil, s.fail(ctx, err)
+	}
+	return tokenResponse(out.Issued), nil
+}
+
+// Introspect はイントロスペクション（RFC 7662）。呼べるのは client_secret か private_key_jwt で認証した連携先（リソースサーバー）だけ。
+func (s *oidcServer) Introspect(ctx context.Context, r *op.Request[op.IntrospectionRequest]) (*op.Response, error) {
+	if _, err := s.authenticate(ctx, r.Data.ClientCredentials, []string{s.endpoint(oidcIntrospect), s.a.issuer}, true); err != nil {
+		return nil, err
+	}
+	var out provider.Introspection
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		out, err = s.a.tokens.Introspect(ctx, tx, s.a.realm.ID, r.Data.Token)
+		return err
+	})
+	if err != nil {
+		return nil, s.fail(ctx, err)
+	}
+	return op.NewResponse(out), nil
+}
+
+// Revocation は失効（RFC 7009）。知らないトークンでも 200 を返す。
+func (s *oidcServer) Revocation(ctx context.Context, r *op.ClientRequest[oidc.RevocationRequest]) (*op.Response, error) {
+	cl := r.Client.(opClient).c
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		return s.a.tokens.Revoke(ctx, tx, cl, r.Data.Token, requestID(ctx))
+	})
+	if err != nil {
+		return nil, s.fail(ctx, err)
+	}
+	return op.NewResponse(struct{}{}), nil
 }
 
 // userinfo は UserInfo（OIDC Core 5.3）。アクセストークンは Authorization ヘッダーか、POST の本文の access_token で受ける。

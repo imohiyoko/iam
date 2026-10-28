@@ -16,7 +16,7 @@ M5 で、連携先が標準の OIDC でログインを任せられるように�
   （`op.RegisterServer`）に任せる。状態（認可要求・認可コード・認可・トークン）と ID トークンの署名は `authn/provider` で行う
   （zitadel/oidc の Storage と署名の経路は使わない。0040）
 - エンドポイント：`/.well-known/openid-configuration`、`/oauth2/authorize`、`/oauth2/token`、`/oauth2/userinfo`、
-  `/oauth2/keys`。issuer は `server.public_url`。public_url が無ければ OIDC Provider のエンドポイントを出さない
+  `/oauth2/keys`、`/oauth2/introspect`、`/oauth2/revoke`。issuer は `server.public_url`。public_url が無ければ OIDC Provider のエンドポイントを出さない
 - 認可コードフローだけ（`response_type=code`、`response_mode=query`）。PKCE は S256 だけで、すべての連携先に求める
   （OAuth 2.0 Security BCP）。`request` パラメーターは受けない
 - ログイン画面との受け渡し
@@ -40,7 +40,13 @@ M5 で、連携先が標準の OIDC でログインを任せられるように�
   - アクセストークンは不透明（0021）で、`<ID>.<256bit 乱数>`。保存するのは秘密部分の SHA-256 だけ（セッションと同じ。5.2）
   - トークンの検証では、認可の失効・期限に加え、系列の今のセッションを Validate と同じ規則（失効・期限・寿命・停止・有効期間・
     認証情報の無効化）で確かめ、認可した Org の可否も確かめる。系列が終われば（ログアウト・失効など）トークンも使えない
-  - 連携先からの利用はセッションの無操作の期限を延ばさない（延ばすのはリフレッシュ。M5 の次の段）
+  - アクセストークンの利用はセッションの無操作の期限を延ばさない。リフレッシュは延ばす（連携先での利用も利用とみなす）
+  - リフレッシュトークンも不透明で1回限り。使うたびに新しいものに替え（期限は認可の期限）、使用済みのものが再び来たら
+    認可ごと失効させる（OAuth 2.0 Security BCP 4.14。監査ログ `oidc.refresh_reused`）。リフレッシュでも系列と Org を確かめる
+  - イントロスペクション（RFC 7662）は client_secret か private_key_jwt で認証した連携先（リソースサーバー）だけが呼べ、
+    どの連携先のトークンでも確かめられる。結果はトークンの検証と同じ規則で毎回求め、キャッシュしない（停止・失効はすぐ反映される）
+  - 失効（RFC 7009）はアクセストークンでもリフレッシュトークンでも認可ごと失効させる。知らないトークン・別の連携先の
+    トークンは何もしないで 200（監査ログ `oidc.grant_revoked`）
   - 連携先の削除とユーザーの消去で、認可とトークンも消す
 - ID トークンのクレーム：`iss`、`sub`（ユーザーの外部 ID）、`aud` / `azp`（client_id）、`exp`、`iat`、`auth_time`、`nonce`、
   `amr`、`sid`、`org_id`（Org オンのみ。外部 ID）、`email` / `email_verified`（`email` スコープのみ。Membership に結び付けたメール。
