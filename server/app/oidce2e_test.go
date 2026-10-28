@@ -228,8 +228,12 @@ func TestOIDCE2EMLDSARP(t *testing.T) {
 		claims["sub"] != e.l.userID(t, "bob@example.com") {
 		t.Fatalf("claims: %v", claims)
 	}
-	if exp, _ := claims["exp"].(float64); time.Unix(int64(exp), 0).Before(time.Now()) {
+	exp, _ := claims["exp"].(float64)
+	if time.Unix(int64(exp), 0).Before(time.Now()) {
 		t.Fatalf("expired: %v", claims["exp"])
+	}
+	if iat, ok := claims["iat"].(float64); !ok || iat <= 0 || iat > exp {
+		t.Fatalf("iat: %v", claims["iat"])
 	}
 }
 
