@@ -37,11 +37,17 @@ func (s *Service) ScheduleDeletion(ctx context.Context, tx port.Tx, o port.Org, 
 	if o.DeletedAt != nil {
 		return port.Org{}, errs.New(errs.KindNotFound, "org")
 	}
-	if o.DeletionScheduledAt != nil {
+	if grace > 0 && o.DeletionScheduledAt != nil {
 		return port.Org{}, ErrDeletionScheduled
 	}
 	now := s.Clock.Now()
 	if grace <= 0 {
+		// 予約済みでも今削除する。残っている予約は取り消す。
+		if o.DeletionScheduledAt != nil {
+			if err := tx.ScheduledEvents().CancelByRef(ctx, o.RealmID, deletionRef(o)); err != nil {
+				return port.Org{}, err
+			}
+		}
 		o.DeletionScheduledAt = new(now)
 		if err := s.purge(ctx, tx, o, actor, requestID); err != nil {
 			return port.Org{}, err
