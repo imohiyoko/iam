@@ -71,6 +71,9 @@ const (
 	ReasonRecovered = "account_recovered"
 	// ReasonOrgSwitched は Org の切り替えで ID を入れ替えたこと（4.4）。
 	ReasonOrgSwitched = "org_switched"
+	// ReasonSuspended と ReasonValidity は、ユーザーの停止・有効期間の外でログインの系列を終えたこと（EndUserTx。失効はしない）。
+	ReasonSuspended = "user_suspended"
+	ReasonValidity  = "outside_validity"
 )
 
 // 2要素目の種類（LoginResult の second_factor_methods）。
@@ -106,6 +109,13 @@ type Manager struct {
 	Warnings *warning.Evaluator
 	// Orgs はセッションの active な Org を決める（4.4）。nil ならフィーチャー org が動いておらず、active な Org を持たない。
 	Orgs OrgPicker
+	// Lineages はログインの系列が終わったときに呼ぶ（Back-Channel Logout。5.2）。nil なら呼ばない。
+	Lineages LineageHook
+}
+
+// LineageHook はログインの系列（sid）が終わったことを受け取る（authn/provider）。失効と同じトランザクションで呼ぶ。
+type LineageHook interface {
+	LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, reason, requestID string) error
 }
 
 // OrgPicker はログインで入る Org を決めるもの（authn/org）。
@@ -1130,6 +1140,9 @@ func (m *Manager) RevokeAllTx(ctx context.Context, tx port.Tx, realmID, userID, 
 	if err != nil {
 		return nil, err
 	}
+	if err := m.EndLineagesTx(ctx, tx, realmID, ids, reason, requestID); err != nil {
+		return nil, err
+	}
 	return ids, nil
 }
 
@@ -1152,7 +1165,68 @@ func (m *Manager) revokeInTx(ctx context.Context, tx port.Tx, s port.Session, re
 		Type: "session.revoked", Result: audit.ResultSuccess, RealmID: s.RealmID, Actor: actor, SessionID: s.ID,
 		RequestID: requestID, Details: map[string]any{"reason": reason, "user_id": subject.ID},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	return m.EndLineagesTx(ctx, tx, s.RealmID, []string{s.ID}, reason, requestID)
+}
+
+// EndLineagesTx は失効させたセッションのうち、ログインの系列の今のセッションだったものの系列を終える（Lineages を呼ぶ）。
+// ID の入れ替えで古い ID を失効させたときは、系列の今のセッションは新しい ID なので終わらない。
+func (m *Manager) EndLineagesTx(ctx context.Context, tx port.Tx, realmID string, sessionIDs []string, reason, requestID string) error {
+	if m.Lineages == nil {
+		return nil
+	}
+	now := m.Clock.Now()
+	done := map[string]bool{}
+	for _, sessionID := range sessionIDs {
+		s, err := tx.Sessions().Get(ctx, realmID, sessionID)
+		if errors.Is(err, errs.NotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if s.SID == "" || done[s.SID] {
+			continue
+		}
+		cur, err := tx.Sessions().GetCurrentBySID(ctx, realmID, s.SID)
+		if err != nil {
+			return err
+		}
+		if cur.RevokedAt == nil || now.Before(*cur.RevokedAt) {
+			continue
+		}
+		done[s.SID] = true
+		if err := m.Lineages.LineageEnded(ctx, tx, realmID, s.SID, reason, requestID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// EndUserTx は主体のログインの系列をすべて終える（停止・有効期間の終わりなど、セッションを失効させずに使えなくなったとき。
+// Back-Channel Logout。5.2）。停止が解けてもその系列の連携先の認可は戻らない。
+func (m *Manager) EndUserTx(ctx context.Context, tx port.Tx, realmID, userID, reason, requestID string) error {
+	if m.Lineages == nil {
+		return nil
+	}
+	all, err := tx.Sessions().ListByPrincipal(ctx, realmID, port.PrincipalUser, userID)
+	if err != nil {
+		return err
+	}
+	now := m.Clock.Now()
+	done := map[string]bool{}
+	for _, s := range all {
+		if s.SID == "" || done[s.SID] || (s.RevokedAt != nil && !now.Before(*s.RevokedAt)) || !now.Before(s.ExpiresAt) {
+			continue
+		}
+		done[s.SID] = true
+		if err := m.Lineages.LineageEnded(ctx, tx, realmID, s.SID, reason, requestID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // forget はキャッシュを消す（ベストエフォート。失敗しても TTL で上限内に反映される。5.3）。

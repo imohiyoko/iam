@@ -536,7 +536,8 @@ func TestOIDCRefreshIntrospectRevoke(t *testing.T) {
 	for _, e := range l.auditTypes(t) {
 		types[e.Type]++
 	}
-	if types["oidc.refresh_reused"] != 1 || types["oidc.grant_revoked"] != 1 {
+	// 失効は連携先によるものと、停止で系列が終わったもの。
+	if types["oidc.refresh_reused"] != 1 || types["oidc.grant_revoked"] != 2 {
 		t.Fatalf("audit: %v", types)
 	}
 	if strings.Contains(l.out.String(), l.internalUserID(t, alice)) {

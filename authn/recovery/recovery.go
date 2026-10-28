@@ -353,6 +353,9 @@ func (s *Service) Complete(ctx context.Context, realmID, sessionID string, c Cli
 		if revoked, err = tx.Sessions().RevokeByPrincipal(ctx, realmID, port.PrincipalUser, u.ID, "", now, session.ReasonRecovered); err != nil {
 			return err
 		}
+		if err := s.Sessions.EndLineagesTx(ctx, tx, realmID, revoked, session.ReasonRecovered, c.RequestID); err != nil {
+			return err
+		}
 		if codes, err = s.Generate(ctx, tx, realmID, u.ID, actor, c.RequestID); err != nil {
 			return err
 		}

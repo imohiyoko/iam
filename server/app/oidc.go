@@ -70,8 +70,74 @@ func newOIDCHandler(a *App) http.Handler {
 	mux.HandleFunc(oidcUserinfo, srv.userinfo)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		if srv.cors(w, r) {
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// cors はブラウザの連携先（SPA）から呼ぶエンドポイントの CORS（ADR 0066）。Discovery と JWKS は公開の情報なのでどのオリジンにも
+// 許す。token・userinfo・revoke は公開クライアント（none）の戻り先のオリジンだけに許す（機密の連携先はサーバーから呼ぶ）。
+// Cookie は送らせない（Allow-Credentials を付けない）。authorize はトップレベルの遷移、introspect はリソースサーバーから呼ぶので
+// CORS を付けない。プリフライトに答えたら true。
+func (s *oidcServer) cors(w http.ResponseWriter, r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	public := r.URL.Path == oidc.DiscoveryEndpoint || r.URL.Path == oidcKeys
+	browser := r.URL.Path == oidcToken || r.URL.Path == oidcUserinfo || r.URL.Path == oidcRevoke
+	if origin == "" || !public && !browser {
+		return false
+	}
+	h := w.Header()
+	h.Add("Vary", "Origin")
+	preflight := r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != ""
+	switch {
+	case public:
+		h.Set("Access-Control-Allow-Origin", "*")
+	case s.browserOrigin(r.Context(), origin):
+		h.Set("Access-Control-Allow-Origin", origin)
+	default:
+		if preflight {
+			w.WriteHeader(http.StatusNoContent)
+		}
+		return preflight
+	}
+	if !preflight {
+		h.Set("Access-Control-Expose-Headers", "WWW-Authenticate")
+		return false
+	}
+	h.Set("Access-Control-Allow-Methods", "GET, POST")
+	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	h.Set("Access-Control-Max-Age", "600")
+	w.WriteHeader(http.StatusNoContent)
+	return true
+}
+
+// browserOrigin は origin が公開クライアントの戻り先のオリジンかを返す。
+func (s *oidcServer) browserOrigin(ctx context.Context, origin string) bool {
+	var ok bool
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		cs, err := tx.Clients().List(ctx, s.a.realm.ID)
+		if err != nil {
+			return err
+		}
+		for _, c := range cs {
+			if c.AuthMethod != port.ClientAuthNone {
+				continue
+			}
+			for _, uri := range c.RedirectURIs {
+				if u, err := url.Parse(uri); err == nil && u.Scheme+"://"+u.Host == origin {
+					ok = true
+					return nil
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		s.a.deps.Logger.WarnContext(ctx, "oidc: cors origin lookup failed", "error", err)
+	}
+	return ok
 }
 
 type oidcServer struct {
@@ -128,6 +194,8 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		RevocationEndpoint:                                 s.endpoint(oidcRevoke),
 		RevocationEndpointAuthMethodsSupported:             authMethods,
 		RevocationEndpointAuthSigningAlgValuesSupported:    assertionAlgs,
+		BackChannelLogoutSupported:                         true,
+		BackChannelLogoutSessionSupported:                  true,
 	}), nil
 }
 

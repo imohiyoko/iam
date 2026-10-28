@@ -53,7 +53,20 @@ M5 で、連携先が標準の OIDC でログインを任せられるように�
   4.4）。UserInfo は `sub`・`org_id`・`email`・`email_verified`
 - 対応するスコープは `openid` と `email`。ほかは無視する
 - OIDC のエンドポイントは CrossOriginProtection の外に置く（token は連携先のサーバー、authorize はトップレベルの遷移から呼ばれる）。
-  ブラウザからの CORS は M5 の次の段で決める
+  Cookie を見るのは GET の authorize とその続きだけで、Cookie は SameSite=Lax。書き込みの公開 API（`/v1`）は今まで通り
+  CrossOriginProtection で別オリジンを拒み、CORS も付けない
+- CORS：Discovery と JWKS はどのオリジンにも許す。token・userinfo・revoke は公開クライアント（`none`）の戻り先のオリジンだけに
+  許す（機密の連携先はサーバーから呼ぶ）。`Access-Control-Allow-Credentials` は付けない。authorize と introspect には付けない
+- Back-Channel Logout（5.2）
+  - ログインの系列が終わったとき（今のセッションの失効：ログアウト・本人や運営者による失効・認証情報の変更・削除の予約・復旧、
+    ユーザーの停止の始まり、有効期間の終わり）、系列の認可を失効させ、`backchannel_logout_uri` を登録した連携先ごとに
+    Logout Token の送信を outbox に積む（同じトランザクション。少なくとも1回。ID の入れ替え・Org の切り替えでは終わらない。
+    認可が期限切れでも送る。連携先のログインは認可の期限とは別に残りうる）
+  - Logout Token は ID トークンと同じ鍵・アルゴリズムで署名し（`typ: logout+jwt`）、`iss`・`aud`・`iat`・`exp`（2 分）・
+    `jti`（outbox の ID）・`sid`・`sub`・`events` を持つ。`nonce` は持たない
+  - 送れなければ次の送出でまた送り、1 時間であきらめる（送れなかったものは outbox の末尾に積み直し、1件の失敗で他を止めない）
+  - 停止が解けてもセッションは使えるが、終えた系列の認可は戻らず、同じ系列に2度は送らない
+  - 無操作・寿命による期限切れでは送らない。Org の停止や離脱は認可の検証で拒むだけで、送らない
 - エラーの説明に内部のエラーを載せない（zitadel/oidc は既定でエラーの文字列を説明にするので、`oidc.Error` に置き換えてから返す）
 - 監査ログ：認可コードの交換で `oidc.authorized`（client_id とスコープ）
 
