@@ -91,6 +91,19 @@ func TestE2EM4OrgScope(t *testing.T) {
 	if l.adminCheck(t, checker, samID, "doc:write", acme) || l.adminCheck(t, checker, samID, role.PermOrgRead, acme) {
 		t.Fatal("membership outside validity still allowed after the delay")
 	}
+	// 本人の check は、realm の範囲の付与があっても、使える所属の無い Org では allowed: false。
+	err = l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+		return role.Grant(ctx, tx, l.a.realm.ID, role.RealmSupport, port.PrincipalUser, uid, l.a.deps.Clock.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.advance(delay + time.Second)
+	for org, want := range map[string]bool{acme: false, beta: true} {
+		if code, out := l.meDo(t, "POST", sam, "/v1/me:check", map[string]any{"action": role.PermSuspensionsRead, "org_id": org}); code != 200 || out["allowed"] != want {
+			t.Errorf("self check in %s: %d %v, want %v", org, code, out, want)
+		}
+	}
 
 	// 3. 権限の無い管理操作は permission_denied。
 	_, support := l.operator(t, "support@example.com", role.RealmSupport)

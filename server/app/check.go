@@ -105,13 +105,19 @@ func (s publicServer) CheckMyAuthz(ctx context.Context, req publicapi.CheckMyAut
 	}
 	r := check.Request{Principal: check.Principal{Type: au.PrincipalType, ID: au.PrincipalID}, Action: b.Action, Resource: res, OrgID: au.ActiveOrgID}
 	if b.OrgId != nil && s.a.orgs != nil {
+		member := false
 		err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 			o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, *b.OrgId)
+			if err != nil {
+				return err
+			}
 			r.OrgID = o.ID
+			// realm の範囲の付与は所属を見ないので、指定した Org に使える所属があるかをここで確かめる。
+			_, member, err = authzMembers{}.OrgRole(ctx, tx, s.a.realm.ID, r.Principal, o.ID, s.a.deps.Clock.Now())
 			return err
 		})
-		if errors.Is(err, errs.NotFound) {
-			// 無い Org では何もできない（所属していない Org と区別しない）。
+		if errors.Is(err, errs.NotFound) || (err == nil && !member) {
+			// 無い Org と所属していない Org では何もできない（区別しない）。
 			return publicapi.CheckMyAuthz200JSONResponse{Allowed: false}, nil
 		}
 		if err != nil {
