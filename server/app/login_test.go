@@ -55,6 +55,7 @@ type loginEnv struct {
 	e      *env
 	notes  *recorder
 	apiKey string
+	ua     string // 空でなければ各リクエストの User-Agent
 	out    bytes.Buffer
 	codes  []string // claim で受け取ったコード（秘密が漏れないことの確認用）
 }
@@ -112,6 +113,9 @@ func (l *loginEnv) do(t *testing.T, h http.Handler, method, path string, body an
 	}
 	r := httptest.NewRequest(method, path, rd)
 	r.Header.Set("Content-Type", "application/json")
+	if l.ua != "" {
+		r.Header.Set("User-Agent", l.ua)
+	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		r.Header.Set(hdr[i], hdr[i+1])
 	}

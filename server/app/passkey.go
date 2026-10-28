@@ -109,6 +109,9 @@ func (s publicServer) StartRegisterPasskey(ctx context.Context, _ publicapi.Star
 	if !ok {
 		return publicapi.StartRegisterPasskey401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
+	if s.stale(au) {
+		return publicapi.StartRegisterPasskey401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
 	if s.a.passkeys == nil {
 		return publicapi.StartRegisterPasskey404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	}
@@ -126,7 +129,13 @@ func (s publicServer) StartRegisterPasskey(ctx context.Context, _ publicapi.Star
 func (s publicServer) FinishRegisterPasskey(ctx context.Context, req publicapi.FinishRegisterPasskeyRequestObject) (publicapi.FinishRegisterPasskeyResponseObject, error) {
 	fail := publicapi.FinishRegisterPasskey401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}
 	au, ok := authFrom(ctx)
-	if !ok || s.a.passkeys == nil || req.Body == nil {
+	if !ok || req.Body == nil {
+		return fail, nil
+	}
+	if s.stale(au) {
+		return publicapi.FinishRegisterPasskey401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
+	if s.a.passkeys == nil {
 		return fail, nil
 	}
 	resp, err := json.Marshal(req.Body.Credential)
@@ -188,8 +197,10 @@ func (s publicServer) RenameMyPasskey(ctx context.Context, req publicapi.RenameM
 }
 
 func (s publicServer) RevokeMyPasskey(ctx context.Context, req publicapi.RevokeMyPasskeyRequestObject) (publicapi.RevokeMyPasskeyResponseObject, error) {
-	if _, ok := authFrom(ctx); !ok {
+	if au, ok := authFrom(ctx); !ok {
 		return publicapi.RevokeMyPasskey401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	} else if s.stale(au) {
+		return publicapi.RevokeMyPasskey401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	nf, code, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
 		_, err := s.a.accounts.RevokePasskey(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Id, au.Actor(), requestID(ctx))
