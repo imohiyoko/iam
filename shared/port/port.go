@@ -60,6 +60,8 @@ type Tx interface {
 	Groups() GroupRepo
 	Clients() ClientRepo
 	SigningKeys() SigningKeyRepo
+	Grants() GrantRepo
+	OIDCTokens() OIDCTokenRepo
 }
 
 // Realm はユーザー集合の単位（design.md 3.1）。

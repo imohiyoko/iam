@@ -77,3 +77,4 @@
 | [0063](0063-audit-client-data.md) | 監査ログの IP と User-Agent の暗号化 | 承認 |
 | [0064](0064-authz-roles-groups-check.md) | ロール・付与・Group と認可の判定 | 承認 |
 | [0065](0065-oidc-clients-and-signing-keys.md) | OIDC の連携先の登録と ID トークンの署名鍵 | 承認 |
+| [0066](0066-oidc-authorization-code-flow.md) | OIDC の認可コードフローと、トークンをログインの系列に結び付けること | 承認 |

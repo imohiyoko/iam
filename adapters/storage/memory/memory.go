@@ -72,6 +72,8 @@ type state struct {
 	invitations  map[string]port.Invitation
 	clients      map[string]port.Client
 	signingKeys  map[string]port.SigningKey
+	grants       map[string]port.Grant
+	oidcTokens   map[string]port.OIDCToken
 }
 
 // Storage はインメモリの Storage。
@@ -98,6 +100,7 @@ func New(clk clock.Clock) *Storage {
 		roleBindings: map[string]port.RoleBinding{}, roles: map[string]port.Role{}, groups: map[string]port.Group{},
 		groupMembers: map[string]port.GroupMember{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 		invitations: map[string]port.Invitation{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
+		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{},
 	}}
 }
 
@@ -163,6 +166,8 @@ func (t *tx) Roles() port.RoleRepo                     { return roles{t} }
 func (t *tx) Groups() port.GroupRepo                   { return groups{t} }
 func (t *tx) Clients() port.ClientRepo                 { return clients{t} }
 func (t *tx) SigningKeys() port.SigningKeyRepo         { return signingKeys{t} }
+func (t *tx) Grants() port.GrantRepo                   { return grants{t} }
+func (t *tx) OIDCTokens() port.OIDCTokenRepo           { return oidcTokens{t} }
 
 // setKey は map の値を設定し、取り消し方を記録する。
 func setKey[K comparable, V any](t *tx, m map[K]V, k K, v V) {

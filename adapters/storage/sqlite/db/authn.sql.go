@@ -292,8 +292,8 @@ func (q *Queries) CreateServiceAccountCredential(ctx context.Context, arg Create
 
 const createSession = `-- name: CreateSession :exec
 INSERT INTO authn_sessions (id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids,
-    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateSessionParams struct {
@@ -315,6 +315,7 @@ type CreateSessionParams struct {
 	RevokedAt         sql.NullString
 	RevokeReason      string
 	Restriction       string
+	Sid               string
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
@@ -337,6 +338,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 		arg.RevokedAt,
 		arg.RevokeReason,
 		arg.Restriction,
+		arg.Sid,
 	)
 	return err
 }
@@ -714,6 +716,42 @@ func (q *Queries) GetConnectionBySlug(ctx context.Context, arg GetConnectionBySl
 	return i, err
 }
 
+const getCurrentSessionBySID = `-- name: GetCurrentSessionBySID :one
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid FROM authn_sessions WHERE realm_id = ? AND sid = ? ORDER BY created_at DESC, id DESC LIMIT 1
+`
+
+type GetCurrentSessionBySIDParams struct {
+	RealmID string
+	Sid     string
+}
+
+func (q *Queries) GetCurrentSessionBySID(ctx context.Context, arg GetCurrentSessionBySIDParams) (AuthnSession, error) {
+	row := q.db.QueryRowContext(ctx, getCurrentSessionBySID, arg.RealmID, arg.Sid)
+	var i AuthnSession
+	err := row.Scan(
+		&i.ID,
+		&i.RealmID,
+		&i.PrincipalType,
+		&i.PrincipalID,
+		&i.ActiveOrgID,
+		&i.TokenHash,
+		&i.AuthMethods,
+		&i.AuthCredentialIds,
+		&i.Warnings,
+		&i.Ip,
+		&i.UserAgent,
+		&i.AuthenticatedAt,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+		&i.Restriction,
+		&i.Sid,
+	)
+	return i, err
+}
+
 const getEmail = `-- name: GetEmail :one
 SELECT id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at, public_id FROM authn_user_emails WHERE realm_id = ? AND id = ?
 `
@@ -1053,7 +1091,7 @@ func (q *Queries) GetServiceAccountCredential(ctx context.Context, arg GetServic
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction FROM authn_sessions WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid FROM authn_sessions WHERE realm_id = ? AND id = ?
 `
 
 type GetSessionParams struct {
@@ -1083,6 +1121,7 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (AuthnSe
 		&i.RevokedAt,
 		&i.RevokeReason,
 		&i.Restriction,
+		&i.Sid,
 	)
 	return i, err
 }
@@ -1504,7 +1543,7 @@ func (q *Queries) ListRecoveryCodes(ctx context.Context, arg ListRecoveryCodesPa
 }
 
 const listSessionsByPrincipal = `-- name: ListSessionsByPrincipal :many
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at DESC, id DESC
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid FROM authn_sessions WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at DESC, id DESC
 `
 
 type ListSessionsByPrincipalParams struct {
@@ -1541,6 +1580,7 @@ func (q *Queries) ListSessionsByPrincipal(ctx context.Context, arg ListSessionsB
 			&i.RevokedAt,
 			&i.RevokeReason,
 			&i.Restriction,
+			&i.Sid,
 		); err != nil {
 			return nil, err
 		}

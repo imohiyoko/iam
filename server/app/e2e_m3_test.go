@@ -18,7 +18,7 @@ import (
 // M3 の完了条件（roadmap.md M3）。条件ごとのテスト：
 //   - 仕事用メールでログインすると会社の Org に入る。passkey の既定 Org も効く：TestInvitationBindsInvitedEmail、TestPasskeyPreferredOrg、下の E2E
 //   - Org の管理者から、結び付けたメール以外が見えない：TestInvitationBindsInvitedEmail、下の E2E
-//     （連携先へのメールの受け渡しは M5 の OIDC で、同じく Membership に結び付けたメールだけを渡す）
+//     （連携先へも同じく Membership に結び付けたメールだけを渡す：TestOIDCOrgEmailIsBoundEmail）
 //   - 最後のオーナーは抜けられない。個人ユーザーの退会は Org の設定で止められない：TestLeaveOrg、下の E2E
 //   - 削除後、監査ログに残った個人情報が復号できない：shared/eventlog の TestClientSealing、下の E2E
 //   - Org をオフにした構成で M1・M2 の E2E がそのまま通る：TestE2EOrgOff

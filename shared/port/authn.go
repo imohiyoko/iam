@@ -51,7 +51,7 @@ type UserRepo interface {
 	// SetLegalHold は消去の保留を置き換える。無ければ errs.NotFound。
 	SetLegalHold(ctx context.Context, realmID, id string, hold bool, updatedAt time.Time) error
 	// Erase はユーザーを削除済み（墓標）にし、メール（インデックスごと。再登録できるように）・外部 ID の紐付け・passkey・
-	// TOTP・パスワード・リカバリーコード・セッション・ロールの付与を消す（4.10）。データ鍵、Membership、個人 Org、停止の記録は
+	// TOTP・パスワード・リカバリーコード・セッション・ロールの付与・連携先への認可を消す（4.10）。データ鍵、Membership、個人 Org、停止の記録は
 	// 呼び出し側が扱う。無ければ errs.NotFound。
 	Erase(ctx context.Context, realmID, id string, at time.Time) error
 }
@@ -346,11 +346,13 @@ const (
 
 // Session は sessions の1行（design.md 5.2）。秘密トークンは持たず、そのハッシュだけを持つ。
 type Session struct {
-	ID                string
-	RealmID           string
-	PrincipalType     PrincipalType
-	PrincipalID       string
-	ActiveOrgID       string   // Org がオフなら常に空
+	ID            string
+	RealmID       string
+	PrincipalType PrincipalType
+	PrincipalID   string
+	ActiveOrgID   string // Org がオフなら常に空
+	// SID はログインの系列の ID（最初のセッションの ID）。ID を入れ替えても引き継ぐ。OIDC の sid（5.1、5.2）。
+	SID               string
 	TokenHash         []byte   // 秘密部分の SHA-256
 	AuthMethods       []string // amr
 	AuthCredentialIDs []string // 認証に使った認証情報（無効化の判定に使う）
@@ -391,6 +393,8 @@ type SessionRepo interface {
 	Get(ctx context.Context, realmID, id string) (Session, error)
 	// ListByPrincipal は主体のセッションを新しい順に返す（失効・期限切れも含む）。
 	ListByPrincipal(ctx context.Context, realmID string, t PrincipalType, principalID string) ([]Session, error)
+	// GetCurrentBySID はログインの系列の最新のセッション（最後に作ったもの）を返す（失効・期限切れも含む）。無ければ errs.NotFound。
+	GetCurrentBySID(ctx context.Context, realmID, sid string) (Session, error)
 	// Touch は最終利用時刻を進める（戻さない）。
 	Touch(ctx context.Context, realmID, id string, at time.Time) error
 	// Revoke は at に失効させる。既に at 以前に失効していれば何もしない（失効の時刻は早まるだけで遅れない）。

@@ -89,9 +89,15 @@ type App struct {
 	// recovery はリカバリーコードと復旧の完了（4.12）。
 	recovery *recovery.Service
 	notifier *eventlog.Relay
+	// logout は Back-Channel Logout を送る（ADR 0066）。
+	logout *eventlog.Relay
 	// clients と keys は OIDC Provider の連携先と ID トークンの署名鍵（5.5、9.3）。
 	clients *provider.Clients
 	keys    *provider.Keys
+	// issuer は OIDC の iss（server.public_url）。空なら OIDC Provider のエンドポイントを出さない。
+	issuer string
+	flow   *provider.Flow
+	tokens *provider.Tokens
 	// authz は認可の判定（ADR 0064）。manage はロール・付与・Group の管理。
 	authz  *check.Checker
 	manage *manage.Service
@@ -203,6 +209,20 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, a.realm.ID) }); err != nil {
 		return nil, err
 	}
+	a.issuer = strings.TrimSuffix(cfg.Server.PublicURL, "/")
+	if a.issuer == "" {
+		d.Logger.Info("the OIDC provider is disabled: set server.public_url")
+	}
+	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D()}
+	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Issuer: a.issuer,
+		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D()}
+	if a.issuer != "" {
+		a.sessions.Lineages = a.tokens
+	}
+	a.logout = &eventlog.Relay{
+		Storage: d.Storage, Topic: provider.LogoutTopic, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
+		Deliver: (&provider.LogoutDeliverer{Storage: d.Storage, Keys: a.keys, Clock: d.Clock, Issuer: a.issuer, Log: d.Logger}).Deliver,
+	}
 	a.email = &emailflow.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Notify: a.notify, Log: d.Logger,
@@ -264,7 +284,8 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	}
 	a.scheduler = &eventlog.Scheduler{Storage: d.Storage, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger}
 	a.scheduler.Handlers = map[string]eventlog.Handler{account.EventUserDeleted: a.accounts.PurgeDue,
-		eventlog.EventClientKeyExpired: clientSealer.Expire}
+		eventlog.EventClientKeyExpired: clientSealer.Expire,
+		account.EventSuspensionStarted: a.endOnSuspensionStart, account.EventValidityEnded: a.endOnValidityEnd}
 	if a.orgs != nil {
 		a.scheduler.Handlers[org.EventOrgDeleted] = a.orgs.PurgeDue
 		a.scheduler.Handlers[org.EventInvitationExpired] = a.orgs.ExpireDue
@@ -435,9 +456,11 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	for i, l := range []net.Listener{pubL, admL} {
 		go func() { errc <- servers[i].Serve(l) }()
 	}
-	relayDone, notifyDone, schedDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	go func() { a.relay.Run(ctx); close(relayDone) }()
-	go func() { a.notifier.Run(ctx); close(notifyDone) }()
+	relays := []*eventlog.Relay{a.relay, a.notifier, a.logout}
+	relayDone, schedDone := make(chan struct{}, len(relays)), make(chan struct{})
+	for _, r := range relays {
+		go func() { r.Run(ctx); relayDone <- struct{}{} }()
+	}
 	go func() { a.scheduler.Run(ctx); close(schedDone) }()
 
 	a.deps.Logger.Info("iam started", "public", pubL.Addr().String(), "admin", admL.Addr().String(),
@@ -457,11 +480,12 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	for _, s := range servers {
 		_ = s.Shutdown(shutdownCtx)
 	}
-	<-relayDone
-	<-notifyDone
+	for range relays {
+		<-relayDone
+	}
 	<-schedDone
 	// 止める前に残りを送る（届かなければ次の起動で送る）。
-	for _, r := range []*eventlog.Relay{a.relay, a.notifier} {
+	for _, r := range relays {
 		if _, err := r.Flush(shutdownCtx); err != nil {
 			a.deps.Logger.Warn("final outbox flush failed", "topic", r.Topic, "error", err)
 		}

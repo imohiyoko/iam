@@ -43,8 +43,21 @@
   // 取り除くため（"/\t/evil.example" は "//evil.example" になる）、制御文字とバックスラッシュを拒み、
   // 解決した結果のオリジンも確かめる。返すのは絶対 URL にする。パスだけを返すと、ドット区間の正規化で
   // "/a/..//evil.example" の pathname が "//evil.example" になり、遷移のときに外部の URL と解釈される。
+  // 外部プロバイダへの往復では戻り先がクエリから消えるので、同じタブの sessionStorage に預ける。
+  function returnTo() {
+    let r = app.dataset.returnTo || "";
+    try {
+      if (r) sessionStorage.setItem("iam_return_to", r);
+      else if (app.dataset.page === "oauth_callback") r = sessionStorage.getItem("iam_return_to") || "";
+      else sessionStorage.removeItem("iam_return_to"); // 放棄した往復の戻り先を後のログインで使わない
+    } catch (_) {}
+    return r;
+  }
+
+  returnTo();
+
   function safeReturnTo() {
-    const r = app.dataset.returnTo || "";
+    const r = returnTo();
     if (!r.startsWith("/") || /[\u0000-\u001f\u007f\\]/.test(r)) return "";
     try {
       const u = new URL(r, window.location.origin);
@@ -74,6 +87,7 @@
     show("done");
     say((r.data.warnings || []).length ? "warnings" : "done", false);
     const to = safeReturnTo();
+    try { sessionStorage.removeItem("iam_return_to"); } catch (_) {}
     if (to) window.location.assign(to);
   }
 

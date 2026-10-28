@@ -82,7 +82,13 @@ func (r clients) Update(ctx context.Context, c port.Client) error {
 
 func (r clients) Delete(ctx context.Context, realmID, id string) error {
 	n, err := r.q.DeleteClient(ctx, db.DeleteClientParams{RealmID: realmID, ID: id})
-	return affected(n, err, "client")
+	if err := affected(n, err, "client"); err != nil {
+		return err
+	}
+	if err := r.q.DeleteClientGrantTokens(ctx, db.DeleteClientGrantTokensParams{RealmID: realmID, ClientID: id}); err != nil {
+		return mapErr(err)
+	}
+	return mapErr(r.q.DeleteClientGrants(ctx, db.DeleteClientGrantsParams{RealmID: realmID, ClientID: id}))
 }
 
 // ---------------------------------------------------------------------------
@@ -114,4 +120,78 @@ func (r signingKeys) Retire(ctx context.Context, realmID, id string, at time.Tim
 func (r signingKeys) Delete(ctx context.Context, realmID, id string) error {
 	n, err := r.q.DeleteSigningKey(ctx, db.DeleteSigningKeyParams{RealmID: realmID, ID: id})
 	return affected(n, err, "signing key")
+}
+
+// ---------------------------------------------------------------------------
+
+type grants struct{ q *db.Queries }
+
+func toGrant(r db.AuthnOidcGrant) (port.Grant, error) {
+	var p times
+	g := port.Grant{ID: r.ID, RealmID: r.RealmID, ClientID: r.ClientID, UserID: r.UserID, OrgID: r.OrgID, SID: r.Sid,
+		AuthTime: p.at(r.AuthTime), CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.at(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt),
+		RevokeReason: r.RevokeReason}
+	if p.err != nil {
+		return g, p.err
+	}
+	if err := json.Unmarshal([]byte(r.Scopes), &g.Scopes); err != nil {
+		return g, err
+	}
+	return g, json.Unmarshal([]byte(r.AuthMethods), &g.AuthMethods)
+}
+
+func (r grants) Create(ctx context.Context, g port.Grant) error {
+	return mapErr(r.q.CreateGrant(ctx, db.CreateGrantParams{ID: g.ID, RealmID: g.RealmID, ClientID: g.ClientID, UserID: g.UserID, OrgID: g.OrgID,
+		Sid: g.SID, Scopes: jsonList(g.Scopes), AuthMethods: jsonList(g.AuthMethods), AuthTime: formatTime(g.AuthTime),
+		CreatedAt: formatTime(g.CreatedAt), ExpiresAt: formatTime(g.ExpiresAt), RevokedAt: nullTime(g.RevokedAt), RevokeReason: g.RevokeReason}))
+}
+
+func (r grants) Get(ctx context.Context, realmID, id string) (port.Grant, error) {
+	row, err := r.q.GetGrant(ctx, db.GetGrantParams{RealmID: realmID, ID: id})
+	return one(row, err, toGrant)
+}
+
+func (r grants) ListBySID(ctx context.Context, realmID, sid string) ([]port.Grant, error) {
+	rs, err := r.q.ListGrantsBySID(ctx, db.ListGrantsBySIDParams{RealmID: realmID, Sid: sid})
+	return rows(rs, err, toGrant)
+}
+
+func (r grants) Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error {
+	n, err := r.q.RevokeGrant(ctx, db.RevokeGrantParams{At: nullTime(&at), Reason: reason, RealmID: realmID, ID: id})
+	return affected(n, err, "grant")
+}
+
+// ---------------------------------------------------------------------------
+
+type oidcTokens struct{ q *db.Queries }
+
+func toOIDCToken(r db.AuthnOidcToken) (port.OIDCToken, error) {
+	var p times
+	t := port.OIDCToken{ID: r.ID, RealmID: r.RealmID, GrantID: r.GrantID, Kind: r.Kind, Hash: r.TokenHash, CreatedAt: p.at(r.CreatedAt),
+		ExpiresAt: p.at(r.ExpiresAt), UsedAt: p.null(r.UsedAt)}
+	return t, p.err
+}
+
+func (r oidcTokens) Create(ctx context.Context, t port.OIDCToken) error {
+	return mapErr(r.q.CreateOIDCToken(ctx, db.CreateOIDCTokenParams{ID: t.ID, RealmID: t.RealmID, GrantID: t.GrantID, Kind: t.Kind,
+		TokenHash: nonNil(t.Hash), CreatedAt: formatTime(t.CreatedAt), ExpiresAt: formatTime(t.ExpiresAt), UsedAt: nullTime(t.UsedAt)}))
+}
+
+func (r oidcTokens) Get(ctx context.Context, realmID, id string) (port.OIDCToken, error) {
+	row, err := r.q.GetOIDCToken(ctx, db.GetOIDCTokenParams{RealmID: realmID, ID: id})
+	return one(row, err, toOIDCToken)
+}
+
+func (r oidcTokens) Use(ctx context.Context, realmID, id string, at time.Time) (bool, error) {
+	n, err := r.q.UseOIDCToken(ctx, db.UseOIDCTokenParams{UsedAt: nullTime(&at), RealmID: realmID, ID: id})
+	if err != nil {
+		return false, mapErr(err)
+	}
+	if n == 1 {
+		return true, nil
+	}
+	if _, err := r.Get(ctx, realmID, id); err != nil {
+		return false, err
+	}
+	return false, nil
 }

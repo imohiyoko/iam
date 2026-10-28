@@ -53,6 +53,75 @@ func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) erro
 	return err
 }
 
+const createGrant = `-- name: CreateGrant :exec
+INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateGrantParams struct {
+	ID           string
+	RealmID      string
+	ClientID     string
+	UserID       string
+	OrgID        string
+	Sid          string
+	Scopes       string
+	AuthMethods  string
+	AuthTime     string
+	CreatedAt    string
+	ExpiresAt    string
+	RevokedAt    sql.NullString
+	RevokeReason string
+}
+
+func (q *Queries) CreateGrant(ctx context.Context, arg CreateGrantParams) error {
+	_, err := q.db.ExecContext(ctx, createGrant,
+		arg.ID,
+		arg.RealmID,
+		arg.ClientID,
+		arg.UserID,
+		arg.OrgID,
+		arg.Sid,
+		arg.Scopes,
+		arg.AuthMethods,
+		arg.AuthTime,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+		arg.RevokedAt,
+		arg.RevokeReason,
+	)
+	return err
+}
+
+const createOIDCToken = `-- name: CreateOIDCToken :exec
+INSERT INTO authn_oidc_tokens (id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateOIDCTokenParams struct {
+	ID        string
+	RealmID   string
+	GrantID   string
+	Kind      string
+	TokenHash []byte
+	CreatedAt string
+	ExpiresAt string
+	UsedAt    sql.NullString
+}
+
+func (q *Queries) CreateOIDCToken(ctx context.Context, arg CreateOIDCTokenParams) error {
+	_, err := q.db.ExecContext(ctx, createOIDCToken,
+		arg.ID,
+		arg.RealmID,
+		arg.GrantID,
+		arg.Kind,
+		arg.TokenHash,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+		arg.UsedAt,
+	)
+	return err
+}
+
 const createSigningKey = `-- name: CreateSigningKey :exec
 INSERT INTO authn_signing_keys (id, realm_id, alg, public_key, private_key, created_at, retired_at) VALUES (?, ?, ?, ?, ?, ?, ?)
 `
@@ -97,6 +166,34 @@ func (q *Queries) DeleteClient(ctx context.Context, arg DeleteClientParams) (int
 	return result.RowsAffected()
 }
 
+const deleteClientGrantTokens = `-- name: DeleteClientGrantTokens :exec
+DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_grants g WHERE g.realm_id = ?1 AND g.client_id = ?2)
+`
+
+type DeleteClientGrantTokensParams struct {
+	RealmID  string
+	ClientID string
+}
+
+func (q *Queries) DeleteClientGrantTokens(ctx context.Context, arg DeleteClientGrantTokensParams) error {
+	_, err := q.db.ExecContext(ctx, deleteClientGrantTokens, arg.RealmID, arg.ClientID)
+	return err
+}
+
+const deleteClientGrants = `-- name: DeleteClientGrants :exec
+DELETE FROM authn_oidc_grants WHERE realm_id = ? AND client_id = ?
+`
+
+type DeleteClientGrantsParams struct {
+	RealmID  string
+	ClientID string
+}
+
+func (q *Queries) DeleteClientGrants(ctx context.Context, arg DeleteClientGrantsParams) error {
+	_, err := q.db.ExecContext(ctx, deleteClientGrants, arg.RealmID, arg.ClientID)
+	return err
+}
+
 const deleteSigningKey = `-- name: DeleteSigningKey :execrows
 DELETE FROM authn_signing_keys WHERE realm_id = ? AND id = ?
 `
@@ -112,6 +209,34 @@ func (q *Queries) DeleteSigningKey(ctx context.Context, arg DeleteSigningKeyPara
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const eraseUserGrantTokens = `-- name: EraseUserGrantTokens :exec
+DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_grants g WHERE g.realm_id = ?1 AND g.user_id = ?2)
+`
+
+type EraseUserGrantTokensParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) EraseUserGrantTokens(ctx context.Context, arg EraseUserGrantTokensParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserGrantTokens, arg.RealmID, arg.UserID)
+	return err
+}
+
+const eraseUserGrants = `-- name: EraseUserGrants :exec
+DELETE FROM authn_oidc_grants WHERE realm_id = ? AND user_id = ?
+`
+
+type EraseUserGrantsParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) EraseUserGrants(ctx context.Context, arg EraseUserGrantsParams) error {
+	_, err := q.db.ExecContext(ctx, eraseUserGrants, arg.RealmID, arg.UserID)
+	return err
 }
 
 const getClient = `-- name: GetClient :one
@@ -176,6 +301,61 @@ func (q *Queries) GetClientByPublicID(ctx context.Context, arg GetClientByPublic
 	return i, err
 }
 
+const getGrant = `-- name: GetGrant :one
+SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason FROM authn_oidc_grants WHERE realm_id = ? AND id = ?
+`
+
+type GetGrantParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (AuthnOidcGrant, error) {
+	row := q.db.QueryRowContext(ctx, getGrant, arg.RealmID, arg.ID)
+	var i AuthnOidcGrant
+	err := row.Scan(
+		&i.ID,
+		&i.RealmID,
+		&i.ClientID,
+		&i.UserID,
+		&i.OrgID,
+		&i.Sid,
+		&i.Scopes,
+		&i.AuthMethods,
+		&i.AuthTime,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
+const getOIDCToken = `-- name: GetOIDCToken :one
+SELECT id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at FROM authn_oidc_tokens WHERE realm_id = ? AND id = ?
+`
+
+type GetOIDCTokenParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetOIDCToken(ctx context.Context, arg GetOIDCTokenParams) (AuthnOidcToken, error) {
+	row := q.db.QueryRowContext(ctx, getOIDCToken, arg.RealmID, arg.ID)
+	var i AuthnOidcToken
+	err := row.Scan(
+		&i.ID,
+		&i.RealmID,
+		&i.GrantID,
+		&i.Kind,
+		&i.TokenHash,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.UsedAt,
+	)
+	return i, err
+}
+
 const listClients = `-- name: ListClients :many
 SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id
 `
@@ -204,6 +384,52 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 			&i.BackchannelLogoutUri,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGrantsBySID = `-- name: ListGrantsBySID :many
+SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason FROM authn_oidc_grants WHERE realm_id = ? AND sid = ? ORDER BY created_at, id
+`
+
+type ListGrantsBySIDParams struct {
+	RealmID string
+	Sid     string
+}
+
+func (q *Queries) ListGrantsBySID(ctx context.Context, arg ListGrantsBySIDParams) ([]AuthnOidcGrant, error) {
+	rows, err := q.db.QueryContext(ctx, listGrantsBySID, arg.RealmID, arg.Sid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnOidcGrant
+	for rows.Next() {
+		var i AuthnOidcGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.RealmID,
+			&i.ClientID,
+			&i.UserID,
+			&i.OrgID,
+			&i.Sid,
+			&i.Scopes,
+			&i.AuthMethods,
+			&i.AuthTime,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.RevokeReason,
 		); err != nil {
 			return nil, err
 		}
@@ -271,6 +497,33 @@ func (q *Queries) RetireSigningKey(ctx context.Context, arg RetireSigningKeyPara
 	return result.RowsAffected()
 }
 
+const revokeGrant = `-- name: RevokeGrant :execrows
+UPDATE authn_oidc_grants SET
+    revoke_reason = CASE WHEN revoked_at IS NULL OR revoked_at > ?1 THEN ?2 ELSE revoke_reason END,
+    revoked_at = CASE WHEN revoked_at IS NULL OR revoked_at > ?1 THEN ?1 ELSE revoked_at END
+WHERE realm_id = ?3 AND id = ?4
+`
+
+type RevokeGrantParams struct {
+	At      sql.NullString
+	Reason  string
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) RevokeGrant(ctx context.Context, arg RevokeGrantParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeGrant,
+		arg.At,
+		arg.Reason,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateClient = `-- name: UpdateClient :execrows
 UPDATE authn_clients SET name = ?, trust_level = ?, redirect_uris = ?, post_logout_redirect_uris = ?, auth_method = ?, secret_hash = ?, jwks = ?,
     id_token_alg = ?, backchannel_logout_uri = ?, updated_at = ?
@@ -307,6 +560,24 @@ func (q *Queries) UpdateClient(ctx context.Context, arg UpdateClientParams) (int
 		arg.RealmID,
 		arg.ID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const useOIDCToken = `-- name: UseOIDCToken :execrows
+UPDATE authn_oidc_tokens SET used_at = ? WHERE realm_id = ? AND id = ? AND used_at IS NULL
+`
+
+type UseOIDCTokenParams struct {
+	UsedAt  sql.NullString
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) UseOIDCToken(ctx context.Context, arg UseOIDCTokenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, useOIDCToken, arg.UsedAt, arg.RealmID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

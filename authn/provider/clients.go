@@ -11,9 +11,12 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
+	"github.com/lestrrat-go/jwx/v4/jwt"
 
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -247,6 +250,70 @@ func AuthenticateSecret(ctx context.Context, tx port.Tx, realmID, clientID, secr
 	}
 	h := sha256.Sum256([]byte(secret))
 	if cl.AuthMethod != port.ClientAuthSecret || subtle.ConstantTimeCompare(h[:], cl.SecretHash) != 1 {
+		return port.Client{}, ErrClientAuth
+	}
+	return cl, nil
+}
+
+// MaxAssertionLifetime は client_assertion の exp の上限（今からの長さ）。jti の再利用の検知はこの間だけ覚える。
+const MaxAssertionLifetime = 5 * time.Minute
+
+// AssertionReplay は client_assertion の jti を覚える（1回だけ使える。RFC 7523 3）。
+type AssertionReplay interface {
+	Incr(ctx context.Context, key string, ttl time.Duration) (int64, error)
+}
+
+// AuthenticateAssertion は private_key_jwt の client_assertion で連携先を認証する（OIDC Core 9、RFC 7523）。
+// iss と sub は client_id、aud は audiences（token エンドポイントの URL か issuer）のどれか、exp は今から
+// MaxAssertionLifetime 以内、jti は未使用であること。理由は返さない。
+func AuthenticateAssertion(ctx context.Context, tx port.Tx, replay AssertionReplay, clk clock.Clock, realmID, clientID, assertion string,
+	audiences []string) (port.Client, error) {
+	if clientID == "" {
+		// client_id を省いたときは、署名の検証の前に iss を読む（検証の後で sub・iss と照合する）。
+		t, err := jwt.ParseInsecure([]byte(assertion))
+		if err != nil {
+			return port.Client{}, ErrClientAuth
+		}
+		if clientID, _ = t.Issuer(); clientID == "" {
+			return port.Client{}, ErrClientAuth
+		}
+	}
+	cl, err := tx.Clients().GetByPublicID(ctx, realmID, clientID)
+	if errors.Is(err, errs.NotFound) {
+		return port.Client{}, ErrClientAuth
+	}
+	if err != nil {
+		return port.Client{}, err
+	}
+	if cl.AuthMethod != port.ClientAuthPrivateKeyJWT {
+		return port.Client{}, ErrClientAuth
+	}
+	set, err := jwk.Parse(cl.JWKS)
+	if err != nil {
+		return port.Client{}, ErrClientAuth
+	}
+	now := clk.Now()
+	t, err := jwt.Parse([]byte(assertion), jwt.WithKeySet(set, jws.WithInferAlgorithmFromKey(true)), jwt.WithValidate(true),
+		jwt.WithClock(jwt.ClockFunc(clk.Now)), jwt.WithAcceptableSkew(30*time.Second),
+		jwt.WithIssuer(cl.PublicID), jwt.WithSubject(cl.PublicID), jwt.WithRequiredClaim(jwt.ExpirationKey), jwt.WithRequiredClaim(jwt.JwtIDKey))
+	if err != nil {
+		return port.Client{}, ErrClientAuth
+	}
+	aud, _ := t.Audience()
+	if !slices.ContainsFunc(aud, func(a string) bool { return slices.Contains(audiences, a) }) {
+		return port.Client{}, ErrClientAuth
+	}
+	exp, _ := t.Expiration()
+	if exp.Sub(now) > MaxAssertionLifetime {
+		return port.Client{}, ErrClientAuth
+	}
+	jti, _ := t.JwtID()
+	h := sha256.Sum256([]byte(cl.PublicID + "\x00" + jti))
+	n, err := replay.Incr(ctx, "oidc:assertion:v1:"+base64.RawURLEncoding.EncodeToString(h[:]), MaxAssertionLifetime+time.Minute)
+	if err != nil {
+		return port.Client{}, err
+	}
+	if n != 1 {
 		return port.Client{}, ErrClientAuth
 	}
 	return cl, nil

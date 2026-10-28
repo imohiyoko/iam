@@ -511,8 +511,9 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 - ログには公開 ID だけを出す。秘密部分はどこにも出さない
 - Cookie：`__Host-`、`Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/`、`Domain` なし。別ドメインのアプリには Bearer
 - ID の入れ替え：ログイン成功時、step-up 時、Org 切り替え時、一定時間ごと
+- OIDC の `sid` はログインの系列の ID（最初のセッションの ID）。ID を入れ替えても変わらず、連携先のトークンは系列の今のセッションが使える間だけ使える（ADR 0066）
 - 失効の契機：ログアウト、本人・管理者による失効、パスワード・認証手段の変更時（他のセッションを一括失効）
-- 失効は Storage に書いてからキャッシュを消す。Back-Channel Logout で `sid` を通知（M5 以降）
+- 失効は Storage に書いてからキャッシュを消す。ログインの系列が終われば Back-Channel Logout で `sid` を通知する（ADR 0066）
 - 将来：端末に結び付けたセッション（Device Bound Session Credentials など）
 
 ### 5.3 セッション検証とキャッシュ
