@@ -34,6 +34,33 @@ type AuthnConnection struct {
 	CreatedAt string
 }
 
+type AuthnOidcGrant struct {
+	ID           string
+	RealmID      string
+	ClientID     string
+	UserID       string
+	OrgID        string
+	Sid          string
+	Scopes       string
+	AuthMethods  string
+	AuthTime     string
+	CreatedAt    string
+	ExpiresAt    string
+	RevokedAt    sql.NullString
+	RevokeReason string
+}
+
+type AuthnOidcToken struct {
+	ID        string
+	RealmID   string
+	GrantID   string
+	Kind      string
+	TokenHash []byte
+	CreatedAt string
+	ExpiresAt string
+	UsedAt    sql.NullString
+}
+
 type AuthnPasskey struct {
 	ID             string
 	PublicID       string
@@ -124,6 +151,7 @@ type AuthnSession struct {
 	RevokedAt         sql.NullString
 	RevokeReason      string
 	Restriction       string
+	Sid               string
 }
 
 type AuthnSigningKey struct {

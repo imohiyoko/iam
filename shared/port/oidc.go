@@ -56,7 +56,7 @@ type ClientRepo interface {
 	List(ctx context.Context, realmID string) ([]Client, error)
 	// Update は ID と realm と作成時刻以外を置き換える。無ければ errs.NotFound。
 	Update(ctx context.Context, c Client) error
-	// Delete はクライアントを消す。無ければ errs.NotFound。
+	// Delete はクライアントと、その認可・トークンを消す。無ければ errs.NotFound。
 	Delete(ctx context.Context, realmID, id string) error
 }
 
@@ -85,4 +85,65 @@ type SigningKeyRepo interface {
 	Retire(ctx context.Context, realmID, id string, at time.Time) error
 	// Delete は鍵を消す。無ければ errs.NotFound。
 	Delete(ctx context.Context, realmID, id string) error
+}
+
+// Grant は連携先への認可の1件（認可コードの交換ごとに作る。アクセストークンとリフレッシュトークンの親。5.1）。
+// ログインの系列（Session.SID）に結び付け、系列が終われば（ログアウト・失効・期限）使えなくなる。
+type Grant struct {
+	ID       string // 内部 ID。外に出さない
+	RealmID  string
+	ClientID string // 内部 ID
+	UserID   string // 内部 ID
+	// OrgID は認可したときの active な Org（内部 ID）。Org がオフなら空。
+	OrgID       string
+	SID         string
+	Scopes      []string
+	AuthMethods []string // amr
+	// AuthTime は認可に使ったセッションで最後に本人確認した時刻（auth_time）。
+	AuthTime     time.Time
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	RevokedAt    *time.Time
+	RevokeReason string
+}
+
+// GrantRepo は oidc_grants の Repository。認可とそのトークンは、連携先の削除（ClientRepo.Delete）と
+// ユーザーの消去（UserRepo.Erase）で一緒に消える。
+type GrantRepo interface {
+	// Create は ID が重複すれば errs.Conflict を返す。
+	Create(ctx context.Context, g Grant) error
+	Get(ctx context.Context, realmID, id string) (Grant, error)
+	// ListBySID はログインの系列に結び付いた認可を作成時刻の順（同時刻は ID の順）に返す（失効したものも含む）。
+	ListBySID(ctx context.Context, realmID, sid string) ([]Grant, error)
+	// Revoke は at に失効させる。既に at 以前に失効していれば何もしない。無ければ errs.NotFound。
+	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+}
+
+// トークンの種類。
+const (
+	TokenAccess  = "access"
+	TokenRefresh = "refresh"
+)
+
+// OIDCToken は oidc_tokens の1行（不透明なアクセストークン・リフレッシュトークン。5.1）。
+// トークンは `<ID>.<256bit 乱数>` で、保存するのは秘密部分の SHA-256 だけ（セッションと同じ。5.2）。
+type OIDCToken struct {
+	ID        string
+	RealmID   string
+	GrantID   string
+	Kind      string
+	Hash      []byte
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	// UsedAt はリフレッシュトークンを使った（ローテーションした）時刻。
+	UsedAt *time.Time
+}
+
+// OIDCTokenRepo は oidc_tokens の Repository。
+type OIDCTokenRepo interface {
+	// Create は ID が重複すれば errs.Conflict を返す。
+	Create(ctx context.Context, t OIDCToken) error
+	Get(ctx context.Context, realmID, id string) (OIDCToken, error)
+	// Use はまだ使っていなければ at に使用済みにして true を返す（同時に使われても true は1回だけ）。無ければ errs.NotFound。
+	Use(ctx context.Context, realmID, id string, at time.Time) (bool, error)
 }

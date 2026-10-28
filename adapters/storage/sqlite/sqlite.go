@@ -205,6 +205,8 @@ func (t *tx) Roles() port.RoleRepo                     { return roles{t.q} }
 func (t *tx) Groups() port.GroupRepo                   { return groups{t.q} }
 func (t *tx) Clients() port.ClientRepo                 { return clients{t.q} }
 func (t *tx) SigningKeys() port.SigningKeyRepo         { return signingKeys{t.q} }
+func (t *tx) Grants() port.GrantRepo                   { return grants{t.q} }
+func (t *tx) OIDCTokens() port.OIDCTokenRepo           { return oidcTokens{t.q} }
 
 // ---------------------------------------------------------------------------
 
