@@ -185,8 +185,9 @@ Group のネスト、Org 階層（M7）。
 
 ### 完了条件
 
-- [ ] OpenID Foundation の適合試験（Basic OP 相当）に、既知の差異（RS256 なし）以外で合格（観点は自動テストで確認済み。
-  公式の試験は公開した環境で実行する。[適合性メモ](oidc-conformance.md)）
+- [ ] OpenID Foundation の適合試験（Basic OP 相当）に、[適合性メモ](oidc-conformance.md)の既知の差異（RS256 なし、PKCE 必須、
+  `query` 以外の response_mode・request・claims・profile などのスコープ・同意画面・動的登録・offline_access を扱わない）以外で
+  合格（観点は自動テストで確認済み。公式の試験は公開した環境で実行する）
 - [x] 停止・無効化がイントロスペクションの結果に上限の時間内で反映される
 - [x] ML-DSA と ES256 の両方の RP で E2E が通る
 - [ ] 連携先から、Membership に結び付けたメール以外が見えない

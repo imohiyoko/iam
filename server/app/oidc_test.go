@@ -246,6 +246,16 @@ func TestOIDCAuthorizationCodeFlow(t *testing.T) {
 		!strings.Contains(w.Body.String(), alice) {
 		t.Fatalf("userinfo POST: %d %s", w.Code, w.Body)
 	}
+	// client_secret_post（本文の client_id と client_secret）でも認証できる。nonce の無い認可要求も受け、ID トークンに
+	// nonce を入れない。
+	cp := p.code(t, l.oidcDo(t, "GET", p.authorizeURL(url.Values{"nonce": nil}), nil, cookie))
+	status, tp := p.exchange(t, cp, url.Values{"client_id": {p.clientID}, "client_secret": {p.secret}}, "Accept", "application/json")
+	if status != 200 {
+		t.Fatalf("client_secret_post: %d %v", status, tp)
+	}
+	if c := l.idClaims(t, tp["id_token"].(string), port.AlgES256); c["nonce"] != nil || c["sub"] != alice {
+		t.Fatalf("id token without nonce: %v", c)
+	}
 
 	// ログイン済みならそのまま戻る。セッションの ID を入れ替えても sid は変わらない。
 	l.advance(l.a.cfg.Security.Session.RotationInterval.D() + time.Second)
@@ -320,7 +330,7 @@ func TestOIDCAuthorizationCodeFlow(t *testing.T) {
 	for _, e := range l.auditTypes(t) {
 		types[e.Type]++
 	}
-	if types["oidc.authorized"] != 2 {
+	if types["oidc.authorized"] != 3 {
 		t.Fatalf("audit: %v", types)
 	}
 }
