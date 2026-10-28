@@ -28,8 +28,8 @@ jobs:
       # PostgreSQL のアダプタの契約テスト（未設定ならスキップする）。
       IAM_TEST_POSTGRES: postgres://iam:iam@127.0.0.1:5432/iam?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.27.x"
           cache-dependency-path: "**/go.sum"
@@ -44,8 +44,8 @@ jobs:
     # 生成コード（sqlc、oapi-codegen）が定義と一致しているか。
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.27.x"
           cache-dependency-path: "**/go.sum"
@@ -70,8 +70,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.27.x"
           cache-dependency-path: "**/go.sum"
@@ -91,8 +91,8 @@ jobs:
     # 主要操作のレイテンシを計測し、bench/baseline.txt の上限と比べる（ADR 0044）。
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.27.x"
           cache-dependency-path: "**/go.sum"
@@ -103,7 +103,7 @@ jobs:
             (cd . && GOWORK=off go test -run '^$' -bench . -count 5 ./...)
             (cd adapters/storage/sqlite && GOWORK=off go test -run '^$' -bench . -count 5 ./...)
           } | tee bench.txt | scripts/benchcheck.sh bench/baseline.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: bench

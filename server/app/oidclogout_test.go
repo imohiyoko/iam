@@ -13,6 +13,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authz/role"
+	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -241,5 +242,28 @@ func TestOIDCCORSAndCSRF(t *testing.T) {
 	}
 	if w := l.oidcDo(t, "POST", "/v1/logout", nil, cookie, "Sec-Fetch-Site", "same-origin"); w.Code != 204 {
 		t.Fatalf("same-origin logout: %d", w.Code)
+	}
+}
+
+// 認可が期限切れでも、系列が終われば連携先に送る（連携先のログインは認可の期限とは別に残りうる）。
+func TestOIDCBackchannelLogoutAfterGrantExpiry(t *testing.T) {
+	l := newLoginEnvWith(t, func(c *config.Config) {
+		withIssuer(c)
+		c.OIDC.RefreshTokenTTL = config.Duration(time.Hour)
+	}, nil)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	recv := &bclReceiver{}
+	srv := httptest.NewServer(recv)
+	defer srv.Close()
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "backchannel_logout_uri": srv.URL + "/bcl"})
+	code, cookie := p.login(t, "alice@example.com", nil)
+	_, _ = p.exchange(t, code, nil)
+	l.advance(2 * time.Hour)
+	if code, _ := l.meDo(t, "POST", cookie, "/v1/logout", nil); code != 204 {
+		t.Fatalf("logout: %d", code)
+	}
+	l.flushLogout(t)
+	if got := recv.take(); len(got) != 1 {
+		t.Fatalf("logout tokens after grant expiry: %d", len(got))
 	}
 }
