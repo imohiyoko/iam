@@ -124,7 +124,7 @@ func TestOIDCE2EStandardRP(t *testing.T) {
 	}
 	// リフレッシュで出す ID トークンには nonce を入れない（OIDC Core 12.2）。
 	refreshed, err := oidcrp.RefreshTokens[*oidc.IDTokenClaims](ctx, relying, tokens.RefreshToken, "", "")
-	if err != nil || refreshed.IDTokenClaims.SessionID != tokens.IDTokenClaims.SessionID || refreshed.RefreshToken == tokens.RefreshToken {
+	if err != nil || refreshed.IDTokenClaims.SessionID != tokens.IDTokenClaims.SessionID || refreshed.RefreshToken == tokens.RefreshToken || refreshed.IDTokenClaims.Nonce != "" {
 		t.Fatalf("refresh: %+v %v", refreshed, err)
 	}
 
