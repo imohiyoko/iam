@@ -78,3 +78,4 @@
 | [0064](0064-authz-roles-groups-check.md) | ロール・付与・Group と認可の判定 | 承認 |
 | [0065](0065-oidc-clients-and-signing-keys.md) | OIDC の連携先の登録と ID トークンの署名鍵 | 承認 |
 | [0066](0066-oidc-authorization-code-flow.md) | OIDC の認可コードフローと、トークンをログインの系列に結び付けること | 承認 |
+| [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 提案 |
