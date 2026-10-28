@@ -241,6 +241,11 @@ func TestOIDCAuthorizationCodeFlow(t *testing.T) {
 	if status, info := l.userinfo(t, tok["access_token"].(string)); status != 200 || info["sub"] != alice || info["email"] != "alice@example.com" {
 		t.Fatalf("userinfo: %d %v", status, info)
 	}
+	// POST の本文の access_token でも受ける（OIDC Core 5.3.1）。
+	if w := l.oidcDo(t, "POST", oidcUserinfo, url.Values{"access_token": {tok["access_token"].(string)}}, ""); w.Code != 200 ||
+		!strings.Contains(w.Body.String(), alice) {
+		t.Fatalf("userinfo POST: %d %s", w.Code, w.Body)
+	}
 
 	// ログイン済みならそのまま戻る。セッションの ID を入れ替えても sid は変わらない。
 	l.advance(l.a.cfg.Security.Session.RotationInterval.D() + time.Second)
