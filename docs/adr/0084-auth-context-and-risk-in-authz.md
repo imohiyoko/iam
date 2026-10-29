@@ -1,6 +1,6 @@
 # 0084. 認証の文脈とリスクを認可の条件にする
 
-- 状態: 提案
+- 状態: 承認
 - 日付: 2026-10-28
 - 関連: [design.md](../design.md) 2.1、2.8、4.5、4.9、5.3、10、11.8、[0007](0007-auth-warnings.md)、[0064](0064-authz-roles-groups-check.md)、
   [0066](0066-oidc-authorization-code-flow.md)、0069、0074、0077、0078、0081（M6・M7 の PR で追加）
