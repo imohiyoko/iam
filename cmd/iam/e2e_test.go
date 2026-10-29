@@ -35,7 +35,8 @@ func TestE2EPostgresAndRedis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Close()
+	// t.Cleanup は後入れ先出しなので、DROP DATABASE の後に閉じる。
+	t.Cleanup(func() { _ = admin.Close() })
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
 	name := "iam_e2e_" + hex.EncodeToString(b)
@@ -52,6 +53,7 @@ type e2eServer struct {
 	pub, adm string
 	logs     *syncBuffer
 	seen     map[string]string // 宛先ごとに使ったコード
+	codes    []string          // 使ったコード（イベントに出ないことを確かめる）
 }
 
 // code は dev の Notifier がログに出した、to 宛ての最新のコードを返す。
@@ -94,6 +96,7 @@ func (s *e2eServer) waitNewCode(t *testing.T, email, flowID string) string {
 	for range 100 {
 		if c := s.code(t, email); c != seen {
 			s.seen[strings.ToLower(email)] = c
+			s.codes = append(s.codes, c)
 			return c
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -261,5 +264,14 @@ outbox: {interval: 50ms}
 	}
 	if strings.Contains(stdout.String(), alice) || strings.Contains(stdout.String(), link) {
 		t.Fatal("a secret reached the event sink")
+	}
+	// メールのコードは数字だけなので、時刻などとの部分一致を避けて JSON の文字列として探す。
+	if len(s.codes) == 0 {
+		t.Fatal("no codes were used")
+	}
+	for _, c := range s.codes {
+		if strings.Contains(stdout.String(), `"`+c+`"`) {
+			t.Fatalf("email code %s reached the event sink", c)
+		}
 	}
 }

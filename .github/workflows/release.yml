@@ -86,9 +86,11 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           mkdir -p dist
+          # iam build の CLI はホスト向けに作り、実行時の GOOS/GOARCH を中の go build に引き継がせる。
+          (cd cmd/iam && go build -o /tmp/iam-host .)
           for arch in amd64 arm64; do
             (cd cmd/iam && GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-X main.version=${GITHUB_REF_NAME}" -o ../../dist/iam-linux-$arch .)
-            (cd cmd/iam && GOOS=linux GOARCH=$arch go run . build -f ../../build/minimal.yaml -o ../../dist/iam-minimal-linux-$arch -version "${GITHUB_REF_NAME}")
+            (cd cmd/iam && GOOS=linux GOARCH=$arch /tmp/iam-host build -f ../../build/minimal.yaml -o ../../dist/iam-minimal-linux-$arch -version "${GITHUB_REF_NAME}")
           done
           (cd dist && sha256sum iam-* > SHA256SUMS)
       - uses: anchore/sbom-action@v0

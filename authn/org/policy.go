@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -53,13 +54,28 @@ func (p *LoginPolicy) empty() bool {
 	return p == nil || (!p.RequirePasskey && len(p.MembershipEmailDomains) == 0 && len(p.IPAllowlist) == 0)
 }
 
-// checkPolicy は設定しようとするポリシーを確かめ、正規化したものを返す。
-func (s *Service) checkPolicy(p *LoginPolicy) (*LoginPolicy, error) {
+// checkPolicy は設定しようとするポリシー p を確かめ、正規化したものを返す。フィーチャーが止まっていても、
+// 保存済みのポリシー prev をそのまま残す更新は受ける（止めている間は判定しないが設定は残す。ADR 0069）。
+func (s *Service) checkPolicy(p, prev *LoginPolicy) (*LoginPolicy, error) {
 	if p.empty() {
 		return nil, nil
 	}
+	out, err := normalizePolicy(p)
+	if err != nil {
+		return nil, err
+	}
 	if !s.LoginPolicies {
+		if keep, err := normalizePolicy(prev); err == nil && !prev.empty() && reflect.DeepEqual(out, keep) {
+			return out, nil
+		}
 		return nil, settingInvalid("login_policy: the org_login_policy feature is not enabled")
+	}
+	return out, nil
+}
+
+func normalizePolicy(p *LoginPolicy) (*LoginPolicy, error) {
+	if p.empty() {
+		return nil, nil
 	}
 	out := &LoginPolicy{RequirePasskey: p.RequirePasskey}
 	if len(p.MembershipEmailDomains) > MaxPolicyDomains || len(p.IPAllowlist) > MaxPolicyCIDRs {
@@ -78,6 +94,13 @@ func (s *Service) checkPolicy(p *LoginPolicy) (*LoginPolicy, error) {
 		pfx, err := netip.ParsePrefix(strings.TrimSpace(c))
 		if err != nil {
 			return nil, settingInvalid("login_policy.ip_allowlist: invalid CIDR %q", c)
+		}
+		// 要求の IP は IPv4 に戻して比べる（ipAllowed）ので、IPv4-mapped の CIDR は IPv4 の CIDR に直す。
+		if a := pfx.Addr(); a.Is4In6() {
+			if pfx.Bits() < 96 {
+				return nil, settingInvalid("login_policy.ip_allowlist: invalid CIDR %q", c)
+			}
+			pfx = netip.PrefixFrom(a.Unmap(), pfx.Bits()-96)
 		}
 		if v := pfx.Masked().String(); !slices.Contains(out.IPAllowlist, v) {
 			out.IPAllowlist = append(out.IPAllowlist, v)
