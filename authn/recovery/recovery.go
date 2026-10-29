@@ -213,7 +213,7 @@ func (s *Service) Redeem(ctx context.Context, realmID, email, code string, c Cli
 		if err != nil {
 			return session.Issued{}, "", err
 		}
-		if err := s.PerAccount.Allow(ctx, "recovery:"+realmID+":"+base64.RawURLEncoding.EncodeToString(ix.Value)); err != nil {
+		if err := s.PerAccount.AllowFrom(ctx, "recovery:"+realmID+":"+base64.RawURLEncoding.EncodeToString(ix.Value), c.IP); err != nil {
 			return session.Issued{}, "", err
 		}
 	}

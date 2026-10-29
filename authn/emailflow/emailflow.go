@@ -269,7 +269,7 @@ func (s *Service) limit(ctx context.Context, realmID, email string, c Client) er
 	if err != nil {
 		return err
 	}
-	err = s.PerAccount.Allow(ctx, "email:"+realmID+":"+base64.RawURLEncoding.EncodeToString(idx.Value))
+	err = s.PerAccount.AllowFrom(ctx, "email:"+realmID+":"+base64.RawURLEncoding.EncodeToString(idx.Value), c.IP)
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok && ex.First {
 		if aerr := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 			_, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{

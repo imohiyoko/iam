@@ -134,3 +134,37 @@ func (l *loginEnv) passwordLoginCookie(t *testing.T, email, pw string) (int, str
 	}
 	return status, c
 }
+
+// 下位のロールの運営者は、上位のロールの運営者の認証情報を無効化できず、停止・有効期間も変えられない（ADR 0052、0053）。
+func TestAdminActionsRespectOutranks(t *testing.T) {
+	l := newPasskeyEnv(t)
+	ownerID, owner := l.operator(t, "owner@example.com", role.RealmOwner)
+	adminID, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
+	_, sec := l.operator(t, "sec@example.com", role.RealmSecurity)
+	users := "/v1/admin/users/" + ownerID
+	for _, path := range []string{users + "/credentials:revoke-all", users + "/password:revoke", users + "/credentials/psk_missing:revoke"} {
+		if status, out := l.admin(t, path, sec, nil); status != 403 {
+			t.Fatalf("%s by security: %d %v", path, status, out)
+		}
+	}
+	if status, out := l.admin(t, users+"/suspensions", sec, map[string]any{"category": "security_risk", "reason": "x"}); status != 403 {
+		t.Fatalf("suspend owner by security: %d %v", status, out)
+	}
+	if status, out := l.adminDo(t, "PATCH", admin, users, map[string]any{"valid_until": l.a.deps.Clock.Now().Add(time.Hour)}); status != 403 {
+		t.Fatalf("validity of owner by admin: %d %v", status, out)
+	}
+	// 上位からは変えられる。上位が付けた停止を下位は解除できない。
+	status, out := l.admin(t, "/v1/admin/users/"+adminID+"/suspensions", owner, map[string]any{"category": "security_risk", "reason": "x"})
+	if status != 201 {
+		t.Fatalf("suspend admin by owner: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/suspensions/"+out["id"].(string)+":lift", sec, map[string]any{"reason": "x"}); status != 403 {
+		t.Fatalf("lift admin's suspension by security: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/suspensions/"+out["id"].(string)+":lift", owner, map[string]any{"reason": "x"}); status != 200 {
+		t.Fatalf("lift by owner: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/users/"+adminID+"/credentials:revoke-all", owner, nil); status != 200 {
+		t.Fatalf("revoke admin's credentials by owner: %d %v", status, out)
+	}
+}

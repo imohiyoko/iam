@@ -28,6 +28,8 @@ M2 ではユーザーの停止（種別つき、予約、重ね掛け）と有�
   `realm:security`（`security_risk`）、`realm:billing`（`billing`）に付ける。realm で足した種別（`security.suspension_categories`）は
   `realm:owner`（`suspensions:*`）だけ。一覧は `suspensions:read`、有効期間の変更は `users:update`
 - 本人は自分の停止を解除できない（予約も）
+- ユーザーの停止・解除と有効期間の変更は、呼び出し側が対象のロールの権限をすべて持つときだけ（なりすましと同じ outranks の判定。
+  下位のロールの運営者が上位の運営者を止めない。足りなければ `403 permission_denied`）
 - 管理 API：
   - `POST /v1/admin/users/{id}/suspensions`：`{category, reason, starts_at, ends_at, external_ref}`。`reason` は必須（4.13）。
     `starts_at` が省略か過去なら今から（遡らない）。`external_ref` が同じ停止（対象・種別も同じ）があれば 200 でそれを返す（冪等）
