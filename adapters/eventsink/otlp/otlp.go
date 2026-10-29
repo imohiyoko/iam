@@ -152,9 +152,27 @@ func (s *Sink) Emit(ctx context.Context, events []audit.Event) error {
 		return fmt.Errorf("eventsink otlp: %w", err)
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
+	rb, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("eventsink otlp: status %d", resp.StatusCode)
+	}
+	return partialFailure(rb)
+}
+
+// partialFailure は 2xx の応答の partialSuccess で拒まれた記録があればエラーにする（送出全体をやり直す。OTLP の仕様では
+// 拒まれた記録は送り直さないが、監査ログは欠けを残さないことを優先する）。
+func partialFailure(body []byte) error {
+	var r struct {
+		PartialSuccess struct {
+			RejectedLogRecords json.Number `json:"rejectedLogRecords"`
+			ErrorMessage       string      `json:"errorMessage"`
+		} `json:"partialSuccess"`
+	}
+	if len(bytes.TrimSpace(body)) == 0 || json.Unmarshal(body, &r) != nil {
+		return nil
+	}
+	if n, err := r.PartialSuccess.RejectedLogRecords.Int64(); err == nil && n > 0 {
+		return fmt.Errorf("eventsink otlp: %d log records rejected: %s", n, r.PartialSuccess.ErrorMessage)
 	}
 	return nil
 }

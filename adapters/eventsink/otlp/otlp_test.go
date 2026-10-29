@@ -18,10 +18,12 @@ func TestOTLPLogs(t *testing.T) {
 	var body []byte
 	var auth string
 	status := http.StatusOK
+	reply := ""
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ = io.ReadAll(r.Body)
 		auth = r.Header.Get("Authorization")
 		w.WriteHeader(status)
+		_, _ = io.WriteString(w, reply)
 	}))
 	defer srv.Close()
 	t.Setenv("IAM_TEST_OTLP_HEADERS", "Authorization=Bearer t0ken, X-Scope = audit")
@@ -60,6 +62,17 @@ func TestOTLPLogs(t *testing.T) {
 	}
 	if auth != "Bearer t0ken" {
 		t.Fatalf("authorization = %q", auth)
+	}
+	// 2xx でも partialSuccess で拒まれた記録があれば失敗（rejectedLogRecords は int64 で、JSON では文字列にもなる）。
+	for _, r := range []string{`{"partialSuccess":{"rejectedLogRecords":"1","errorMessage":"bad"}}`, `{"partialSuccess":{"rejectedLogRecords":2}}`} {
+		reply = r
+		if err := sink.Emit(context.Background(), []audit.Event{e}); err == nil {
+			t.Fatalf("partial success %s must fail", r)
+		}
+	}
+	reply = `{"partialSuccess":{}}`
+	if err := sink.Emit(context.Background(), []audit.Event{e}); err != nil {
+		t.Fatal(err)
 	}
 	status = http.StatusServiceUnavailable
 	if err := sink.Emit(context.Background(), []audit.Event{e}); err == nil {
