@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"sync"
@@ -40,7 +41,7 @@ func (f *fakeDNS) set(name string, v ...string) {
 	f.txt[name] = v
 }
 
-func newDomainEnv(t *testing.T, on bool) (*loginEnv, *fakeDNS) {
+func newDomainEnv(t *testing.T, on bool, extra ...string) (*loginEnv, *fakeDNS) {
 	t.Helper()
 	l := newLoginEnvWith(t, func(c *config.Config) {
 		c.Realm.VerifiedVia = []string{"code", "oauth_provider", "admin", "invitation"}
@@ -53,6 +54,7 @@ func newDomainEnv(t *testing.T, on bool) (*loginEnv, *fakeDNS) {
 		if on {
 			names = append(names, feature.OrgManagedUsers)
 		}
+		names = append(names, extra...)
 		c.Features = &names
 	}, feature.Registered())
 	dns := &fakeDNS{txt: map[string][]string{}}
@@ -386,6 +388,48 @@ func TestManagedUsersPowers(t *testing.T) {
 	}
 	if code, out := l.meDo(t, "GET", newbie, "/v1/me/orgs", nil); code != 401 {
 		t.Fatalf("session of deleted managed user: %d %v", code, out)
+	}
+}
+
+// passkey 必須の Org の管理ユーザーで passkey が無い人は、ログインできないのではなく passkey の登録だけができるセッションになる。
+func TestManagedUserPasskeyEnrollment(t *testing.T) {
+	l, dns := newDomainEnv(t, true, feature.OrgLoginPolicy)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	l.verifiedDomain(t, dns, owner, acme, "acme.example")
+	if code, out := l.putSettings(t, owner, acme, map[string]any{"login_policy": map[string]any{"require_passkey": true}}); code != 200 {
+		t.Fatalf("put passkey: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, owner, "/v1/me/orgs/"+acme+"/invitations", map[string]any{"email": "new@acme.example", "role": "member", "managed": true}); code != 201 {
+		t.Fatalf("managed invite: %d %v", code, out)
+	}
+	// 招待からの登録（メールのコード）は、参加を済ませて登録だけのセッションになる。
+	_, token := l.claimToken(t)
+	code, out := l.accept(t, "", token)
+	if code != 200 {
+		t.Fatalf("accept as new user: %d %v", code, out)
+	}
+	if login, _ := out["login"].(map[string]any); login == nil || login["next"] != "enroll" {
+		t.Fatalf("accept login: %v", out)
+	}
+	// メールのコードでのログインも、登録だけのセッションになる。
+	w := l.loginVerify(t, "new@acme.example")
+	var res map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if w.Code != 200 || res["next"] != "enroll" {
+		t.Fatalf("managed login without passkey: %d %s", w.Code, w.Body.String())
+	}
+	var cookie string
+	for _, c := range w.Result().Cookies() {
+		if c.Name == sessionCookie {
+			cookie = c.Value
+		}
+	}
+	if code, out := l.meDo(t, "GET", cookie, "/v1/me/orgs", nil); code != 401 {
+		t.Fatalf("enroll session used the api: %d %v", code, out)
+	}
+	if code, out := l.meDo(t, "GET", cookie, "/v1/me/methods", nil); code != 200 {
+		t.Fatalf("enroll session methods: %d %v", code, out)
 	}
 }
 

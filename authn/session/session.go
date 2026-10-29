@@ -317,8 +317,19 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	actor := audit.Actor{Type: "user", ID: u.PublicID}
 	var choices []string
 	if m.Orgs != nil {
-		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: in.OrgID, Credentials: in.Credentials, Email: in.OrgEmail, Warnings: hits,
-			AuthMethods: in.AuthMethods, IP: in.IP, Partial: restriction != port.RestrictionNone, Fallback: in.OrgFallback, RequestID: in.RequestID})
+		pick := OrgPick{Explicit: in.OrgID, Credentials: in.Credentials, Email: in.OrgEmail, Warnings: hits,
+			AuthMethods: in.AuthMethods, IP: in.IP, Partial: restriction != port.RestrictionNone, Fallback: in.OrgFallback, RequestID: in.RequestID}
+		picked, err := m.Orgs.Pick(ctx, tx, u, pick)
+		if errors.Is(err, ErrPasskeyEnrollment) && restriction == port.RestrictionNone {
+			// 管理ユーザーが passkey の必須だけで入れないなら、passkey の登録だけができるセッションにする（ADR 0076）。
+			restriction, s.Restriction = port.RestrictionEnroll, port.RestrictionEnroll
+			hits = slices.DeleteFunc(hits, func(w warning.Warning) bool { return w.Code == warning.CodeSingleFactor })
+			if s.Warnings, err = json.Marshal(nonNilWarnings(hits)); err != nil {
+				return Issued{}, err
+			}
+			pick.Warnings, pick.Partial = hits, true
+			picked, err = m.Orgs.Pick(ctx, tx, u, pick)
+		}
 		if err != nil {
 			return Issued{}, err
 		}
@@ -475,6 +486,11 @@ func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string) ([]s
 	}
 	return out, nil
 }
+
+// ErrPasskeyEnrollment は、管理ユーザー（ADR 0076）が管理する Org に入れない理由が passkey の必須（require_passkey）だけで、
+// passkey を1つも登録していないこと（OrgPicker が返す）。Issue は登録だけのセッション（RestrictionEnroll）を発行し、
+// 本人は passkey を登録してからそれでログインし直す。
+var ErrPasskeyEnrollment = errors.New("session: passkey enrollment required")
 
 // ErrNotRestricted は、2要素目で替えようとしたセッションが制限つきでないこと。
 var ErrNotRestricted = errs.New(errs.KindFailedPrecondition, "session is not waiting for a second factor")
