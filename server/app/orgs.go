@@ -749,7 +749,15 @@ func (s publicServer) SwitchMyOrg(ctx context.Context, req publicapi.SwitchMyOrg
 	}
 	var orgID string
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		// 所属していない Org は無いものとして扱う（存在を明かさない）。入れない理由（停止など）は所属している人にだけ返す。
 		o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, req.Id)
+		if err != nil {
+			return err
+		}
+		m, err := tx.Memberships().GetByUserOrg(ctx, s.a.realm.ID, au.PrincipalID, o.ID)
+		if err == nil && m.Status != port.MembershipActive {
+			err = errs.New(errs.KindNotFound, "membership")
+		}
 		orgID = o.ID
 		return err
 	})

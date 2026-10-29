@@ -24,7 +24,10 @@ M6 で、複数のインスタンスから使える Storage として PostgreSQL
   SQL は2つで動く書き方にする。マイグレーションは PostgreSQL の側に手で足す
 - 直列化：すべてのトランザクションの始めに `pg_advisory_xact_lock` を取る。SQLite の `BEGIN IMMEDIATE` と同じ約束になり、
   複数のインスタンスでも件数の上限・監査ログのチェーンが保たれる
-- 書き込みの文は SAVEPOINT で囲み、失敗したらその文だけを取り消す（PostgreSQL は文の失敗で Tx 全体を使えなくする）
+- `ExecContext` を通る書き込みの文は SAVEPOINT で囲み、失敗したらその文だけを取り消す（PostgreSQL は文の失敗で Tx 全体を
+  使えなくする）。`QueryContext` を通る `RETURNING` つきの書き込みは囲まないので、一意制約に触れうる列を書き換えない
+- 接続の上限は既定で 10（`max_open_conns`）。Tx は advisory lock で1つずつ進むため、待っている Tx が接続を持ったまま
+  増えて PostgreSQL の `max_connections` に達しないようにする
 - マイグレーションは goose のセッションロックで、同時に起動したインスタンスから1つずつ適用する
 - 契約テスト（`storagetest`）を `IAM_TEST_POSTGRES` の DB で動かす（試験ごとに DB を作る）。CI は PostgreSQL 16 のサービスで動かす
 
