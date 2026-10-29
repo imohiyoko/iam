@@ -101,7 +101,7 @@ func (s publicServer) AddOrgConnection(ctx context.Context, req publicapi.AddOrg
 	case errors.Is(err, errs.PermissionDenied):
 		return publicapi.AddOrgConnection403JSONResponse{DeniedJSONResponse: orgDenied(err)}, nil
 	case errors.Is(err, errs.Invalid):
-		return publicapi.AddOrgConnection400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_connection"}}, nil
+		return publicapi.AddOrgConnection400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: errCodeOr(err, "invalid_connection")}}, nil
 	case err != nil:
 		return nil, err
 	}

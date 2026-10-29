@@ -22,6 +22,8 @@
 - 管理ユーザーとして招く（招待の `managed`）：アドレスのドメインを Org が証明済みであること。受け入れで新しく登録した人は
   そのまま管理ユーザーになり、既存のユーザーには管理を求める（本人の同意を待つ）
 - 管理ユーザーは、管理する Org に入れなければ（Org や Membership の停止・有効期間の外・ログインポリシー）ログインそのものが失敗する。
+  ただし理由が passkey の必須（require_passkey）だけで passkey を1つも登録していなければ、passkey の登録だけができるセッション（next=enroll）にする。
+  招待からの登録（メールのコード）でも同じで、本人は passkey を登録してからそれでログインし直す。
   Org の owner は Membership の停止でアカウントを止められる
 - Org の owner は `:delete-account` で管理ユーザーのアカウントの削除を予約できる（本人の削除と同じ猶予）。管理ユーザーは予約を取り消せない
 - 監査ログ：`org.management.requested`・`declined`・`canceled`、`user.managed`、`user.management_released`

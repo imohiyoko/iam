@@ -35,10 +35,18 @@ type Service struct {
 	// Orgs はユーザーと同じトランザクションで個人 Org を作り、削除で所属を片付ける（11.13、4.10）。
 	// nil ならフィーチャー org が動いていない。
 	Orgs UserOrgs
+	// Roles は削除するユーザーのロールを確かめる（authz）。nil なら確かめない。
+	Roles UserRoles
 	// DeletionGrace はアカウントの削除の猶予期間（4.10）。0 なら猶予なし。
 	DeletionGrace time.Duration
 	// IndexOnly はメールの最小化モード（9.6）。アドレスの暗号文を持たず、インデックスだけを置く。
 	IndexOnly bool
+}
+
+// UserRoles はユーザーのロールを確かめるもの（authz。authn は authz を import しない）。
+type UserRoles interface {
+	// IsLastOwner はユーザーが now に realm の最後の使える realm:owner かを返す。
+	IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string, now time.Time) (bool, error)
 }
 
 // UserOrgs はユーザーの Org を扱うもの（authn/org）。

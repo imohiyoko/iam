@@ -19,10 +19,12 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/feature"
+	"github.com/imohiyoko/iam/shared/port"
 )
 
 // 汎用サービスアカウント（design.md 11.2、ADR 0074）。
@@ -360,8 +362,35 @@ func TestOrgServiceAccount(t *testing.T) {
 	if code, _ := l.adminDo(t, "GET", key, "/v1/admin/orgs/"+acme, nil); code != 200 {
 		t.Fatalf("use: %d", code)
 	}
+	// Org の範囲の付与が効くよう、使える間はその Org に所属する（org_role は無い）。
+	member := func() bool {
+		t.Helper()
+		var ok bool
+		err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+			o, err := tx.Orgs().GetByPublicID(ctx, l.a.realm.ID, acme)
+			if err != nil {
+				return err
+			}
+			var r port.OrgRole
+			r, ok, err = authzMembers{}.OrgRole(ctx, tx, l.a.realm.ID, check.Principal{Type: port.PrincipalServiceAccount, ID: sa}, o.ID, l.e.deps.Clock.Now())
+			if r != "" {
+				t.Fatalf("service account org role = %q", r)
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	if !member() {
+		t.Fatal("org service account is not a member of its org")
+	}
 	if code, out := l.admin(t, "/v1/admin/orgs/"+acme+"/suspensions", owner, map[string]any{"category": "billing", "reason": "unpaid"}); code != 201 {
 		t.Fatalf("suspend org: %d %v", code, out)
+	}
+	if member() {
+		t.Fatal("member of a suspended org")
 	}
 	if code, _ := l.adminDo(t, "GET", key, "/v1/admin/orgs/"+acme, nil); code != 401 {
 		t.Fatalf("org suspended: %d", code)
@@ -403,5 +432,53 @@ func TestDisableServiceAccountsWithData(t *testing.T) {
 	// 配信用のキー（newLoginEnv で作ったもの）は使い続けられる。
 	if code, out := l.admin(t, "/v1/admin/notifications/ntf_00000000000000000000000000:claim", l.apiKey, nil); code != 404 {
 		t.Fatalf("delivery key after disable: %d %v", code, out)
+	}
+}
+
+// service_accounts:manage だけでは、自分の持たない権限のサービスアカウントの鍵を作ったり消したりできない。
+func TestServiceAccountCredentialsNeedTargetPermissions(t *testing.T) {
+	l := serviceAccountsEnv(t)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	_, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
+	create := func(name, roleName string) string {
+		t.Helper()
+		code, out := l.admin(t, "/v1/admin/service-accounts", owner, map[string]any{"name": name})
+		if code != 201 {
+			t.Fatalf("create: %d %v", code, out)
+		}
+		sa := out["id"].(string)
+		if code, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": roleName, "principal_type": "service_account",
+			"principal_id": sa}); code != 201 {
+			t.Fatalf("grant: %d %v", code, out)
+		}
+		return sa
+	}
+	strong := "/v1/admin/service-accounts/" + create("strong", role.RealmOwner)
+	weak := "/v1/admin/service-accounts/" + create("weak", role.RealmSupport)
+
+	if code, out := l.admin(t, strong+"/credentials", admin, map[string]any{"type": "api_key"}); code != 403 || out["secret"] != nil {
+		t.Fatalf("admin adds a key to an owner account: %d %v", code, out)
+	}
+	code, out := l.admin(t, strong+"/credentials", owner, map[string]any{"type": "api_key"})
+	if code != 201 {
+		t.Fatalf("owner adds a key: %d %v", code, out)
+	}
+	cred := out["id"].(string)
+	if code, _ := l.admin(t, strong+"/credentials/"+cred+":revoke", admin, nil); code != 403 {
+		t.Fatalf("admin revokes: %d", code)
+	}
+	if code, _ := l.admin(t, strong+":delete", admin, nil); code != 403 {
+		t.Fatalf("admin deletes: %d", code)
+	}
+	if code, out := l.adminDo(t, "GET", owner, strong+"/credentials", nil); code != 200 || len(out["credentials"].([]any)) != 1 ||
+		out["credentials"].([]any)[0].(map[string]any)["active"] != true {
+		t.Fatalf("credentials changed: %d %v", code, out)
+	}
+	// 呼び出し側の権限に収まるサービスアカウントは扱える。
+	if code, out := l.admin(t, weak+"/credentials", admin, map[string]any{"type": "api_key"}); code != 201 {
+		t.Fatalf("admin adds a key to a support account: %d %v", code, out)
+	}
+	if code, out := l.admin(t, weak+":delete", admin, nil); code != 200 || out["deleted"] != true {
+		t.Fatalf("admin deletes a support account: %d %v", code, out)
 	}
 }
