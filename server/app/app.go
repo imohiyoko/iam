@@ -553,6 +553,13 @@ func newHTTPServer(h http.Handler) *http.Server {
 // flowHooks は設定の hooks からフロー フックの Runner を作る（11.8、ADR 0081）。url の無いフックは d.Hooks から取る。
 func flowHooks(cfg config.Config, d Deps, realm string) (*hook.Runner, error) {
 	r := &hook.Runner{Entries: map[string]hook.Entry{}, Realm: realm, Log: d.Logger}
+	// 同じ secret_env を共有するフックがあるので、秘密は名前ごとに一度読み、全部作ってから消す。
+	secrets := map[string]string{}
+	defer func() {
+		for env := range secrets {
+			_ = os.Unsetenv(env)
+		}
+	}()
 	for name, h := range cfg.Hooks {
 		e := hook.Entry{Timeout: h.Timeout.D(), FailOpen: h.FailOpen}
 		if h.URL == "" {
@@ -560,11 +567,14 @@ func flowHooks(cfg config.Config, d Deps, realm string) (*hook.Runner, error) {
 				return nil, fmt.Errorf("app: hooks.%s has no url and no Go implementation", name)
 			}
 		} else {
-			secret := os.Getenv(h.SecretEnv)
+			secret, ok := secrets[h.SecretEnv]
+			if !ok {
+				secret = os.Getenv(h.SecretEnv)
+				secrets[h.SecretEnv] = secret
+			}
 			if len(secret) < 32 {
 				return nil, fmt.Errorf("app: hooks.%s: %s must hold a secret of at least 32 bytes", name, h.SecretEnv)
 			}
-			_ = os.Unsetenv(h.SecretEnv)
 			e.Hook = &hook.Webhook{URL: h.URL, Secret: []byte(secret), Clock: d.Clock}
 		}
 		r.Entries[name] = e
