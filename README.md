@@ -27,6 +27,7 @@ curl localhost:8081/healthz   # 管理 API
 ```sh
 cd cmd/iam
 go run . build -f ../../build/minimal.yaml -o iam
+cd ../..
 docker build --build-arg BUILD_SPEC=build/minimal.yaml -t iam:minimal .   # リポジトリの直下で
 ```
 
