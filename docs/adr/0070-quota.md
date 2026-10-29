@@ -26,6 +26,8 @@ Org の人数の上限（フィーチャー `quota`、roadmap M6）を、期間�
   インメモリは mutex）なので上限を超えない。契約テスト（`QuotaCountThenAddConcurrent`）で各アダプタを確かめる
 - 管理 API：`GET /v1/admin/orgs/{id}/quota`、`POST …/quota/grants`、`PUT|DELETE …/quota/grants/{grant_id}`
 - ホットパス（セッションの検証、ログイン）では判定しない
+- 停止を解く・早く終える操作（`suspended` を数えないとき、人数が増える）は拒まない。停止は安全のための操作で、枠で止めると
+  解けなくなるため。超えた分は既存のメンバーと同じ扱いで、新規を止める
 
 ## 理由
 
