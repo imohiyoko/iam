@@ -318,6 +318,7 @@ type Invitation struct {
 	CreatedAt       string
 	ClosedAt        sql.NullString
 	ClosedBy        string
+	Managed         int64
 }
 
 type Membership struct {

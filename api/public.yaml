@@ -1457,6 +1457,11 @@ paths:
                 role: { type: string, enum: [owner, admin, member] }
                 valid_from: { type: string, format: date-time }
                 valid_until: { type: string, format: date-time }
+                managed:
+                  type: boolean
+                  description: |
+                    管理ユーザーとして招く（ADR 0076）。アドレスのドメインを Org が証明済みであること（`409 email_domain_not_verified`）。
+                    受け入れで新しく登録した人は管理ユーザーになり、既存のユーザーには管理を求める（本人の同意を待つ）
       responses:
         "201":
           description: 招待した
@@ -1624,6 +1629,35 @@ paths:
         - { name: membership_id, in: path, required: true, schema: { type: string } }
       responses:
         "204": { description: 手放した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/members/{membership_id}:delete-account:
+    post:
+      operationId: deleteManagedAccount
+      summary: 管理ユーザーのアカウントを削除する（Org の owner。11.3、ADR 0076）
+      description: |
+        本人の削除（`/v1/me/account:delete`）と同じく、realm の `user_deletion_grace` の後に消す。既存のセッションはすべて失効する。
+        管理ユーザーは削除の予約を取り消せない。対象がこの Org の管理ユーザーでなければ `409 not_managed`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: membership_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 削除を予約した（猶予が無ければ削除した）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deletes_at: { type: string, format: date-time, description: 予約したとき }
+                  deleted: { type: boolean, description: もう削除したか }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -2370,6 +2404,7 @@ components:
         email: { type: string, description: pending の招待だけ }
         role: { type: string, enum: [owner, admin, member] }
         status: { type: string, enum: [pending, accepted, revoked, expired] }
+        managed: { type: boolean, description: 管理ユーザーとして招いた }
         expires_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
     OrgDomain:

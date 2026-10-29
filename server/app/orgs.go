@@ -427,6 +427,9 @@ func orgInvitation(inv port.Invitation, email string, now time.Time) publicapi.O
 		st = "expired"
 	}
 	v := publicapi.OrgInvitation{Id: inv.PublicID, Role: publicapi.OrgInvitationRole(inv.Role), Status: st, ExpiresAt: inv.ExpiresAt, CreatedAt: inv.CreatedAt}
+	if inv.Managed {
+		v.Managed = new(true)
+	}
 	if email != "" && inv.Status == port.InvitationPending && now.Before(inv.ExpiresAt) {
 		v.Email = &email
 	}
@@ -595,7 +598,8 @@ func (s publicServer) InviteToOrg(ctx context.Context, req publicapi.InviteToOrg
 		if r == port.OrgOwner && m.Role != port.OrgOwner {
 			return errOrgPermission
 		}
-		inv, err := s.a.orgs.Invite(ctx, tx, o, org.Invite{Email: req.Body.Email, Role: r, ValidFrom: req.Body.ValidFrom, ValidUntil: req.Body.ValidUntil},
+		inv, err := s.a.orgs.Invite(ctx, tx, o, org.Invite{Email: req.Body.Email, Role: r, ValidFrom: req.Body.ValidFrom, ValidUntil: req.Body.ValidUntil,
+			Managed: deref(req.Body.Managed)},
 			au.Actor(), requestID(ctx))
 		out = orgInvitation(inv.Invitation, inv.Email, s.a.deps.Clock.Now())
 		return err

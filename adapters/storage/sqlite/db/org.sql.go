@@ -77,8 +77,8 @@ func (q *Queries) CountQuotaGrants(ctx context.Context) (int64, error) {
 
 const createInvitation = `-- name: CreateInvitation :exec
 INSERT INTO invitations (id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash,
-    valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by, managed)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateInvitationParams struct {
@@ -99,6 +99,7 @@ type CreateInvitationParams struct {
 	CreatedAt       string
 	ClosedAt        sql.NullString
 	ClosedBy        string
+	Managed         int64
 }
 
 func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) error {
@@ -120,6 +121,7 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		arg.CreatedAt,
 		arg.ClosedAt,
 		arg.ClosedBy,
+		arg.Managed,
 	)
 	return err
 }
@@ -313,7 +315,7 @@ func (q *Queries) DeleteQuotaGrant(ctx context.Context, arg DeleteQuotaGrantPara
 }
 
 const getInvitation = `-- name: GetInvitation :one
-SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by FROM invitations WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by, managed FROM invitations WHERE realm_id = ? AND id = ?
 `
 
 type GetInvitationParams struct {
@@ -342,12 +344,13 @@ func (q *Queries) GetInvitation(ctx context.Context, arg GetInvitationParams) (I
 		&i.CreatedAt,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.Managed,
 	)
 	return i, err
 }
 
 const getInvitationByPublicID = `-- name: GetInvitationByPublicID :one
-SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by FROM invitations WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by, managed FROM invitations WHERE realm_id = ? AND public_id = ?
 `
 
 type GetInvitationByPublicIDParams struct {
@@ -376,6 +379,7 @@ func (q *Queries) GetInvitationByPublicID(ctx context.Context, arg GetInvitation
 		&i.CreatedAt,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.Managed,
 	)
 	return i, err
 }
@@ -688,7 +692,7 @@ func (q *Queries) GetVerifiedOrgDomain(ctx context.Context, arg GetVerifiedOrgDo
 }
 
 const listInvitationsByOrg = `-- name: ListInvitationsByOrg :many
-SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by FROM invitations WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, org_id, email_index, email_ciphertext, index_key_id, org_role, token_hash, valid_from, valid_until, invited_by, expires_at, status, created_at, closed_at, closed_by, managed FROM invitations WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id
 `
 
 type ListInvitationsByOrgParams struct {
@@ -723,6 +727,7 @@ func (q *Queries) ListInvitationsByOrg(ctx context.Context, arg ListInvitationsB
 			&i.CreatedAt,
 			&i.ClosedAt,
 			&i.ClosedBy,
+			&i.Managed,
 		); err != nil {
 			return nil, err
 		}

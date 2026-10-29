@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -169,4 +171,45 @@ func (s publicServer) DeclineOrgManagement(ctx context.Context, req publicapi.De
 		return nil, err
 	}
 	return publicapi.DeclineOrgManagement204Response{}, nil
+}
+
+// DeleteManagedAccount は Org の owner が管理ユーザーのアカウントの削除を予約する（本人の削除と同じ猶予）。
+func (s publicServer) DeleteManagedAccount(ctx context.Context, req publicapi.DeleteManagedAccountRequestObject) (publicapi.DeleteManagedAccountResponseObject, error) {
+	var out publicapi.DeleteManagedAccount200JSONResponse
+	var revoked []string
+	r, code, cause, err := s.managedTarget(ctx, req.Id, req.MembershipId, func(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, au auth) error {
+		u, err := tx.Users().Get(ctx, s.a.realm.ID, m.UserID)
+		if err != nil {
+			return err
+		}
+		if !org.IsManaged(u, o) {
+			return org.ErrNotManaged
+		}
+		if u.ID == au.PrincipalID {
+			return org.ErrSelfTarget
+		}
+		if revoked, err = s.a.sessions.RevokeAllTx(ctx, tx, s.a.realm.ID, u.ID, "", account.ReasonDeletionScheduled, au.Actor(), requestID(ctx)); err != nil {
+			return err
+		}
+		if u, err = s.a.accounts.ScheduleDeletion(ctx, tx, u, s.a.accounts.DeletionGrace, au.Actor(), requestID(ctx)); err != nil {
+			return err
+		}
+		out.DeletesAt, out.Deleted = u.DeletionScheduledAt, u.Status == port.UserDeleted
+		return nil
+	})
+	switch r {
+	case managedUnauthenticated:
+		return publicapi.DeleteManagedAccount401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	case managedNotFound:
+		return publicapi.DeleteManagedAccount404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	case managedDenied:
+		return publicapi.DeleteManagedAccount403JSONResponse{DeniedJSONResponse: orgDenied(cause)}, nil
+	case managedConflict:
+		return publicapi.DeleteManagedAccount409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.a.sessions.ForgetIDs(ctx, s.a.realm.ID, revoked)
+	return out, nil
 }
