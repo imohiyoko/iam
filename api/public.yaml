@@ -1485,6 +1485,111 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}/domains:
+    get:
+      operationId: listOrgDomains
+      summary: Org のドメインの一覧（Org の owner。11.3）
+      description: |
+        Org の権限 `org:settings`（組み込みのロールでは owner だけが持つ。ドメインの4つの操作で同じ）。
+        フィーチャー `org_managed_users` が動いていなければ 404。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 登録の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [domains]
+                properties:
+                  domains:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgDomain" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: addOrgDomain
+      summary: Org にドメインを登録する（Org の owner。11.3、ADR 0075）
+      description: |
+        未証明で登録し、TXT に置く名前と値を返す。ASCII だけ（IDN は A ラベル）。個人 Org には登録できない（`409 personal_org`）。
+        同じドメインを登録済みなら `409 domain_exists`、realm の別の Org が証明済みなら `409 domain_taken`、
+        Org のドメインが上限（20）に達していれば `409 domain_limit`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domain]
+              properties:
+                domain: { type: string, maxLength: 254 }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgDomain" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/domains/{domain_id}:verify:
+    post:
+      operationId: verifyOrgDomain
+      summary: ドメインの TXT を確かめ、証明済みにする（Org の owner）
+      description: |
+        `txt_name` に `txt_value` の TXT が無ければ `409 domain_not_verified`（確かめた時刻は残る）。
+        realm の別の Org が先に証明していれば `409 domain_taken`。証明済みなら何もしない。DNS の障害は 503。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: domain_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 証明済み
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgDomain" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503":
+          description: DNS に問い合わせられなかった
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/me/orgs/{id}/domains/{domain_id}:delete:
+    post:
+      operationId: deleteOrgDomain
+      summary: ドメインを消す（Org の owner）
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: domain_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 消した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/me/orgs/{id}:bind-email:
     post:
       operationId: bindMyOrgEmail
@@ -2189,6 +2294,18 @@ components:
         role: { type: string, enum: [owner, admin, member] }
         status: { type: string, enum: [pending, accepted, revoked, expired] }
         expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    OrgDomain:
+      type: object
+      required: [id, domain, status, txt_name, txt_value, created_at]
+      properties:
+        id: { type: string, description: 公開のドメイン ID（dom_…） }
+        domain: { type: string }
+        status: { type: string, enum: [pending, verified] }
+        txt_name: { type: string, description: TXT を置く名前（`_iam-challenge.<domain>`） }
+        txt_value: { type: string, description: TXT の値（`iam-domain-verification=<token>`） }
+        verified_at: { type: string, format: date-time }
+        checked_at: { type: string, format: date-time, description: 最後に TXT を確かめた時刻 }
         created_at: { type: string, format: date-time }
     MyEmail:
       type: object

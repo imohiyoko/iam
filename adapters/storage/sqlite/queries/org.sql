@@ -92,3 +92,28 @@ SELECT count(*) FROM org_quota_grants;
 
 -- name: PurgeQuotaGrants :execrows
 DELETE FROM org_quota_grants WHERE id IN (SELECT g.id FROM org_quota_grants g LIMIT sqlc.arg(lim));
+
+-- name: CreateOrgDomain :exec
+INSERT INTO org_domains (id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetOrgDomainByPublicID :one
+SELECT * FROM org_domains WHERE realm_id = ? AND public_id = ?;
+
+-- name: GetVerifiedOrgDomain :one
+SELECT * FROM org_domains WHERE realm_id = ? AND domain = ? AND verified_at IS NOT NULL;
+
+-- name: ListOrgDomainsByOrg :many
+SELECT * FROM org_domains WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id;
+
+-- name: UpdateOrgDomain :execrows
+UPDATE org_domains SET verified_at = ?, checked_at = ? WHERE realm_id = ? AND id = ?;
+
+-- name: DeleteOrgDomain :execrows
+DELETE FROM org_domains WHERE realm_id = ? AND id = ?;
+
+-- name: CountOrgDomains :one
+SELECT count(*) FROM org_domains;
+
+-- name: PurgeOrgDomains :execrows
+DELETE FROM org_domains WHERE id IN (SELECT d.id FROM org_domains d LIMIT sqlc.arg(lim));

@@ -88,6 +88,7 @@ const (
 	Membership     Prefix = "mbr"
 	Invitation     Prefix = "inv"
 	QuotaGrant     Prefix = "qgr"
+	OrgDomain      Prefix = "dom"
 	Session        Prefix = "ses"
 	Suspension     Prefix = "sus"
 	ServiceAccount Prefix = "sva"

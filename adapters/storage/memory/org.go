@@ -341,3 +341,99 @@ func (r quotaGrants) Delete(_ context.Context, realmID, id string) error {
 	deleteKey(r.t, r.t.s.quotaGrants, id)
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+
+type orgDomains struct{ t *tx }
+
+func cloneOrgDomain(d port.OrgDomain) port.OrgDomain {
+	d.VerifiedAt, d.CheckedAt = cloneTime(d.VerifiedAt), cloneTime(d.CheckedAt)
+	return d
+}
+
+func (r orgDomains) Create(_ context.Context, d port.OrgDomain) error {
+	if _, ok := r.t.s.orgDomains[d.ID]; ok {
+		return errs.New(errs.KindConflict, "org domain %s exists", d.ID)
+	}
+	for _, x := range r.t.s.orgDomains {
+		if x.RealmID == d.RealmID && x.PublicID == d.PublicID {
+			return errs.New(errs.KindConflict, "org domain public id exists in realm")
+		}
+		if x.RealmID == d.RealmID && x.OrgID == d.OrgID && x.Domain == d.Domain {
+			return errs.New(errs.KindConflict, "org domain exists in org")
+		}
+		if d.VerifiedAt != nil && x.VerifiedAt != nil && x.RealmID == d.RealmID && x.Domain == d.Domain {
+			return errs.New(errs.KindConflict, "org domain verified by another org")
+		}
+	}
+	setKey(r.t, r.t.s.orgDomains, d.ID, cloneOrgDomain(d))
+	return nil
+}
+
+func (r orgDomains) GetByPublicID(_ context.Context, realmID, publicID string) (port.OrgDomain, error) {
+	for _, x := range r.t.s.orgDomains {
+		if x.RealmID == realmID && x.PublicID == publicID {
+			return cloneOrgDomain(x), nil
+		}
+	}
+	return port.OrgDomain{}, errs.New(errs.KindNotFound, "org domain")
+}
+
+func (r orgDomains) GetVerified(_ context.Context, realmID, domain string) (port.OrgDomain, error) {
+	for _, x := range r.t.s.orgDomains {
+		if x.RealmID == realmID && x.Domain == domain && x.VerifiedAt != nil {
+			return cloneOrgDomain(x), nil
+		}
+	}
+	return port.OrgDomain{}, errs.New(errs.KindNotFound, "org domain")
+}
+
+func (r orgDomains) ListByOrg(_ context.Context, realmID, orgID string) ([]port.OrgDomain, error) {
+	var out []port.OrgDomain
+	for _, x := range r.t.s.orgDomains {
+		if x.RealmID == realmID && x.OrgID == orgID {
+			out = append(out, cloneOrgDomain(x))
+		}
+	}
+	sortByCreated(out, func(x port.OrgDomain) (time.Time, string) { return x.CreatedAt, x.ID })
+	return out, nil
+}
+
+func (r orgDomains) Update(_ context.Context, d port.OrgDomain) error {
+	x, err := get(r.t.s.orgDomains, d.RealmID, d.ID, func(d port.OrgDomain) string { return d.RealmID }, "org domain")
+	if err != nil {
+		return err
+	}
+	if d.VerifiedAt != nil {
+		for _, y := range r.t.s.orgDomains {
+			if y.ID != x.ID && y.RealmID == x.RealmID && y.Domain == x.Domain && y.VerifiedAt != nil {
+				return errs.New(errs.KindConflict, "org domain verified by another org")
+			}
+		}
+	}
+	x.VerifiedAt, x.CheckedAt = cloneTime(d.VerifiedAt), cloneTime(d.CheckedAt)
+	setKey(r.t, r.t.s.orgDomains, x.ID, x)
+	return nil
+}
+
+func (r orgDomains) Delete(_ context.Context, realmID, id string) error {
+	if _, err := get(r.t.s.orgDomains, realmID, id, func(d port.OrgDomain) string { return d.RealmID }, "org domain"); err != nil {
+		return err
+	}
+	deleteKey(r.t, r.t.s.orgDomains, id)
+	return nil
+}
+
+func (r orgDomains) Count(context.Context) (int, error) { return len(r.t.s.orgDomains), nil }
+
+func (r orgDomains) Purge(_ context.Context, limit int) (int, error) {
+	n := 0
+	for id := range r.t.s.orgDomains {
+		if n >= limit {
+			break
+		}
+		deleteKey(r.t, r.t.s.orgDomains, id)
+		n++
+	}
+	return n, nil
+}

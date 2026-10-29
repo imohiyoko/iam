@@ -200,7 +200,7 @@ memberships          id, user_id, org_id, status（invited / active / ended）
                      created_at, UNIQUE (user_id, org_id)
 invitations          id, realm_id, org_id, email_index, email_ciphertext, org_role
                      valid_from, valid_until, invited_by, expires_at, status（pending / accepted / revoked / expired）, created_at
-org_domains          org_id, domain, verified_at（11.3）
+org_domains          org_id, domain, token, verified_at, checked_at（11.3、ADR 0075）
 org_login_policies   （orgs.settings の login_policy に含める。ADR 0069）type（require_passkey / ip_allowlist / membership_email_domain / require_sso …）, config
 org_quota_grants     id, realm_id, org_id, quota_key, kind（base / addon / override）, quantity
                      starts_at, ends_at（NULL=無期限）, source（manual / external）, external_ref, created_by, created_at
@@ -713,6 +713,11 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 - 個人ユーザーは本人が所有し、Org は所属から外すことしかできない。Org 管理ユーザーは Org が所有し、停止・削除・ログイン方法の強制ができる
 - Org は DNS の TXT 等でドメインの所有を証明する（`org_domains`）。証明済みドメインで登録した人を管理ユーザーにできる。既存の個人ユーザーの切り替えには本人の同意が要る
 - Org 専用 SSO は `connections.owner_org_id` で表す
+
+実装（ADR 0075）：
+
+- フィーチャー `org_managed_users`。Org の owner が公開 API の `/v1/me/orgs/{id}/domains` でドメインを登録し、`_iam-challenge.<domain>` に TXT `iam-domain-verification=<token>` を置いて `:verify` で証明する
+- 証明済みのドメインは realm で1つの Org だけが持てる（`domain_taken`）。DNS はトランザクションの外で引く
 
 ### 11.4 Org 階層
 

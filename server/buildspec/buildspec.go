@@ -31,6 +31,7 @@ var featureCatalog = map[string]struct {
 	pkg  string
 }{
 	feature.Org:             {org.Feature, module + "/features/org"},
+	feature.OrgManagedUsers: {org.ManagedUsersFeature, module + "/features/orgmanagedusers"},
 	feature.OrgLoginPolicy:  {org.PolicyFeature, module + "/features/orgloginpolicy"},
 	feature.Quota:           {org.QuotaFeature, module + "/features/quota"},
 	feature.Warnings:        {warning.Feature, module + "/features/warnings"},

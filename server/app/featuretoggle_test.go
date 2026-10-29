@@ -199,7 +199,7 @@ func TestDisableOrgWithData(t *testing.T) {
 	if _, err := l.a.DisableFeature(ctx, feature.Org, false); !errors.Is(err, ErrFeatureRequired) {
 		t.Fatalf("disable org with dependents: %v", err)
 	}
-	for _, n := range []string{feature.Quota, feature.OrgLoginPolicy} {
+	for _, n := range []string{feature.Quota, feature.OrgLoginPolicy, feature.OrgManagedUsers} {
 		if res, err := l.a.DisableFeature(ctx, n, false); err != nil || !res.Done {
 			t.Fatalf("disable %s = %+v, %v", n, res, err)
 		}
@@ -218,7 +218,7 @@ func TestDisableOrgWithData(t *testing.T) {
 	if res, err := l.a.DisableFeature(ctx, feature.Org, false); err != nil || !res.Done {
 		t.Fatalf("disable org after deletion = %+v, %v", res, err)
 	}
-	rest := without(feature.Registered(), feature.Org, feature.Quota, feature.OrgLoginPolicy)
+	rest := without(feature.Registered(), feature.Org, feature.Quota, feature.OrgLoginPolicy, feature.OrgManagedUsers)
 	if _, err := l.restart(t, names(rest), rest); err != nil {
 		t.Fatal(err)
 	}

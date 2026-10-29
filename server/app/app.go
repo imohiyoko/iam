@@ -55,8 +55,10 @@ type Deps struct {
 	EventSink port.EventSink
 	// BreachCheck は漏洩済みパスワードの確認。nil なら確認しない。
 	BreachCheck port.BreachChecker
-	Clock       clock.Clock
-	Logger      *slog.Logger
+	// DNS は Org のドメインの証明で TXT を引く。nil なら net.DefaultResolver。
+	DNS    org.TXTResolver
+	Clock  clock.Clock
+	Logger *slog.Logger
 }
 
 // App は組み立て済みの IAM。
@@ -199,7 +201,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 				AbsoluteLifetime: ss.AbsoluteLifetime.Rule("session.absolute_lifetime"), IdleTimeout: ss.IdleTimeout.Rule("session.idle_timeout"),
 				MaxAuthAge: ss.MaxAuthAge.Rule("session.max_auth_age"), Warnings: warnings,
 			}, LoginPolicies: plan.IsActive(feature.OrgLoginPolicy), Quotas: plan.IsActive(feature.Quota),
-			QuotaCount: org.QuotaCount(cfg.Realm.QuotaCount)}
+			QuotaCount: org.QuotaCount(cfg.Realm.QuotaCount), ManagedUsers: plan.IsActive(feature.OrgManagedUsers), Resolver: d.DNS}
 		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
 	}
 	// 判定の材料のキャッシュは、セッションの検証と同じ反映の遅れの上限（5.3）まで。
