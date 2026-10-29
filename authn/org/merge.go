@@ -1,6 +1,7 @@
 package org
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"time"
@@ -19,6 +20,10 @@ const EndedMerged = "merged"
 
 // MergedOrgName は統合で作る、統合元の個人 Org の中身を移す共有 Org の名前（後から owner が変えられる）。
 const MergedOrgName = "Merged account"
+
+// ErrMembershipSuspended は統合元の Membership に終わっていない停止（予約を含む）があること。停止は Membership に付き、
+// 引き継げないので、統合しない（管理者が解除するか、Membership を終えてから）。
+var ErrMembershipSuspended = errs.WithCode(errs.KindFailedPrecondition, "membership_suspended", "a membership of the merged account is suspended")
 
 // MergedOrgs は統合で Org の側に起きたこと。
 type MergedOrgs struct {
@@ -63,6 +68,9 @@ func (s *Service) MergeUser(ctx context.Context, tx port.Tx, from, into port.Use
 				out.Personal, out.PersonalPublic = o.ID, o.PublicID
 			}
 			continue
+		}
+		if suspended, err := openSuspension(ctx, tx, m, now); err != nil || suspended {
+			return MergedOrgs{}, cmp.Or(err, ErrMembershipSuspended)
 		}
 		if err := s.takeOver(ctx, tx, m, into.ID, now); err != nil {
 			return MergedOrgs{}, err
@@ -119,16 +127,38 @@ func (s *Service) takeOver(ctx context.Context, tx port.Tx, m port.Membership, i
 	}
 	if cur.Status == port.MembershipEnded {
 		cur.Status, cur.Role, cur.EmailID, cur.ValidFrom, cur.ValidUntil, cur.EndedReason = m.Status, m.Role, m.EmailID, m.ValidFrom, m.ValidUntil, ""
-	} else {
+	} else if usable(m, now) {
+		// 使える（active で有効期間内の）Membership だけが、役割と active を引き上げる。
 		if rank(m.Role) > rank(cur.Role) {
 			cur.Role = m.Role
 		}
-		if m.Status == port.MembershipActive {
-			cur.Status = port.MembershipActive
-		}
+		cur.Status = port.MembershipActive
 	}
 	cur.UpdatedAt = now
 	return tx.Memberships().Update(ctx, cur)
+}
+
+// usable は Membership m が now に active で有効期間内かを返す（停止は openSuspension で先に見る）。
+func usable(m port.Membership, now time.Time) bool {
+	return m.Status == port.MembershipActive && (m.ValidFrom == nil || !now.Before(*m.ValidFrom)) && (m.ValidUntil == nil || now.Before(*m.ValidUntil))
+}
+
+// openSuspension は Membership m に now 以降も続く（予約を含む）停止があるかを返す。
+func openSuspension(ctx context.Context, tx port.Tx, m port.Membership, now time.Time) (bool, error) {
+	ss, err := tx.Suspensions().ListByTarget(ctx, m.RealmID, port.SuspensionTargetMembership, m.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, s := range ss {
+		end := s.EndsAt
+		if s.LiftedAt != nil && (end == nil || s.LiftedAt.Before(*end)) {
+			end = s.LiftedAt
+		}
+		if end == nil || end.After(now) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func rank(r port.OrgRole) int {

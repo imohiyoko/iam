@@ -158,3 +158,38 @@ func TestAccountMergeGuards(t *testing.T) {
 		t.Fatalf("merge into an account pending deletion: %d %v", code, out)
 	}
 }
+
+// 統合元の使えない Membership は統合先の役割を引き上げず、停止中なら統合しない。
+func TestAccountMergeUnusableMemberships(t *testing.T) {
+	l := mergeEnv(t, true)
+	_, alice := l.login(t, "alice@example.com")
+	acme := l.sharedOrg(t, alice, "Acme")
+	carol := l.join(t, alice, acme, "carol@example.com", "member")
+	// 有効期間の外の Membership は引き上げない。
+	bob := l.join(t, alice, acme, "bob@example.com", "admin")
+	bobM := l.membershipOf(t, alice, acme, l.userID(t, "bob@example.com"))
+	from := l.a.deps.Clock.Now().Add(time.Hour)
+	if code, out := l.mePatch(t, alice, "/v1/me/orgs/"+acme+"/members/"+bobM, map[string]any{"valid_from": from}); code != 200 || out["valid_from"] == nil {
+		t.Fatalf("patch bob: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, carol, "/v1/me/merges", map[string]string{"token": l.mergeToken(t, bob)}); code != 200 {
+		t.Fatalf("merge outside validity: %d %v", code, out)
+	}
+	if e := l.myOrgEntry(t, carol, acme); e["role"] != "member" {
+		t.Fatalf("carol's role after merging a membership outside validity: %v", e)
+	}
+	// 停止中の Membership は引き継げないので、統合しない。
+	dave := l.join(t, alice, acme, "dave@example.com", "admin")
+	daveM := l.membershipOf(t, alice, acme, l.userID(t, "dave@example.com"))
+	if code, _ := l.mePost(t, alice, "/v1/me/orgs/"+acme+"/members/"+daveM+"/suspensions", map[string]string{"reason": "x"}); code != 201 {
+		t.Fatalf("suspend: %d", code)
+	}
+	token := l.mergeToken(t, dave)
+	_, erin := l.login(t, "erin@example.com")
+	if code, out := l.mePost(t, erin, "/v1/me/merges", map[string]string{"token": token}); code != 409 || out["error"] != "membership_suspended" {
+		t.Fatalf("merge suspended: %d %v", code, out)
+	}
+	if code, _ := l.me(t, dave); code != 200 {
+		t.Fatalf("dave after the refused merge: %d", code)
+	}
+}
