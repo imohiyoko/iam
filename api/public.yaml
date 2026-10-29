@@ -1664,7 +1664,7 @@ paths:
         Org の IdP（OIDC）を登録する。IdP には応答の `redirect_uri`（ホスト型ログイン画面の戻り先。Org は選べない）を登録する。
         URL は https に限り、トークンエンドポイントは公開のアドレスに限る。その Org の管理ユーザーだけがログインでき、
         登録は Org が証明したドメインのアドレスに限る。個人 Org には登録できない（`409 personal_org`）。
-        Org の connection が上限（5）に達していれば `409 connection_limit`。設定の誤りは `400 invalid_connection`。
+        Org の connection が上限（5）に達していれば `409 connection_limit`。設定の誤りは `400 invalid_connection`（サーバーの server.public_url が無ければ `400 public_url_required`）。
       security:
         - cookieAuth: []
         - bearerAuth: []
