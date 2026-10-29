@@ -547,7 +547,7 @@ paths:
       description: |
         直近の本人確認が要る（`max_auth_age` を過ぎていれば `401 reauthentication_required`）。realm の
         `user_deletion_grace`（既定30日）の後に消し、その間はログインしても取り消し（`next: cancel_deletion`）だけができる。
-        既存のセッションはすべて失効する。共有 Org の最後のオーナーの間はできない（`409 last_owner`）。
+        既存のセッションはすべて失効する。共有 Org の最後のオーナーと、realm の最後の `realm:owner` の間はできない（`409 last_owner`）。
         消去では、所属を終えて個人 Org を削除し、認証情報・セッション・メールのインデックスを消し、データ鍵を消す
         （個人情報は復号できなくなる）。ID は墓標として残る。
       security:
@@ -1580,7 +1580,9 @@ paths:
     get:
       operationId: listOrgDomains
       summary: Org のドメインの一覧（Org の owner。11.3）
-      description: フィーチャー `org_managed_users` が動いていなければ 404。
+      description: |
+        Org の権限 `org:settings`（組み込みのロールでは owner だけが持つ。ドメインの4つの操作で同じ）。
+        フィーチャー `org_managed_users` が動いていなければ 404。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -1711,7 +1713,7 @@ paths:
         Org の IdP（OIDC）を登録する。IdP には応答の `redirect_uri`（ホスト型ログイン画面の戻り先。Org は選べない）を登録する。
         URL は https に限り、トークンエンドポイントは公開のアドレスに限る。その Org の管理ユーザーだけがログインでき、
         登録は Org が証明したドメインのアドレスに限る。個人 Org には登録できない（`409 personal_org`）。
-        Org の connection が上限（5）に達していれば `409 connection_limit`。設定の誤りは `400 invalid_connection`。
+        Org の connection が上限（5）に達していれば `409 connection_limit`。設定の誤りは `400 invalid_connection`（サーバーの server.public_url が無ければ `400 public_url_required`）。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -1839,6 +1841,7 @@ paths:
       description: |
         以後は Org がアカウントを所有し、本人はその Org を抜けられず、自分でアカウントを消せない（`409 managed_user`）。
         求めが無ければ `409 no_management_request`。受け入れの時点でメールとドメインを確かめ直す。
+        直近の本人確認が要る（`max_auth_age` を過ぎていれば `401 reauthentication_required`）。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -1904,7 +1907,7 @@ paths:
           ほかのユーザーのものなら `409 email_exists`
         - ログインしていない：アドレスが誰のものでもなく、realm が経路 `invitation` を受け入れるなら、そのアドレスで登録して
           招待された Org に入ったセッションを返す（`login`）。既存のユーザーのものなら `409 login_required`
-        無い・期限切れ・使用済みのトークンは `404 invalid_invitation`。
+        無い・期限切れ・使用済みのトークンは `404 invalid_invitation`。Org の削除が予定されているなら `409 deletion_scheduled`。
       requestBody:
         required: true
         content:
@@ -1937,7 +1940,7 @@ paths:
       summary: セッションの Org を切り替える（4.4）
       description: |
         active な Membership のある Org に切り替え、セッションの ID を入れ替える（古い ID はすぐ失効する）。
-        Cookie のセッションは Cookie を差し替える。入れない Org なら `403 no_available_org`、Org が無いか所属していなければ `404`。
+        Cookie のセッションは Cookie を差し替える。Org が無いか所属していなければ `404`（存在を明かさない）。所属しているが入れない（停止・有効期間の外）なら `403 no_available_org`。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -2447,7 +2450,8 @@ components:
           enum: [second_factor, enroll, recovery, cancel_deletion]
           description: |
             セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-            登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+            登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。`cancel_deletion` はアカウントの削除の
+            猶予期間の間で、`/v1/me/account:cancel-deletion` とログアウトだけができる（4.10）。制限つきのセッションは短い期限で失効し、
             決まった API にしか使えない（他は未ログインの扱い）。
         second_factor_methods:
           type: array
@@ -2771,7 +2775,7 @@ components:
       properties:
         action: { type: string, minLength: 1, maxLength: 130, description: "`<リソース>:<操作>`" }
         org_id: { type: string, description: 判定の文脈の Org の公開 ID。省けば active な Org }
-        resource_type: { type: string, maxLength: 64 }
+        resource_type: { type: string, maxLength: 64, description: "`org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`" }
         resource_id: { type: string, maxLength: 256 }
     CheckResult:
       type: object

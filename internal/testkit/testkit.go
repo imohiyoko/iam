@@ -9,7 +9,7 @@ import (
 	"time"
 
 	ephemeral "github.com/imohiyoko/iam/adapters/ephemeral/memory"
-	"github.com/imohiyoko/iam/adapters/keystore/file"
+	"github.com/imohiyoko/iam/adapters/keystore/keyfile"
 	storage "github.com/imohiyoko/iam/adapters/storage/memory"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/id"
@@ -34,11 +34,11 @@ type Kit struct {
 func New(t testing.TB) *Kit {
 	t.Helper()
 	clk := clock.NewFake(T0)
-	keys, err := file.Generate()
+	keys, err := keyfile.Generate()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ks, err := file.FromKeys(keys)
+	ks, err := keyfile.FromKeys(keys)
 	if err != nil {
 		t.Fatal(err)
 	}

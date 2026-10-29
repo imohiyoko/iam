@@ -13,7 +13,7 @@ Org 管理ユーザー（11.3）は、Org が所有を証明したドメイン�
 
 - フィーチャー `org_managed_users`（既定オフ、`org` が要る）。テーブル `org_domains`（`dom_…` の外部 ID）
 - Org の owner（`org:settings`）が公開 API の `/v1/me/orgs/{id}/domains` で登録・一覧し、`…/{domain_id}:verify` で確かめ、`…:delete` で消す。
-  個人 Org には登録できない。1つの Org に 20 まで
+  個人 Org には登録できない。1つの Org に 20 まで。運営者は管理 API の `/v1/admin/orgs/{id}/domains`（`orgs:update`）で同じことをする
 - ドメインは ASCII の小文字（IDN は A ラベル）で、末尾の点を除く。ラベルは2つ以上で、TLD は数字だけではない（IP アドレスを除く）
 - 登録すると IAM がトークン（160bit の乱数）を作る。owner が `_iam-challenge.<domain>` に TXT `iam-domain-verification=<token>` を置き、
   確かめると証明済みになる。TXT が無ければ `409 domain_not_verified`（確かめた時刻は残す）、DNS の障害は `503 dns_unavailable`
@@ -21,7 +21,7 @@ Org 管理ユーザー（11.3）は、Org が所有を証明したドメイン�
   証明前の登録は複数の Org が持ててよい（先に証明した方が持つ）
 - DNS はトランザクションの外で引き、結果を書くときに行が同じ（トークンが同じ）ことを確かめる
 - 監査ログ：`org.domain.added`、`org.domain.verified`、`org.domain.removed`
-- フィーチャーを無効にするときは `org_domains` の行を消す
+- フィーチャーを無効にするときは `org_domains` の行を消す。Org を消すとき（即時・猶予の後）もその Org のドメインを消す
 
 ## 理由
 
@@ -33,8 +33,7 @@ Org 管理ユーザー（11.3）は、Org が所有を証明したドメイン�
 
 ## 影響
 
-- 証明済みのドメインを定期的に確かめ直すこと（TXT を消したら証明を外す）は後に回す。今は証明済みのまま残し、消すのは owner の操作だけ
-- 管理 API で運営者がドメインを扱う口は後に回す
+- 証明済みのドメインを定期的に確かめ直すこと（TXT を消したら証明を外す）は後に回す。今は証明済みのまま残し、消すのは owner か運営者の操作か Org の削除だけ
 - Org 管理ユーザーの登録（証明済みドメインのアドレス）は、この上に足す
 
 ## 検討した代替案

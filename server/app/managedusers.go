@@ -133,6 +133,10 @@ func (s publicServer) ReleaseOrgManagement(ctx context.Context, req publicapi.Re
 }
 
 func (s publicServer) AcceptOrgManagement(ctx context.Context, req publicapi.AcceptOrgManagementRequestObject) (publicapi.AcceptOrgManagementResponseObject, error) {
+	// 抜けることも自分で消すこともできなくなるので、直近の本人確認を求める（盗まれたセッションで受け入れさせない）。
+	if au, ok := authFrom(ctx); ok && !s.recent(au) {
+		return publicapi.AcceptOrgManagement401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
 	r, code, err := s.managedSelf(ctx, req.Id, func(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, au auth) error {
 		_, err := s.a.orgs.AcceptManagement(ctx, tx, o, m, au.Actor(), requestID(ctx))
 		return err

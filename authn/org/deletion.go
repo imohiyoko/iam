@@ -37,11 +37,17 @@ func (s *Service) ScheduleDeletion(ctx context.Context, tx port.Tx, o port.Org, 
 	if o.DeletedAt != nil {
 		return port.Org{}, errs.New(errs.KindNotFound, "org")
 	}
-	if o.DeletionScheduledAt != nil {
+	if grace > 0 && o.DeletionScheduledAt != nil {
 		return port.Org{}, ErrDeletionScheduled
 	}
 	now := s.Clock.Now()
 	if grace <= 0 {
+		// 予約済みでも今削除する。残っている予約は取り消す。
+		if o.DeletionScheduledAt != nil {
+			if err := tx.ScheduledEvents().CancelByRef(ctx, o.RealmID, deletionRef(o)); err != nil {
+				return port.Org{}, err
+			}
+		}
 		o.DeletionScheduledAt = new(now)
 		if err := s.purge(ctx, tx, o, actor, requestID); err != nil {
 			return port.Org{}, err
@@ -141,23 +147,24 @@ func (s *Service) purge(ctx context.Context, tx port.Tx, o port.Org, actor audit
 			return err
 		}
 	}
+	// ドメインを消す（証明済みのドメインを、消えた Org が持ち続けないように）。
+	ds, err := tx.OrgDomains().ListByOrg(ctx, o.RealmID, o.ID)
+	if err != nil {
+		return err
+	}
+	for _, d := range ds {
+		if err := s.RemoveDomain(ctx, tx, o, d, actor, requestID); err != nil {
+			return err
+		}
+	}
 	now := s.Clock.Now()
-	// Org 専用 SSO の connection と、ドメインの所有証明を消す（ADR 0077。ドメインは別の Org が証明できるようになる）。
+	// Org 専用 SSO の connection を消す（ADR 0077。ドメインは上で消したので、別の Org が証明できるようになる）。
 	if _, err := PurgeConnections(ctx, tx, o.RealmID, o.ID, now, -1); err != nil {
 		return err
 	}
 	// 親から外し、子を根にする（ADR 0078）。
 	if err := s.detachHierarchy(ctx, tx, o, now); err != nil {
 		return err
-	}
-	ds, err := tx.OrgDomains().ListByOrg(ctx, o.RealmID, o.ID)
-	if err != nil {
-		return err
-	}
-	for _, d := range ds {
-		if err := tx.OrgDomains().Delete(ctx, o.RealmID, d.ID); err != nil {
-			return err
-		}
 	}
 	return tx.Orgs().SetDeletion(ctx, o.RealmID, o.ID, o.DeletionScheduledAt, &now, now)
 }

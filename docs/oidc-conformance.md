@@ -9,8 +9,8 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 | --- | --- |
 | Discovery と issuer の一致、JWKS（`oidcc-discovery-*`） | `TestOIDCAuthorizationCodeFlow`、`TestOIDCE2EStandardRP`（zitadel/oidc の rp で Discovery から） |
 | 認可コードフロー、ID トークンの署名とクレーム（`oidcc-server`） | `TestOIDCAuthorizationCodeFlow`、`TestOIDCE2EStandardRP`、`TestOIDCE2EMLDSARP` |
-| client_secret_basic / post、private_key_jwt、none | `TestOIDCAuthorizationCodeFlow`、`TestOIDCPrivateKeyJWT`、`TestOIDCPublicClientMLDSAAndOrg` |
-| nonce の受け渡しと、nonce なしの要求（`oidcc-ensure-request-without-nonce-*`） | `TestOIDCE2EMLDSARP`、`TestOIDCRefreshIntrospectRevoke` |
+| client_secret_basic / post、private_key_jwt、none | `TestOIDCAuthorizationCodeFlow`（basic と post）、`TestOIDCPrivateKeyJWT`、`TestOIDCPublicClientMLDSAAndOrg` |
+| nonce の受け渡しと、nonce なしの要求（`oidcc-ensure-request-without-nonce-*`） | `TestOIDCE2EMLDSARP`、`TestOIDCAuthorizationCodeFlow`（nonce なし）、`TestOIDCRefreshIntrospectRevoke`（リフレッシュの ID トークン） |
 | UserInfo（GET と POST、Bearer）（`oidcc-userinfo-*`） | `TestOIDCAuthorizationCodeFlow`、`TestOIDCE2EStandardRP` |
 | `prompt=none` で未ログインなら `login_required`、`prompt=login`（`oidcc-prompt-*`） | `TestOIDCAuthorizationCodeFlow` |
 | `max_age`（`oidcc-max-age-*`） | `TestPKCEAndFreshness` |

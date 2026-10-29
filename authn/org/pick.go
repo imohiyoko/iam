@@ -1,6 +1,7 @@
 package org
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -18,8 +19,10 @@ import (
 //
 //  1. 候補：active な Membership を持ち、Org と Membership が停止中でも有効期間の外でもなく、Org の段で deny にした警告に当たらない Org
 //     （Check、warningsDenied。ログインポリシーは後で足す）
-//     管理ユーザー（ADR 0076）は、管理する Org がこの条件を満たさなければログインそのものが失敗する
-//  2. 明示的な指定があれば、それが候補にあること（所属が無ければ ErrNoAvailableOrg、使えなければ理由つきの *account.UnavailableError）
+//     管理ユーザー（ADR 0076）は、管理する Org がこの条件を満たさなければログインそのものが失敗する。理由が passkey の必須だけで
+//     passkey が無ければ session.ErrPasskeyEnrollment（登録だけのセッションになる）
+//  2. 明示的な指定があれば、それが候補にあること（所属が無ければ ErrNoAvailableOrg、使えなければ理由つきの *account.UnavailableError）。
+//     Fallback なら、候補に無いときは指定が無いものとして 3 へ進む
 //  3. ログインの手がかり（使ったメールや OAuth のアドレスを結び付けた Membership、passkey の既定の Org）に結び付いた候補。
 //     1つならそれ。複数なら前回の Org がその中にあればそれ、無ければ選ばせる（Choices を返し、4 へ進む）
 //  4. 前回の Org（最後に発行したセッションの Org）が候補にあればそれ
@@ -48,8 +51,13 @@ func (s *Service) Pick(ctx context.Context, tx port.Tx, u port.User, in session.
 			// ログインポリシーを満たさなければ、その Org に入れない（ログインは成功する。4.4）。
 			err = s.policyDenied(ctx, tx, o, m, in)
 		}
-		// 管理ユーザーは、管理する Org に入れなければログインそのものができない（停止・ログインポリシー。ADR 0076）。
-		if (m.OrgID == in.Explicit || IsManaged(u, o)) && err != nil {
+		// 管理ユーザーは、管理する Org に入れなければログインそのものができない（停止・ログインポリシー。ADR 0076。Fallback でも同じ）。
+		if err != nil && ((m.OrgID == in.Explicit && !in.Fallback) || IsManaged(u, o)) {
+			if IsManaged(u, o) {
+				if enroll, err := needsPasskey(ctx, tx, u, err); err != nil || enroll {
+					return session.PickedOrg{}, cmp.Or(err, session.ErrPasskeyEnrollment)
+				}
+			}
 			return session.PickedOrg{}, err
 		}
 		if _, ok := errors.AsType[*account.UnavailableError](err); ok {
@@ -67,10 +75,12 @@ func (s *Service) Pick(ctx context.Context, tx port.Tx, u port.User, in session.
 		return slices.ContainsFunc(candidates, func(m port.Membership) bool { return m.OrgID == orgID })
 	}
 	if in.Explicit != "" {
-		if !has(in.Explicit) {
+		if has(in.Explicit) {
+			return session.PickedOrg{OrgID: in.Explicit}, nil
+		}
+		if !in.Fallback {
 			return session.PickedOrg{}, ErrNoAvailableOrg
 		}
-		return session.PickedOrg{OrgID: in.Explicit}, nil
 	}
 	hinted, err := s.hinted(ctx, tx, u, candidates, in)
 	if err != nil {
@@ -106,6 +116,20 @@ func (s *Service) Pick(ctx context.Context, tx port.Tx, u port.User, in session.
 	}
 	out.OrgID = p.ID
 	return out, nil
+}
+
+// needsPasskey は、管理ユーザーが管理する Org に入れない理由 denied が passkey の必須だけで、passkey を1つも
+// 登録していない（無効化していないものが無い）かを返す。そのときは passkey の登録だけができるセッションにする（ADR 0076）。
+func needsPasskey(ctx context.Context, tx port.Tx, u port.User, denied error) (bool, error) {
+	ue, ok := errors.AsType[*account.UnavailableError](denied)
+	if !ok || !slices.Equal(ue.Codes, []string{"policy." + PolicyRequirePasskey}) {
+		return false, nil
+	}
+	ps, err := tx.Passkeys().ListByUser(ctx, u.RealmID, u.ID)
+	if err != nil {
+		return false, err
+	}
+	return !slices.ContainsFunc(ps, func(p port.Passkey) bool { return p.RevokedAt == nil }), nil
 }
 
 // hinted はログインの手がかりに結び付いた候補の Org（内部 ID、Membership の作成の順）を返す。
