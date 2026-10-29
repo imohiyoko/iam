@@ -496,8 +496,12 @@ func (s publicServer) orgMemberView(ctx context.Context, tx port.Tx, m port.Memb
 	}
 	v := publicapi.OrgMember{MembershipId: m.PublicID, UserId: u.PublicID, Role: publicapi.OrgMemberRole(m.Role), Status: publicapi.OrgMemberStatus(m.Status),
 		ValidFrom: m.ValidFrom, ValidUntil: m.ValidUntil}
+	// アドレスを保存しない構成（index_only。9.6）では、切り替え前の暗号文が掃除前に残っていても出さない。
+	if s.a.accounts.IndexOnly {
+		return v, nil
+	}
 	e, err := org.BoundEmail(ctx, tx, m)
-	// 結び付けたメールが無いか、アドレスを保存しない構成（index_only。9.6）なら出さない。
+	// 結び付けたメールが無いか、アドレスの暗号文が無ければ出さない。
 	if errors.Is(err, errs.NotFound) || (err == nil && len(e.Ciphertext) == 0) {
 		return v, nil
 	}
@@ -749,7 +753,15 @@ func (s publicServer) SwitchMyOrg(ctx context.Context, req publicapi.SwitchMyOrg
 	}
 	var orgID string
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		// 所属していない Org は無いものとして扱う（存在を明かさない）。入れない理由（停止など）は所属している人にだけ返す。
 		o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, req.Id)
+		if err != nil {
+			return err
+		}
+		m, err := tx.Memberships().GetByUserOrg(ctx, s.a.realm.ID, au.PrincipalID, o.ID)
+		if err == nil && m.Status != port.MembershipActive {
+			err = errs.New(errs.KindNotFound, "membership")
+		}
 		orgID = o.ID
 		return err
 	})

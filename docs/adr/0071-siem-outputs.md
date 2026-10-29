@@ -19,8 +19,13 @@
 - 対象の個人情報は、監査ログに残す切り詰めた IP と User-Agent の大分類。outbox にはこれを残し（`audit.External` は全文の暗号文
   だけを外す）、アダプタが出し方を決める。全文の暗号文はどの出し方でも出さない
 - OCSF は 1.3 の IAM カテゴリ（3）。クラスは type の接頭辞で決め（ログイン・セッションは Authentication 3002、
-  ユーザーと認証手段は Account Change 3001、ロールは User Access Management 3005、ほかは Entity Management 3004）、
-  IAM 固有の項目（realm・Org・details・チェーンの位置）は `unmapped`
+  ユーザーと認証手段は Account Change 3001、ロールの付与・取り消しは User Access Management 3005、Group は Group Management 3006、
+  ほか（ロールそのものを含む）は Entity Management 3004）、`activity_id` と `type_uid` はクラスごとの列挙で決める。
+  クラスが必須とする対象（`user`・`privileges`・`group`・`entity`）は details の識別子から作り、無ければ主体を、それも無ければ
+  `name: unknown` を入れる（対象を省いた不完全な記録は出さない）。切り詰めた IP は `src_endpoint.subnet_uid`（`ip` は完全な
+  アドレスのときだけ）、仮名は `src_endpoint.uid`。IAM 固有の項目（realm・Org・details・チェーンの位置）は `unmapped`
+- 仮名化は IP と User-Agent の大分類の両方に掛ける。syslog の MSG は UTF-8 の BOM から始める（RFC 5424 6.4）。OTLP の 2xx の本文が
+  読めない・64 KiB を超える・JSON でないときは送出の失敗にする（拒まれた記録を見落とさない）
 - 送り先の URL は https に限る（開発ビルドと localhost は http 可）。秘密（ヘッダー、署名の鍵、仮名化の鍵）は環境変数の名前で渡し、
   設定ファイルに書かない
 - 少なくとも1回：失敗すれば送出全体をやり直す。受け取る側はイベント ID で重複を除き、`chain.seq` の欠けで抜けを検出する

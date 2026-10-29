@@ -86,3 +86,4 @@
 | [0072](0072-retention.md) | 保持期間は1つの掃除のループで消し、監査ログはチェックポイントを残して先頭から切り詰める | 承認 |
 | [0073](0073-build-and-feature-toggle.md) | iam build は imports.go を差し替えてビルドし、フィーチャーの無効化はデータが 0 件になって完了する | 承認 |
 | [0074](0074-service-accounts.md) | 汎用サービスアカウントは管理 API で作り、API キーか client credentials の短命トークンで管理 API を使う | 承認 |
+| [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |
