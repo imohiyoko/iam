@@ -129,6 +129,25 @@ func (r orgs) ListChildren(ctx context.Context, realmID, id string) ([]port.Org,
 	return rows(rs, err, toOrg)
 }
 
+func (r orgs) MoveContents(ctx context.Context, realmID, fromID, toID string) error {
+	if fromID == "" || toID == "" {
+		return errs.New(errs.KindInvalid, "org: move contents needs both orgs")
+	}
+	p := db.MoveOrgRolesParams{ToOrgID: toID, RealmID: realmID, FromOrgID: fromID}
+	for _, err := range []error{
+		r.q.MoveOrgRoles(ctx, p),
+		r.q.MoveOrgGroups(ctx, db.MoveOrgGroupsParams(p)),
+		r.q.MoveOrgServiceAccounts(ctx, db.MoveOrgServiceAccountsParams(p)),
+		r.q.MoveOrgQuotaGrants(ctx, db.MoveOrgQuotaGrantsParams(p)),
+		r.q.MoveOrgPasskeyPreferences(ctx, db.MoveOrgPasskeyPreferencesParams(p)),
+	} {
+		if err != nil {
+			return mapErr(err)
+		}
+	}
+	return nil
+}
+
 func (r orgs) SetSettings(ctx context.Context, realmID, id string, settings []byte, updatedAt time.Time) error {
 	n, err := r.q.SetOrgSettings(ctx, db.SetOrgSettingsParams{Settings: settings, UpdatedAt: formatTime(updatedAt), RealmID: realmID, ID: id})
 	return affected(n, err, "org")

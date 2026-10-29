@@ -1142,6 +1142,81 @@ func (q *Queries) ListQuotaGrantsByOrg(ctx context.Context, arg ListQuotaGrantsB
 	return items, nil
 }
 
+const moveOrgGroups = `-- name: MoveOrgGroups :exec
+UPDATE authz_groups SET org_id = ?1 WHERE realm_id = ?2 AND org_id = ?3
+`
+
+type MoveOrgGroupsParams struct {
+	ToOrgID   string
+	RealmID   string
+	FromOrgID string
+}
+
+func (q *Queries) MoveOrgGroups(ctx context.Context, arg MoveOrgGroupsParams) error {
+	_, err := q.db.ExecContext(ctx, moveOrgGroups, arg.ToOrgID, arg.RealmID, arg.FromOrgID)
+	return err
+}
+
+const moveOrgPasskeyPreferences = `-- name: MoveOrgPasskeyPreferences :exec
+UPDATE authn_passkeys SET preferred_org_id = ?1 WHERE realm_id = ?2 AND preferred_org_id = ?3
+`
+
+type MoveOrgPasskeyPreferencesParams struct {
+	ToOrgID   string
+	RealmID   string
+	FromOrgID string
+}
+
+func (q *Queries) MoveOrgPasskeyPreferences(ctx context.Context, arg MoveOrgPasskeyPreferencesParams) error {
+	_, err := q.db.ExecContext(ctx, moveOrgPasskeyPreferences, arg.ToOrgID, arg.RealmID, arg.FromOrgID)
+	return err
+}
+
+const moveOrgQuotaGrants = `-- name: MoveOrgQuotaGrants :exec
+UPDATE org_quota_grants SET org_id = ?1 WHERE realm_id = ?2 AND org_id = ?3
+`
+
+type MoveOrgQuotaGrantsParams struct {
+	ToOrgID   string
+	RealmID   string
+	FromOrgID string
+}
+
+func (q *Queries) MoveOrgQuotaGrants(ctx context.Context, arg MoveOrgQuotaGrantsParams) error {
+	_, err := q.db.ExecContext(ctx, moveOrgQuotaGrants, arg.ToOrgID, arg.RealmID, arg.FromOrgID)
+	return err
+}
+
+const moveOrgRoles = `-- name: MoveOrgRoles :exec
+UPDATE authz_roles SET org_id = ?1 WHERE realm_id = ?2 AND org_id = ?3
+`
+
+type MoveOrgRolesParams struct {
+	ToOrgID   string
+	RealmID   string
+	FromOrgID string
+}
+
+func (q *Queries) MoveOrgRoles(ctx context.Context, arg MoveOrgRolesParams) error {
+	_, err := q.db.ExecContext(ctx, moveOrgRoles, arg.ToOrgID, arg.RealmID, arg.FromOrgID)
+	return err
+}
+
+const moveOrgServiceAccounts = `-- name: MoveOrgServiceAccounts :exec
+UPDATE authn_service_accounts SET org_id = ?1 WHERE realm_id = ?2 AND org_id = ?3
+`
+
+type MoveOrgServiceAccountsParams struct {
+	ToOrgID   string
+	RealmID   string
+	FromOrgID string
+}
+
+func (q *Queries) MoveOrgServiceAccounts(ctx context.Context, arg MoveOrgServiceAccountsParams) error {
+	_, err := q.db.ExecContext(ctx, moveOrgServiceAccounts, arg.ToOrgID, arg.RealmID, arg.FromOrgID)
+	return err
+}
+
 const purgeOrgDomains = `-- name: PurgeOrgDomains :execrows
 DELETE FROM org_domains WHERE id IN (SELECT d.id FROM org_domains d LIMIT ?1)
 `

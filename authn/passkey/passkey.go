@@ -461,6 +461,10 @@ func (s *Service) finishLogin(ctx context.Context, realmID string, in Login) (Re
 			if u, wu, _, err = s.loadUser(ctx, tx, realmID, p.UserID, false); err != nil {
 				return nil, err
 			}
+			// 統合（11.6）で移した passkey は、元のユーザーのハンドルで登録されている。
+			if len(p.UserHandle) > 0 {
+				wu.handle = p.UserHandle
+			}
 			if !bytes.Equal(userHandle, wu.handle) {
 				return nil, errors.New("user handle does not match the credential")
 			}
@@ -557,6 +561,12 @@ func (s *Service) verify(ctx context.Context, tx port.Tx, realmID, userID, flowI
 	_, wu, active, err := s.loadUser(ctx, tx, realmID, userID, false)
 	if err != nil {
 		return port.Passkey{}, err
+	}
+	for _, p := range active {
+		if bytes.Equal(p.CredentialID, parsed.RawID) && len(p.UserHandle) > 0 {
+			// 統合（11.6）で移した passkey。フローは userID のものと take で確かめてあるので、照合する ID も合わせる。
+			wu.handle, st.Session.UserID = p.UserHandle, p.UserHandle
+		}
 	}
 	c, err := s.wa.ValidateLogin(wu, st.Session, parsed)
 	if err != nil {

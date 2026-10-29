@@ -44,6 +44,7 @@ var authnTests = []struct {
 	{"SessionRevokeByPrincipal", testSessionRevokeByPrincipal},
 	{"SessionMoveOrg", testSessionMoveOrg},
 	{"UserDeletion", testUserDeletion},
+	{"AccountMerge", testAccountMerge},
 	{"ServiceAccounts", testServiceAccounts},
 	{"ServiceAccountsM7", testServiceAccountsM7},
 	{"RoleBindings", testRoleBindings},

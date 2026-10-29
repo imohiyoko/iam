@@ -146,8 +146,8 @@ DELETE FROM authn_service_account_tokens WHERE id IN (
 
 -- name: CreatePasskey :exec
 INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,
-    transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id, user_handle)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: IsPasskeyCredentialRevoked :one
 SELECT COUNT(*) FROM authn_revoked_passkey_credentials WHERE realm_id = ? AND credential_id = ?;
@@ -327,3 +327,13 @@ SELECT count(*) FROM authn_users WHERE managed_org_id IS NOT NULL;
 -- name: ReleaseManagedUsers :execrows
 UPDATE authn_users SET managed_org_id = NULL, managed_at = NULL, updated_at = sqlc.arg(updated_at)
 WHERE id IN (SELECT u.id FROM authn_users u WHERE u.managed_org_id IS NOT NULL LIMIT sqlc.arg(lim));
+
+-- name: SetUserMerged :execrows
+UPDATE authn_users SET status = 'merged', merged_into = ?, deletion_scheduled_at = NULL, updated_at = ?
+WHERE realm_id = ? AND id = ? AND status = 'active';
+
+-- name: SetPasskeyHandles :exec
+UPDATE authn_passkeys SET user_handle = ? WHERE realm_id = ? AND user_id = ? AND length(user_handle) = 0;
+
+-- name: MovePasskeys :execrows
+UPDATE authn_passkeys SET user_id = sqlc.arg(to_user_id) WHERE realm_id = sqlc.arg(realm_id) AND user_id = sqlc.arg(from_user_id);

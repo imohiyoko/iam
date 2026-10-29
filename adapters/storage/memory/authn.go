@@ -599,6 +599,19 @@ func (r users) SetLegalHold(_ context.Context, realmID, id string, hold bool, up
 	return r.change(realmID, id, func(u *port.User) { u.LegalHold, u.UpdatedAt = hold, updatedAt })
 }
 
+func (r users) SetMerged(_ context.Context, realmID, id, into string, at time.Time) error {
+	u, err := get(r.t.s.users, realmID, id, func(u port.User) string { return u.RealmID }, "user")
+	if err != nil {
+		return err
+	}
+	if u.Status != port.UserActive {
+		return errs.New(errs.KindNotFound, "user")
+	}
+	return r.change(realmID, id, func(u *port.User) {
+		u.Status, u.MergedInto, u.DeletionScheduledAt, u.UpdatedAt = port.UserMerged, into, nil, at
+	})
+}
+
 func (r users) SetManagedOrg(_ context.Context, realmID, id, orgID string, at time.Time) error {
 	return r.change(realmID, id, func(u *port.User) {
 		u.ManagedOrgID, u.ManagedAt, u.UpdatedAt = orgID, nil, at

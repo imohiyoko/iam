@@ -268,3 +268,31 @@ func TestVerifySecondFactor(t *testing.T) {
 		t.Fatalf("verify with another user's flow = %v", err)
 	}
 }
+
+// 統合（11.6）で移した passkey は、統合元の user handle のまま2要素目に使える。
+func TestVerifyMergedPasskey(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	alice, bob := e.user(t, "alice@example.com"), e.user(t, "bob@example.com")
+	a := passkeytest.New(origin)
+	if _, err := e.register(t, bob, a); err != nil {
+		t.Fatal(err)
+	}
+	e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		_, err := tx.Passkeys().MoveUser(ctx, e.k.RealmID, bob.ID, alice.ID, []byte(bob.PublicID))
+		return err
+	})
+	st, err := e.svc.BeginVerify(ctx, e.k.RealmID, alice.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Flags = passkeytest.FlagUP
+	resp, err := a.Get(st.Options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		_, err := e.svc.Verify(ctx, tx, e.k.RealmID, alice.ID, st.FlowID, resp)
+		return err
+	})
+}

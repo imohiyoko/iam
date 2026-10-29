@@ -187,7 +187,8 @@ func defsByKey(ctx context.Context, tx port.Tx, realmID string) (map[string]port
 	return out, nil
 }
 
-func aad(key string) string { return "user_attributes." + key }
+// AAD は属性の値の暗号文の AAD の用途。
+func AAD(key string) string { return "user_attributes." + key }
 
 // Values はユーザーの値を返す。onlyToken ならトークンに載せる属性だけ。復号できない値（データ鍵の削除）は返さない。
 func (s *Service) Values(ctx context.Context, tx port.Tx, u port.User, onlyToken bool) (map[string]any, error) {
@@ -208,7 +209,7 @@ func (s *Service) Values(ctx context.Context, tx port.Tx, u port.User, onlyToken
 		}
 		raw := v.Value
 		if d.Encrypted {
-			raw, err = s.Crypter.Decrypt(ctx, tx.DataKeys(), userID, v.Value, aad(v.Key))
+			raw, err = s.Crypter.Decrypt(ctx, tx.DataKeys(), userID, v.Value, AAD(v.Key))
 			if errors.Is(err, pii.ErrShredded) {
 				continue
 			}
@@ -302,7 +303,7 @@ func (s *Service) Set(ctx context.Context, tx port.Tx, u port.User, in map[strin
 			return err
 		}
 		if d.Encrypted {
-			if b, err = s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, b, aad(k)); err != nil {
+			if b, err = s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, b, AAD(k)); err != nil {
 				return err
 			}
 		}
