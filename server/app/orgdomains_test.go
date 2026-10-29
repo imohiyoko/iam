@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
@@ -249,6 +250,13 @@ func TestManagedUsers(t *testing.T) {
 	if code, out := l.mePost(t, owner, member(patMember)+":request-management", nil); code != 204 {
 		t.Fatalf("request again: %d %v", code, out)
 	}
+	// 受け入れには直近の本人確認が要る。
+	l.advance(l.e.cfg.Security.Session.MaxAuthAge.Default.D() + time.Minute)
+	if code, out := l.mePost(t, pat, "/v1/me/orgs/"+acme+":accept-management", nil); code != 401 || out["error"] != "reauthentication_required" {
+		t.Fatalf("accept without recent auth: %d %v", code, out)
+	}
+	_, pat = l.login(t, "pat@acme.example")
+	_, owner = l.login(t, "boss@acme.example")
 	if code, out := l.mePost(t, pat, "/v1/me/orgs/"+acme+":accept-management", nil); code != 204 {
 		t.Fatalf("accept: %d %v", code, out)
 	}
