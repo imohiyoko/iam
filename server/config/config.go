@@ -143,6 +143,15 @@ type Realm struct {
 	UserDeletionGrace Duration `yaml:"user_deletion_grace"`
 	// ClientDataRetention は監査ログの IP と User-Agent の全文を読める期間（design.md 9.6）。期間の後は切り詰めた値だけが残る。
 	ClientDataRetention Duration `yaml:"client_data_retention"`
+	// QuotaCount は Quota（フィーチャー quota）で数えるもの（design.md 11.14）。active な Membership は必ず数える。
+	QuotaCount QuotaCount `yaml:"quota_count"`
+}
+
+// QuotaCount は Quota で数えるもの。既定はすべて数える。
+type QuotaCount struct {
+	Invited   bool `yaml:"invited"`   // 受け入れ待ちの招待
+	Future    bool `yaml:"future"`    // 有効期間がまだ始まっていない Membership
+	Suspended bool `yaml:"suspended"` // 停止中の Membership
 }
 
 // KnownOrgCreation は realm.org_creation の値。
@@ -320,7 +329,8 @@ func Default() Config {
 		BreachCheck: Adapter{Driver: "hibp"},
 		Realm: Realm{Slug: "default", Timezone: "UTC", VerifiedVia: []string{"code", "oauth_provider", "sso", "admin"},
 			OrgCreation: "anyone", OrgDeletionGrace: Duration(30 * day),
-			UserDeletionGrace: Duration(30 * day), ClientDataRetention: Duration(30 * day)},
+			UserDeletionGrace: Duration(30 * day), ClientDataRetention: Duration(30 * day),
+			QuotaCount: QuotaCount{Invited: true, Future: true, Suspended: true}},
 		Security: Security{Session: SessionRules{
 			AbsoluteLifetime: DurationRule{Default: Duration(30 * day), Min: Duration(time.Hour), Max: Duration(90 * day)},
 			IdleTimeout:      DurationRule{Default: Duration(7 * day), Min: Duration(5 * time.Minute), Max: Duration(30 * day)},

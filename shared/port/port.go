@@ -55,6 +55,7 @@ type Tx interface {
 	Orgs() OrgRepo
 	Memberships() MembershipRepo
 	Invitations() InvitationRepo
+	QuotaGrants() QuotaGrantRepo
 	ServiceAccounts() ServiceAccountRepo
 	RoleBindings() RoleBindingRepo
 	Roles() RoleRepo

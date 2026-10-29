@@ -2,6 +2,7 @@ package storagetest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -378,5 +379,144 @@ var invitationIsolationCase = IsolationCase{
 		}
 		m, err := count(tx.Invitations().ListByOrg(ctx, r, isoOrg))
 		return n + m, err
+	},
+}
+
+func newQuotaGrant(realmID, orgID string, kind port.QuotaGrantKind, n int64) port.QuotaGrant {
+	return port.QuotaGrant{ID: id.New(id.QuotaGrant), PublicID: id.NewExternal(id.QuotaGrant), RealmID: realmID, OrgID: orgID, QuotaKey: "members",
+		Kind: kind, Quantity: n, StartsAt: T0, Source: port.QuotaSourceManual, CreatedBy: "usr_admin", CreatedAt: T0, UpdatedAt: T0}
+}
+
+func testQuotaGrants(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, o := id.New(id.Realm), id.New(id.Org)
+	a := newQuotaGrant(r, o, port.QuotaBase, 10)
+	a.EndsAt = ptr(T0.Add(time.Hour))
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.QuotaGrants()
+		if err := repo.Create(ctx, a); err != nil {
+			return err
+		}
+		if got, err := repo.GetByPublicID(ctx, r, a.PublicID); err != nil || !reflect.DeepEqual(got, a) {
+			return fmt.Errorf("GetByPublicID = %+v, %v", got, err)
+		}
+		dup := newQuotaGrant(r, o, port.QuotaAddon, 1)
+		dup.PublicID = a.PublicID
+		if err := conflict("same public id", repo.Create(ctx, dup)); err != nil {
+			return err
+		}
+		// 空の external_ref は重複してよい。空でなければ (Org, quota_key) ごとに一意。
+		b := newQuotaGrant(r, o, port.QuotaAddon, 2)
+		b.CreatedAt, b.Source, b.ExternalRef = T0.Add(time.Minute), port.QuotaSourceExternal, "sub_1"
+		if err := repo.Create(ctx, b); err != nil {
+			return err
+		}
+		c := newQuotaGrant(r, o, port.QuotaAddon, 3)
+		c.CreatedAt, c.ExternalRef = T0.Add(2*time.Minute), "sub_1"
+		if err := conflict("same external ref", repo.Create(ctx, c)); err != nil {
+			return err
+		}
+		c.QuotaKey = "projects"
+		if err := repo.Create(ctx, c); err != nil {
+			return err
+		}
+		if got, err := repo.GetByExternalRef(ctx, r, o, "members", "sub_1"); err != nil || got.ID != b.ID {
+			return fmt.Errorf("GetByExternalRef = %+v, %v", got, err)
+		}
+		if _, err := repo.GetByExternalRef(ctx, r, o, "members", ""); notFound("empty external ref", err) != nil {
+			return notFound("empty external ref", err)
+		}
+		if list, err := repo.ListByOrg(ctx, r, o, "members"); err != nil || len(list) != 2 || list[0].ID != a.ID || list[1].ID != b.ID {
+			return fmt.Errorf("ListByOrg = %+v, %v", list, err)
+		}
+		a.Kind, a.Quantity, a.StartsAt, a.EndsAt, a.UpdatedAt = port.QuotaOverride, 4, T0.Add(time.Second), nil, T0.Add(time.Hour)
+		if err := repo.Update(ctx, a); err != nil {
+			return err
+		}
+		if got, err := repo.GetByPublicID(ctx, r, a.PublicID); err != nil || !reflect.DeepEqual(got, a) {
+			return fmt.Errorf("after Update = %+v, %v", got, err)
+		}
+		other := a
+		other.RealmID = id.New(id.Realm)
+		if err := notFound("update in another realm", repo.Update(ctx, other)); err != nil {
+			return err
+		}
+		if err := notFound("delete in another realm", repo.Delete(ctx, other.RealmID, a.ID)); err != nil {
+			return err
+		}
+		if err := repo.Delete(ctx, r, a.ID); err != nil {
+			return err
+		}
+		if _, err := repo.GetByPublicID(ctx, r, a.PublicID); notFound("deleted", err) != nil {
+			return notFound("deleted", err)
+		}
+		return notFound("delete again", repo.Delete(ctx, r, a.ID))
+	})
+}
+
+// testQuotaCountThenAddConcurrent は、件数の確認と追加を同じトランザクションで並行に行っても上限を超えないこと（11.14、12章）。
+func testQuotaCountThenAddConcurrent(t *testing.T, h Harness) {
+	const limit, workers = 5, 32
+	s, _ := open(t, h)
+	r, o := id.New(id.Realm), id.New(id.Org)
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		return tx.QuotaGrants().Create(ctx, newQuotaGrant(r, o, port.QuotaBase, limit))
+	})
+	errFull := errors.New("quota exceeded")
+	results := Concurrent(workers, func(int) error {
+		return s.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+			gs, err := tx.QuotaGrants().ListByOrg(ctx, r, o, "members")
+			if err != nil || len(gs) != 1 {
+				return fmt.Errorf("grants = %d, %v", len(gs), err)
+			}
+			ms, err := tx.Memberships().ListByOrg(ctx, r, o, "", 1000)
+			if err != nil {
+				return err
+			}
+			if int64(len(ms))+1 > gs[0].Quantity {
+				return errFull
+			}
+			return tx.Memberships().Create(ctx, newMembership(r, id.New(id.User), o))
+		})
+	})
+	ok := 0
+	for _, err := range results {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, errFull):
+		default:
+			t.Errorf("unexpected: %v", err)
+		}
+	}
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		ms, err := tx.Memberships().ListByOrg(ctx, r, o, "", 1000)
+		if err != nil || len(ms) != ok || ok != limit {
+			return fmt.Errorf("members = %d (succeeded %d), %v; want %d", len(ms), ok, err, limit)
+		}
+		return nil
+	})
+}
+
+const isoQuotaGrant = "qgr_00000000000000000000000009"
+
+var quotaGrantIsolationCase = IsolationCase{
+	Name: "QuotaGrants.GetByPublicID+GetByExternalRef+ListByOrg",
+	Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
+		g := newQuotaGrant(r, isoOrg, port.QuotaBase, 1)
+		g.PublicID, g.ExternalRef = isoQuotaGrant, "ext"
+		return tx.QuotaGrants().Create(ctx, g)
+	},
+	Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {
+		a, err := countOne(tx.QuotaGrants().GetByPublicID(ctx, r, isoQuotaGrant))
+		if err != nil {
+			return 0, err
+		}
+		b, err := countOne(tx.QuotaGrants().GetByExternalRef(ctx, r, isoOrg, "members", "ext"))
+		if err != nil {
+			return 0, err
+		}
+		c, err := count(tx.QuotaGrants().ListByOrg(ctx, r, isoOrg, "members"))
+		return a + b + c, err
 	},
 }

@@ -194,7 +194,8 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 			DeletionGrace: cfg.Realm.OrgDeletionGrace.D(), Rules: org.Rules{
 				AbsoluteLifetime: ss.AbsoluteLifetime.Rule("session.absolute_lifetime"), IdleTimeout: ss.IdleTimeout.Rule("session.idle_timeout"),
 				MaxAuthAge: ss.MaxAuthAge.Rule("session.max_auth_age"), Warnings: warnings,
-			}, LoginPolicies: plan.IsActive(feature.OrgLoginPolicy)}
+			}, LoginPolicies: plan.IsActive(feature.OrgLoginPolicy), Quotas: plan.IsActive(feature.Quota),
+			QuotaCount: org.QuotaCount(cfg.Realm.QuotaCount)}
 		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
 	}
 	// 判定の材料のキャッシュは、セッションの検証と同じ反映の遅れの上限（5.3）まで。

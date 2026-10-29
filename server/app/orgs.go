@@ -580,7 +580,7 @@ func (s publicServer) InviteToOrg(ctx context.Context, req publicapi.InviteToOrg
 		return err
 	})
 	if c, ok := stateCode(err); ok {
-		return publicapi.InviteToOrg409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: c}}, nil
+		return publicapi.InviteToOrg409JSONResponse{ConflictJSONResponse: conflictOf(err, c)}, nil
 	}
 	switch {
 	case errors.Is(err, errs.NotFound):
@@ -710,7 +710,7 @@ func (s publicServer) AcceptInvitation(ctx context.Context, req publicapi.Accept
 		return publicapi.AcceptInvitation403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	if code, ok := stateCode(err); ok {
-		return publicapi.AcceptInvitation409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
+		return publicapi.AcceptInvitation409JSONResponse{ConflictJSONResponse: conflictOf(err, code)}, nil
 	}
 	switch {
 	case errors.Is(err, errs.NotFound):

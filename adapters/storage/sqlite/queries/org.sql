@@ -63,3 +63,23 @@ SELECT * FROM invitations WHERE realm_id = ? AND org_id = ? ORDER BY created_at,
 
 -- name: CloseInvitation :execrows
 UPDATE invitations SET status = ?, closed_at = ?, closed_by = ? WHERE realm_id = ? AND id = ? AND status = 'pending';
+
+-- name: CreateQuotaGrant :exec
+INSERT INTO org_quota_grants (id, public_id, realm_id, org_id, quota_key, kind, quantity, starts_at, ends_at, source, external_ref,
+    created_by, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetQuotaGrantByPublicID :one
+SELECT * FROM org_quota_grants WHERE realm_id = ? AND public_id = ?;
+
+-- name: GetQuotaGrantByExternalRef :one
+SELECT * FROM org_quota_grants WHERE realm_id = ? AND org_id = ? AND quota_key = ? AND external_ref = ? AND external_ref <> '';
+
+-- name: ListQuotaGrantsByOrg :many
+SELECT * FROM org_quota_grants WHERE realm_id = ? AND org_id = ? AND quota_key = ? ORDER BY created_at, id;
+
+-- name: UpdateQuotaGrant :execrows
+UPDATE org_quota_grants SET kind = ?, quantity = ?, starts_at = ?, ends_at = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
+
+-- name: DeleteQuotaGrant :execrows
+DELETE FROM org_quota_grants WHERE realm_id = ? AND id = ?;
