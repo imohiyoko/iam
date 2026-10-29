@@ -75,9 +75,25 @@ func (r *Runner) Run(ctx context.Context, in port.HookInput) (port.HookResult, e
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	res, err := e.Hook.Call(cctx, in)
-	// 期限を過ぎて返った結果は使わない（Go の実装は ctx に従って早く返す）。
-	if err == nil && cctx.Err() != nil {
+	// ctx に従わない実装でも期限で待つのをやめる。期限を過ぎて返った結果は使わない。
+	type result struct {
+		res port.HookResult
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		res, err := e.Hook.Call(cctx, in)
+		done <- result{res, err}
+	}()
+	var res port.HookResult
+	var err error
+	select {
+	case out := <-done:
+		res, err = out.res, out.err
+		if err == nil && cctx.Err() != nil {
+			err = cctx.Err()
+		}
+	case <-cctx.Done():
 		err = cctx.Err()
 	}
 	log := r.Log

@@ -237,7 +237,7 @@ paths:
       summary: ユーザーを削除する（4.10）
       description: |
         権限 `users:delete`。既定は realm の `user_deletion_grace` の後に消す（その間は取り消せる）。`immediate` なら今消す
-        （`legal_hold` が立っていれば予約にする）。共有 Org の最後のオーナーの間は `409 last_owner`。
+        （`legal_hold` が立っていれば予約にする）。共有 Org の最後のオーナーと、realm の最後の `realm:owner` の間は `409 last_owner`。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -542,6 +542,93 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/orgs/{id}/domains:
+    get:
+      operationId: adminListOrgDomains
+      summary: Org のドメインの一覧（11.3、ADR 0075）
+      description: 権限 `orgs:update`（TXT の値を含むため）。フィーチャー `org_managed_users` が動いていなければ `404 org_managed_users_disabled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 登録の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [domains]
+                properties:
+                  domains:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgDomain" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: adminAddOrgDomain
+      summary: Org にドメインを登録する（11.3、ADR 0075）
+      description: |
+        権限 `orgs:update`。公開 API の `addOrgDomain` と同じ。個人 Org は `409 personal_org`、登録済みは `409 domain_exists`、
+        realm の別の Org が証明済みなら `409 domain_taken`、上限（20）は `409 domain_limit`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [domain]
+              properties:
+                domain: { type: string, maxLength: 254 }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgDomain" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/orgs/{id}/domains/{domain_id}:verify:
+    post:
+      operationId: adminVerifyOrgDomain
+      summary: ドメインの TXT を確かめ、証明済みにする（11.3）
+      description: |
+        権限 `orgs:update`。TXT が無ければ `409 domain_not_verified`（確かめた時刻は残る）。realm の別の Org が先に証明していれば
+        `409 domain_taken`。証明済みなら何もしない。DNS の障害は `503 dns_unavailable`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: domain_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 証明済み
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgDomain" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/orgs/{id}/domains/{domain_id}:delete:
+    post:
+      operationId: adminDeleteOrgDomain
+      summary: ドメインを消す（11.3）
+      description: 権限 `orgs:update`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: domain_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 消した }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/orgs/{id}/quota:
     get:
       operationId: getOrgQuota
@@ -670,6 +757,7 @@ paths:
         権限 `orgs:update`。`parent_id` を省略か null にすると親を外す。親の Org の付与と org_role が、子孫の Org の範囲の
         判定に効く（親の使える所属を持つ間、子の Org が使えるとき）。個人 Org は `409 personal_org`、削除した Org は
         `409 org_deleted`、循環は `409 hierarchy_cycle`、段数（根を含めて 5）を超えるなら `409 hierarchy_too_deep`。
+        `parent_id` の Org が無ければ `400 parent_not_found`。
         フィーチャー org_hierarchy が動いていなければ `404 hierarchy_disabled`。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -1959,6 +2047,18 @@ components:
         require_sso:
           type: boolean
           description: この Org の connection（Org 専用 SSO。ADR 0077）で認証したセッションだけを入れる。フィーチャー org_managed_users も要る
+    OrgDomain:
+      type: object
+      required: [id, domain, status, txt_name, txt_value, created_at]
+      properties:
+        id: { type: string, description: 公開のドメイン ID（dom_…） }
+        domain: { type: string }
+        status: { type: string, enum: [pending, verified] }
+        txt_name: { type: string, description: TXT を置く名前（`_iam-challenge.<domain>`） }
+        txt_value: { type: string, description: TXT の値（`iam-domain-verification=<token>`） }
+        verified_at: { type: string, format: date-time }
+        checked_at: { type: string, format: date-time, description: 最後に TXT を確かめた時刻 }
+        created_at: { type: string, format: date-time }
     OrgSettingsView:
       type: object
       required: [settings, effective]
@@ -2277,7 +2377,7 @@ components:
         principal_id: { type: string, description: 主体の公開 ID }
         action: { type: string, minLength: 1, maxLength: 130, description: "`<リソース>:<操作>`" }
         org_id: { type: string, description: 判定の文脈の Org の公開 ID }
-        resource_type: { type: string, maxLength: 64 }
+        resource_type: { type: string, maxLength: 64, description: "`org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`" }
         resource_id: { type: string, maxLength: 256 }
     CheckResult:
       type: object

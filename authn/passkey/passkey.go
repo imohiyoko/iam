@@ -564,7 +564,8 @@ func (s *Service) verify(ctx context.Context, tx port.Tx, realmID, userID, flowI
 	}
 	for _, p := range active {
 		if bytes.Equal(p.CredentialID, parsed.RawID) && len(p.UserHandle) > 0 {
-			wu.handle = p.UserHandle // 統合（11.6）で移した passkey
+			// 統合（11.6）で移した passkey。フローは userID のものと take で確かめてあるので、照合する ID も合わせる。
+			wu.handle, st.Session.UserID = p.UserHandle, p.UserHandle
 		}
 	}
 	c, err := s.wa.ValidateLogin(wu, st.Session, parsed)

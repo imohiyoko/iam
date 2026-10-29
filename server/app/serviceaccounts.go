@@ -11,6 +11,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
+	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -45,8 +46,17 @@ func (s adminServer) manageServiceAccount(ctx context.Context, saID string, fn f
 		}
 		return fn(ctx, tx, p, sa)
 	})
+	if errors.Is(err, errOutranked) {
+		return failed(http.StatusForbidden, errs.CodePermissionDenied), nil
+	}
 	o, _, err := outcomeOf(nil, err)
 	return o, err
+}
+
+// outranksServiceAccount は、認証情報の追加・失効と削除の前に、呼び出し側がサービスアカウントのロールの権限を
+// すべて持つかを確かめる（service_accounts:manage だけで強いサービスアカウントの鍵を得て昇格させない）。
+func (s adminServer) outranksServiceAccount(ctx context.Context, tx port.Tx, p adminPrincipal, sa port.ServiceAccount) error {
+	return s.a.outranksPrincipal(ctx, tx, p, check.Principal{Type: port.PrincipalServiceAccount, ID: sa.ID}, sa.OrgID)
 }
 
 func (s adminServer) serviceAccountView(ctx context.Context, tx port.Tx, sa port.ServiceAccount) (adminapi.ServiceAccount, error) {
@@ -222,6 +232,9 @@ func (s adminServer) GetServiceAccount(ctx context.Context, req adminapi.GetServ
 func (s adminServer) DeleteServiceAccount(ctx context.Context, req adminapi.DeleteServiceAccountRequestObject) (adminapi.DeleteServiceAccountResponseObject, error) {
 	var out adminapi.ServiceAccount
 	o, err := s.manageServiceAccount(ctx, req.Id, func(ctx context.Context, tx port.Tx, p adminPrincipal, sa port.ServiceAccount) error {
+		if err := s.outranksServiceAccount(ctx, tx, p, sa); err != nil {
+			return err
+		}
 		sa, err := s.a.serviceAccounts.Delete(ctx, tx, sa, p.Actor, requestID(ctx))
 		if err != nil {
 			return err
@@ -285,6 +298,9 @@ func (s adminServer) CreateServiceAccountCredential(ctx context.Context, req adm
 			}
 		}
 		o, err = s.manageServiceAccount(ctx, req.Id, func(ctx context.Context, tx port.Tx, p adminPrincipal, sa port.ServiceAccount) error {
+			if err := s.outranksServiceAccount(ctx, tx, p, sa); err != nil {
+				return err
+			}
 			c, secret, err := s.a.serviceAccounts.AddCredential(ctx, tx, sa, in, p.Actor, requestID(ctx))
 			if err != nil {
 				return err
@@ -318,6 +334,9 @@ func (s adminServer) CreateServiceAccountCredential(ctx context.Context, req adm
 func (s adminServer) RevokeServiceAccountCredential(ctx context.Context, req adminapi.RevokeServiceAccountCredentialRequestObject) (adminapi.RevokeServiceAccountCredentialResponseObject, error) {
 	var out adminapi.ServiceAccountCredential
 	o, err := s.manageServiceAccount(ctx, req.Id, func(ctx context.Context, tx port.Tx, p adminPrincipal, sa port.ServiceAccount) error {
+		if err := s.outranksServiceAccount(ctx, tx, p, sa); err != nil {
+			return err
+		}
 		c, err := s.a.serviceAccounts.RevokeCredential(ctx, tx, sa, req.CredentialId, p.Actor, requestID(ctx))
 		out = s.credentialView(c)
 		return err

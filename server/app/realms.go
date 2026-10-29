@@ -211,7 +211,7 @@ func (a *App) newRealmApp(ctx context.Context, r port.Realm) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	ra := &App{cfg: a.cfg, deps: a.deps, plan: a.plan, binary: a.binary, clientSealer: a.clientSealer, pii: a.pii,
+	ra := &App{cfg: a.cfg, deps: a.deps, plan: a.plan, binary: a.binary, clientSealer: a.clientSealer, pii: a.pii, hookSecrets: a.hookSecrets,
 		relay: a.relay, notifier: a.notifier, logout: a.logout, scheduler: a.scheduler, retention: a.retention, root: a}
 	if err := ra.assemble(ctx, r, rs, endpointFor(a.cfg, r, false)); err != nil {
 		return nil, err

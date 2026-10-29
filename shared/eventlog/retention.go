@@ -17,7 +17,8 @@ import (
 const EventAuditTruncated = "audit.truncated"
 
 // auditPage は監査ログの切り詰めで1つのトランザクションに読む件数。
-const auditPage = 5000
+// 切り詰めの間は監査の追記が待つため、1回のトランザクションを短く保つ。
+const auditPage = 1000
 
 // Retention は保持期間を過ぎたデータを消す（design.md 6.5、9.6、ADR 0072）。
 type Retention struct {

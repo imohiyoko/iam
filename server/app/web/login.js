@@ -51,9 +51,12 @@
     try {
       if (r) sessionStorage.setItem("iam_return_to", r);
       else if (app.dataset.page === "oauth_callback") r = sessionStorage.getItem("iam_return_to") || "";
+      else sessionStorage.removeItem("iam_return_to"); // 放棄した往復の戻り先を後のログインで使わない
     } catch (_) {}
     return r;
   }
+
+  returnTo();
 
   function safeReturnTo() {
     const r = returnTo();

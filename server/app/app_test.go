@@ -15,7 +15,7 @@ import (
 
 	ephemeral "github.com/imohiyoko/iam/adapters/ephemeral/memory"
 	"github.com/imohiyoko/iam/adapters/eventsink/stdout"
-	"github.com/imohiyoko/iam/adapters/keystore/file"
+	"github.com/imohiyoko/iam/adapters/keystore/keyfile"
 	"github.com/imohiyoko/iam/adapters/notifier/dev"
 	"github.com/imohiyoko/iam/adapters/storage/memory"
 	"github.com/imohiyoko/iam/server/config"
@@ -34,11 +34,11 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	keys, err := file.Generate()
+	keys, err := keyfile.Generate()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ks, err := file.FromKeys(keys)
+	ks, err := keyfile.FromKeys(keys)
 	if err != nil {
 		t.Fatal(err)
 	}

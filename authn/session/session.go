@@ -190,7 +190,9 @@ type OrgPick struct {
 	AuthMethods []string
 	IP          string
 	// Partial は2要素目の前の段。ログインポリシーは完了のときに判定する。
-	Partial   bool
+	Partial bool
+	// Fallback は、Explicit に入れなければ明示的な指定が無いものとして決め直す（2要素目の前の段で決めた Org を引き継ぐとき）。
+	Fallback  bool
 	RequestID string
 }
 
@@ -223,6 +225,8 @@ type Issue struct {
 	Recovery bool
 	// OrgID は入る Org の内部 ID（明示的な指定、2要素目の前の段の Org）。空なら OrgPicker が手がかりから決める。
 	OrgID string
+	// OrgFallback は、OrgID に入れなければ手がかりから決め直す（2要素目の前の段の Org。ログインポリシーは完了のときに判定する）。
+	OrgFallback bool
 	// OrgEmail は OAuth のプロバイダが返したアドレス（Org の手がかり）。
 	OrgEmail string
 }
@@ -241,6 +245,8 @@ type Issued struct {
 	OrgChoices []string
 	// OrgPublicID は active な Org の公開 ID（Org がオフなら空）。
 	OrgPublicID string
+	// current は、古いセッションが入れ替えの猶予の内だったときに一緒に失効させた、系列の今のセッションの ID。
+	current string
 }
 
 // Committed は Issue を呼んだトランザクションが確定した後に呼ぶ。入れ替えた古いセッションの
@@ -248,6 +254,9 @@ type Issued struct {
 func (m *Manager) Committed(ctx context.Context, realmID string, is Issued) {
 	if is.Replaced != "" {
 		m.forget(ctx, realmID, is.Replaced)
+	}
+	if is.current != "" {
+		m.forget(ctx, realmID, is.current)
 	}
 }
 
@@ -319,8 +328,19 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	actor := audit.Actor{Type: "user", ID: u.PublicID}
 	var choices []string
 	if m.Orgs != nil {
-		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: in.OrgID, Credentials: in.Credentials, Email: in.OrgEmail, Warnings: hits,
-			AuthMethods: in.AuthMethods, IP: in.IP, Partial: restriction != port.RestrictionNone, RequestID: in.RequestID})
+		pick := OrgPick{Explicit: in.OrgID, Credentials: in.Credentials, Email: in.OrgEmail, Warnings: hits,
+			AuthMethods: in.AuthMethods, IP: in.IP, Partial: restriction != port.RestrictionNone, Fallback: in.OrgFallback, RequestID: in.RequestID}
+		picked, err := m.Orgs.Pick(ctx, tx, u, pick)
+		if errors.Is(err, ErrPasskeyEnrollment) && restriction == port.RestrictionNone {
+			// 管理ユーザーが passkey の必須だけで入れないなら、passkey の登録だけができるセッションにする（ADR 0076）。
+			restriction, s.Restriction = port.RestrictionEnroll, port.RestrictionEnroll
+			hits = slices.DeleteFunc(hits, func(w warning.Warning) bool { return w.Code == warning.CodeSingleFactor })
+			if s.Warnings, err = json.Marshal(nonNilWarnings(hits)); err != nil {
+				return Issued{}, err
+			}
+			pick.Warnings, pick.Partial = hits, true
+			picked, err = m.Orgs.Pick(ctx, tx, u, pick)
+		}
 		if err != nil {
 			return Issued{}, err
 		}
@@ -343,6 +363,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	warnings, _ := m.Warnings.Apply(hits, lim.Warnings)
 	// 同じブラウザの古いセッション。同じ本人の通常のセッションなら、ログインの系列（sid）を引き継ぐ（連携先の認可が続く。5.1）。
 	var old *port.Session
+	var current port.Session // 引き継ぐ系列の今のセッション
 	if sid, secret, ok := SplitToken(in.ReplaceToken); ok {
 		o, err := tx.Sessions().Get(ctx, in.RealmID, sid)
 		if err == nil && (o.RevokedAt == nil || now.Before(*o.RevokedAt)) && subtle.ConstantTimeCompare(o.TokenHash, hashSecret(secret)) == 1 {
@@ -352,7 +373,20 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	s.SID = s.ID
 	if old != nil && old.PrincipalType == port.PrincipalUser && old.PrincipalID == s.PrincipalID && old.Restriction == port.RestrictionNone &&
 		restriction == port.RestrictionNone && old.SID != "" {
-		s.SID = old.SID
+		// 古いセッションと、その系列の今のセッション（入れ替えの後なら新しい方）がどちらも使える（寿命・無操作・停止などを
+		// Validate と同じに確かめる）ときだけ引き継ぐ。今のセッションをログアウトした後に、猶予の残る古い Cookie で系列を蘇らせない。
+		_, _, _, err := m.check(ctx, tx, *old, now)
+		if err == nil {
+			current, _, err = m.CheckLineage(ctx, tx, in.RealmID, old.SID, now)
+		}
+		switch {
+		case err == nil:
+			s.SID = old.SID
+			s.CreatedAt = successorTime(current.CreatedAt, now)
+		case errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) || errors.Is(err, ErrInvalid):
+		default:
+			return Issued{}, err
+		}
 	}
 	if err := tx.Sessions().Create(ctx, s); err != nil {
 		return Issued{}, err
@@ -376,6 +410,14 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		details["replaced"] = old.ID
 		replaced = old.ID
 	}
+	// 古いセッションが入れ替えの猶予の内なら、系列の今のセッションも置き換わる（同じ系列の使えるセッションを2つ残さない）。
+	var retired string
+	if current.ID != "" && old != nil && current.ID != old.ID {
+		if err := m.revokeInTx(ctx, tx, current, ReasonReplacedByLogin, actor, in.RequestID); err != nil {
+			return Issued{}, err
+		}
+		retired = current.ID
+	}
 	var orgPublicID string
 	if s.ActiveOrgID != "" {
 		o, err := tx.Orgs().Get(ctx, in.RealmID, s.ActiveOrgID)
@@ -390,7 +432,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		RequestID: in.RequestID, Details: details,
 	})
 	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced, SecondFactorMethods: methods, OrgChoices: choices,
-		OrgPublicID: orgPublicID}, err
+		OrgPublicID: orgPublicID, current: retired}, err
 }
 
 // carry は前の段の警告のうち、新しい評価に無いコードのものを足す。
@@ -456,6 +498,11 @@ func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string) ([]s
 	return out, nil
 }
 
+// ErrPasskeyEnrollment は、管理ユーザー（ADR 0076）が管理する Org に入れない理由が passkey の必須（require_passkey）だけで、
+// passkey を1つも登録していないこと（OrgPicker が返す）。Issue は登録だけのセッション（RestrictionEnroll）を発行し、
+// 本人は passkey を登録してからそれでログインし直す。
+var ErrPasskeyEnrollment = errors.New("session: passkey enrollment required")
+
 // ErrNotRestricted は、2要素目で替えようとしたセッションが制限つきでないこと。
 var ErrNotRestricted = errs.New(errs.KindFailedPrecondition, "session is not waiting for a second factor")
 
@@ -502,7 +549,7 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
 		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt,
-		OrgID: old.ActiveOrgID,
+		OrgID: old.ActiveOrgID, OrgFallback: true,
 	})
 	if err != nil {
 		return Issued{}, err
@@ -538,6 +585,7 @@ func (m *Manager) DeletionCancelled(ctx context.Context, tx port.Tx, realmID, se
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: old.AuthMethods, Credentials: old.AuthCredentialIDs,
 		IP: ip, UserAgent: userAgent, RequestID: requestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt, OrgID: old.ActiveOrgID,
+		OrgFallback: true,
 	})
 	if err != nil {
 		return Issued{}, err
@@ -874,6 +922,15 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 	return nil
 }
 
+// successorTime は系列を継ぐセッションの作成時刻。系列の今のセッションは作成時刻の新しい方なので（GetCurrentBySID）、
+// 同じ時刻に作っても前のセッションより後になるようにする（時計の粒度が粗いときやテストの時計）。
+func successorTime(prev, now time.Time) time.Time {
+	if now.After(prev) {
+		return now
+	}
+	return prev.Add(time.Nanosecond)
+}
+
 func earliest(a, b time.Time) time.Time {
 	if b.Before(a) {
 		return b
@@ -926,7 +983,7 @@ func (m *Manager) Rotate(ctx context.Context, realmID, sessionID, requestID stri
 			return ErrNotRotated
 		}
 		s := old
-		s.ID, s.CreatedAt, s.LastSeenAt = id.NewExternal(id.Session), now, now
+		s.ID, s.CreatedAt, s.LastSeenAt = id.NewExternal(id.Session), successorTime(old.CreatedAt, now), now
 		if s.SID == "" {
 			s.SID = old.ID
 		}
@@ -975,6 +1032,7 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, ip, 
 	}
 	now := m.Clock.Now()
 	var out Issued
+	var retired string // 一緒に失効させた系列の今のセッション
 	err := m.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		old, err := tx.Sessions().Get(ctx, realmID, sessionID)
 		if err != nil {
@@ -982,6 +1040,19 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, ip, 
 		}
 		if (old.RevokedAt != nil && !now.Before(*old.RevokedAt)) || !now.Before(old.ExpiresAt) || old.Restriction != port.RestrictionNone {
 			return ErrNotSwitchable
+		}
+		// 系列の今のセッション（入れ替えの後なら新しい方）も使えなければ切り替えない。ログアウトした系列を、猶予の残る
+		// 古いセッションから蘇らせない。
+		lineage := old.SID
+		if lineage == "" {
+			lineage = old.ID
+		}
+		current, _, err := m.CheckLineage(ctx, tx, realmID, lineage, now)
+		if errors.Is(err, ErrInvalid) {
+			return ErrNotSwitchable
+		}
+		if err != nil {
+			return err
 		}
 		u, err := tx.Users().Get(ctx, realmID, old.PrincipalID)
 		if err != nil {
@@ -1010,7 +1081,7 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, ip, 
 			return err
 		}
 		s := old
-		s.ID, s.ActiveOrgID, s.CreatedAt, s.LastSeenAt, s.RevokedAt, s.RevokeReason = id.NewExternal(id.Session), picked.OrgID, now, now, nil, ""
+		s.ID, s.ActiveOrgID, s.CreatedAt, s.LastSeenAt, s.RevokedAt, s.RevokeReason = id.NewExternal(id.Session), picked.OrgID, successorTime(current.CreatedAt, now), now, nil, ""
 		if s.SID == "" {
 			s.SID = old.ID
 		}
@@ -1026,6 +1097,12 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, ip, 
 		if err := tx.Sessions().Revoke(ctx, realmID, old.ID, now, ReasonOrgSwitched); err != nil {
 			return err
 		}
+		if current.ID != old.ID {
+			if err := tx.Sessions().Revoke(ctx, realmID, current.ID, now, ReasonOrgSwitched); err != nil {
+				return err
+			}
+			retired = current.ID
+		}
 		if _, err := eventlog.Record(ctx, tx, m.Clock, audit.Event{
 			Type: "session.org_switched", Result: audit.ResultSuccess, RealmID: realmID, OrgID: o.PublicID,
 			Actor: audit.Actor{Type: "user", ID: u.PublicID}, SessionID: s.ID, RequestID: requestID,
@@ -1040,6 +1117,9 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, ip, 
 		return Issued{}, err
 	}
 	m.forget(ctx, realmID, sessionID)
+	if retired != "" {
+		m.forget(ctx, realmID, retired)
+	}
 	return out, nil
 }
 

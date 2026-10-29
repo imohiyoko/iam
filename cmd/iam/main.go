@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/imohiyoko/iam/adapters/keystore/file"
+	"github.com/imohiyoko/iam/adapters/keystore/keyfile"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/app"
 	"github.com/imohiyoko/iam/server/buildspec"
@@ -467,11 +467,11 @@ func keys(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	k, err := file.Generate()
+	k, err := keyfile.Generate()
 	if err != nil {
 		return err
 	}
-	if err := file.Write(*out, k); err != nil {
+	if err := keyfile.Write(*out, k); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "wrote %s (master key %s, index key %s). Back it up: data cannot be recovered without it.\n",

@@ -15,6 +15,8 @@ M7 の最初に、Org または realm に属する機械の主体（11.2）を�
   `iam service-account create -name … [-role …]` で作り、API キーを1回だけ表示する。フィーチャーがオフならロールは配信用に限る
 - サービスアカウントは realm か Org（`org_id`）に属し、有効期間（`valid_from`・`valid_until`）と停止（4.7）を持つ。
   Org が停止・削除されれば、その Org のサービスアカウントも使えない。削除は論理削除（`deleted_at`）で、以後は認証できない
+  認可では、Org のサービスアカウントは使える間その Org に所属する（Org の範囲の付与と Org の Group が効く）。`org_role` は無いので Org の既定ロールは付かない
+- 認証情報の追加・失効と削除は、`service_accounts:manage` に加え、呼び出し側がそのサービスアカウントのロールの権限をすべて持つときだけ通る（鍵を作って強い権限を得る昇格を防ぐ。ロールの付与と同じ考え）
 - 管理 API：`/v1/admin/service-accounts`（作成・一覧・取得・削除）、`…/{id}/credentials`（作成・一覧・無効化）、
   `…/{id}/suspensions`。権限は `service_accounts:manage`（realm:owner と realm:admin）。ロールの付与と Group は既存の API で、principal を `service_account` にする
 - 認証情報の種類：

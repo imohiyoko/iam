@@ -18,7 +18,8 @@
   ログインした本人が `POST /v1/me/merges` で使う。どちらも直近の本人確認（`max_auth_age`）が要る。認証手段を問わずに
   両方の所有を確かめられる。トークンは秘密の SHA-256 をキーに一時ストアに置き、中身は封をする
 - 統合しない場合：同じユーザー（`400 same_user`）、どちらかが停止・期間外・削除の予定あり（`409 deletion_scheduled`）、
-  どちらかが Org 管理ユーザー（`409 managed_user`。Org の許可の流れは未実装）、B に消去の保留（`409 legal_hold`）
+  どちらかが Org 管理ユーザー（`409 managed_user`。Org の許可の流れは未実装）、B に消去の保留（`409 legal_hold`）、B の Membership に終わっていない停止（予約を含む。停止は Membership に付き
+  引き継げない。`409 membership_suspended`）
 - 移すもの（1つのトランザクションで）：
   - メール：同じ ID のまま、A のデータ鍵で暗号化し直して移す（primary は A のものを残す）
   - 外部 ID：B の紐付けを無効化し、同じ外部 ID を A に紐付け直す
@@ -26,7 +27,8 @@
   - TOTP・パスワード：A に無ければ移す（TOTP は暗号化し直す）。B のものは無効化する。B のリカバリーコードは捨てる
   - ロールの付与・Group の所属：A に付け直す（同じものがあれば B のものを消すだけ）
   - カスタム属性の値：A に値の無い属性だけ移す（暗号化する属性は暗号化し直す）。B の値は消す
-  - Membership：A が所属していない Org では A の Membership を作り、所属している Org では役割の高い方と active を残す。
+  - Membership：A が所属していない Org では A の Membership を作り、所属している Org では役割の高い方と active を残す
+    （引き上げるのは B の Membership が active で有効期間内のときだけ）。
     B の Membership は `merged` で終える
 - 統合元の個人 Org は消さずに残す（B の Membership も残し、B は使えないので誰も入れない）。A を owner にした新しい共有 Org
   （名前は `Merged account`。owner が変えられる）を作り、個人 Org の設定と中身（Group・独自のロール・サービスアカウント・

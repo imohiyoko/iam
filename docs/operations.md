@@ -64,7 +64,7 @@ iam features plan -config iam.yaml -build build.yaml   # 次のバイナリで�
 
 - 追加：新しいバイナリを全台に配る → 設定の `features` に足す → `iam features enable <name>`（準備処理の後に active）→ 全台を再起動する
 - 削除：`iam features disable <name>`（disabling になる）→ 全台を再起動する（書き込みが止まる）→ データを片付ける
-  （`-purge`、または共有 Org は管理 API で削除）→ もう一度 `iam features disable <name>` で台帳から消える → 設定から外し、含まないバイナリを配る
+  （`-purge`、または共有 Org は管理 API で削除。`realm.org_deletion_grace`（既定 30 日）が正なら、削除は猶予期間の後にスケジューラが実行するまで終わらない。すぐ消すなら `{"immediate": true}` を付ける）→ もう一度 `iam features disable <name>` で台帳から消える → 設定から外し、含まないバイナリを配る
 - 依存するフィーチャー（`quota` と `org_login_policy` は `org` に依存）を先に無効にする
 - 台帳にあるフィーチャーを含まないバイナリは起動を拒否する
 
@@ -74,8 +74,9 @@ SQLite から PostgreSQL へ（逆も）：
 
 1. 書き込みを止める（インスタンスを止める）
 2. `iam storage export -config from.yaml -out dump.jsonl`
-3. 移行先で `iam migrate -config to.yaml`、続けて `iam storage import -config to.yaml -in dump.jsonl`（空の Storage にだけ入る。監査ログのチェーンを検証する）
-4. 設定を移行先に変えて起動する
+3. 移行先の KeyStore に、移行元と同じ鍵（`master_keys` と `index_keys`）を置く。新しい鍵を作らない（書き出しは鍵を含まず、`storage import` は鍵が合うかを確かめないので、違う鍵では個人情報を復号できず、メールの検索もできない）
+4. 移行先で `iam migrate -config to.yaml`、続けて `iam storage import -config to.yaml -in dump.jsonl`（空の Storage にだけ入る。監査ログのチェーンを検証する）
+5. 設定を移行先に変えて起動する
 
 dump.jsonl には暗号化した個人情報が入る。移行が終わったら消す。
 
@@ -97,5 +98,5 @@ dump.jsonl には暗号化した個人情報が入る。移行が終わったら
 | 起動を拒否する（鍵） | KeyStore を読めない | 鍵のファイルの権限（0600）と環境変数を確かめ、バックアップから戻す |
 | `storage import` が監査ログの検証で失敗する | 監査ログの改ざん、または書き出しの破損 | 書き出しをやり直す。改ざんならインシデントとして扱い、SIEM の記録と照らし合わせる |
 | 運営者のアカウントの乗っ取りが疑われる | ― | 別の owner が管理 API で停止（`security_risk`）し、全認証情報と全セッションを無効化する（`POST /v1/admin/users/{id}/credentials:revoke-all`）。運営者がいなければ `iam operator create` で作り直す |
-| 署名鍵の漏洩が疑われる | ― | `POST /v1/admin/signing-keys:rotate` で入れ替える。古い鍵は `oidc.retired_key_ttl` の後に JWKS から消える |
+| 署名鍵の漏洩が疑われる | ― | 運営者のトークンで `POST /v1/admin/signing-keys:rotate`（`Authorization: Bearer …`、`Content-Type: application/json`、本文 `{"alg": "ES256"}` か `{"alg": "ML-DSA-65"}`）を実行し、漏れた鍵のアルゴリズムを新しい鍵に切り替える。古い鍵は `oidc.retired_key_ttl`（既定 7 日）の間 JWKS に残り、その間は漏れた鍵で署名した ID トークンが RP の検証を通りうる。個別に失効させる API は無いので、`oidc.retired_key_ttl` を `oidc.id_token_ttl` を少し超える値に一時的に下げて全台を再起動し、残る期間を縮める。影響の範囲を記録し、RP に古い `kid` を信頼しないよう伝える |
 | マスター鍵の漏洩が疑われる | ― | DB の漏洩と合わせて評価する。新しいマスター鍵に切り替え（2章）、データ鍵の包み直しは今は無いため、影響を記録する |

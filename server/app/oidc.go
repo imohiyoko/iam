@@ -84,7 +84,8 @@ func newOIDCHandler(a *App) http.Handler {
 func (s *oidcServer) cors(w http.ResponseWriter, r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	public := r.URL.Path == oidc.DiscoveryEndpoint || r.URL.Path == oidcKeys
-	if origin == "" || !(public || r.URL.Path == oidcToken || r.URL.Path == oidcUserinfo || r.URL.Path == oidcRevoke) {
+	browser := r.URL.Path == oidcToken || r.URL.Path == oidcUserinfo || r.URL.Path == oidcRevoke
+	if origin == "" || !public && !browser {
 		return false
 	}
 	h := w.Header()

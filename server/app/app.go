@@ -76,7 +76,9 @@ type App struct {
 	binary []feature.Feature
 	// clientSealer は監査ログの IP と User-Agent の全文を暗号化する（ADR 0063）。
 	clientSealer *eventlog.ClientSealer
-	realm        port.Realm
+	// hookSecrets はフローフックの Webhook の秘密（secret_env ごと。どの realm も使う）。
+	hookSecrets map[string][]byte
+	realm       port.Realm
 	// root は既定の realm の App（共有の部分と realm の表を持つ）。既定の realm では自分（ADR 0083）。
 	root *App
 	// base は realm を /realms/{slug} で指すときのパスの接頭辞。既定の realm とホスト名で指す realm では空。
@@ -192,6 +194,11 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if !slices.Contains(cfg.Realm.VerifiedVia, string(port.VerifiedViaCode)) {
 		d.Logger.Warn("realm.verified_via does not include code: email codes and links are disabled, and email recovery is unavailable")
 	}
+	if plan.IsActive(feature.FlowHooks) {
+		if a.hookSecrets, err = hookSecrets(cfg); err != nil {
+			return nil, err
+		}
+	}
 	if err := a.assemble(ctx, realm, defaultRealmSettings(cfg.Realm), endpointFor(cfg, realm, true)); err != nil {
 		return nil, err
 	}
@@ -277,7 +284,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		via = append(via, port.VerifiedVia(v))
 	}
 	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via, ExtraCategories: cfg.Security.SuspensionCategories,
-		DeletionGrace: rs.userDeletionGrace(), IndexOnly: rs.EmailStorage == "index_only"}
+		DeletionGrace: rs.userDeletionGrace(), IndexOnly: rs.EmailStorage == "index_only", Roles: authzRoles{}}
 	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
 	if plan.IsActive(feature.Org) {
 		a.orgs = &org.Service{Clock: d.Clock, Crypter: a.pii, Accounts: a.accounts, Notify: a.notify, Policy: org.CreationPolicy(rs.OrgCreation),
@@ -371,7 +378,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.merge = &merge.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Sessions: a.sessions, Orgs: a.orgs}
 	}
 	if plan.IsActive(feature.FlowHooks) {
-		runner, err := flowHooks(cfg, d, realm.Slug)
+		runner, err := flowHooks(cfg, d, realm.Slug, a.hookSecrets)
 		if err != nil {
 			return err
 		}
@@ -597,8 +604,32 @@ func newHTTPServer(h http.Handler) *http.Server {
 	}
 }
 
-// flowHooks は設定の hooks からフロー フックの Runner を作る（11.8、ADR 0081）。url の無いフックは d.Hooks から取る。
-func flowHooks(cfg config.Config, d Deps, realm string) (*hook.Runner, error) {
+// hookSecrets は Webhook のフローフックの署名の秘密を環境変数から一度だけ読み、読んだ環境変数を消す（11.8、ADR 0081）。
+// どの realm の Runner もこれを使う（realm は後から増えるので、環境変数は残せない）。
+func hookSecrets(cfg config.Config) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	defer func() {
+		for env := range out {
+			_ = os.Unsetenv(env)
+		}
+	}()
+	for name, h := range cfg.Hooks {
+		if h.URL == "" {
+			continue
+		}
+		if _, ok := out[h.SecretEnv]; !ok {
+			out[h.SecretEnv] = []byte(os.Getenv(h.SecretEnv)) // 同じ secret_env を共有するフックがある
+		}
+		if len(out[h.SecretEnv]) < 32 {
+			return nil, fmt.Errorf("app: hooks.%s: %s must hold a secret of at least 32 bytes", name, h.SecretEnv)
+		}
+	}
+	return out, nil
+}
+
+// flowHooks は設定の hooks からフロー フックの Runner を作る（11.8、ADR 0081）。url の無いフックは d.Hooks から取り、
+// Webhook の秘密は secrets（hookSecrets）から取る。
+func flowHooks(cfg config.Config, d Deps, realm string, secrets map[string][]byte) (*hook.Runner, error) {
 	r := &hook.Runner{Entries: map[string]hook.Entry{}, Realm: realm, Log: d.Logger}
 	for name, h := range cfg.Hooks {
 		e := hook.Entry{Timeout: h.Timeout.D(), FailOpen: h.FailOpen}
@@ -607,12 +638,11 @@ func flowHooks(cfg config.Config, d Deps, realm string) (*hook.Runner, error) {
 				return nil, fmt.Errorf("app: hooks.%s has no url and no Go implementation", name)
 			}
 		} else {
-			secret := os.Getenv(h.SecretEnv)
+			secret := secrets[h.SecretEnv]
 			if len(secret) < 32 {
 				return nil, fmt.Errorf("app: hooks.%s: %s must hold a secret of at least 32 bytes", name, h.SecretEnv)
 			}
-			_ = os.Unsetenv(h.SecretEnv)
-			e.Hook = &hook.Webhook{URL: h.URL, Secret: []byte(secret), Clock: d.Clock}
+			e.Hook = &hook.Webhook{URL: h.URL, Secret: secret, Clock: d.Clock}
 		}
 		r.Entries[name] = e
 	}
