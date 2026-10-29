@@ -19,6 +19,7 @@ import (
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
+	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/plugin"
 )
@@ -38,6 +39,7 @@ var featureCatalog = map[string]struct {
 	feature.Warnings:        {warning.Feature, module + "/features/warnings"},
 	feature.Password:        {password.Feature, module + "/features/password"},
 	feature.ServiceAccounts: {serviceaccount.Feature, module + "/features/serviceaccounts"},
+	feature.NestedGroups:    {manage.NestedGroupsFeature, module + "/features/nestedgroups"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

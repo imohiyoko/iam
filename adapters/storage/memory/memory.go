@@ -71,6 +71,8 @@ type state struct {
 	groups          map[string]port.Group
 	// groupMembers のキーは group_id + member_type + member_id。
 	groupMembers map[string]port.GroupMember
+	// groupClosure のキーは realm_id + group_id + ancestor_id。値は depth。
+	groupClosure map[string]groupLink
 	orgs         map[string]port.Org
 	memberships  map[string]port.Membership
 	invitations  map[string]port.Invitation
@@ -105,7 +107,7 @@ func New(clk clock.Clock) *Storage {
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
 		saTokens:     map[string]port.ServiceAccountToken{},
 		roleBindings: map[string]port.RoleBinding{}, roles: map[string]port.Role{}, groups: map[string]port.Group{},
-		groupMembers: map[string]port.GroupMember{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
+		groupMembers: map[string]port.GroupMember{}, groupClosure: map[string]groupLink{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 		invitations: map[string]port.Invitation{}, quotaGrants: map[string]port.QuotaGrant{}, orgDomains: map[string]port.OrgDomain{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
 		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{},
 	}}

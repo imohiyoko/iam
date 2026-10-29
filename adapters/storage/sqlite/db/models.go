@@ -270,6 +270,13 @@ type AuthzGroup struct {
 	UpdatedAt string
 }
 
+type AuthzGroupClosure struct {
+	RealmID    string
+	GroupID    string
+	AncestorID string
+	Depth      int64
+}
+
 type AuthzGroupMember struct {
 	GroupID    string
 	MemberType string

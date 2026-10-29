@@ -259,7 +259,7 @@ func testEffectiveBindings(t *testing.T, h Harness) {
 				return err
 			}
 		}
-		got, err := tx.RoleBindings().ListEffective(ctx, r, port.PrincipalUser, u)
+		got, err := tx.RoleBindings().ListEffective(ctx, r, port.PrincipalUser, u, false)
 		if err != nil {
 			return err
 		}
@@ -275,8 +275,133 @@ func testEffectiveBindings(t *testing.T, h Harness) {
 		if got[2].GroupOrgID != "" || got[2].Custom != nil {
 			return fmt.Errorf("via realm group = %+v", got[2])
 		}
-		if none, err := tx.RoleBindings().ListEffective(ctx, r, port.PrincipalUser, id.New(id.User)); err != nil || len(none) != 0 {
+		if none, err := tx.RoleBindings().ListEffective(ctx, r, port.PrincipalUser, id.New(id.User), true); err != nil || len(none) != 0 {
 			return fmt.Errorf("ListEffective(stranger) = %+v, %v", none, err)
+		}
+		return nil
+	})
+}
+
+// testNestedGroups は Group のネスト（design.md 11.5）の閉包と、それを使う ListEffective。閉包の計算は呼び出し側がする。
+func testNestedGroups(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, org := id.New(id.Realm), id.New(id.Org)
+	mk := func(name string) port.Group {
+		return port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r, OrgID: org, Name: name, CreatedAt: T0, UpdatedAt: T0}
+	}
+	a, b, c, d := mk("all"), mk("eng"), mk("backend"), mk("other")
+	u := id.New(id.User)
+	member := func(g string, typ port.PrincipalType, m string) port.GroupMember {
+		return port.GroupMember{GroupID: g, MemberType: typ, MemberID: m, CreatedAt: T0}
+	}
+	onA := newBinding(r, "realm:support", port.PrincipalGroup, a.ID, org, T0)
+	onB := newBinding(r, "realm:support", port.PrincipalGroup, b.ID, org, T0.Add(time.Second))
+	onC := newBinding(r, "realm:support", port.PrincipalGroup, c.ID, org, T0.Add(2*time.Second))
+	onD := newBinding(r, "realm:support", port.PrincipalGroup, d.ID, org, T0.Add(3*time.Second))
+	ids := func(bs []port.EffectiveBinding) []string {
+		var out []string
+		for _, b := range bs {
+			out = append(out, b.ID)
+		}
+		return out
+	}
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.Groups()
+		for _, g := range []port.Group{a, b, c, d} {
+			if err := repo.Create(ctx, g); err != nil {
+				return err
+			}
+		}
+		for _, m := range []port.GroupMember{member(a.ID, port.PrincipalGroup, b.ID), member(b.ID, port.PrincipalGroup, c.ID),
+			member(c.ID, port.PrincipalUser, u)} {
+			if err := repo.AddMember(ctx, r, m); err != nil {
+				return err
+			}
+		}
+		if err := repo.SetAncestors(ctx, r, c.ID, []port.GroupLink{{GroupID: a.ID, Depth: 2}, {GroupID: b.ID, Depth: 1}}); err != nil {
+			return err
+		}
+		if err := repo.SetAncestors(ctx, r, b.ID, []port.GroupLink{{GroupID: a.ID, Depth: 1}}); err != nil {
+			return err
+		}
+		for _, x := range []port.RoleBinding{onD, onC, onB, onA} {
+			if err := tx.RoleBindings().Create(ctx, x); err != nil {
+				return err
+			}
+		}
+		if got, err := repo.Ancestors(ctx, r, c.ID); err != nil || !reflect.DeepEqual(got, []port.GroupLink{{GroupID: b.ID, Depth: 1}, {GroupID: a.ID, Depth: 2}}) {
+			return fmt.Errorf("repo.Ancestors = %+v, %v", got, err)
+		}
+		if got, err := repo.Descendants(ctx, r, a.ID); err != nil || !reflect.DeepEqual(got, []port.GroupLink{{GroupID: b.ID, Depth: 1}, {GroupID: c.ID, Depth: 2}}) {
+			return fmt.Errorf("repo.Descendants = %+v, %v", got, err)
+		}
+		if got, err := repo.Ancestors(ctx, id.New(id.Realm), c.ID); err != nil || len(got) != 0 {
+			return fmt.Errorf("repo.Ancestors in another realm = %+v, %v", got, err)
+		}
+		if gs, err := repo.ListByMember(ctx, r, port.PrincipalGroup, b.ID); err != nil || len(gs) != 1 || gs[0].ID != a.ID {
+			return fmt.Errorf("ListByMember(group) = %+v, %v", gs, err)
+		}
+		// nested でなければ直接の Group だけ。nested なら祖先の Group の付与も、その Group の Org とともに返す。
+		if got, err := tx.RoleBindings().ListEffective(ctx, r, port.PrincipalUser, u, false); err != nil || !slices.Equal(ids(got), []string{onC.ID}) {
+			return fmt.Errorf("ListEffective(not nested) = %+v, %v", got, err)
+		}
+		got, err := tx.RoleBindings().ListEffective(ctx, r, port.PrincipalUser, u, true)
+		if err != nil || !slices.Equal(ids(got), []string{onA.ID, onB.ID, onC.ID}) || got[0].GroupOrgID != org {
+			return fmt.Errorf("ListEffective(nested) = %+v, %v", got, err)
+		}
+		if got, err := tx.RoleBindings().ListEffective(ctx, id.New(id.Realm), port.PrincipalUser, u, true); err != nil || len(got) != 0 {
+			return fmt.Errorf("ListEffective in another realm = %+v, %v", got, err)
+		}
+		// SetAncestors は置き換える。
+		if err := repo.SetAncestors(ctx, r, c.ID, []port.GroupLink{{GroupID: b.ID, Depth: 1}}); err != nil {
+			return err
+		}
+		if got, err := repo.Ancestors(ctx, r, c.ID); err != nil || !reflect.DeepEqual(got, []port.GroupLink{{GroupID: b.ID, Depth: 1}}) {
+			return fmt.Errorf("repo.Ancestors after replace = %+v, %v", got, err)
+		}
+		// 2 つの所属と 2 つの閉包の行。片付けは閉包の行から。
+		if n, err := repo.CountNested(ctx); err != nil || n != 4 {
+			return fmt.Errorf("CountNested = %d, %v", n, err)
+		}
+		if n, err := repo.PurgeNested(ctx, 3); err != nil || n != 3 {
+			return fmt.Errorf("PurgeNested(3) = %d, %v", n, err)
+		}
+		if got, err := repo.Ancestors(ctx, r, c.ID); err != nil || len(got) != 0 {
+			return fmt.Errorf("repo.Ancestors after purge = %+v, %v", got, err)
+		}
+		if n, err := repo.PurgeNested(ctx, 10); err != nil || n != 1 {
+			return fmt.Errorf("PurgeNested(10) = %d, %v", n, err)
+		}
+		if n, err := repo.CountNested(ctx); err != nil || n != 0 {
+			return fmt.Errorf("CountNested after purge = %d, %v", n, err)
+		}
+		if gs, err := repo.ListByMember(ctx, r, port.PrincipalUser, u); err != nil || len(gs) != 1 {
+			return fmt.Errorf("user membership after purge = %+v, %v", gs, err)
+		}
+		// Group を消すと、Group としての所属と閉包の行も消える。
+		if err := repo.AddMember(ctx, r, member(a.ID, port.PrincipalGroup, b.ID)); err != nil {
+			return err
+		}
+		if err := repo.AddMember(ctx, r, member(b.ID, port.PrincipalGroup, c.ID)); err != nil {
+			return err
+		}
+		if err := repo.SetAncestors(ctx, r, b.ID, []port.GroupLink{{GroupID: a.ID, Depth: 1}}); err != nil {
+			return err
+		}
+		if err := repo.SetAncestors(ctx, r, c.ID, []port.GroupLink{{GroupID: b.ID, Depth: 1}, {GroupID: a.ID, Depth: 2}}); err != nil {
+			return err
+		}
+		if err := repo.Delete(ctx, r, b.ID); err != nil {
+			return err
+		}
+		if gs, err := repo.ListByMember(ctx, r, port.PrincipalGroup, b.ID); err != nil || len(gs) != 0 {
+			return fmt.Errorf("memberships of a deleted group = %+v, %v", gs, err)
+		}
+		if got, err := repo.Ancestors(ctx, r, c.ID); err != nil || !reflect.DeepEqual(got, []port.GroupLink{{GroupID: a.ID, Depth: 2}}) {
+			return fmt.Errorf("repo.Ancestors after deleting the middle = %+v, %v", got, err)
+		}
+		if got, err := repo.Descendants(ctx, r, a.ID); err != nil || !reflect.DeepEqual(got, []port.GroupLink{{GroupID: c.ID, Depth: 2}}) {
+			return fmt.Errorf("repo.Descendants after deleting the middle = %+v, %v", got, err)
 		}
 		return nil
 	})

@@ -364,3 +364,87 @@ func TestGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestNestedGroups は Group のネスト（ADR 0079）：閉包は最も長い経路の段数を持ち、ひし形でも別の経路が残る間は祖先が残る。
+func TestNestedGroups(t *testing.T) {
+	e := newEnv(t, members{})
+	e.s.NestedGroups = true
+	e.grant(role.RealmOwner, "owner")
+	e.grant(role.RealmAdmin, "admin")
+	sc := e.realm()
+	gs := map[string]port.Group{}
+	asTarget := func(g port.Group) manage.Target {
+		return manage.Target{Principal: check.Principal{Type: port.PrincipalGroup, ID: g.ID}, PublicID: g.PublicID}
+	}
+	nest := func(a string, parent, child string) error {
+		return e.run(func(ctx context.Context, tx port.Tx) error {
+			return e.s.AddMember(ctx, tx, sc, actor(a), gs[parent], asTarget(gs[child]))
+		})
+	}
+	unnest := func(parent, child string) {
+		t.Helper()
+		if err := e.run(func(ctx context.Context, tx port.Tx) error {
+			return e.s.RemoveMember(ctx, tx, sc, actor("owner"), gs[parent], asTarget(gs[child]))
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ancestors := func(name string) map[string]int {
+		t.Helper()
+		out := map[string]int{}
+		e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+			ls, err := tx.Groups().Ancestors(ctx, e.k.RealmID, gs[name].ID)
+			for _, l := range ls {
+				for n, g := range gs {
+					if g.ID == l.GroupID {
+						out[n] = l.Depth
+					}
+				}
+			}
+			return err
+		})
+		return out
+	}
+	e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		for _, n := range []string{"a", "b", "c", "d", "owners"} {
+			g, err := e.s.CreateGroup(ctx, tx, sc, actor("owner"), n)
+			if err != nil {
+				return err
+			}
+			gs[n] = g
+		}
+		_, err := e.s.Bind(ctx, tx, sc, actor("owner"), role.RealmOwner, asTarget(gs["owners"]), check.Resource{})
+		return err
+	})
+	// a ⊃ b ⊃ d、a ⊃ c ⊃ d、b ⊃ c（d まで最も長い経路は a→b→c→d の 3）。
+	for _, p := range [][2]string{{"a", "b"}, {"a", "c"}, {"b", "d"}, {"c", "d"}, {"b", "c"}} {
+		if err := nest("owner", p[0], p[1]); err != nil {
+			t.Fatalf("nest %v: %v", p, err)
+		}
+	}
+	if got := ancestors("d"); len(got) != 3 || got["a"] != 3 || got["b"] != 2 || got["c"] != 1 {
+		t.Fatalf("ancestors of d = %v", got)
+	}
+	unnest("a", "b")
+	if got := ancestors("d"); len(got) != 3 || got["a"] != 2 || got["b"] != 2 {
+		t.Fatalf("ancestors of d after a-b = %v", got)
+	}
+	unnest("a", "c")
+	if got := ancestors("d"); len(got) != 2 || got["a"] != 0 {
+		t.Fatalf("ancestors of d after a-c = %v", got)
+	}
+	// 循環と、持たない権限の Group に入れる（権限の引き上げ）。
+	wantCode(t, nest("owner", "d", "b"), "group_cycle")
+	wantCode(t, nest("admin", "owners", "a"), errs.CodePermissionDenied)
+	// owners に含まれる Group に入れるにも、owners の付与の権限が要る（祖先の付与を受けるため）。
+	if err := nest("owner", "owners", "a"); err != nil {
+		t.Fatalf("nest a in owners: %v", err)
+	}
+	wantCode(t, nest("admin", "a", "d"), errs.CodePermissionDenied)
+	if err := nest("owner", "a", "d"); err != nil {
+		t.Fatalf("owner nests d in a: %v", err)
+	}
+	// 無効なら Group を入れられない。
+	e.s.NestedGroups = false
+	wantCode(t, nest("owner", "a", "b"), "invalid_principal")
+}
