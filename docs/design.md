@@ -756,6 +756,7 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - **扱えないデータが DB にあれば起動を拒否し、判定中に未知のデータに出会えば拒否する（fail-closed）**
 - スキーマはフィーチャーの有無で変えない
 - 効果は攻撃面・依存・サイズの削減（レイテンシは起動時の組み立てで既にゼロ）
+- 実装：フィーチャーは `features/<name>` の import で登録する。`iam build` は build.yaml から作った `cmd/iam/imports.go` を `go build -overlay` で差し替える（ADR 0073）
 
 ### 11.12 構成変更の保証
 
@@ -771,7 +772,8 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - 動くのは「含まれる」「設定で有効」「台帳で active」が揃ったときだけ
 - バイナリは自分の構成を埋め込む（`iam version --manifest`）
 - 状態は CLI（または管理 API）で明示的に進める：enable → enabling（冪等な準備処理）→ active → disable → disabling（書き込み停止、データ 0 件で完了）
-- `iam features plan --build build.yaml` で事前に差分と影響を表示する
+- `iam features plan -build build.yaml` で事前に差分と影響を表示する
+- `iam features disable [-purge]`：依存するものが台帳にあれば拒否。データ（パスワード、Quota の付与、ログインポリシー、共有 Org）が 0 件になれば台帳から消す。共有 Org は管理 API で削除し、個人 Org は残す（ADR 0073）
 - 本体の更新と構成の変更は別のデプロイで行うことを推奨する
 - データ形式は前進のみで移行する。互換性の保証は「1つ前のバージョンのバイナリが同じデータで動く」こと
 
@@ -867,6 +869,8 @@ govulncheck、OSV-Scanner、Dependabot / Renovate、staticcheck、gosec、CodeQL
 ### 13.8 配布物
 
 署名（Sigstore / cosign）、SBOM、SLSA provenance。再現可能ビルドを目指す。
+
+- 公式イメージは全部入りと最小構成（`build/minimal.yaml`）。タグで GHCR に出し、cosign のキーレス署名、SBOM、provenance を付ける（`.github/workflows/release.yml`、ADR 0073）
 
 ### 13.9 成熟度
 

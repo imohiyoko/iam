@@ -14,9 +14,8 @@ import (
 	"github.com/imohiyoko/iam/shared/feature"
 )
 
-func init() {
-	feature.Register(feature.Feature{Name: feature.Warnings, DataVersion: 1, DefaultEnabled: true})
-}
+// Feature は認証の警告の宣言（features/warnings が登録する）。
+var Feature = feature.Feature{Name: feature.Warnings, DataVersion: 1, DefaultEnabled: true}
 
 // 警告のコード（公開の契約。11.10）。
 const (

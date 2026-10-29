@@ -2,12 +2,14 @@ package org
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/passkey"
@@ -22,9 +24,8 @@ import (
 // 入場の条件で、ログインと Org の切り替えのときに判定する。満たさなければその Org に入れず、理由は policy.<type>
 // （ログインは個人 Org などで成功する）。ポリシーは Org の設定（orgs.settings の login_policy）に持つ。個人 Org には無い。
 
-func init() {
-	feature.Register(feature.Feature{Name: feature.OrgLoginPolicy, DataVersion: 1, Requires: []string{feature.Org}})
-}
+// PolicyFeature は Org のログインポリシーの宣言（features/orgloginpolicy が登録する）。
+var PolicyFeature = feature.Feature{Name: feature.OrgLoginPolicy, DataVersion: 1, Requires: []string{feature.Org}}
 
 // ログインポリシーの種類（拒否理由は "policy." + 種類）。
 const (
@@ -184,4 +185,26 @@ func ipAllowed(ip string, cidrs []string) bool {
 		}
 	}
 	return false
+}
+
+// HasLoginPolicy は Org の設定にログインポリシーがあるかを返す（フィーチャーの無効化で数える。11.12）。
+func HasLoginPolicy(o port.Org) (bool, error) {
+	st, err := SettingsOf(o)
+	return !st.LoginPolicy.empty(), err
+}
+
+// ClearLoginPolicy は Org の設定からログインポリシーを外す（フィーチャーの無効化の片付け。11.12）。外したら true。
+func ClearLoginPolicy(ctx context.Context, tx port.Tx, o port.Org, now time.Time) (bool, error) {
+	st, err := SettingsOf(o)
+	if err != nil || st.LoginPolicy.empty() {
+		return false, err
+	}
+	st.LoginPolicy = nil
+	var raw []byte
+	if !st.empty() {
+		if raw, err = json.Marshal(st); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Orgs().SetSettings(ctx, o.RealmID, o.ID, raw, now)
 }

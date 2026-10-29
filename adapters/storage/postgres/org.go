@@ -37,6 +37,11 @@ func (r orgs) GetByPublicID(ctx context.Context, realmID, publicID string) (port
 	return one(row, err, toOrg)
 }
 
+func (r orgs) List(ctx context.Context, realmID, afterID string, limit int) ([]port.Org, error) {
+	rs, err := r.q.ListOrgs(ctx, db.ListOrgsParams{RealmID: realmID, After: afterID, Lim: int64(limit)})
+	return rows(rs, err, toOrg)
+}
+
 func (r orgs) GetPersonal(ctx context.Context, realmID, userID string) (port.Org, error) {
 	row, err := r.q.GetPersonalOrg(ctx, db.GetPersonalOrgParams{RealmID: realmID, PersonalOwnerID: userID})
 	return one(row, err, toOrg)
@@ -208,6 +213,16 @@ func (r quotaGrants) Update(ctx context.Context, g port.QuotaGrant) error {
 		return errs.New(errs.KindNotFound, "quota grant %s", g.ID)
 	}
 	return mapErr(err)
+}
+
+func (r quotaGrants) Count(ctx context.Context) (int, error) {
+	n, err := r.q.CountQuotaGrants(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r quotaGrants) Purge(ctx context.Context, limit int) (int, error) {
+	n, err := r.q.PurgeQuotaGrants(ctx, int64(limit))
+	return int(n), mapErr(err)
 }
 
 func (r quotaGrants) Delete(ctx context.Context, realmID, id string) error {

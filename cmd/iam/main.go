@@ -1,7 +1,7 @@
 // Command iam は設定を読み、アダプタを選んで IAM を起動する（design.md 2.2）。
 //
-// このバイナリに含めるアダプタとフィーチャーは、下の import で決まる（自己登録。design.md 11.11）。
-// 将来は `iam build` が build.yaml からこの import の一覧を生成する。
+// このバイナリに含めるフィーチャーとアダプタは imports.go の import で決まる（自己登録。design.md 11.11）。
+// リポジトリの imports.go は全部入りで、`iam build` は build.yaml から作った imports.go に差し替えてビルドする。
 package main
 
 import (
@@ -18,26 +18,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/imohiyoko/iam/adapters/keystore/file"
+	"github.com/imohiyoko/iam/adapters/keystore/keyfile"
 	"github.com/imohiyoko/iam/server/app"
+	"github.com/imohiyoko/iam/server/buildspec"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/plugin"
-
-	// アダプタ（全部入りの構成）。
-	_ "github.com/imohiyoko/iam/adapters/breachcheck/hibp"
-	_ "github.com/imohiyoko/iam/adapters/ephemeral/memory"
-	_ "github.com/imohiyoko/iam/adapters/ephemeral/redis"
-	_ "github.com/imohiyoko/iam/adapters/eventsink/otlp"
-	_ "github.com/imohiyoko/iam/adapters/eventsink/stdout"
-	_ "github.com/imohiyoko/iam/adapters/eventsink/syslog"
-	_ "github.com/imohiyoko/iam/adapters/eventsink/webhook"
-	_ "github.com/imohiyoko/iam/adapters/keystore/env"
-	_ "github.com/imohiyoko/iam/adapters/notifier/dev"
-	_ "github.com/imohiyoko/iam/adapters/storage/memory"
-	_ "github.com/imohiyoko/iam/adapters/storage/postgres"
-	_ "github.com/imohiyoko/iam/adapters/storage/sqlite"
+	"github.com/imohiyoko/iam/shared/port"
 )
 
 // version はビルド時に -ldflags "-X main.version=…" で埋め込む。
@@ -50,6 +38,12 @@ commands:
   migrate   -config iam.yaml        Storage のマイグレーションを適用する
   features enable -config iam.yaml <name>
                                     フィーチャーを有効にする（準備処理の後に active。サーバーは再起動で反映）
+  features disable -config iam.yaml [-purge] <name>
+                                    フィーチャーを無効にする（disabling。データが 0 件になれば台帳から消す）
+  features plan -config iam.yaml -build build.yaml
+                                    次のバイナリに入れ替えたときの影響を表示する
+  build -f build.yaml -o iam [-version v] [-print]
+                                    選んだフィーチャーとアダプタだけを含むバイナリをビルドする（Go とソースが要る）
   storage export -config iam.yaml -out dump.jsonl
   storage import -config iam.yaml -in dump.jsonl
                                     Storage の中身を書き出す・空の Storage に読み込む（移行用）
@@ -86,6 +80,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return features(ctx, args[1:], stdout, stderr)
 	case "storage":
 		return storageCmd(ctx, args[1:], stdout, stderr)
+	case "build":
+		return buildCmd(ctx, args[1:], stdout, stderr)
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return nil
@@ -254,13 +250,41 @@ func operator(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 }
 
 func features(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	const use = "usage: iam features enable -config iam.yaml <name>"
-	if len(args) == 0 || args[0] != "enable" {
+	const use = "usage: iam features enable|disable|plan -config iam.yaml [flags]"
+	if len(args) == 0 {
 		return errors.New(use)
 	}
+	switch args[0] {
+	case "enable":
+		return featuresEnable(ctx, args[1:], stdout, stderr)
+	case "disable":
+		return featuresDisable(ctx, args[1:], stdout, stderr)
+	case "plan":
+		return featuresPlan(ctx, args[1:], stdout, stderr)
+	}
+	return errors.New(use)
+}
+
+// openApp は CLI の操作のために App を組み立てる（サーバーは起動しない）。
+func openApp(ctx context.Context, cfg config.Config, stdout, stderr io.Writer) (*app.App, func(), error) {
+	log := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	deps, closeFn, err := build(ctx, cfg, log, stdout)
+	if err != nil {
+		return nil, nil, err
+	}
+	a, err := app.New(ctx, cfg, deps, feature.Registered())
+	if err != nil {
+		closeFn()
+		return nil, nil, err
+	}
+	return a, closeFn, nil
+}
+
+func featuresEnable(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	const use = "usage: iam features enable -config iam.yaml <name>"
 	fs := flag.NewFlagSet("features enable", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	cfg, err := loadConfig(fs, args[1:])
+	cfg, err := loadConfig(fs, args)
 	if err != nil {
 		return err
 	}
@@ -268,16 +292,11 @@ func features(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		return errors.New(use)
 	}
 	name := fs.Arg(0)
-	log := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	deps, closeFn, err := build(ctx, cfg, log, stdout)
+	a, closeFn, err := openApp(ctx, cfg, stdout, stderr)
 	if err != nil {
 		return err
 	}
 	defer closeFn()
-	a, err := app.New(ctx, cfg, deps, feature.Registered())
-	if err != nil {
-		return err
-	}
 	changed, err := a.EnableFeature(ctx, name)
 	if err != nil {
 		return err
@@ -287,6 +306,97 @@ func features(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		return nil
 	}
 	fmt.Fprintf(stdout, "%s is now active. Restart the servers to apply it.\n", name)
+	return nil
+}
+
+func featuresDisable(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	const use = "usage: iam features disable -config iam.yaml [-purge] <name>"
+	fs := flag.NewFlagSet("features disable", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	purge := fs.Bool("purge", false, "フィーチャーのデータを片付ける（元に戻せない）")
+	cfg, err := loadConfig(fs, args)
+	if err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New(use)
+	}
+	name := fs.Arg(0)
+	a, closeFn, err := openApp(ctx, cfg, stdout, stderr)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	res, err := a.DisableFeature(ctx, name, *purge)
+	if err != nil {
+		return err
+	}
+	if res.Purged > 0 {
+		fmt.Fprintf(stdout, "purged %d records of %s\n", res.Purged, name)
+	}
+	if res.Done {
+		fmt.Fprintf(stdout, "%s is disabled and removed from the ledger. Remove it from `features` and the binary as needed.\n", name)
+		return nil
+	}
+	fmt.Fprintf(stdout, "%s is disabling: %d records remain. Restart the servers so that they stop writing, then ", name, res.Remaining)
+	if res.Hint != "" {
+		fmt.Fprintf(stdout, "%s, and run this again.\n", res.Hint)
+	} else {
+		fmt.Fprintln(stdout, "run this again with -purge.")
+	}
+	return errors.New("feature: disabling is not complete")
+}
+
+func featuresPlan(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("features plan", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	specPath := fs.String("build", "build.yaml", "次にビルドする構成")
+	cfg, err := loadConfig(fs, args)
+	if err != nil {
+		return err
+	}
+	b, err := os.ReadFile(*specPath) // #nosec G304 -- 運営者が指定するファイル
+	if err != nil {
+		return err
+	}
+	spec, err := buildspec.Parse(b)
+	if err != nil {
+		return err
+	}
+	sf, err := plugin.Storage(cfg.Storage.Driver)
+	if err != nil {
+		return err
+	}
+	log := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	s, err := sf(ctx, plugin.Config{Clock: clock.System{}, Logger: log, Stdout: stdout, Options: cfg.Storage.Options, Dev: cfg.Dev})
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	var ledger []port.FeatureRecord
+	if err := s.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		ledger, err = tx.Features().List(ctx)
+		return err
+	}); err != nil {
+		return err
+	}
+	var enabled []string
+	if cfg.Features != nil {
+		enabled = *cfg.Features
+	}
+	c := feature.PlanChange(ledger, feature.Registered(), spec.Binary(), enabled)
+	fmt.Fprintf(stdout, "features added: %v\nfeatures removed: %v\n", c.Added, c.Removed)
+	for _, p := range c.Problems {
+		fmt.Fprintln(stdout, "BLOCKER:", p)
+	}
+	for _, p := range c.Steps {
+		fmt.Fprintln(stdout, "then:", p)
+	}
+	if len(c.Problems) > 0 {
+		return errors.New("feature: the new binary would refuse to start")
+	}
+	fmt.Fprintln(stdout, "ok: the new binary can start with this ledger and config")
 	return nil
 }
 
@@ -317,11 +427,11 @@ func keys(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	k, err := file.Generate()
+	k, err := keyfile.Generate()
 	if err != nil {
 		return err
 	}
-	if err := file.Write(*out, k); err != nil {
+	if err := keyfile.Write(*out, k); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "wrote %s (master key %s, index key %s). Back it up: data cannot be recovered without it.\n",

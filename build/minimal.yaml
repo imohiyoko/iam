@@ -1,0 +1,9 @@
+# 最小構成の公式イメージ（design.md 11.11、13.8）。既定で有効なフィーチャーと、本番の1構成のアダプタだけを含める。
+# 自分の構成は、これを写して `iam build -f build.yaml -o iam` でビルドする。
+features: [org, warnings]
+adapters:
+  storage: [postgres]
+  ephemeral: [redis]
+  keystore: [env]
+  event_sink: [stdout, otlp]
+  notifier: [webhook]

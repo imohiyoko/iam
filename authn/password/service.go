@@ -27,9 +27,8 @@ import (
 	"github.com/imohiyoko/iam/shared/ratelimit"
 )
 
-func init() {
-	feature.Register(feature.Feature{Name: feature.Password, DataVersion: 1})
-}
+// Feature はパスワードの宣言（features/password が登録する）。
+var Feature = feature.Feature{Name: feature.Password, DataVersion: 1}
 
 // AMR はパスワードの amr（RFC 8176）。
 const AMR = "pwd"

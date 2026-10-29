@@ -23,9 +23,8 @@ import (
 // 判定は Membership の追加・招待・有効期間の変更・付与の変更のときに、同じトランザクションで行う（ホットパスでは判定しない）。
 // 新しい人の有効期間のすべての時点で「その時点の人数 + 1 ≤ 上限」を満たすこと（区切りの時刻だけを調べる）。
 
-func init() {
-	feature.Register(feature.Feature{Name: feature.Quota, DataVersion: 1, Requires: []string{feature.Org}})
-}
+// QuotaFeature は Quota の宣言（features/quota が登録する）。
+var QuotaFeature = feature.Feature{Name: feature.Quota, DataVersion: 1, Requires: []string{feature.Org}}
 
 // QuotaMembers は Membership の数の Quota。
 const QuotaMembers = "members"

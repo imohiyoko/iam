@@ -73,6 +73,28 @@ jobs:
           git add -N .
           git diff --exit-code
 
+  build:
+    # iam build が最小構成をビルドでき、選んだものだけが含まれる（design.md 11.11、ADR 0073）。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: "**/go.sum"
+      - name: iam build (minimal)
+        working-directory: cmd/iam
+        run: |
+          go run . build -f ../../build/minimal.yaml -o /tmp/iam-minimal -version ci
+          /tmp/iam-minimal version -manifest | tee /tmp/manifest.json
+          test "$(jq -c '[.features[].name]' /tmp/manifest.json)" = '["org","warnings"]'
+          test "$(jq -c '.adapters.storage' /tmp/manifest.json)" = '["postgres"]'
+          test "$(jq -c '.adapters.keystore' /tmp/manifest.json)" = '["env"]'
+      - name: docker build (minimal)
+        run: |
+          docker build --build-arg BUILD_SPEC=build/minimal.yaml --build-arg VERSION=ci -t iam:minimal .
+          docker run --rm iam:minimal version
+
   lint:
     runs-on: ubuntu-latest
     steps:

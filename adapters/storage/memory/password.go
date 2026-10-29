@@ -56,6 +56,20 @@ func (r passwords) UpdateHash(_ context.Context, realmID, id, hash string) error
 	return nil
 }
 
+func (r passwords) Count(context.Context) (int, error) { return len(r.t.s.passwords), nil }
+
+func (r passwords) Purge(_ context.Context, limit int) (int, error) {
+	n := 0
+	for id := range r.t.s.passwords {
+		if n >= limit {
+			break
+		}
+		deleteKey(r.t, r.t.s.passwords, id)
+		n++
+	}
+	return n, nil
+}
+
 func (r passwords) Revoke(_ context.Context, realmID, id string, at time.Time, reason string) error {
 	c, err := get(r.t.s.passwords, realmID, id, func(c port.PasswordCredential) string { return c.RealmID }, "password")
 	if err != nil || c.RevokedAt != nil {

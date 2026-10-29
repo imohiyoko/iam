@@ -20,6 +20,17 @@ curl localhost:8080/healthz   # 公開 API
 curl localhost:8081/healthz   # 管理 API
 ```
 
+## 構成を選んでビルドする
+
+使うフィーチャーとアダプタだけを含むバイナリは `iam build` で作ります（[build/minimal.yaml](build/minimal.yaml) が例）。
+
+```sh
+cd cmd/iam
+go run . build -f ../../build/minimal.yaml -o iam
+cd ../..
+docker build --build-arg BUILD_SPEC=build/minimal.yaml -t iam:minimal .   # リポジトリの直下で
+```
+
 ## テスト
 
 アダプタは別の Go モジュールなので、モジュールごとに実行します。

@@ -277,3 +277,9 @@ DELETE FROM authn_sessions WHERE id IN (
 -- name: DeleteFiredScheduledEvents :execrows
 DELETE FROM scheduled_events WHERE id IN (
     SELECT e.id FROM scheduled_events e WHERE e.fired_at IS NOT NULL AND e.fired_at < sqlc.arg(before) LIMIT sqlc.arg(lim));
+
+-- name: CountPasswords :one
+SELECT count(*) FROM authn_password_credentials;
+
+-- name: PurgePasswords :execrows
+DELETE FROM authn_password_credentials WHERE id IN (SELECT p.id FROM authn_password_credentials p LIMIT sqlc.arg(lim));

@@ -44,6 +44,16 @@ func (r passwords) UpdateHash(ctx context.Context, realmID, id, hash string) err
 	return nil
 }
 
+func (r passwords) Count(ctx context.Context) (int, error) {
+	n, err := r.q.CountPasswords(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r passwords) Purge(ctx context.Context, limit int) (int, error) {
+	n, err := r.q.PurgePasswords(ctx, int64(limit))
+	return int(n), mapErr(err)
+}
+
 func (r passwords) Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error {
 	if _, err := r.q.GetPassword(ctx, db.GetPasswordParams{RealmID: realmID, ID: id}); err != nil {
 		return mapErr(err)
