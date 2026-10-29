@@ -15,6 +15,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
       postgres:
         image: postgres:16
         env:
@@ -27,6 +32,7 @@ jobs:
     env:
       # PostgreSQL のアダプタの契約テスト（未設定ならスキップする）。
       IAM_TEST_POSTGRES: postgres://iam:iam@127.0.0.1:5432/iam?sslmode=disable
+      IAM_TEST_REDIS: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
