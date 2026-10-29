@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
@@ -38,6 +39,9 @@ func (s publicServer) DeleteMyAccount(ctx context.Context, _ publicapi.DeleteMyA
 		u, err := tx.Users().Get(ctx, s.a.realm.ID, au.PrincipalID)
 		if err != nil {
 			return err
+		}
+		if u.ManagedOrgID != "" {
+			return org.ErrManagedUser // 管理ユーザーのアカウントは Org が扱う（ADR 0076）
 		}
 		if revoked, err = s.a.sessions.RevokeAllTx(ctx, tx, s.a.realm.ID, u.ID, "", account.ReasonDeletionScheduled, au.Actor(), requestID(ctx)); err != nil {
 			return err

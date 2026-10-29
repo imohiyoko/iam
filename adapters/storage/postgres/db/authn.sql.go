@@ -59,6 +59,17 @@ func (q *Queries) ClearEmailCiphertexts(ctx context.Context, arg ClearEmailCiphe
 	return result.RowsAffected()
 }
 
+const countManagedUsers = `-- name: CountManagedUsers :one
+SELECT count(*) FROM authn_users WHERE managed_org_id IS NOT NULL
+`
+
+func (q *Queries) CountManagedUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countManagedUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countPasswords = `-- name: CountPasswords :one
 SELECT count(*) FROM authn_password_credentials
 `
@@ -1415,7 +1426,7 @@ func (q *Queries) GetTOTPByPublicID(ctx context.Context, arg GetTOTPByPublicIDPa
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold FROM authn_users WHERE realm_id = $1 AND id = $2
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold, managed_org_id, managed_at FROM authn_users WHERE realm_id = $1 AND id = $2
 `
 
 type GetUserParams struct {
@@ -1437,12 +1448,14 @@ func (q *Queries) GetUser(ctx context.Context, arg GetUserParams) (AuthnUser, er
 		&i.UpdatedAt,
 		&i.DeletionScheduledAt,
 		&i.LegalHold,
+		&i.ManagedOrgID,
+		&i.ManagedAt,
 	)
 	return i, err
 }
 
 const getUserByPublicID = `-- name: GetUserByPublicID :one
-SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold FROM authn_users WHERE realm_id = $1 AND public_id = $2
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold, managed_org_id, managed_at FROM authn_users WHERE realm_id = $1 AND public_id = $2
 `
 
 type GetUserByPublicIDParams struct {
@@ -1464,6 +1477,8 @@ func (q *Queries) GetUserByPublicID(ctx context.Context, arg GetUserByPublicIDPa
 		&i.UpdatedAt,
 		&i.DeletionScheduledAt,
 		&i.LegalHold,
+		&i.ManagedOrgID,
+		&i.ManagedAt,
 	)
 	return i, err
 }
@@ -1946,7 +1961,7 @@ func (q *Queries) ListTOTPByUser(ctx context.Context, arg ListTOTPByUserParams) 
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold FROM authn_users WHERE realm_id = $1 AND id > $2 ORDER BY id LIMIT $3::bigint
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold, managed_org_id, managed_at FROM authn_users WHERE realm_id = $1 AND id > $2 ORDER BY id LIMIT $3::bigint
 `
 
 type ListUsersParams struct {
@@ -1975,6 +1990,60 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]AuthnUs
 			&i.UpdatedAt,
 			&i.DeletionScheduledAt,
 			&i.LegalHold,
+			&i.ManagedOrgID,
+			&i.ManagedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersManagedByOrg = `-- name: ListUsersManagedByOrg :many
+SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold, managed_org_id, managed_at FROM authn_users WHERE realm_id = $1 AND managed_org_id = $2 AND id > $3 ORDER BY id LIMIT $4::bigint
+`
+
+type ListUsersManagedByOrgParams struct {
+	RealmID      string
+	ManagedOrgID sql.NullString
+	After        string
+	Lim          int64
+}
+
+func (q *Queries) ListUsersManagedByOrg(ctx context.Context, arg ListUsersManagedByOrgParams) ([]AuthnUser, error) {
+	rows, err := q.db.QueryContext(ctx, listUsersManagedByOrg,
+		arg.RealmID,
+		arg.ManagedOrgID,
+		arg.After,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnUser
+	for rows.Next() {
+		var i AuthnUser
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.Status,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletionScheduledAt,
+			&i.LegalHold,
+			&i.ManagedOrgID,
+			&i.ManagedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2072,6 +2141,24 @@ DELETE FROM authn_password_credentials WHERE id IN (SELECT p.id FROM authn_passw
 
 func (q *Queries) PurgePasswords(ctx context.Context, lim int64) (int64, error) {
 	result, err := q.db.ExecContext(ctx, purgePasswords, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const releaseManagedUsers = `-- name: ReleaseManagedUsers :execrows
+UPDATE authn_users SET managed_org_id = NULL, managed_at = NULL, updated_at = $1
+WHERE id IN (SELECT u.id FROM authn_users u WHERE u.managed_org_id IS NOT NULL LIMIT $2::bigint)
+`
+
+type ReleaseManagedUsersParams struct {
+	UpdatedAt string
+	Lim       int64
+}
+
+func (q *Queries) ReleaseManagedUsers(ctx context.Context, arg ReleaseManagedUsersParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, releaseManagedUsers, arg.UpdatedAt, arg.Lim)
 	if err != nil {
 		return 0, err
 	}
@@ -2371,6 +2458,32 @@ type SetUserLegalHoldParams struct {
 func (q *Queries) SetUserLegalHold(ctx context.Context, arg SetUserLegalHoldParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setUserLegalHold,
 		arg.LegalHold,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setUserManagedOrg = `-- name: SetUserManagedOrg :execrows
+UPDATE authn_users SET managed_org_id = $1, managed_at = $2, updated_at = $3 WHERE realm_id = $4 AND id = $5
+`
+
+type SetUserManagedOrgParams struct {
+	ManagedOrgID sql.NullString
+	ManagedAt    sql.NullString
+	UpdatedAt    string
+	RealmID      string
+	ID           string
+}
+
+func (q *Queries) SetUserManagedOrg(ctx context.Context, arg SetUserManagedOrgParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setUserManagedOrg,
+		arg.ManagedOrgID,
+		arg.ManagedAt,
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.ID,

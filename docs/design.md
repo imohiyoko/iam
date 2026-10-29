@@ -718,6 +718,7 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 
 - フィーチャー `org_managed_users`。Org の owner が公開 API の `/v1/me/orgs/{id}/domains` でドメインを登録し、`_iam-challenge.<domain>` に TXT `iam-domain-verification=<token>` を置いて `:verify` で証明する
 - 証明済みのドメインは realm で1つの Org だけが持てる（`domain_taken`）。DNS はトランザクションの外で引く
+- 管理ユーザーは `users.managed_org_id`（ADR 0076）。Org の owner が求め（`:request-management`）、本人が受け入れる（`:accept-management`）。対象は、この Org で使う確認済みのメールが証明済みドメインのメンバー。管理ユーザーはその Org を抜けられず、自分でアカウントを消せない。Org が手放す・除名・削除すると個人ユーザーに戻る
 
 ### 11.4 Org 階層
 

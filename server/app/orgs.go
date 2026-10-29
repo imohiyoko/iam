@@ -27,6 +27,9 @@ func myOrg(j org.Joined, activeOrgID string) publicapi.MyOrg {
 	}
 	st := publicapi.MyOrgStatus(j.Membership.Status)
 	v.Status = &st
+	if j.Membership.ManagementRequestedAt != nil {
+		v.ManagementRequested = new(true)
+	}
 	return v
 }
 
@@ -44,9 +47,16 @@ func (s publicServer) ListMyOrgs(ctx context.Context, _ publicapi.ListMyOrgsRequ
 		if err != nil {
 			return err
 		}
+		u, err := tx.Users().Get(ctx, s.a.realm.ID, au.PrincipalID)
+		if err != nil {
+			return err
+		}
 		now := s.a.deps.Clock.Now()
 		for _, j := range js {
 			v := myOrg(j, au.ActiveOrgID)
+			if org.IsManaged(u, j.Org) {
+				v.Managed = new(true)
+			}
 			if j.Membership.Status == port.MembershipActive {
 				_, err := org.Check(ctx, tx, j.Org, j.Membership, now)
 				if d, ok := errors.AsType[errs.Denial](err); ok {
@@ -496,6 +506,12 @@ func (s publicServer) orgMemberView(ctx context.Context, tx port.Tx, m port.Memb
 	}
 	v := publicapi.OrgMember{MembershipId: m.PublicID, UserId: u.PublicID, Role: publicapi.OrgMemberRole(m.Role), Status: publicapi.OrgMemberStatus(m.Status),
 		ValidFrom: m.ValidFrom, ValidUntil: m.ValidUntil}
+	if u.ManagedOrgID != "" && u.ManagedOrgID == m.OrgID {
+		v.Managed = new(true)
+	}
+	if m.ManagementRequestedAt != nil {
+		v.ManagementRequested = new(true)
+	}
 	// アドレスを保存しない構成（index_only。9.6）では、切り替え前の暗号文が掃除前に残っていても出さない。
 	if s.a.accounts.IndexOnly {
 		return v, nil

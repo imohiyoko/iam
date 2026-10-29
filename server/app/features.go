@@ -41,10 +41,22 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.QuotaGrants().Purge(ctx, limit)
 		}},
-	feature.OrgManagedUsers: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.OrgDomains().Count(ctx) },
-		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
-			return tx.OrgDomains().Purge(ctx, limit)
-		}},
+	// 管理ユーザーは個人ユーザーに戻し、ドメインを消す（ADR 0076）。
+	feature.OrgManagedUsers: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		n, err := tx.Users().CountManaged(ctx)
+		if err != nil {
+			return 0, err
+		}
+		d, err := tx.OrgDomains().Count(ctx)
+		return n + d, err
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		n, err := tx.Users().ReleaseManaged(ctx, limit, now)
+		if err != nil || n >= limit {
+			return n, err
+		}
+		d, err := tx.OrgDomains().Purge(ctx, limit-n)
+		return n + d, err
+	}},
 	feature.ServiceAccounts: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		return eachServiceAccount(ctx, tx, -1, func(port.ServiceAccount) (bool, error) { return true, nil })
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {

@@ -90,7 +90,8 @@ func toUser(r db.AuthnUser) (port.User, error) {
 	var p times
 	u := port.User{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Status: port.UserStatus(r.Status),
 		ValidFrom: p.null(r.ValidFrom), ValidUntil: p.null(r.ValidUntil), DeletionScheduledAt: p.null(r.DeletionScheduledAt),
-		LegalHold: r.LegalHold != 0, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		LegalHold: r.LegalHold != 0, ManagedOrgID: r.ManagedOrgID.String, ManagedAt: p.null(r.ManagedAt), CreatedAt: p.at(r.CreatedAt),
+		UpdatedAt: p.at(r.UpdatedAt)}
 	return u, p.err
 }
 
@@ -435,6 +436,31 @@ func (r users) SetLegalHold(ctx context.Context, realmID, id string, hold bool, 
 	}
 	n, err := r.q.SetUserLegalHold(ctx, db.SetUserLegalHoldParams{LegalHold: v, UpdatedAt: formatTime(updatedAt), RealmID: realmID, ID: id})
 	return affected(n, err, "user")
+}
+
+func (r users) SetManagedOrg(ctx context.Context, realmID, id, orgID string, at time.Time) error {
+	p := db.SetUserManagedOrgParams{UpdatedAt: formatTime(at), RealmID: realmID, ID: id}
+	if orgID != "" {
+		p.ManagedOrgID, p.ManagedAt = sql.NullString{String: orgID, Valid: true}, nullTime(&at)
+	}
+	n, err := r.q.SetUserManagedOrg(ctx, p)
+	return affected(n, err, "user")
+}
+
+func (r users) ListManagedByOrg(ctx context.Context, realmID, orgID, afterID string, limit int) ([]port.User, error) {
+	rs, err := r.q.ListUsersManagedByOrg(ctx, db.ListUsersManagedByOrgParams{RealmID: realmID, ManagedOrgID: sql.NullString{String: orgID, Valid: true},
+		After: afterID, Lim: int64(limit)})
+	return rows(rs, err, toUser)
+}
+
+func (r users) CountManaged(ctx context.Context) (int, error) {
+	n, err := r.q.CountManagedUsers(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r users) ReleaseManaged(ctx context.Context, limit int, at time.Time) (int, error) {
+	n, err := r.q.ReleaseManagedUsers(ctx, db.ReleaseManagedUsersParams{UpdatedAt: formatTime(at), Lim: int64(limit)})
+	return int(n), mapErr(err)
 }
 
 func (r users) Erase(ctx context.Context, realmID, id string, at time.Time) error {

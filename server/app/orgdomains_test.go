@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
@@ -162,6 +163,162 @@ func TestOrgDomainsAPI(t *testing.T) {
 	for ty, seen := range want {
 		if !seen {
 			t.Errorf("audit %s missing: %v", ty, types)
+		}
+	}
+}
+
+// verifiedDomain は Org に domain を登録して証明する。
+func (l *loginEnv) verifiedDomain(t *testing.T, dns *fakeDNS, cookie, orgID, domain string) {
+	t.Helper()
+	base := "/v1/me/orgs/" + orgID + "/domains"
+	code, out := l.mePost(t, cookie, base, map[string]string{"domain": domain})
+	if code != 201 {
+		t.Fatalf("add domain: %d %v", code, out)
+	}
+	dns.set(out["txt_name"].(string), out["txt_value"].(string))
+	if code, out := l.mePost(t, cookie, base+"/"+out["id"].(string)+":verify", nil); code != 200 {
+		t.Fatalf("verify domain: %d %v", code, out)
+	}
+}
+
+// myOrgEntry は本人の Org の一覧から orgID の行を返す。
+func (l *loginEnv) myOrgEntry(t *testing.T, cookie, orgID string) map[string]any {
+	t.Helper()
+	code, out := l.meDo(t, "GET", cookie, "/v1/me/orgs", nil)
+	if code != 200 {
+		t.Fatalf("my orgs: %d %v", code, out)
+	}
+	for _, o := range out["orgs"].([]any) {
+		if m := o.(map[string]any); m["id"] == orgID {
+			return m
+		}
+	}
+	t.Fatalf("org %s not in %v", orgID, out)
+	return nil
+}
+
+// joinOrg は email を Org に招待し、受け入れさせる。
+func (l *loginEnv) joinOrg(t *testing.T, owner, orgID, email string) string {
+	t.Helper()
+	_, cookie := l.login(t, email)
+	if code, body := l.invite(t, owner, orgID, email, "member"); code != 201 {
+		t.Fatalf("invite %s: %d %v", email, code, body)
+	}
+	_, token := l.claimToken(t)
+	if code, body := l.accept(t, cookie, token); code != 200 {
+		t.Fatalf("accept %s: %d %v", email, code, body)
+	}
+	return cookie
+}
+
+func TestManagedUsers(t *testing.T) {
+	l, dns := newDomainEnv(t, true)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	l.verifiedDomain(t, dns, owner, acme, "acme.example")
+	pat := l.joinOrg(t, owner, acme, "pat@acme.example")
+	sam := l.joinOrg(t, owner, acme, "sam@other.example")
+	patMember := l.myOrgEntry(t, pat, acme)["membership_id"].(string)
+	samMember := l.myOrgEntry(t, sam, acme)["membership_id"].(string)
+	member := func(id string) string { return "/v1/me/orgs/" + acme + "/members/" + id }
+
+	if code, out := l.mePost(t, sam, "/v1/me/orgs/"+acme+":accept-management", nil); code != 409 || out["error"] != "no_management_request" {
+		t.Fatalf("accept without request: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, owner, member(samMember)+":request-management", nil); code != 409 || out["error"] != "email_domain_not_verified" {
+		t.Fatalf("request for unverified domain: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, sam, member(patMember)+":request-management", nil); code != 403 {
+		t.Fatalf("request by member: %d %v", code, out)
+	}
+
+	// 求めて、断られる。
+	if code, out := l.mePost(t, owner, member(patMember)+":request-management", nil); code != 204 {
+		t.Fatalf("request: %d %v", code, out)
+	}
+	if e := l.myOrgEntry(t, pat, acme); e["management_requested"] != true || e["managed"] != nil {
+		t.Fatalf("my org after request: %v", e)
+	}
+	if code, out := l.mePost(t, pat, "/v1/me/orgs/"+acme+":decline-management", nil); code != 204 {
+		t.Fatalf("decline: %d %v", code, out)
+	}
+	if e := l.myOrgEntry(t, pat, acme); e["management_requested"] != nil {
+		t.Fatalf("my org after decline: %v", e)
+	}
+
+	// 求めて、受け入れられる。
+	if code, out := l.mePost(t, owner, member(patMember)+":request-management", nil); code != 204 {
+		t.Fatalf("request again: %d %v", code, out)
+	}
+	// 受け入れには直近の本人確認が要る。
+	l.advance(l.e.cfg.Security.Session.MaxAuthAge.Default.D() + time.Minute)
+	if code, out := l.mePost(t, pat, "/v1/me/orgs/"+acme+":accept-management", nil); code != 401 || out["error"] != "reauthentication_required" {
+		t.Fatalf("accept without recent auth: %d %v", code, out)
+	}
+	_, pat = l.login(t, "pat@acme.example")
+	_, owner = l.login(t, "boss@acme.example")
+	if code, out := l.mePost(t, pat, "/v1/me/orgs/"+acme+":accept-management", nil); code != 204 {
+		t.Fatalf("accept: %d %v", code, out)
+	}
+	if e := l.myOrgEntry(t, pat, acme); e["managed"] != true || e["management_requested"] != nil {
+		t.Fatalf("my org after accept: %v", e)
+	}
+	code, out := l.meDo(t, "GET", owner, "/v1/me/orgs/"+acme+"/members", nil)
+	managed := 0
+	for _, m := range out["members"].([]any) {
+		if m.(map[string]any)["managed"] == true {
+			managed++
+		}
+	}
+	if code != 200 || managed != 1 {
+		t.Fatalf("members: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, owner, member(patMember)+":request-management", nil); code != 409 || out["error"] != "already_managed" {
+		t.Fatalf("request for managed: %d %v", code, out)
+	}
+
+	// 管理ユーザーは抜けられず、自分でアカウントを消せない。
+	if code, out := l.mePost(t, pat, "/v1/me/orgs/"+acme+":leave", nil); code != 409 || out["error"] != "managed_user" {
+		t.Fatalf("leave as managed: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, pat, "/v1/me/account:delete", nil); code != 409 || out["error"] != "managed_user" {
+		t.Fatalf("delete account as managed: %d %v", code, out)
+	}
+
+	// Org が手放すと個人ユーザーに戻り、抜けられる。
+	if code, out := l.mePost(t, owner, member(patMember)+":release-management", nil); code != 204 {
+		t.Fatalf("release: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, owner, member(patMember)+":release-management", nil); code != 409 || out["error"] != "not_managed" {
+		t.Fatalf("release again: %d %v", code, out)
+	}
+	if e := l.myOrgEntry(t, pat, acme); e["managed"] != nil {
+		t.Fatalf("my org after release: %v", e)
+	}
+
+	// 除名でも個人ユーザーに戻る。
+	if code, out := l.mePost(t, owner, member(patMember)+":request-management", nil); code != 204 {
+		t.Fatalf("request third: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, pat, "/v1/me/orgs/"+acme+":accept-management", nil); code != 204 {
+		t.Fatalf("accept again: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, owner, member(patMember)+":remove", nil); code != 204 {
+		t.Fatalf("remove: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, pat, "/v1/me/account:delete", nil); code != 200 {
+		t.Fatalf("delete account after removal: %d %v", code, out)
+	}
+
+	seen := map[string]bool{}
+	for _, e := range l.auditTypes(t) {
+		if e.OrgID == acme {
+			seen[e.Type] = true
+		}
+	}
+	for _, ty := range []string{"org.management.requested", "org.management.declined", "user.managed", "user.management_released"} {
+		if !seen[ty] {
+			t.Errorf("audit %s missing", ty)
 		}
 	}
 }

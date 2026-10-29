@@ -66,17 +66,28 @@ func (s *Service) end(ctx context.Context, tx port.Tx, o port.Org, m port.Member
 			return Ended{}, ErrLastOwner
 		}
 	}
+	u, err := tx.Users().Get(ctx, o.RealmID, m.UserID)
+	if err != nil {
+		return Ended{}, err
+	}
+	// 管理ユーザーは自分では抜けられない。Org が除名・削除すれば個人ユーザーに戻す（ADR 0076）。
+	managed := IsManaged(u, o)
+	if managed && reason == EndedLeft {
+		return Ended{}, ErrManagedUser
+	}
 	now := s.Clock.Now()
-	m.Status, m.EndedReason, m.EmailID, m.UpdatedAt = port.MembershipEnded, reason, "", now
+	m.Status, m.EndedReason, m.EmailID, m.ManagementRequestedAt, m.UpdatedAt = port.MembershipEnded, reason, "", nil, now
 	if m.ValidUntil == nil || m.ValidUntil.After(now) {
 		m.ValidUntil = new(now)
 	}
 	if err := tx.Memberships().Update(ctx, m); err != nil {
 		return Ended{}, err
 	}
-	u, err := tx.Users().Get(ctx, o.RealmID, m.UserID)
-	if err != nil {
-		return Ended{}, err
+	if managed && reason != EndedAccountDeleted {
+		if err := s.release(ctx, tx, o, m, u, actor, requestID); err != nil {
+			return Ended{}, err
+		}
+		u.ManagedOrgID, u.ManagedAt = "", nil
 	}
 	bindings, groups, err := dropOrgAuthz(ctx, tx, o, u.ID)
 	if err != nil {

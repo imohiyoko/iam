@@ -113,7 +113,7 @@ func (r orgs) SetSettings(_ context.Context, realmID, id string, settings []byte
 type memberships struct{ t *tx }
 
 func cloneMembership(m port.Membership) port.Membership {
-	m.ValidFrom, m.ValidUntil = cloneTime(m.ValidFrom), cloneTime(m.ValidUntil)
+	m.ValidFrom, m.ValidUntil, m.ManagementRequestedAt = cloneTime(m.ValidFrom), cloneTime(m.ValidUntil), cloneTime(m.ManagementRequestedAt)
 	return m
 }
 

@@ -33,8 +33,11 @@ type User struct {
 	DeletionScheduledAt *time.Time
 	// LegalHold は運営者による消去の保留（4.10）。立っている間は猶予が終わっても消さない。
 	LegalHold bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// ManagedOrgID はユーザーを管理する Org（内部 ID。design.md 11.3、ADR 0076）。空なら個人ユーザー（本人が所有する）。
+	ManagedOrgID string
+	ManagedAt    *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // UserRepo は users の Repository。
@@ -50,6 +53,14 @@ type UserRepo interface {
 	SetDeletion(ctx context.Context, realmID, id string, scheduledAt *time.Time, updatedAt time.Time) error
 	// SetLegalHold は消去の保留を置き換える。無ければ errs.NotFound。
 	SetLegalHold(ctx context.Context, realmID, id string, hold bool, updatedAt time.Time) error
+	// SetManagedOrg は管理する Org を置き換える（空の orgID で個人ユーザーに戻し、at は無視する）。無ければ errs.NotFound。
+	SetManagedOrg(ctx context.Context, realmID, id, orgID string, at time.Time) error
+	// ListManagedByOrg は Org が管理するユーザーを内部 ID の順に、afterID より後から最大 limit 件返す。
+	ListManagedByOrg(ctx context.Context, realmID, orgID, afterID string, limit int) ([]User, error)
+	// CountManaged は管理ユーザーの数（全 realm）を返す（フィーチャーの無効化。11.12）。
+	CountManaged(ctx context.Context) (int, error)
+	// ReleaseManaged は管理ユーザーを全 realm から最大 limit 人、個人ユーザーに戻し、戻した数を返す。
+	ReleaseManaged(ctx context.Context, limit int, at time.Time) (int, error)
 	// Erase はユーザーを削除済み（墓標）にし、メール（インデックスごと。再登録できるように）・外部 ID の紐付け・passkey・
 	// TOTP・パスワード・リカバリーコード・セッション・ロールの付与・連携先への認可を消す（4.10）。データ鍵、Membership、個人 Org、停止の記録は
 	// 呼び出し側が扱う。無ければ errs.NotFound。
@@ -558,8 +569,10 @@ type Membership struct {
 	ValidFrom   *time.Time
 	ValidUntil  *time.Time
 	EndedReason string // left / removed / expired / org_deleted / user_deleted
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// ManagementRequestedAt は Org の owner がこのユーザーの管理を求めた時刻（本人の同意を待つ。ADR 0076）。
+	ManagementRequestedAt *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // MembershipRepo は memberships の Repository。
@@ -577,7 +590,7 @@ type MembershipRepo interface {
 	ListByOrg(ctx context.Context, realmID, orgID, afterPublicID string, limit int) ([]Membership, error)
 	// CountActive は Org の active な Membership のうち、役割が role のものの数を返す（最後のオーナー。4.10）。
 	CountActive(ctx context.Context, realmID, orgID string, role OrgRole) (int, error)
-	// Update は ID の Membership の状態・役割・メール・有効期間・終了の理由・更新時刻を m の値に置き換える。
+	// Update は ID の Membership の状態・役割・メール・有効期間・終了の理由・管理の求め・更新時刻を m の値に置き換える。
 	// ユーザー・Org・作成時刻は変えない。無ければ errs.NotFound。
 	Update(ctx context.Context, m Membership) error
 }
