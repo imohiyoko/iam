@@ -201,7 +201,7 @@ memberships          id, user_id, org_id, status（invited / active / ended）
 invitations          id, realm_id, org_id, email_index, email_ciphertext, org_role
                      valid_from, valid_until, invited_by, expires_at, status（pending / accepted / revoked / expired）, created_at
 org_domains          org_id, domain, verified_at（11.3）
-org_login_policies   org_id, type（require_passkey / ip_allowlist / membership_email_domain / require_sso …）, config
+org_login_policies   （orgs.settings の login_policy に含める。ADR 0069）type（require_passkey / ip_allowlist / membership_email_domain / require_sso …）, config
 org_quota_grants     id, realm_id, org_id, quota_key, kind（base / addon / override）, quantity
                      starts_at, ends_at（NULL=無期限）, source（manual / external）, external_ref, created_by, created_at
                      UNIQUE (org_id, quota_key, external_ref)

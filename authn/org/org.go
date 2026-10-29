@@ -67,6 +67,8 @@ type Service struct {
 	DeletionGrace time.Duration
 	// Rules は Org の段の設定の規則（2.8）。
 	Rules Rules
+	// LoginPolicies は Org のログインポリシー（フィーチャー org_login_policy）が active か。
+	LoginPolicies bool
 }
 
 // NormalizeName は名前の前後の空白を除き、形式を確かめる。

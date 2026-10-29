@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/check"
@@ -687,10 +688,16 @@ func (s publicServer) AcceptInvitation(ctx context.Context, req publicapi.Accept
 		active := au.ActiveOrgID
 		if acc.Created != nil {
 			// 招待からの登録：招待された Org に入ったセッションを発行する。
-			is, err := s.a.sessions.Issue(ctx, tx, session.Issue{
+			in := session.Issue{
 				RealmID: s.a.realm.ID, UserID: acc.Created.User.ID, AuthMethods: []string{"otp"}, Credentials: []string{acc.Created.Email.ID},
 				IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, ReplaceToken: replace, OrgID: acc.Joined.Org.ID,
-			})
+			}
+			is, err := s.a.sessions.Issue(ctx, tx, in)
+			if _, ok := errors.AsType[*account.UnavailableError](err); ok {
+				// 招待された Org のログインポリシー（passkey 必須など）を満たさなければ、参加は済ませて個人 Org に入る。
+				in.OrgID = ""
+				is, err = s.a.sessions.Issue(ctx, tx, in)
+			}
 			if err != nil {
 				return err
 			}
@@ -759,7 +766,7 @@ func (s publicServer) SwitchMyOrg(ctx context.Context, req publicapi.SwitchMyOrg
 	if err != nil {
 		return nil, err
 	}
-	is, err := s.a.sessions.SwitchOrg(ctx, s.a.realm.ID, au.SessionID, orgID, requestID(ctx))
+	is, err := s.a.sessions.SwitchOrg(ctx, s.a.realm.ID, au.SessionID, orgID, s.a.clientOf(ctx).IP, requestID(ctx))
 	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.SwitchMyOrg403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}

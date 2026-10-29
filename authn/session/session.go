@@ -181,7 +181,14 @@ type OrgPick struct {
 	// Email は OAuth のプロバイダが返したアドレス。結び付けたメールと一致すれば手がかりにする。
 	Email string
 	// Warnings はこの認証で該当した警告（warning.Evaluator.Hits）。Org の段で deny になる Org には入れない（10章）。
-	Warnings  []warning.Warning
+	Warnings []warning.Warning
+	// AuthMethods はこの認証の amr、IP は要求の IP（Org のログインポリシーの判定。4.4）。
+	AuthMethods []string
+	IP          string
+	// Partial は2要素目の前の段。ログインポリシーは完了のときに判定する。
+	Partial bool
+	// Fallback は、Explicit に入れなければ明示的な指定が無いものとして決め直す（2要素目の前の段で決めた Org を引き継ぐとき）。
+	Fallback  bool
 	RequestID string
 }
 
@@ -214,6 +221,8 @@ type Issue struct {
 	Recovery bool
 	// OrgID は入る Org の内部 ID（明示的な指定、2要素目の前の段の Org）。空なら OrgPicker が手がかりから決める。
 	OrgID string
+	// OrgFallback は、OrgID に入れなければ手がかりから決め直す（2要素目の前の段の Org。ログインポリシーは完了のときに判定する）。
+	OrgFallback bool
 	// OrgEmail は OAuth のプロバイダが返したアドレス（Org の手がかり）。
 	OrgEmail string
 }
@@ -309,7 +318,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	var choices []string
 	if m.Orgs != nil {
 		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: in.OrgID, Credentials: in.Credentials, Email: in.OrgEmail, Warnings: hits,
-			RequestID: in.RequestID})
+			AuthMethods: in.AuthMethods, IP: in.IP, Partial: restriction != port.RestrictionNone, Fallback: in.OrgFallback, RequestID: in.RequestID})
 		if err != nil {
 			return Issued{}, err
 		}
@@ -513,7 +522,7 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
 		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt,
-		OrgID: old.ActiveOrgID,
+		OrgID: old.ActiveOrgID, OrgFallback: true,
 	})
 	if err != nil {
 		return Issued{}, err
@@ -549,6 +558,7 @@ func (m *Manager) DeletionCancelled(ctx context.Context, tx port.Tx, realmID, se
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: old.AuthMethods, Credentials: old.AuthCredentialIDs,
 		IP: ip, UserAgent: userAgent, RequestID: requestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt, OrgID: old.ActiveOrgID,
+		OrgFallback: true,
 	})
 	if err != nil {
 		return Issued{}, err
@@ -988,7 +998,8 @@ var ErrNotSwitchable = errs.WithCode(errs.KindUnauthenticated, errs.CodeAuthenti
 
 // SwitchOrg はセッションの active な Org を orgID（内部 ID）に替え、ID を入れ替える（4.4、5.2）。
 // 古い ID はすぐに失効させる（別の Org の文脈で使われ続けないように）。入れる Org かは OrgPicker で確かめる。
-func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requestID string) (Issued, error) {
+// ip は切り替えの要求の IP（Org のログインポリシーの判定）。
+func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, ip, requestID string) (Issued, error) {
 	if m.Orgs == nil {
 		return Issued{}, errs.New(errs.KindNotFound, "org feature is off")
 	}
@@ -1026,7 +1037,7 @@ func (m *Manager) SwitchOrg(ctx context.Context, realmID, sessionID, orgID, requ
 				return err
 			}
 		}
-		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: orgID, Warnings: hits, RequestID: requestID})
+		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: orgID, Warnings: hits, AuthMethods: old.AuthMethods, IP: ip, RequestID: requestID})
 		if err != nil {
 			return err
 		}

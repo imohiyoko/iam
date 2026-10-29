@@ -1207,6 +1207,24 @@ components:
           type: object
           description: 警告のコードごとのアクション
           additionalProperties: { type: string, enum: [ignore, warn, deny] }
+        login_policy: { $ref: "#/components/schemas/OrgLoginPolicy" }
+    OrgLoginPolicy:
+      type: object
+      description: >-
+        Org のログインポリシー（フィーチャー org_login_policy）。ログインと Org の切り替えで判定し、満たさなければその Org に入れない
+        （理由は policy.<種類>）。空の項目は判定しない
+      properties:
+        require_passkey: { type: boolean, description: passkey で本人確認したセッションだけを入れる }
+        membership_email_domains:
+          type: array
+          maxItems: 50
+          description: Membership に結び付けたメール（無ければ primary、確認済み）のドメインがこのどれかであること
+          items: { type: string }
+        ip_allowlist:
+          type: array
+          maxItems: 100
+          description: 要求の IP がこのどれか（CIDR）に入ること
+          items: { type: string }
     OrgSettingsView:
       type: object
       required: [settings, effective]
