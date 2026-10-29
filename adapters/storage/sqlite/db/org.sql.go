@@ -280,6 +280,21 @@ func (q *Queries) CreateQuotaGrant(ctx context.Context, arg CreateQuotaGrantPara
 	return err
 }
 
+const deleteOrgAncestorsAbove = `-- name: DeleteOrgAncestorsAbove :exec
+DELETE FROM org_ancestors WHERE realm_id = ? AND org_id = ? AND depth > ?
+`
+
+type DeleteOrgAncestorsAboveParams struct {
+	RealmID string
+	OrgID   string
+	Depth   int64
+}
+
+func (q *Queries) DeleteOrgAncestorsAbove(ctx context.Context, arg DeleteOrgAncestorsAboveParams) error {
+	_, err := q.db.ExecContext(ctx, deleteOrgAncestorsAbove, arg.RealmID, arg.OrgID, arg.Depth)
+	return err
+}
+
 const deleteOrgDomain = `-- name: DeleteOrgDomain :execrows
 DELETE FROM org_domains WHERE realm_id = ? AND id = ?
 `
@@ -479,7 +494,7 @@ func (q *Queries) GetMembershipByUserOrg(ctx context.Context, arg GetMembershipB
 }
 
 const getOrg = `-- name: GetOrg :one
-SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings, parent_org_id FROM orgs WHERE realm_id = ? AND id = ?
 `
 
 type GetOrgParams struct {
@@ -504,12 +519,13 @@ func (q *Queries) GetOrg(ctx context.Context, arg GetOrgParams) (Org, error) {
 		&i.DeletionScheduledAt,
 		&i.DeletedAt,
 		&i.Settings,
+		&i.ParentOrgID,
 	)
 	return i, err
 }
 
 const getOrgByPublicID = `-- name: GetOrgByPublicID :one
-SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings, parent_org_id FROM orgs WHERE realm_id = ? AND public_id = ?
 `
 
 type GetOrgByPublicIDParams struct {
@@ -534,6 +550,7 @@ func (q *Queries) GetOrgByPublicID(ctx context.Context, arg GetOrgByPublicIDPara
 		&i.DeletionScheduledAt,
 		&i.DeletedAt,
 		&i.Settings,
+		&i.ParentOrgID,
 	)
 	return i, err
 }
@@ -566,7 +583,7 @@ func (q *Queries) GetOrgDomainByPublicID(ctx context.Context, arg GetOrgDomainBy
 }
 
 const getPersonalOrg = `-- name: GetPersonalOrg :one
-SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = ? AND kind = 'personal' AND personal_owner_id = ?
+SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings, parent_org_id FROM orgs WHERE realm_id = ? AND kind = 'personal' AND personal_owner_id = ?
 `
 
 type GetPersonalOrgParams struct {
@@ -591,6 +608,7 @@ func (q *Queries) GetPersonalOrg(ctx context.Context, arg GetPersonalOrgParams) 
 		&i.DeletionScheduledAt,
 		&i.DeletedAt,
 		&i.Settings,
+		&i.ParentOrgID,
 	)
 	return i, err
 }
@@ -689,6 +707,27 @@ func (q *Queries) GetVerifiedOrgDomain(ctx context.Context, arg GetVerifiedOrgDo
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const insertOrgAncestor = `-- name: InsertOrgAncestor :exec
+INSERT INTO org_ancestors (realm_id, org_id, ancestor_id, depth) VALUES (?, ?, ?, ?)
+`
+
+type InsertOrgAncestorParams struct {
+	RealmID    string
+	OrgID      string
+	AncestorID string
+	Depth      int64
+}
+
+func (q *Queries) InsertOrgAncestor(ctx context.Context, arg InsertOrgAncestorParams) error {
+	_, err := q.db.ExecContext(ctx, insertOrgAncestor,
+		arg.RealmID,
+		arg.OrgID,
+		arg.AncestorID,
+		arg.Depth,
+	)
+	return err
 }
 
 const listInvitationsByOrg = `-- name: ListInvitationsByOrg :many
@@ -843,6 +882,127 @@ func (q *Queries) ListMembershipsByUser(ctx context.Context, arg ListMemberships
 	return items, nil
 }
 
+const listOrgAncestors = `-- name: ListOrgAncestors :many
+SELECT ancestor_id, depth FROM org_ancestors WHERE realm_id = ? AND org_id = ? ORDER BY depth
+`
+
+type ListOrgAncestorsParams struct {
+	RealmID string
+	OrgID   string
+}
+
+type ListOrgAncestorsRow struct {
+	AncestorID string
+	Depth      int64
+}
+
+func (q *Queries) ListOrgAncestors(ctx context.Context, arg ListOrgAncestorsParams) ([]ListOrgAncestorsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listOrgAncestors, arg.RealmID, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgAncestorsRow
+	for rows.Next() {
+		var i ListOrgAncestorsRow
+		if err := rows.Scan(&i.AncestorID, &i.Depth); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgChildren = `-- name: ListOrgChildren :many
+SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings, parent_org_id FROM orgs WHERE realm_id = ? AND parent_org_id = ? ORDER BY id
+`
+
+type ListOrgChildrenParams struct {
+	RealmID     string
+	ParentOrgID string
+}
+
+func (q *Queries) ListOrgChildren(ctx context.Context, arg ListOrgChildrenParams) ([]Org, error) {
+	rows, err := q.db.QueryContext(ctx, listOrgChildren, arg.RealmID, arg.ParentOrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Org
+	for rows.Next() {
+		var i Org
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.Kind,
+			&i.Name,
+			&i.PersonalOwnerID,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletionScheduledAt,
+			&i.DeletedAt,
+			&i.Settings,
+			&i.ParentOrgID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgDescendants = `-- name: ListOrgDescendants :many
+SELECT org_id, depth FROM org_ancestors WHERE realm_id = ? AND ancestor_id = ? ORDER BY depth, org_id
+`
+
+type ListOrgDescendantsParams struct {
+	RealmID    string
+	AncestorID string
+}
+
+type ListOrgDescendantsRow struct {
+	OrgID string
+	Depth int64
+}
+
+func (q *Queries) ListOrgDescendants(ctx context.Context, arg ListOrgDescendantsParams) ([]ListOrgDescendantsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listOrgDescendants, arg.RealmID, arg.AncestorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrgDescendantsRow
+	for rows.Next() {
+		var i ListOrgDescendantsRow
+		if err := rows.Scan(&i.OrgID, &i.Depth); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgDomainsByOrg = `-- name: ListOrgDomainsByOrg :many
 SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at FROM org_domains WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id
 `
@@ -887,7 +1047,7 @@ func (q *Queries) ListOrgDomainsByOrg(ctx context.Context, arg ListOrgDomainsByO
 }
 
 const listOrgs = `-- name: ListOrgs :many
-SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings FROM orgs WHERE realm_id = ? AND id > ?2 ORDER BY id LIMIT ?3
+SELECT id, public_id, realm_id, kind, name, personal_owner_id, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, deleted_at, settings, parent_org_id FROM orgs WHERE realm_id = ? AND id > ?2 ORDER BY id LIMIT ?3
 `
 
 type ListOrgsParams struct {
@@ -919,6 +1079,7 @@ func (q *Queries) ListOrgs(ctx context.Context, arg ListOrgsParams) ([]Org, erro
 			&i.DeletionScheduledAt,
 			&i.DeletedAt,
 			&i.Settings,
+			&i.ParentOrgID,
 		); err != nil {
 			return nil, err
 		}
@@ -1021,6 +1182,30 @@ func (q *Queries) SetOrgDeletion(ctx context.Context, arg SetOrgDeletionParams) 
 	result, err := q.db.ExecContext(ctx, setOrgDeletion,
 		arg.DeletionScheduledAt,
 		arg.DeletedAt,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setOrgParent = `-- name: SetOrgParent :execrows
+UPDATE orgs SET parent_org_id = ?, updated_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type SetOrgParentParams struct {
+	ParentOrgID string
+	UpdatedAt   string
+	RealmID     string
+	ID          string
+}
+
+func (q *Queries) SetOrgParent(ctx context.Context, arg SetOrgParentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setOrgParent,
+		arg.ParentOrgID,
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.ID,

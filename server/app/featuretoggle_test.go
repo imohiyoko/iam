@@ -199,7 +199,7 @@ func TestDisableOrgWithData(t *testing.T) {
 	if _, err := l.a.DisableFeature(ctx, feature.Org, false); !errors.Is(err, ErrFeatureRequired) {
 		t.Fatalf("disable org with dependents: %v", err)
 	}
-	for _, n := range []string{feature.Quota, feature.OrgLoginPolicy, feature.OrgManagedUsers} {
+	for _, n := range []string{feature.Quota, feature.OrgLoginPolicy, feature.OrgManagedUsers, feature.OrgHierarchy} {
 		if res, err := l.a.DisableFeature(ctx, n, false); err != nil || !res.Done {
 			t.Fatalf("disable %s = %+v, %v", n, res, err)
 		}
@@ -218,7 +218,7 @@ func TestDisableOrgWithData(t *testing.T) {
 	if res, err := l.a.DisableFeature(ctx, feature.Org, false); err != nil || !res.Done {
 		t.Fatalf("disable org after deletion = %+v, %v", res, err)
 	}
-	rest := without(feature.Registered(), feature.Org, feature.Quota, feature.OrgLoginPolicy, feature.OrgManagedUsers)
+	rest := without(feature.Registered(), feature.Org, feature.Quota, feature.OrgLoginPolicy, feature.OrgManagedUsers, feature.OrgHierarchy)
 	if _, err := l.restart(t, names(rest), rest); err != nil {
 		t.Fatal(err)
 	}
@@ -246,4 +246,20 @@ func TestDisableOrgWithData(t *testing.T) {
 	if l.activeOrg(t, cookie) == "" {
 		t.Fatal("no personal org for the user created while org was disabled")
 	}
+}
+
+// 階層は葉から外すので、子を持つ Org は後の回に外れる（1回で外せなくても片付けを続ける）。
+func TestDisableOrgHierarchyWithData(t *testing.T) {
+	l := allFeaturesEnv(t)
+	_, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
+	_, owner := l.login(t, "boss@acme.example")
+	root := l.sharedOrg(t, owner, "Acme")
+	mid := l.sharedOrg(t, owner, "Sales")
+	leaf := l.sharedOrg(t, owner, "Sales East")
+	for _, p := range [][2]string{{mid, root}, {leaf, mid}} {
+		if code, out := l.adminDo(t, "POST", admin, "/v1/admin/orgs/"+p[0]+":set-parent", map[string]any{"parent_id": p[1]}); code != 200 {
+			t.Fatalf("set parent: %d %v", code, out)
+		}
+	}
+	disableWithData(t, l, feature.OrgHierarchy, 2)
 }

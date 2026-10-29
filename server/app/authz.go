@@ -50,6 +50,17 @@ func (authzMembers) OrgRole(ctx context.Context, tx port.Tx, realmID string, p c
 	return m.Role, true, nil
 }
 
+func (authzMembers) OrgUsable(ctx context.Context, tx port.Tx, realmID, orgID string, now time.Time) (bool, error) {
+	o, err := tx.Orgs().Get(ctx, realmID, orgID)
+	if errors.Is(err, errs.NotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return org.Usable(ctx, tx, o, now)
+}
+
 // serviceAccountMember はサービスアカウント id が now に orgID（内部 ID）に所属して使えるかを返す。
 func serviceAccountMember(ctx context.Context, tx port.Tx, realmID, id, orgID string, now time.Time) (bool, error) {
 	sa, err := tx.ServiceAccounts().Get(ctx, realmID, id)

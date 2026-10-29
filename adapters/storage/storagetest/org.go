@@ -696,3 +696,114 @@ var managedUserIsolationCase = IsolationCase{
 		return count(tx.Users().ListManagedByOrg(ctx, r, isoOrg, "", 10))
 	},
 }
+
+// testOrgHierarchy は Org の親と、書き込み時に計算する祖先の一覧（ADR 0078）を確かめる。
+func testOrgHierarchy(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r := id.New(id.Realm)
+	a, b, c, d := newOrg(r, port.OrgShared, ""), newOrg(r, port.OrgShared, ""), newOrg(r, port.OrgShared, ""), newOrg(r, port.OrgShared, "")
+	at := T0.Add(time.Hour)
+	ancestors := func(ctx context.Context, tx port.Tx, o port.Org, want ...string) error {
+		got, err := tx.Orgs().Ancestors(ctx, r, o.ID)
+		if err != nil {
+			return err
+		}
+		if len(got) != len(want) || (len(want) > 0 && !reflect.DeepEqual(got, want)) {
+			return fmt.Errorf("Ancestors(%s) = %v, want %v", o.Name, got, want)
+		}
+		return nil
+	}
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		for i, o := range []*port.Org{&a, &b, &c, &d} {
+			o.Name = string(rune('A' + i))
+			if err := tx.Orgs().Create(ctx, *o); err != nil {
+				return err
+			}
+		}
+		// C の親を先に B にしてから、B の親を A にする（子孫の祖先も計算し直す）。
+		if err := tx.Orgs().SetParent(ctx, r, c.ID, b.ID, at); err != nil {
+			return err
+		}
+		if err := tx.Orgs().SetParent(ctx, r, b.ID, a.ID, at); err != nil {
+			return err
+		}
+		if err := ancestors(ctx, tx, c, b.ID, a.ID); err != nil {
+			return err
+		}
+		if err := ancestors(ctx, tx, a); err != nil {
+			return err
+		}
+		if h, err := tx.Orgs().SubtreeHeight(ctx, r, a.ID); err != nil || h != 2 {
+			return fmt.Errorf("SubtreeHeight(A) = %d, %v", h, err)
+		}
+		if h, err := tx.Orgs().SubtreeHeight(ctx, r, c.ID); err != nil || h != 0 {
+			return fmt.Errorf("SubtreeHeight(C) = %d, %v", h, err)
+		}
+		got, err := tx.Orgs().Get(ctx, r, b.ID)
+		if err != nil || got.ParentID != a.ID || !got.UpdatedAt.Equal(at) {
+			return fmt.Errorf("Get(B) = %+v, %v", got, err)
+		}
+		// B を D の下に移すと、C の祖先も変わる。
+		if err := tx.Orgs().SetParent(ctx, r, b.ID, d.ID, at); err != nil {
+			return err
+		}
+		if err := ancestors(ctx, tx, c, b.ID, d.ID); err != nil {
+			return err
+		}
+		if h, err := tx.Orgs().SubtreeHeight(ctx, r, a.ID); err != nil || h != 0 {
+			return fmt.Errorf("SubtreeHeight(A) after move = %d, %v", h, err)
+		}
+		cs, err := tx.Orgs().ListChildren(ctx, r, d.ID)
+		if err != nil || len(cs) != 1 || cs[0].ID != b.ID {
+			return fmt.Errorf("ListChildren(D) = %+v, %v", cs, err)
+		}
+		// 親を外すと、B は根になり、C の祖先は B だけになる。
+		if err := tx.Orgs().SetParent(ctx, r, b.ID, "", at); err != nil {
+			return err
+		}
+		if err := ancestors(ctx, tx, c, b.ID); err != nil {
+			return err
+		}
+		if err := ancestors(ctx, tx, b); err != nil {
+			return err
+		}
+		if cs, err := tx.Orgs().ListChildren(ctx, r, d.ID); err != nil || len(cs) != 0 {
+			return fmt.Errorf("ListChildren(D) after detach = %+v, %v", cs, err)
+		}
+		return notFound("SetParent of missing org", tx.Orgs().SetParent(ctx, r, id.New(id.Org), "", at))
+	})
+}
+
+// isoParentOrg・isoChildOrg は階層の分離の確認だけで使う（他の分離の確認の Org と重ねない）。
+const (
+	isoParentOrg = "org_0000000000000000000000000P"
+	isoChildOrg  = "org_0000000000000000000000000C"
+)
+
+var orgHierarchyIsolationCase = IsolationCase{
+	Name: "Orgs.Ancestors+SubtreeHeight+ListChildren",
+	Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
+		parent, child := newOrg(r, port.OrgShared, ""), newOrg(r, port.OrgShared, "")
+		parent.ID, parent.PublicID = isoParentOrg, isoParentOrg
+		child.ID, child.PublicID = isoChildOrg, isoChildOrg
+		if err := tx.Orgs().Create(ctx, parent); err != nil {
+			return err
+		}
+		if err := tx.Orgs().Create(ctx, child); err != nil {
+			return err
+		}
+		return tx.Orgs().SetParent(ctx, r, child.ID, parent.ID, T0)
+	},
+	Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {
+		as, err := tx.Orgs().Ancestors(ctx, r, isoChildOrg)
+		if err != nil {
+			return 0, err
+		}
+		h, err := tx.Orgs().SubtreeHeight(ctx, r, isoParentOrg)
+		if err != nil {
+			return 0, err
+		}
+		cs, err := count(tx.Orgs().ListChildren(ctx, r, isoParentOrg))
+		return len(as) + h + cs, err
+	},
+}

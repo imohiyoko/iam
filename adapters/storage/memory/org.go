@@ -3,6 +3,7 @@ package memory
 import (
 	"bytes"
 	"context"
+	"slices"
 	"sort"
 	"time"
 
@@ -106,6 +107,53 @@ func (r orgs) SetSettings(_ context.Context, realmID, id string, settings []byte
 	o.Settings, o.UpdatedAt = bytes.Clone(settings), updatedAt
 	setKey(r.t, r.t.s.orgs, id, o)
 	return nil
+}
+
+// SetParent は親を置き換える。祖先の一覧は親をたどって求める（メモリでは計算し直すものが無い）。
+func (r orgs) SetParent(_ context.Context, realmID, id, parentID string, updatedAt time.Time) error {
+	o, err := get(r.t.s.orgs, realmID, id, func(o port.Org) string { return o.RealmID }, "org")
+	if err != nil {
+		return err
+	}
+	o = cloneOrg(o)
+	o.ParentID, o.UpdatedAt = parentID, updatedAt
+	setKey(r.t, r.t.s.orgs, id, o)
+	return nil
+}
+
+func (r orgs) Ancestors(_ context.Context, realmID, id string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{id: true}
+	for cur := r.t.s.orgs[id]; cur.RealmID == realmID && cur.ParentID != "" && !seen[cur.ParentID]; cur = r.t.s.orgs[cur.ParentID] {
+		seen[cur.ParentID] = true
+		out = append(out, cur.ParentID)
+	}
+	return out, nil
+}
+
+func (r orgs) SubtreeHeight(ctx context.Context, realmID, id string) (int, error) {
+	h := 0
+	for _, x := range r.t.s.orgs {
+		if x.RealmID != realmID || x.ID == id {
+			continue
+		}
+		as, _ := r.Ancestors(ctx, realmID, x.ID)
+		if i := slices.Index(as, id); i >= 0 {
+			h = max(h, i+1)
+		}
+	}
+	return h, nil
+}
+
+func (r orgs) ListChildren(_ context.Context, realmID, id string) ([]port.Org, error) {
+	var out []port.Org
+	for _, x := range r.t.s.orgs {
+		if x.RealmID == realmID && x.ParentID == id {
+			out = append(out, cloneOrg(x))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------

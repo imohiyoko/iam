@@ -353,6 +353,14 @@ type Org struct {
 	DeletionScheduledAt sql.NullString
 	DeletedAt           sql.NullString
 	Settings            []byte
+	ParentOrgID         string
+}
+
+type OrgAncestor struct {
+	RealmID    string
+	OrgID      string
+	AncestorID string
+	Depth      int64
 }
 
 type OrgDomain struct {
