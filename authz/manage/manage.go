@@ -400,6 +400,31 @@ func groupPermissions(ctx context.Context, tx port.Tx, realmID string, g port.Gr
 	return bs, perms, nil
 }
 
+// effectiveGroupPermissions は g の付与の権限に、ネストが有効なら g を含む Group（祖先）の付与の権限を足す。
+// g に入った主体は祖先の付与も受けるので、g に入れるにはそれもすべて持っていなければならない（ADR 0079）。
+func (s *Service) effectiveGroupPermissions(ctx context.Context, tx port.Tx, realmID string, g port.Group) ([]string, error) {
+	_, perms, err := groupPermissions(ctx, tx, realmID, g)
+	if err != nil || !s.NestedGroups {
+		return perms, err
+	}
+	up, err := tx.Groups().Ancestors(ctx, realmID, g.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range up {
+		anc, err := tx.Groups().Get(ctx, realmID, l.GroupID)
+		if err != nil {
+			return nil, err
+		}
+		_, p, err := groupPermissions(ctx, tx, realmID, anc)
+		if err != nil {
+			return nil, err
+		}
+		perms = append(perms, p...)
+	}
+	return perms, nil
+}
+
 // DeleteGroup は Group と、その所属と付与を消す。
 func (s *Service) DeleteGroup(ctx context.Context, tx port.Tx, sc Scope, a Actor, g port.Group) error {
 	if g.OrgID != sc.OrgID {
@@ -432,7 +457,8 @@ func (s *Service) DeleteGroup(ctx context.Context, tx port.Tx, sc Scope, a Actor
 }
 
 // AddMember は Group に主体を入れる（ユーザーかサービスアカウント。Org の Group には、その Org の使える所属が要る。
-// Group のネストが有効なら、同じ範囲の Group も入れられる）。Group に付与されたロールの権限をすべて持っていなければならない。
+// Group のネストが有効なら、同じ範囲の Group も入れられる）。Group と、それを含む Group に付与されたロールの権限を
+// すべて持っていなければならない。
 func (s *Service) AddMember(ctx context.Context, tx port.Tx, sc Scope, a Actor, g port.Group, t Target) error {
 	if g.OrgID != sc.OrgID {
 		return errs.New(errs.KindNotFound, "group")
@@ -459,7 +485,7 @@ func (s *Service) AddMember(ctx context.Context, tx port.Tx, sc Scope, a Actor, 
 	if err := s.requireMember(ctx, tx, sc, t.Principal); err != nil {
 		return err
 	}
-	_, perms, err := groupPermissions(ctx, tx, sc.RealmID, g)
+	perms, err := s.effectiveGroupPermissions(ctx, tx, sc.RealmID, g)
 	if err != nil {
 		return err
 	}

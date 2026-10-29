@@ -436,6 +436,14 @@ func TestNestedGroups(t *testing.T) {
 	// 循環と、持たない権限の Group に入れる（権限の引き上げ）。
 	wantCode(t, nest("owner", "d", "b"), "group_cycle")
 	wantCode(t, nest("admin", "owners", "a"), errs.CodePermissionDenied)
+	// owners に含まれる Group に入れるにも、owners の付与の権限が要る（祖先の付与を受けるため）。
+	if err := nest("owner", "owners", "a"); err != nil {
+		t.Fatalf("nest a in owners: %v", err)
+	}
+	wantCode(t, nest("admin", "a", "d"), errs.CodePermissionDenied)
+	if err := nest("owner", "a", "d"); err != nil {
+		t.Fatalf("owner nests d in a: %v", err)
+	}
 	// 無効なら Group を入れられない。
 	e.s.NestedGroups = false
 	wantCode(t, nest("owner", "a", "b"), "invalid_principal")
