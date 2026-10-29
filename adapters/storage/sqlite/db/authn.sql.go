@@ -2047,7 +2047,7 @@ func (q *Queries) SetPasskeyPreferredOrg(ctx context.Context, arg SetPasskeyPref
 }
 
 const setPrimaryEmail = `-- name: SetPrimaryEmail :exec
-UPDATE authn_user_emails SET is_primary = (id = ?1) WHERE realm_id = ?2 AND user_id = ?3
+UPDATE authn_user_emails SET is_primary = CASE WHEN id = ?1 THEN 1 ELSE 0 END WHERE realm_id = ?2 AND user_id = ?3
 `
 
 type SetPrimaryEmailParams struct {

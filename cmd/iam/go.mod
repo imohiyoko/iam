@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/imohiyoko/iam v0.0.0
+	github.com/imohiyoko/iam/adapters/storage/postgres v0.0.0
 	github.com/imohiyoko/iam/adapters/storage/sqlite v0.0.0
 )
 
@@ -24,6 +25,11 @@ require (
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/pgx/v5 v5.11.0 // indirect
+	github.com/jackc/puddle/v2 v2.2.3 // indirect
+	github.com/kr/text v0.2.0 // indirect
 	github.com/lestrrat-go/dsig v1.4.0 // indirect
 	github.com/lestrrat-go/jwx/v4 v4.6.0 // indirect
 	github.com/lestrrat-go/option/v3 v3.0.0-alpha1 // indirect
@@ -62,5 +68,6 @@ require (
 
 replace (
 	github.com/imohiyoko/iam => ../..
+	github.com/imohiyoko/iam/adapters/storage/postgres => ../../adapters/storage/postgres
 	github.com/imohiyoko/iam/adapters/storage/sqlite => ../../adapters/storage/sqlite
 )
