@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imohiyoko/iam/adapters/ephemeral/ephemeraltest"
 	"github.com/imohiyoko/iam/shared/clock"
+	"github.com/imohiyoko/iam/shared/port"
 )
 
 var t0 = time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
@@ -137,4 +139,12 @@ func TestTakeOnce(t *testing.T) {
 	if _, ok, _ := s.Take(ctx, "e"); ok {
 		t.Fatal("expired entry must not be taken")
 	}
+}
+
+func TestContract(t *testing.T) {
+	var clk *clock.Fake
+	ephemeraltest.Run(t, ephemeraltest.Harness{
+		New:  func(*testing.T) port.EphemeralStore { clk = clock.NewFake(t0); return New(clk) },
+		Wait: func(_ *testing.T, d time.Duration) { clk.Advance(d) },
+	})
 }

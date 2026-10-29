@@ -13,9 +13,20 @@ storage:
   driver: sqlite
   path: iam.db
   auto_migrate: "true" # false なら `iam migrate` を明示的に実行する
+  # PostgreSQL（複数のインスタンスから使う）は、上の storage を丸ごと次に置き換える（path は残さない）:
+  # storage:
+  #   driver: postgres
+  #   dsn: postgres://iam:secret@db.example.com:5432/iam?sslmode=verify-full
+  #   auto_migrate: "true"
+  #   max_open_conns: "20" # 接続の上限（省略時は 10、0 なら上限なし）
 
 ephemeral:
   driver: memory
+  # Redis（複数のインスタンスで共有する）は、上の ephemeral を丸ごと次に置き換える:
+  # ephemeral:
+  #   driver: redis
+  #   url: rediss://:secret@cache.example.com:6379/0
+  #   prefix: "iam:"
 
 keystore:
   driver: file
@@ -36,6 +47,10 @@ realm:
   org_deletion_grace: 30d  # Org の削除の猶予期間（その間は取り消せる。0 で猶予なし）
   user_deletion_grace: 30d  # アカウントの削除の猶予期間（その間はログインしても取り消しだけができる）
   client_data_retention: 30d  # 監査ログの IP と User-Agent の全文を読める期間（後は IP /24・/48 と UA の大分類だけが残る）
+  quota_count:                 # Quota（フィーチャー quota）で数えるもの。active な Membership は必ず数える
+    invited: true              # 受け入れ待ちの招待
+    future: true               # 有効期間がまだ始まっていない Membership
+    suspended: true            # 停止中の Membership
 
 security:
   session:

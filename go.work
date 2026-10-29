@@ -2,6 +2,8 @@ go 1.27.0
 
 use (
 	.
+	./adapters/ephemeral/redis
+	./adapters/storage/postgres
 	./adapters/storage/sqlite
 	./cmd/iam
 	./spikes

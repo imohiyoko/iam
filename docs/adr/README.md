@@ -78,4 +78,8 @@
 | [0064](0064-authz-roles-groups-check.md) | ロール・付与・Group と認可の判定 | 承認 |
 | [0065](0065-oidc-clients-and-signing-keys.md) | OIDC の連携先の登録と ID トークンの署名鍵 | 承認 |
 | [0066](0066-oidc-authorization-code-flow.md) | OIDC の認可コードフローと、トークンをログインの系列に結び付けること | 承認 |
+| [0067](0067-postgres-adapter.md) | PostgreSQL のアダプタは SQLite のアダプタから作り、advisory lock で直列化する | 承認 |
+| [0068](0068-storage-export-import.md) | Storage の書き出しと読み込み（移行）は表ごとの行を JSON Lines で運ぶ | 承認 |
+| [0069](0069-org-login-policy.md) | Org のログインポリシーは Org の設定に持ち、ログインと切り替えのときに判定する | 承認 |
+| [0070](0070-quota.md) | Quota は時刻ごとの上限と人数で判定し、区切りの時刻だけを調べる | 承認 |
 | [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |

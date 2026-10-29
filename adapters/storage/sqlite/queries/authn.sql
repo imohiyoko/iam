@@ -24,7 +24,7 @@ SELECT * FROM authn_user_emails WHERE realm_id = ? AND public_id = ?;
 SELECT * FROM authn_user_emails WHERE realm_id = ? AND id = ?;
 
 -- name: SetPrimaryEmail :exec
-UPDATE authn_user_emails SET is_primary = (id = sqlc.arg(id)) WHERE realm_id = sqlc.arg(realm_id) AND user_id = sqlc.arg(user_id);
+UPDATE authn_user_emails SET is_primary = CASE WHEN id = sqlc.arg(id) THEN 1 ELSE 0 END WHERE realm_id = sqlc.arg(realm_id) AND user_id = sqlc.arg(user_id);
 
 -- name: DeleteEmail :execrows
 DELETE FROM authn_user_emails WHERE realm_id = ? AND id = ?;

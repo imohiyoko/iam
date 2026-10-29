@@ -70,6 +70,7 @@ type state struct {
 	orgs         map[string]port.Org
 	memberships  map[string]port.Membership
 	invitations  map[string]port.Invitation
+	quotaGrants  map[string]port.QuotaGrant
 	clients      map[string]port.Client
 	signingKeys  map[string]port.SigningKey
 	grants       map[string]port.Grant
@@ -99,7 +100,7 @@ func New(clk clock.Clock) *Storage {
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
 		roleBindings: map[string]port.RoleBinding{}, roles: map[string]port.Role{}, groups: map[string]port.Group{},
 		groupMembers: map[string]port.GroupMember{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
-		invitations: map[string]port.Invitation{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
+		invitations: map[string]port.Invitation{}, quotaGrants: map[string]port.QuotaGrant{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
 		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{},
 	}}
 }
@@ -160,6 +161,7 @@ func (t *tx) Sessions() port.SessionRepo               { return sessions{t} }
 func (t *tx) Orgs() port.OrgRepo                       { return orgs{t} }
 func (t *tx) Memberships() port.MembershipRepo         { return memberships{t} }
 func (t *tx) Invitations() port.InvitationRepo         { return invitations{t} }
+func (t *tx) QuotaGrants() port.QuotaGrantRepo         { return quotaGrants{t} }
 func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t} }
 func (t *tx) RoleBindings() port.RoleBindingRepo       { return roleBindings{t} }
 func (t *tx) Roles() port.RoleRepo                     { return roles{t} }

@@ -241,3 +241,75 @@ func (r invitations) Close(_ context.Context, realmID, id string, status port.In
 	setKey(r.t, r.t.s.invitations, id, i)
 	return true, nil
 }
+
+// ---------------------------------------------------------------------------
+
+type quotaGrants struct{ t *tx }
+
+func cloneQuotaGrant(g port.QuotaGrant) port.QuotaGrant {
+	g.EndsAt = cloneTime(g.EndsAt)
+	return g
+}
+
+func (r quotaGrants) Create(_ context.Context, g port.QuotaGrant) error {
+	if _, ok := r.t.s.quotaGrants[g.ID]; ok {
+		return errs.New(errs.KindConflict, "quota grant %s exists", g.ID)
+	}
+	for _, x := range r.t.s.quotaGrants {
+		if x.RealmID == g.RealmID && x.PublicID == g.PublicID {
+			return errs.New(errs.KindConflict, "quota grant public id exists in realm")
+		}
+		if g.ExternalRef != "" && x.RealmID == g.RealmID && x.OrgID == g.OrgID && x.QuotaKey == g.QuotaKey && x.ExternalRef == g.ExternalRef {
+			return errs.New(errs.KindConflict, "quota grant external ref exists")
+		}
+	}
+	setKey(r.t, r.t.s.quotaGrants, g.ID, cloneQuotaGrant(g))
+	return nil
+}
+
+func (r quotaGrants) GetByPublicID(_ context.Context, realmID, publicID string) (port.QuotaGrant, error) {
+	for _, x := range r.t.s.quotaGrants {
+		if x.RealmID == realmID && x.PublicID == publicID {
+			return cloneQuotaGrant(x), nil
+		}
+	}
+	return port.QuotaGrant{}, errs.New(errs.KindNotFound, "quota grant")
+}
+
+func (r quotaGrants) GetByExternalRef(_ context.Context, realmID, orgID, quotaKey, ref string) (port.QuotaGrant, error) {
+	for _, x := range r.t.s.quotaGrants {
+		if ref != "" && x.RealmID == realmID && x.OrgID == orgID && x.QuotaKey == quotaKey && x.ExternalRef == ref {
+			return cloneQuotaGrant(x), nil
+		}
+	}
+	return port.QuotaGrant{}, errs.New(errs.KindNotFound, "quota grant")
+}
+
+func (r quotaGrants) ListByOrg(_ context.Context, realmID, orgID, quotaKey string) ([]port.QuotaGrant, error) {
+	var out []port.QuotaGrant
+	for _, x := range r.t.s.quotaGrants {
+		if x.RealmID == realmID && x.OrgID == orgID && x.QuotaKey == quotaKey {
+			out = append(out, cloneQuotaGrant(x))
+		}
+	}
+	sortByCreated(out, func(x port.QuotaGrant) (time.Time, string) { return x.CreatedAt, x.ID })
+	return out, nil
+}
+
+func (r quotaGrants) Update(_ context.Context, g port.QuotaGrant) error {
+	x, err := get(r.t.s.quotaGrants, g.RealmID, g.ID, func(g port.QuotaGrant) string { return g.RealmID }, "quota grant")
+	if err != nil {
+		return err
+	}
+	x.Kind, x.Quantity, x.StartsAt, x.EndsAt, x.UpdatedAt = g.Kind, g.Quantity, g.StartsAt, cloneTime(g.EndsAt), g.UpdatedAt
+	setKey(r.t, r.t.s.quotaGrants, x.ID, x)
+	return nil
+}
+
+func (r quotaGrants) Delete(_ context.Context, realmID, id string) error {
+	if _, err := get(r.t.s.quotaGrants, realmID, id, func(g port.QuotaGrant) string { return g.RealmID }, "quota grant"); err != nil {
+		return err
+	}
+	deleteKey(r.t, r.t.s.quotaGrants, id)
+	return nil
+}

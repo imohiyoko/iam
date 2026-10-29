@@ -72,6 +72,12 @@ func (s *Service) SetMembershipValidity(ctx context.Context, tx port.Tx, o port.
 	if err := account.ValidPeriod(from, until); err != nil {
 		return port.Membership{}, err
 	}
+	// 延ばした・早めたなら、その期間にも枠があること（本人の今の分は除いて数える。縮めるだけなら確かめない。11.14）。
+	if old, want := spanOf(m.ValidFrom, m.ValidUntil), spanOf(from, until); want.from < old.from || old.until < want.until {
+		if err := s.checkAdd(ctx, tx, o, want, m.ID); err != nil {
+			return port.Membership{}, err
+		}
+	}
 	m.ValidFrom, m.ValidUntil, m.UpdatedAt = from, until, s.Clock.Now()
 	if err := tx.Memberships().Update(ctx, m); err != nil {
 		return port.Membership{}, err

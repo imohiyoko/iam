@@ -28,10 +28,12 @@ import (
 	// アダプタ（全部入りの構成）。
 	_ "github.com/imohiyoko/iam/adapters/breachcheck/hibp"
 	_ "github.com/imohiyoko/iam/adapters/ephemeral/memory"
+	_ "github.com/imohiyoko/iam/adapters/ephemeral/redis"
 	_ "github.com/imohiyoko/iam/adapters/eventsink/stdout"
 	_ "github.com/imohiyoko/iam/adapters/keystore/env"
 	_ "github.com/imohiyoko/iam/adapters/notifier/dev"
 	_ "github.com/imohiyoko/iam/adapters/storage/memory"
+	_ "github.com/imohiyoko/iam/adapters/storage/postgres"
 	_ "github.com/imohiyoko/iam/adapters/storage/sqlite"
 )
 
@@ -45,6 +47,9 @@ commands:
   migrate   -config iam.yaml        Storage のマイグレーションを適用する
   features enable -config iam.yaml <name>
                                     フィーチャーを有効にする（準備処理の後に active。サーバーは再起動で反映）
+  storage export -config iam.yaml -out dump.jsonl
+  storage import -config iam.yaml -in dump.jsonl
+                                    Storage の中身を書き出す・空の Storage に読み込む（移行用）
   version   [-manifest]             バージョン（とバイナリの構成）を表示する
   keys generate -out keys.json      KeyStore（file）用の鍵を作る
   operator create -config iam.yaml -email <address> [-role realm:owner] [-ttl 15m]
@@ -76,6 +81,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return operator(ctx, args[1:], stdout, stderr)
 	case "features":
 		return features(ctx, args[1:], stdout, stderr)
+	case "storage":
+		return storageCmd(ctx, args[1:], stdout, stderr)
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return nil

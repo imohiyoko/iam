@@ -186,6 +186,21 @@ func (e OrgKind) Valid() bool {
 	}
 }
 
+// Defines values for OrgQuotaQuotaKey.
+const (
+	OrgQuotaQuotaKeyMembers OrgQuotaQuotaKey = "members"
+)
+
+// Valid indicates whether the value is a known member of the OrgQuotaQuotaKey enum.
+func (e OrgQuotaQuotaKey) Valid() bool {
+	switch e {
+	case OrgQuotaQuotaKeyMembers:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OrgSettingsWarnings.
 const (
 	OrgSettingsWarningsDeny   OrgSettingsWarnings = "deny"
@@ -222,6 +237,81 @@ func (e OrgSettingsViewEffectiveWarnings) Valid() bool {
 	case OrgSettingsViewEffectiveWarningsIgnore:
 		return true
 	case OrgSettingsViewEffectiveWarningsWarn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for QuotaGrantKind.
+const (
+	QuotaGrantKindAddon    QuotaGrantKind = "addon"
+	QuotaGrantKindBase     QuotaGrantKind = "base"
+	QuotaGrantKindOverride QuotaGrantKind = "override"
+)
+
+// Valid indicates whether the value is a known member of the QuotaGrantKind enum.
+func (e QuotaGrantKind) Valid() bool {
+	switch e {
+	case QuotaGrantKindAddon:
+		return true
+	case QuotaGrantKindBase:
+		return true
+	case QuotaGrantKindOverride:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for QuotaGrantQuotaKey.
+const (
+	QuotaGrantQuotaKeyMembers QuotaGrantQuotaKey = "members"
+)
+
+// Valid indicates whether the value is a known member of the QuotaGrantQuotaKey enum.
+func (e QuotaGrantQuotaKey) Valid() bool {
+	switch e {
+	case QuotaGrantQuotaKeyMembers:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for QuotaGrantSource.
+const (
+	External QuotaGrantSource = "external"
+	Manual   QuotaGrantSource = "manual"
+)
+
+// Valid indicates whether the value is a known member of the QuotaGrantSource enum.
+func (e QuotaGrantSource) Valid() bool {
+	switch e {
+	case External:
+		return true
+	case Manual:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for QuotaGrantInputKind.
+const (
+	QuotaGrantInputKindAddon    QuotaGrantInputKind = "addon"
+	QuotaGrantInputKindBase     QuotaGrantInputKind = "base"
+	QuotaGrantInputKindOverride QuotaGrantInputKind = "override"
+)
+
+// Valid indicates whether the value is a known member of the QuotaGrantInputKind enum.
+func (e QuotaGrantInputKind) Valid() bool {
+	switch e {
+	case QuotaGrantInputKindAddon:
+		return true
+	case QuotaGrantInputKindBase:
+		return true
+	case QuotaGrantInputKindOverride:
 		return true
 	default:
 		return false
@@ -373,6 +463,9 @@ type Error struct {
 
 	// Message 運営者向けの説明（秘密や個人情報は含めない）
 	Message *string `json:"message,omitempty"`
+
+	// Quota Quota の不足（`quota_exceeded`）。`from` から `until`（無ければ無期限）の間、上限 `limit` に `count` 人がいる
+	Quota *QuotaShortage `json:"quota,omitempty"`
 }
 
 // Group defines model for Group.
@@ -482,11 +575,40 @@ type Org struct {
 // OrgKind defines model for Org.Kind.
 type OrgKind string
 
+// OrgLoginPolicy Org のログインポリシー（フィーチャー org_login_policy）。ログインと Org の切り替えで判定し、満たさなければその Org に入れない （理由は policy.<種類>）。空の項目は判定しない
+type OrgLoginPolicy struct {
+	// IpAllowlist 要求の IP がこのどれか（CIDR）に入ること
+	IpAllowlist *[]string `json:"ip_allowlist,omitempty"`
+
+	// MembershipEmailDomains Membership に結び付けたメール（無ければ primary、確認済み）のドメインがこのどれかであること
+	MembershipEmailDomains *[]string `json:"membership_email_domains,omitempty"`
+
+	// RequirePasskey passkey で本人確認したセッションだけを入れる
+	RequirePasskey *bool `json:"require_passkey,omitempty"`
+}
+
+// OrgQuota defines model for OrgQuota.
+type OrgQuota struct {
+	// Count 今数えている人数
+	Count  int64        `json:"count"`
+	Grants []QuotaGrant `json:"grants"`
+
+	// Limit 今の上限（無ければ無制限）
+	Limit    *int64           `json:"limit,omitempty"`
+	QuotaKey OrgQuotaQuotaKey `json:"quota_key"`
+}
+
+// OrgQuotaQuotaKey defines model for OrgQuota.QuotaKey.
+type OrgQuotaQuotaKey string
+
 // OrgSettings Org の段の設定。省いた項目は realm に従う
 type OrgSettings struct {
 	// AbsoluteLifetimeSeconds 認証の時刻からのセッションの寿命
 	AbsoluteLifetimeSeconds *int64 `json:"absolute_lifetime_seconds,omitempty"`
 	IdleTimeoutSeconds      *int64 `json:"idle_timeout_seconds,omitempty"`
+
+	// LoginPolicy Org のログインポリシー（フィーチャー org_login_policy）。ログインと Org の切り替えで判定し、満たさなければその Org に入れない （理由は policy.<種類>）。空の項目は判定しない
+	LoginPolicy *OrgLoginPolicy `json:"login_policy,omitempty"`
 
 	// MaxAuthAgeSeconds 重要な操作に求める直近の認証の期限
 	MaxAuthAgeSeconds *int64 `json:"max_auth_age_seconds,omitempty"`
@@ -515,6 +637,57 @@ type OrgSettingsView struct {
 
 // OrgSettingsViewEffectiveWarnings defines model for OrgSettingsView.Effective.Warnings.
 type OrgSettingsViewEffectiveWarnings string
+
+// QuotaGrant defines model for QuotaGrant.
+type QuotaGrant struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	EndsAt      *time.Time         `json:"ends_at,omitempty"`
+	ExternalRef *string            `json:"external_ref,omitempty"`
+	Id          string             `json:"id"`
+	Kind        QuotaGrantKind     `json:"kind"`
+	Quantity    int64              `json:"quantity"`
+	QuotaKey    QuotaGrantQuotaKey `json:"quota_key"`
+	Source      QuotaGrantSource   `json:"source"`
+	StartsAt    time.Time          `json:"starts_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+}
+
+// QuotaGrantKind defines model for QuotaGrant.Kind.
+type QuotaGrantKind string
+
+// QuotaGrantQuotaKey defines model for QuotaGrant.QuotaKey.
+type QuotaGrantQuotaKey string
+
+// QuotaGrantSource defines model for QuotaGrant.Source.
+type QuotaGrantSource string
+
+// QuotaGrantInput defines model for QuotaGrantInput.
+type QuotaGrantInput struct {
+	// EndsAt 省けば無期限
+	EndsAt *time.Time `json:"ends_at,omitempty"`
+
+	// ExternalRef 外部（課金など）の付与の参照。同じものがあれば上書きする
+	ExternalRef *string             `json:"external_ref,omitempty"`
+	Kind        QuotaGrantInputKind `json:"kind"`
+	Quantity    int64               `json:"quantity"`
+
+	// StartsAt 省けば今（変更では今の値）
+	StartsAt *time.Time `json:"starts_at,omitempty"`
+}
+
+// QuotaGrantInputKind defines model for QuotaGrantInput.Kind.
+type QuotaGrantInputKind string
+
+// QuotaShortage Quota の不足（`quota_exceeded`）。`from` から `until`（無ければ無期限）の間、上限 `limit` に `count` 人がいる
+type QuotaShortage struct {
+	Count int64     `json:"count"`
+	From  time.Time `json:"from"`
+	Limit int64     `json:"limit"`
+
+	// Shortage 足りない人数
+	Shortage int64      `json:"shortage"`
+	Until    *time.Time `json:"until,omitempty"`
+}
 
 // RevokedCredentials defines model for RevokedCredentials.
 type RevokedCredentials struct {
@@ -778,6 +951,12 @@ type CreateOrgJSONRequestBody CreateOrgJSONBody
 // UpdateOrgJSONRequestBody defines body for UpdateOrg for application/json ContentType.
 type UpdateOrgJSONRequestBody = Validity
 
+// CreateOrgQuotaGrantJSONRequestBody defines body for CreateOrgQuotaGrant for application/json ContentType.
+type CreateOrgQuotaGrantJSONRequestBody = QuotaGrantInput
+
+// UpdateOrgQuotaGrantJSONRequestBody defines body for UpdateOrgQuotaGrant for application/json ContentType.
+type UpdateOrgQuotaGrantJSONRequestBody = QuotaGrantInput
+
 // PutOrgSettingsJSONRequestBody defines body for PutOrgSettings for application/json ContentType.
 type PutOrgSettingsJSONRequestBody = OrgSettings
 
@@ -897,6 +1076,18 @@ type ServerInterface interface {
 	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/memberships)
 	ListOrgMemberships(w http.ResponseWriter, r *http.Request, id string, params ListOrgMembershipsParams)
+	// GetOrgQuota Org の Quota（今の上限と人数、付与の一覧）を返す（11.14）
+	// (GET /v1/admin/orgs/{id}/quota)
+	GetOrgQuota(w http.ResponseWriter, r *http.Request, id string)
+	// CreateOrgQuotaGrant Quota の付与を登録する（11.14）
+	// (POST /v1/admin/orgs/{id}/quota/grants)
+	CreateOrgQuotaGrant(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteOrgQuotaGrant Quota の付与を消す（11.14）
+	// (DELETE /v1/admin/orgs/{id}/quota/grants/{grant_id})
+	DeleteOrgQuotaGrant(w http.ResponseWriter, r *http.Request, id string, grantId string)
+	// UpdateOrgQuotaGrant 手動の Quota の付与を変える（11.14）
+	// (PUT /v1/admin/orgs/{id}/quota/grants/{grant_id})
+	UpdateOrgQuotaGrant(w http.ResponseWriter, r *http.Request, id string, grantId string)
 	// GetOrgSettings Org の段のセキュリティ設定を返す（2.8）
 	// (GET /v1/admin/orgs/{id}/settings)
 	GetOrgSettings(w http.ResponseWriter, r *http.Request, id string)
@@ -1543,6 +1734,128 @@ func (siw *ServerInterfaceWrapper) ListOrgMemberships(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListOrgMemberships(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOrgQuota operation middleware
+func (siw *ServerInterfaceWrapper) GetOrgQuota(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOrgQuota(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOrgQuotaGrant operation middleware
+func (siw *ServerInterfaceWrapper) CreateOrgQuotaGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOrgQuotaGrant(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteOrgQuotaGrant operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOrgQuotaGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "grant_id" -------------
+	var grantId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "grant_id", r.PathValue("grant_id"), &grantId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "grant_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteOrgQuotaGrant(w, r, id, grantId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateOrgQuotaGrant operation middleware
+func (siw *ServerInterfaceWrapper) UpdateOrgQuotaGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "grant_id" -------------
+	var grantId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "grant_id", r.PathValue("grant_id"), &grantId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "grant_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateOrgQuotaGrant(w, r, id, grantId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2386,6 +2699,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.UpdateOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/settings", wrapper.GetOrgSettings)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/orgs/{id}/settings", wrapper.PutOrgSettings)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/quota", wrapper.GetOrgQuota)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}/quota/grants", wrapper.CreateOrgQuotaGrant)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/admin/orgs/{id}/quota/grants/{grant_id}", wrapper.DeleteOrgQuotaGrant)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/orgs/{id}/quota/grants/{grant_id}", wrapper.UpdateOrgQuotaGrant)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}:delete", wrapper.DeleteOrg)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs/{id}:cancel-deletion", wrapper.CancelOrgDeletion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}/memberships", wrapper.ListOrgMemberships)
@@ -4183,6 +4500,358 @@ func (response ListOrgMemberships404JSONResponse) VisitListOrgMembershipsRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgQuotaRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetOrgQuotaResponseObject interface {
+	VisitGetOrgQuotaResponse(w http.ResponseWriter) error
+}
+
+type GetOrgQuota200JSONResponse OrgQuota
+
+func (response GetOrgQuota200JSONResponse) VisitGetOrgQuotaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgQuota401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetOrgQuota401JSONResponse) VisitGetOrgQuotaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgQuota403JSONResponse Error
+
+func (response GetOrgQuota403JSONResponse) VisitGetOrgQuotaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgQuota404JSONResponse Error
+
+func (response GetOrgQuota404JSONResponse) VisitGetOrgQuotaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgQuota409JSONResponse Error
+
+func (response GetOrgQuota409JSONResponse) VisitGetOrgQuotaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgQuotaGrantRequestObject struct {
+	Id   string `json:"id"`
+	Body *CreateOrgQuotaGrantJSONRequestBody
+}
+
+type CreateOrgQuotaGrantResponseObject interface {
+	VisitCreateOrgQuotaGrantResponse(w http.ResponseWriter) error
+}
+
+type CreateOrgQuotaGrant200JSONResponse QuotaGrant
+
+func (response CreateOrgQuotaGrant200JSONResponse) VisitCreateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgQuotaGrant201JSONResponse QuotaGrant
+
+func (response CreateOrgQuotaGrant201JSONResponse) VisitCreateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgQuotaGrant400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateOrgQuotaGrant400JSONResponse) VisitCreateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgQuotaGrant401JSONResponse Error
+
+func (response CreateOrgQuotaGrant401JSONResponse) VisitCreateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgQuotaGrant403JSONResponse Error
+
+func (response CreateOrgQuotaGrant403JSONResponse) VisitCreateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgQuotaGrant404JSONResponse Error
+
+func (response CreateOrgQuotaGrant404JSONResponse) VisitCreateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgQuotaGrant409JSONResponse Error
+
+func (response CreateOrgQuotaGrant409JSONResponse) VisitCreateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgQuotaGrantRequestObject struct {
+	Id      string `json:"id"`
+	GrantId string `json:"grant_id"`
+}
+
+type DeleteOrgQuotaGrantResponseObject interface {
+	VisitDeleteOrgQuotaGrantResponse(w http.ResponseWriter) error
+}
+
+type DeleteOrgQuotaGrant204Response struct {
+}
+
+func (response DeleteOrgQuotaGrant204Response) VisitDeleteOrgQuotaGrantResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteOrgQuotaGrant401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteOrgQuotaGrant401JSONResponse) VisitDeleteOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgQuotaGrant403JSONResponse Error
+
+func (response DeleteOrgQuotaGrant403JSONResponse) VisitDeleteOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgQuotaGrant404JSONResponse Error
+
+func (response DeleteOrgQuotaGrant404JSONResponse) VisitDeleteOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgQuotaGrant409JSONResponse Error
+
+func (response DeleteOrgQuotaGrant409JSONResponse) VisitDeleteOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrgQuotaGrantRequestObject struct {
+	Id      string `json:"id"`
+	GrantId string `json:"grant_id"`
+	Body    *UpdateOrgQuotaGrantJSONRequestBody
+}
+
+type UpdateOrgQuotaGrantResponseObject interface {
+	VisitUpdateOrgQuotaGrantResponse(w http.ResponseWriter) error
+}
+
+type UpdateOrgQuotaGrant200JSONResponse QuotaGrant
+
+func (response UpdateOrgQuotaGrant200JSONResponse) VisitUpdateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrgQuotaGrant400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateOrgQuotaGrant400JSONResponse) VisitUpdateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrgQuotaGrant401JSONResponse Error
+
+func (response UpdateOrgQuotaGrant401JSONResponse) VisitUpdateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrgQuotaGrant403JSONResponse Error
+
+func (response UpdateOrgQuotaGrant403JSONResponse) VisitUpdateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrgQuotaGrant404JSONResponse Error
+
+func (response UpdateOrgQuotaGrant404JSONResponse) VisitUpdateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrgQuotaGrant409JSONResponse Error
+
+func (response UpdateOrgQuotaGrant409JSONResponse) VisitUpdateOrgQuotaGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6439,6 +7108,18 @@ type StrictServerInterface interface {
 	// ListOrgMemberships Org の Membership の一覧（終了したものも含む）
 	// (GET /v1/admin/orgs/{id}/memberships)
 	ListOrgMemberships(ctx context.Context, request ListOrgMembershipsRequestObject) (ListOrgMembershipsResponseObject, error)
+	// GetOrgQuota Org の Quota（今の上限と人数、付与の一覧）を返す（11.14）
+	// (GET /v1/admin/orgs/{id}/quota)
+	GetOrgQuota(ctx context.Context, request GetOrgQuotaRequestObject) (GetOrgQuotaResponseObject, error)
+	// CreateOrgQuotaGrant Quota の付与を登録する（11.14）
+	// (POST /v1/admin/orgs/{id}/quota/grants)
+	CreateOrgQuotaGrant(ctx context.Context, request CreateOrgQuotaGrantRequestObject) (CreateOrgQuotaGrantResponseObject, error)
+	// DeleteOrgQuotaGrant Quota の付与を消す（11.14）
+	// (DELETE /v1/admin/orgs/{id}/quota/grants/{grant_id})
+	DeleteOrgQuotaGrant(ctx context.Context, request DeleteOrgQuotaGrantRequestObject) (DeleteOrgQuotaGrantResponseObject, error)
+	// UpdateOrgQuotaGrant 手動の Quota の付与を変える（11.14）
+	// (PUT /v1/admin/orgs/{id}/quota/grants/{grant_id})
+	UpdateOrgQuotaGrant(ctx context.Context, request UpdateOrgQuotaGrantRequestObject) (UpdateOrgQuotaGrantResponseObject, error)
 	// GetOrgSettings Org の段のセキュリティ設定を返す（2.8）
 	// (GET /v1/admin/orgs/{id}/settings)
 	GetOrgSettings(ctx context.Context, request GetOrgSettingsRequestObject) (GetOrgSettingsResponseObject, error)
@@ -7253,6 +7934,126 @@ func (sh *strictHandler) ListOrgMemberships(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListOrgMembershipsResponseObject); ok {
 		if err := validResponse.VisitListOrgMembershipsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOrgQuota operation middleware
+func (sh *strictHandler) GetOrgQuota(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetOrgQuotaRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOrgQuota(ctx, request.(GetOrgQuotaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOrgQuota")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOrgQuotaResponseObject); ok {
+		if err := validResponse.VisitGetOrgQuotaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateOrgQuotaGrant operation middleware
+func (sh *strictHandler) CreateOrgQuotaGrant(w http.ResponseWriter, r *http.Request, id string) {
+	var request CreateOrgQuotaGrantRequestObject
+
+	request.Id = id
+
+	var body CreateOrgQuotaGrantJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateOrgQuotaGrant(ctx, request.(CreateOrgQuotaGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateOrgQuotaGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateOrgQuotaGrantResponseObject); ok {
+		if err := validResponse.VisitCreateOrgQuotaGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteOrgQuotaGrant operation middleware
+func (sh *strictHandler) DeleteOrgQuotaGrant(w http.ResponseWriter, r *http.Request, id string, grantId string) {
+	var request DeleteOrgQuotaGrantRequestObject
+
+	request.Id = id
+	request.GrantId = grantId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteOrgQuotaGrant(ctx, request.(DeleteOrgQuotaGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteOrgQuotaGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteOrgQuotaGrantResponseObject); ok {
+		if err := validResponse.VisitDeleteOrgQuotaGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateOrgQuotaGrant operation middleware
+func (sh *strictHandler) UpdateOrgQuotaGrant(w http.ResponseWriter, r *http.Request, id string, grantId string) {
+	var request UpdateOrgQuotaGrantRequestObject
+
+	request.Id = id
+	request.GrantId = grantId
+
+	var body UpdateOrgQuotaGrantJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateOrgQuotaGrant(ctx, request.(UpdateOrgQuotaGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateOrgQuotaGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateOrgQuotaGrantResponseObject); ok {
+		if err := validResponse.VisitUpdateOrgQuotaGrantResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

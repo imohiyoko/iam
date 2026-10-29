@@ -100,7 +100,7 @@ func TestVersionManifest(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &m); err != nil {
 		t.Fatalf("%v: %s", err, out.String())
 	}
-	if fmt.Sprint(m.Adapters["storage"]) != "[memory sqlite]" || m.Features == nil {
+	if fmt.Sprint(m.Adapters["storage"]) != "[memory postgres sqlite]" || fmt.Sprint(m.Adapters["ephemeral"]) != "[memory redis]" || m.Features == nil {
 		t.Fatalf("manifest = %s", out.String())
 	}
 }

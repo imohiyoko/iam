@@ -201,7 +201,7 @@ memberships          id, user_id, org_id, status（invited / active / ended）
 invitations          id, realm_id, org_id, email_index, email_ciphertext, org_role
                      valid_from, valid_until, invited_by, expires_at, status（pending / accepted / revoked / expired）, created_at
 org_domains          org_id, domain, verified_at（11.3）
-org_login_policies   org_id, type（require_passkey / ip_allowlist / membership_email_domain / require_sso …）, config
+org_login_policies   （orgs.settings の login_policy に含める。ADR 0069）type（require_passkey / ip_allowlist / membership_email_domain / require_sso …）, config
 org_quota_grants     id, realm_id, org_id, quota_key, kind（base / addon / override）, quantity
                      starts_at, ends_at（NULL=無期限）, source（manual / external）, external_ref, created_by, created_at
                      UNIQUE (org_id, quota_key, external_ref)
@@ -794,7 +794,7 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 ```
 
 - 外部の課金システムとは直接連携しない。ホスト先が管理 API で登録し、`external_ref` で冪等に上書きする。`source` で手動の付与を守る
-- 数えるもの（realm で設定）：active（必ず）、招待中・将来有効・停止中（既定は数える）。個人 Org には適用しない
+- 数えるもの（realm の `quota_count` で設定）：active（必ず）、招待中・将来有効・停止中（既定は数える）。個人 Org には適用しない（ADR 0070）
 - **判定**：追加・招待・有効期間の変更・付与の削除や短縮のときに行い、足りなければエラーで拒否する（待機列は持たない）
   - 新しいメンバーの有効期間の**すべての時点**で「その時点の人数 + 1 ≤ 上限」を満たすこと（区切りの時刻だけを調べる）。期間が重ならない人同士は枠を共有できる
   - 件数の確認と追加は同じトランザクションで行う。エラーには不足する期間と人数を含める

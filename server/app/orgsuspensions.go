@@ -70,7 +70,7 @@ func (s publicServer) UpdateOrgMember(ctx context.Context, req publicapi.UpdateO
 		return err
 	})
 	if code, ok := stateCode(err); ok {
-		return publicapi.UpdateOrgMember409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
+		return publicapi.UpdateOrgMember409JSONResponse{ConflictJSONResponse: conflictOf(err, code)}, nil
 	}
 	switch {
 	case errors.Is(err, errs.NotFound):

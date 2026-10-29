@@ -137,7 +137,9 @@ func outcomeOf(d *denial, err error) (outcome, bool, error) {
 		return outcome{status: d.Status, body: d.Body}, false, nil
 	}
 	if code, ok := stateCode(err); ok {
-		return failed(http.StatusConflict, code), false, nil
+		o := failed(http.StatusConflict, code)
+		o.body.Quota = adminShortage(err)
+		return o, false, nil
 	}
 	switch {
 	case errors.Is(err, errs.NotFound):

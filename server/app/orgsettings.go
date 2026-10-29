@@ -52,6 +52,37 @@ func actionsIn[T ~string](m *map[string]T) map[string]warning.Action {
 	return out
 }
 
+func policyOut(p *org.LoginPolicy) *publicapi.OrgLoginPolicy {
+	if p == nil {
+		return nil
+	}
+	out := publicapi.OrgLoginPolicy{RequirePasskey: &p.RequirePasskey}
+	if len(p.MembershipEmailDomains) > 0 {
+		out.MembershipEmailDomains = &p.MembershipEmailDomains
+	}
+	if len(p.IPAllowlist) > 0 {
+		out.IpAllowlist = &p.IPAllowlist
+	}
+	return &out
+}
+
+func policyIn(p *publicapi.OrgLoginPolicy) *org.LoginPolicy {
+	if p == nil {
+		return nil
+	}
+	var out org.LoginPolicy
+	if p.RequirePasskey != nil {
+		out.RequirePasskey = *p.RequirePasskey
+	}
+	if p.MembershipEmailDomains != nil {
+		out.MembershipEmailDomains = *p.MembershipEmailDomains
+	}
+	if p.IpAllowlist != nil {
+		out.IPAllowlist = *p.IpAllowlist
+	}
+	return &out
+}
+
 func settingsIn(abs, idle, auth *int64) (org.Settings, error) {
 	for _, v := range []*int64{abs, idle, auth} {
 		// 秒の上限は time.Duration のあふれを防ぐため（ホスト先の範囲の検査は CheckSettings）。
@@ -74,7 +105,7 @@ func (a *App) settingsView(o port.Org) (publicapi.OrgSettingsView, error) {
 	}
 	var v publicapi.OrgSettingsView
 	v.Settings = publicapi.OrgSettings{AbsoluteLifetimeSeconds: seconds(st.AbsoluteLifetime), IdleTimeoutSeconds: seconds(st.IdleTimeout),
-		MaxAuthAgeSeconds: seconds(st.MaxAuthAge)}
+		MaxAuthAgeSeconds: seconds(st.MaxAuthAge), LoginPolicy: policyOut(st.LoginPolicy)}
 	if len(st.Warnings) > 0 {
 		w := actionsOut[publicapi.OrgSettingsWarnings](st.Warnings)
 		v.Settings.Warnings = &w
@@ -90,6 +121,9 @@ func adminSettingsView(v publicapi.OrgSettingsView) adminapi.OrgSettingsView {
 	var out adminapi.OrgSettingsView
 	out.Settings = adminapi.OrgSettings{AbsoluteLifetimeSeconds: v.Settings.AbsoluteLifetimeSeconds, IdleTimeoutSeconds: v.Settings.IdleTimeoutSeconds,
 		MaxAuthAgeSeconds: v.Settings.MaxAuthAgeSeconds}
+	if p := v.Settings.LoginPolicy; p != nil {
+		out.Settings.LoginPolicy = &adminapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist}
+	}
 	if v.Settings.Warnings != nil {
 		w := make(map[string]adminapi.OrgSettingsWarnings, len(*v.Settings.Warnings))
 		for k, a := range *v.Settings.Warnings {
@@ -151,6 +185,7 @@ func (s publicServer) PutMyOrgSettings(ctx context.Context, req publicapi.PutMyO
 		return publicapi.PutMyOrgSettings400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: errCode(err)}}, nil
 	}
 	st.Warnings = actionsIn(b.Warnings)
+	st.LoginPolicy = policyIn(b.LoginPolicy)
 	var out publicapi.OrgSettingsView
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		o, _, err := s.orgMember(ctx, tx, au, req.Id, role.PermOrgSettings)
@@ -259,6 +294,9 @@ func (s adminServer) putOrgSettings(ctx context.Context, req adminapi.PutOrgSett
 		return o, err
 	}
 	st.Warnings = actionsIn(b.Warnings)
+	if p := b.LoginPolicy; p != nil {
+		st.LoginPolicy = policyIn(&publicapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist})
+	}
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cur, _, err := s.adminOrg(ctx, tx, req.Id)
 		if err != nil {

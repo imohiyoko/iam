@@ -108,6 +108,12 @@ func (s *Service) Invite(ctx context.Context, tx port.Tx, o port.Org, in Invite,
 	case !errors.Is(err, errs.NotFound):
 		return Invited{}, err
 	}
+	// 招待中を数えるなら、招待の時点で枠を確かめる（受け入れのときは、その招待の枠を引き継ぐ）。
+	if s.QuotaCount.Invited {
+		if err := s.checkAdd(ctx, tx, o, spanOf(in.ValidFrom, in.ValidUntil), ""); err != nil {
+			return Invited{}, err
+		}
+	}
 	now := s.Clock.Now()
 	inv := port.Invitation{ID: id.New(id.Invitation), PublicID: id.NewExternal(id.Invitation), RealmID: o.RealmID, OrgID: o.ID,
 		EmailIndex: ix.Value, IndexKeyID: ix.KeyID, Role: in.Role, ValidFrom: in.ValidFrom, ValidUntil: in.ValidUntil,
@@ -319,6 +325,13 @@ func (s *Service) lookup(ctx context.Context, tx port.Tx, realmID, token string)
 func (s *Service) join(ctx context.Context, tx port.Tx, o port.Org, u port.User, inv port.Invitation, emailID string) (port.Membership, error) {
 	now := s.Clock.Now()
 	m, err := tx.Memberships().GetByUserOrg(ctx, o.RealmID, u.ID, o.ID)
+	if err == nil && m.Status != port.MembershipEnded {
+		return port.Membership{}, ErrAlreadyMember
+	}
+	// 受け入れる招待の枠は、数えていれば本人の分として除く（同じ人を2度数えない）。
+	if err := s.checkAdd(ctx, tx, o, spanOf(inv.ValidFrom, inv.ValidUntil), inv.ID); err != nil {
+		return port.Membership{}, err
+	}
 	switch {
 	case err == nil && m.Status == port.MembershipEnded:
 		m.Status, m.Role, m.EmailID, m.ValidFrom, m.ValidUntil, m.EndedReason, m.UpdatedAt =
