@@ -72,6 +72,14 @@ type Record struct {
 	Payload  []byte // 正規化した JSON。検証はこれから行う
 }
 
+// Checkpoint は保持期間で切り詰めた位置（design.md 6.5）。Seq 以下のレコードは消えていて、
+// 検証は Seq+1 から Hash を前のハッシュとして始める。At は切り詰めた時刻。
+type Checkpoint struct {
+	Seq  int64
+	Hash []byte
+	At   time.Time
+}
+
 // Genesis は先頭のレコードの PrevHash。
 var Genesis = make([]byte, sha256.Size)
 

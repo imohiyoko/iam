@@ -70,6 +70,11 @@ func (r scheduledEvents) MarkFired(ctx context.Context, realmID, id string, at t
 	return n > 0, mapErr(err)
 }
 
+func (r scheduledEvents) DeleteFired(ctx context.Context, before time.Time, limit int) (int, error) {
+	n, err := r.q.DeleteFiredScheduledEvents(ctx, db.DeleteFiredScheduledEventsParams{Before: nullTime(&before), Lim: int64(limit)})
+	return int(n), mapErr(err)
+}
+
 func (r scheduledEvents) CancelByRef(ctx context.Context, realmID, ref string) error {
 	return mapErr(r.q.CancelScheduledEvents(ctx, db.CancelScheduledEventsParams{RealmID: realmID, Ref: ref}))
 }

@@ -145,7 +145,16 @@ type Realm struct {
 	ClientDataRetention Duration `yaml:"client_data_retention"`
 	// QuotaCount は Quota（フィーチャー quota）で数えるもの（design.md 11.14）。active な Membership は必ず数える。
 	QuotaCount QuotaCount `yaml:"quota_count"`
+	// AuditRetention は監査ログの保持期間（design.md 6.5）。過ぎたら先頭から切り詰める。0 は切り詰めない。
+	AuditRetention Duration `yaml:"audit_retention"`
+	// EndedRetention は失効・期限切れのセッション、配送済みの outbox、発火済みの予約イベントを残す期間（9.6）。0 は消さない。
+	EndedRetention Duration `yaml:"ended_retention"`
+	// EmailStorage はメールの保持モード（9.6）：encrypted（暗号文 + インデックス）/ index_only（インデックスのみ）。
+	EmailStorage string `yaml:"email_storage"`
 }
+
+// KnownEmailStorage は realm.email_storage の値。
+var KnownEmailStorage = []string{"encrypted", "index_only"}
 
 // QuotaCount は Quota で数えるもの。既定はすべて数える。
 type QuotaCount struct {
@@ -330,7 +339,8 @@ func Default() Config {
 		Realm: Realm{Slug: "default", Timezone: "UTC", VerifiedVia: []string{"code", "oauth_provider", "sso", "admin"},
 			OrgCreation: "anyone", OrgDeletionGrace: Duration(30 * day),
 			UserDeletionGrace: Duration(30 * day), ClientDataRetention: Duration(30 * day),
-			QuotaCount: QuotaCount{Invited: true, Future: true, Suspended: true}},
+			QuotaCount:     QuotaCount{Invited: true, Future: true, Suspended: true},
+			AuditRetention: Duration(90 * day), EndedRetention: Duration(7 * day), EmailStorage: "encrypted"},
 		Security: Security{Session: SessionRules{
 			AbsoluteLifetime: DurationRule{Default: Duration(30 * day), Min: Duration(time.Hour), Max: Duration(90 * day)},
 			IdleTimeout:      DurationRule{Default: Duration(7 * day), Min: Duration(5 * time.Minute), Max: Duration(30 * day)},
@@ -452,6 +462,12 @@ func (c Config) Validate() error {
 	}
 	if c.Realm.ClientDataRetention <= 0 {
 		problems = append(problems, "realm.client_data_retention must be positive")
+	}
+	if c.Realm.AuditRetention < 0 || c.Realm.EndedRetention < 0 {
+		problems = append(problems, "realm.audit_retention and realm.ended_retention must not be negative")
+	}
+	if !slices.Contains(KnownEmailStorage, c.Realm.EmailStorage) {
+		problems = append(problems, fmt.Sprintf("realm.email_storage: unknown %q (known: %v)", c.Realm.EmailStorage, KnownEmailStorage))
 	}
 	o := c.OIDC
 	if o.CodeTTL <= 0 || o.CodeTTL > Duration(10*time.Minute) {

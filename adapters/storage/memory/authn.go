@@ -145,6 +145,18 @@ func (r emails) Delete(_ context.Context, realmID, id string) error {
 	return nil
 }
 
+func (r emails) ClearCiphertexts(_ context.Context, realmID string, limit int) (int, error) {
+	n := 0
+	for k, x := range r.t.s.emails {
+		if n < limit && x.RealmID == realmID && len(x.Ciphertext) > 0 {
+			x.Ciphertext = nil
+			setKey(r.t, r.t.s.emails, k, x)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r emails) ListByUser(_ context.Context, realmID, userID string) ([]port.UserEmail, error) {
 	var out []port.UserEmail
 	for _, x := range r.t.s.emails {
@@ -360,6 +372,17 @@ func (r sessions) RevokeByPrincipal(_ context.Context, realmID string, t port.Pr
 		}
 	}
 	return ids, nil
+}
+
+func (r sessions) DeleteEnded(_ context.Context, before time.Time, limit int) (int, error) {
+	n := 0
+	for id, x := range r.t.s.sessions {
+		if n < limit && (x.ExpiresAt.Before(before) || (x.RevokedAt != nil && x.RevokedAt.Before(before))) {
+			deleteKey(r.t, r.t.s.sessions, id)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (r sessions) MoveOrg(_ context.Context, realmID, userID, fromOrgID, toOrgID string) ([]string, error) {

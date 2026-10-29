@@ -134,6 +134,11 @@ type AuditRepo interface {
 	Scan(ctx context.Context, fromSeq int64, limit int) ([]audit.Record, error)
 	// ListByRealm は realm のイベントを seq の昇順に返す。
 	ListByRealm(ctx context.Context, realmID string, fromSeq int64, limit int) ([]audit.Record, error)
+	// Checkpoint は保持期間による切り詰めの位置（最後に消したレコード。design.md 6.5）を返す。切り詰めていなければ nil。
+	Checkpoint(ctx context.Context) (*audit.Checkpoint, error)
+	// Truncate は seq が cp.Seq 以下のレコードを消し、チェックポイントを cp にする。
+	// 最新のレコードは消さない（Last がチェーンの続きを返せるように。呼び出し側が守る）。
+	Truncate(ctx context.Context, cp audit.Checkpoint) error
 }
 
 // OutboxMessage は外部に送る出来事（少なくとも1回。ID で重複排除する）。
@@ -152,6 +157,8 @@ type OutboxRepo interface {
 	// ID は乱数（外部 ID）なので、ID の順には頼らない。
 	Pending(ctx context.Context, topic string, limit int) ([]OutboxMessage, error)
 	MarkDelivered(ctx context.Context, ids []string, at time.Time) error
+	// DeleteDelivered は before より前に配送したメッセージを最大 limit 件消し、消した件数を返す（design.md 9.6）。
+	DeleteDelivered(ctx context.Context, before time.Time, limit int) (int, error)
 }
 
 // ---------------------------------------------------------------------------

@@ -97,6 +97,8 @@ type EmailRepo interface {
 	SetPrimary(ctx context.Context, realmID, userID, id string) error
 	// Delete はメールを消す。無ければ errs.NotFound。
 	Delete(ctx context.Context, realmID, id string) error
+	// ClearCiphertexts は realm のメールの暗号文を最大 limit 件消し（インデックスは残す）、消した件数を返す（最小化モード。9.6）。
+	ClearCiphertexts(ctx context.Context, realmID string, limit int) (int, error)
 }
 
 // Identity は user_identities の1行。外部の IdP の ID（connection, provider_subject）とユーザーの紐付け。
@@ -316,6 +318,8 @@ type ScheduledEventRepo interface {
 	MarkFired(ctx context.Context, realmID, id string, at time.Time) (bool, error)
 	// CancelByRef は ref の未発火のものを取り消す（消す）。
 	CancelByRef(ctx context.Context, realmID, ref string) error
+	// DeleteFired は before より前に発火したものを全 realm から最大 limit 件消し、消した件数を返す（9.6）。
+	DeleteFired(ctx context.Context, before time.Time, limit int) (int, error)
 }
 
 // Connection は connections の1行（外部の IdP との接続）。秘密を含む設定はコアが暗号化してから渡す。
@@ -404,6 +408,8 @@ type SessionRepo interface {
 	RevokeByPrincipal(ctx context.Context, realmID string, t PrincipalType, principalID, exceptID string, at time.Time, reason string) ([]string, error)
 	// MoveOrg はユーザーの、active な Org が fromOrgID のセッションを toOrgID に移し、その ID を返す（退会。4.10）。
 	MoveOrg(ctx context.Context, realmID, userID, fromOrgID, toOrgID string) ([]string, error)
+	// DeleteEnded は before より前に失効したか期限が切れたセッションを全 realm から最大 limit 件消し、消した件数を返す（9.6）。
+	DeleteEnded(ctx context.Context, before time.Time, limit int) (int, error)
 }
 
 // ServiceAccount は service_accounts の1行（design.md 11.2）。

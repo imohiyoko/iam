@@ -158,6 +158,11 @@ func (r emails) Delete(ctx context.Context, realmID, id string) error {
 	return affected(n, err, "email")
 }
 
+func (r emails) ClearCiphertexts(ctx context.Context, realmID string, limit int) (int, error) {
+	n, err := r.q.ClearEmailCiphertexts(ctx, db.ClearEmailCiphertextsParams{Empty: []byte{}, RealmID: realmID, Lim: int64(limit)})
+	return int(n), mapErr(err)
+}
+
 func (r emails) ListByUser(ctx context.Context, realmID, userID string) ([]port.UserEmail, error) {
 	rs, err := r.q.ListEmailsByUser(ctx, db.ListEmailsByUserParams{RealmID: realmID, UserID: userID})
 	return rows(rs, err, toEmail)
@@ -295,6 +300,11 @@ func (r sessions) RevokeByPrincipal(ctx context.Context, realmID string, t port.
 	ids, err := r.q.RevokeSessionsByPrincipal(ctx, db.RevokeSessionsByPrincipalParams{At: nullTime(&at), Reason: reason, RealmID: realmID,
 		PrincipalType: string(t), PrincipalID: principalID, ExceptID: exceptID})
 	return ids, mapErr(err)
+}
+
+func (r sessions) DeleteEnded(ctx context.Context, before time.Time, limit int) (int, error) {
+	n, err := r.q.DeleteEndedSessions(ctx, db.DeleteEndedSessionsParams{Before: formatTime(before), Lim: int64(limit)})
+	return int(n), mapErr(err)
 }
 
 func (r sessions) MoveOrg(ctx context.Context, realmID, userID, fromOrgID, toOrgID string) ([]string, error) {

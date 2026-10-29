@@ -361,6 +361,13 @@ type ScheduledEvent struct {
 	CreatedAt string
 }
 
+type SharedAuditCheckpoint struct {
+	ID        int64
+	Seq       int64
+	Hash      []byte
+	CreatedAt string
+}
+
 type SharedAuditClientKey struct {
 	Owner      string
 	WrappedKey []byte

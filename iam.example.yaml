@@ -58,6 +58,9 @@ realm:
     invited: true              # 受け入れ待ちの招待
     future: true               # 有効期間がまだ始まっていない Membership
     suspended: true            # 停止中の Membership
+  audit_retention: 90d  # 監査ログの保持期間。過ぎたら先頭から切り詰め、チェックポイントを残して SIEM にも送る（0 で切り詰めない）
+  ended_retention: 7d   # 失効・期限切れのセッション、配送済みの outbox、発火済みの予約イベントを残す期間（0 で消さない）
+  email_storage: encrypted  # encrypted（暗号文 + インデックス）/ index_only（インデックスのみ。操作起点でない通知の宛先は外部が user_id から解決する）
 
 security:
   session:

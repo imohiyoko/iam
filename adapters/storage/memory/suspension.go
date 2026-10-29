@@ -114,6 +114,17 @@ func (r scheduledEvents) MarkFired(_ context.Context, realmID, id string, at tim
 	return true, nil
 }
 
+func (r scheduledEvents) DeleteFired(_ context.Context, before time.Time, limit int) (int, error) {
+	n := 0
+	for id, e := range r.t.s.scheduled {
+		if n < limit && e.FiredAt != nil && e.FiredAt.Before(before) {
+			deleteKey(r.t, r.t.s.scheduled, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r scheduledEvents) CancelByRef(_ context.Context, realmID, ref string) error {
 	for id, e := range r.t.s.scheduled {
 		if e.RealmID == realmID && e.Ref == ref && e.FiredAt == nil {

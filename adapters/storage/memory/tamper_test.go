@@ -4,5 +4,5 @@ package memory
 func (m *Storage) tamperAudit(seq int64, payload []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.s.audit[seq-1].rec.Payload = payload
+	m.s.audit[seq-1-m.s.auditBase].rec.Payload = payload
 }

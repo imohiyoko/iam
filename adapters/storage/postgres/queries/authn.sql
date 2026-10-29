@@ -267,3 +267,15 @@ SELECT * FROM authn_recovery_codes WHERE realm_id = $1 AND user_id = $2 ORDER BY
 
 -- name: UseRecoveryCode :execrows
 UPDATE authn_recovery_codes SET used_at = $1 WHERE realm_id = $2 AND id = $3 AND used_at IS NULL;
+
+-- name: ClearEmailCiphertexts :execrows
+UPDATE authn_user_emails SET ciphertext = sqlc.arg(empty) WHERE id IN (
+    SELECT e.id FROM authn_user_emails e WHERE e.realm_id = sqlc.arg(realm_id) AND length(e.ciphertext) > 0 LIMIT sqlc.arg(lim)::bigint);
+
+-- name: DeleteEndedSessions :execrows
+DELETE FROM authn_sessions WHERE id IN (
+    SELECT s.id FROM authn_sessions s WHERE s.expires_at < sqlc.arg(before) OR s.revoked_at < sqlc.arg(before) LIMIT sqlc.arg(lim)::bigint);
+
+-- name: DeleteFiredScheduledEvents :execrows
+DELETE FROM scheduled_events WHERE id IN (
+    SELECT e.id FROM scheduled_events e WHERE e.fired_at IS NOT NULL AND e.fired_at < sqlc.arg(before) LIMIT sqlc.arg(lim)::bigint);

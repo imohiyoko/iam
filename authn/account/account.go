@@ -36,6 +36,8 @@ type Service struct {
 	Roles UserRoles
 	// DeletionGrace はアカウントの削除の猶予期間（4.10）。0 なら猶予なし。
 	DeletionGrace time.Duration
+	// IndexOnly はメールの最小化モード（9.6）。アドレスの暗号文を持たず、インデックスだけを置く。
+	IndexOnly bool
 }
 
 // UserRoles はユーザーのロールを確かめるもの（authz。authn は authz を import しない）。
@@ -155,15 +157,17 @@ func (s *Service) unusedIndex(ctx context.Context, tx port.Tx, realmID, email st
 	return ix, nil
 }
 
-// createEmail は確認済みのメールを、ユーザーのデータ鍵で暗号化して置く。
+// createEmail は確認済みのメールを、ユーザーのデータ鍵で暗号化して置く（最小化モードではインデックスだけ）。
 func (s *Service) createEmail(ctx context.Context, tx port.Tx, realmID, userID, email string, ix pii.Index, via port.VerifiedVia, primary bool, now time.Time) (port.UserEmail, error) {
 	dom, err := s.Crypter.DomainIndex(ctx, email)
 	if err != nil {
 		return port.UserEmail{}, err
 	}
-	ct, err := s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, []byte(email), "email")
-	if err != nil {
-		return port.UserEmail{}, err
+	var ct []byte
+	if !s.IndexOnly {
+		if ct, err = s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, []byte(email), "email"); err != nil {
+			return port.UserEmail{}, err
+		}
 	}
 	e := port.UserEmail{ID: id.New(id.Email), PublicID: id.NewExternal(id.Email), RealmID: realmID, UserID: userID, Ciphertext: ct,
 		Index: ix.Value, DomainIndex: dom.Value, IndexKeyID: ix.KeyID, VerifiedAt: &now, VerifiedVia: via, IsPrimary: primary, CreatedAt: now}

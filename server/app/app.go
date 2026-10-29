@@ -103,6 +103,7 @@ type App struct {
 	manage *manage.Service
 	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
 	scheduler *eventlog.Scheduler
+	retention *eventlog.Retention
 	public    http.Handler
 	admin     http.Handler
 }
@@ -187,7 +188,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		d.Logger.Warn("realm.verified_via does not include code: email codes and links are disabled, and email recovery is unavailable")
 	}
 	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via, ExtraCategories: cfg.Security.SuspensionCategories,
-		DeletionGrace: cfg.Realm.UserDeletionGrace.D(), Roles: authzRoles{}}
+		DeletionGrace: cfg.Realm.UserDeletionGrace.D(), IndexOnly: cfg.Realm.EmailStorage == "index_only", Roles: authzRoles{}}
 	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
 	if plan.IsActive(feature.Org) {
 		a.orgs = &org.Service{Clock: d.Clock, Crypter: a.pii, Accounts: a.accounts, Notify: a.notify, Policy: org.CreationPolicy(cfg.Realm.OrgCreation),
@@ -287,6 +288,12 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.scheduler.Handlers = map[string]eventlog.Handler{account.EventUserDeleted: a.accounts.PurgeDue,
 		eventlog.EventClientKeyExpired: clientSealer.Expire,
 		account.EventSuspensionStarted: a.endOnSuspensionStart, account.EventValidityEnded: a.endOnValidityEnd}
+	// 保持期間を過ぎたデータは1時間ごとに消す（design.md 6.5、9.6、ADR 0072）。
+	a.retention = &eventlog.Retention{Storage: d.Storage, Clock: d.Clock, RealmID: a.realm.ID, Audit: cfg.Realm.AuditRetention.D(),
+		Ended: cfg.Realm.EndedRetention.D(), Interval: time.Hour, Batch: cfg.Outbox.Batch, Log: d.Logger}
+	if a.accounts.IndexOnly {
+		a.retention.IndexOnlyRealms = []string{a.realm.ID}
+	}
 	if a.orgs != nil {
 		a.scheduler.Handlers[org.EventOrgDeleted] = a.orgs.PurgeDue
 		a.scheduler.Handlers[org.EventInvitationExpired] = a.orgs.ExpireDue
@@ -458,11 +465,12 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 		go func() { errc <- servers[i].Serve(l) }()
 	}
 	relays := []*eventlog.Relay{a.relay, a.notifier, a.logout}
-	relayDone, schedDone := make(chan struct{}, len(relays)), make(chan struct{})
+	relayDone, schedDone, retDone := make(chan struct{}, len(relays)), make(chan struct{}), make(chan struct{})
 	for _, r := range relays {
 		go func() { r.Run(ctx); relayDone <- struct{}{} }()
 	}
 	go func() { a.scheduler.Run(ctx); close(schedDone) }()
+	go func() { a.retention.Run(ctx); close(retDone) }()
 
 	a.deps.Logger.Info("iam started", "public", pubL.Addr().String(), "admin", admL.Addr().String(),
 		"realm", a.realm.Slug, "features", a.plan.Active)
@@ -485,6 +493,7 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 		<-relayDone
 	}
 	<-schedDone
+	<-retDone
 	// 止める前に残りを送る（届かなければ次の起動で送る）。
 	for _, r := range relays {
 		if _, err := r.Flush(shutdownCtx); err != nil {
