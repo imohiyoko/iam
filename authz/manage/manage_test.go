@@ -67,6 +67,13 @@ func (e *env) run(fn func(ctx context.Context, tx port.Tx) error) error {
 
 func (e *env) grant(name, uid string) {
 	e.k.Tx(e.t, func(ctx context.Context, tx port.Tx) error {
+		// 最後の realm:owner の判定はユーザーが使えるかを見るので、ユーザーも作る。
+		if _, err := tx.Users().Get(ctx, e.k.RealmID, uid); errors.Is(err, errs.NotFound) {
+			now := e.k.Clock.Now()
+			if err := tx.Users().Create(ctx, port.User{ID: uid, PublicID: "pub_" + uid, RealmID: e.k.RealmID, Status: port.UserActive, CreatedAt: now, UpdatedAt: now}); err != nil {
+				return err
+			}
+		}
 		return role.Grant(ctx, tx, e.k.RealmID, name, port.PrincipalUser, uid, e.k.Clock.Now())
 	})
 }
@@ -185,6 +192,27 @@ func TestLastOwner(t *testing.T) {
 		return err
 	})
 	err := e.run(func(ctx context.Context, tx port.Tx) error {
+		return e.s.Unbind(ctx, tx, e.realm(), actor("owner"), b, "pub_owner")
+	})
+	wantCode(t, err, "last_owner")
+	// 有効期間の外と停止中の owner は使えないので数えない。
+	e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		now := e.k.Clock.Now()
+		past := now.Add(-time.Hour)
+		if err := tx.Users().Create(ctx, port.User{ID: "expired", PublicID: "pub_expired", RealmID: e.k.RealmID, Status: port.UserActive,
+			ValidUntil: &past, CreatedAt: now, UpdatedAt: now}); err != nil {
+			return err
+		}
+		if err := tx.Users().Create(ctx, port.User{ID: "stopped", PublicID: "pub_stopped", RealmID: e.k.RealmID, Status: port.UserActive,
+			CreatedAt: now, UpdatedAt: now}); err != nil {
+			return err
+		}
+		return tx.Suspensions().Create(ctx, port.Suspension{ID: "sp1", PublicID: "sus_1", RealmID: e.k.RealmID, TargetType: port.SuspensionTargetUser,
+			TargetID: "stopped", Category: "tos_violation", StartsAt: past, CreatedBy: "pub_owner", CreatedAt: now})
+	})
+	e.grant(role.RealmOwner, "expired")
+	e.grant(role.RealmOwner, "stopped")
+	err = e.run(func(ctx context.Context, tx port.Tx) error {
 		return e.s.Unbind(ctx, tx, e.realm(), actor("owner"), b, "pub_owner")
 	})
 	wantCode(t, err, "last_owner")
@@ -311,6 +339,17 @@ func TestGroups(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Org の範囲からは realm の Group に付与できない。
+	err = e.run(func(ctx context.Context, tx port.Tx) error {
+		inviter, err := e.s.CreateRole(ctx, tx, sc, actor("alice"), "inviter", []string{role.PermOrgInvite})
+		if err != nil {
+			return err
+		}
+		_, err = e.s.Bind(ctx, tx, sc, actor("alice"), inviter.PublicID,
+			manage.Target{Principal: check.Principal{Type: port.PrincipalGroup, ID: rg.ID}, PublicID: rg.PublicID}, check.Resource{})
+		return err
+	})
+	wantCode(t, err, "invalid_principal")
 	err = e.run(func(ctx context.Context, tx port.Tx) error {
 		return e.s.AddMember(ctx, tx, e.realm(), actor("admin"), rg, target("admin"))
 	})

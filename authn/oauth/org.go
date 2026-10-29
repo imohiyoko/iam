@@ -48,7 +48,8 @@ const MaxOrgConnections = 5
 // NewOrgConnection は Org（内部 ID）の connection を作る。slug は ID と同じ（運営者の slug と重ならない）。
 func (s *Service) NewOrgConnection(ctx context.Context, realmID, orgID string, in OrgConnection) (port.Connection, error) {
 	if !okURL(s.OrgRedirectURI, s.Dev) {
-		return port.Connection{}, errors.New("oauth: org redirect uri is not configured (server.public_url)")
+		// server.public_url が無ければ戻り先が決まらない（設定の誤り。登録は 400）。
+		return port.Connection{}, errs.WithCode(errs.KindInvalid, "public_url_required", "oauth: org redirect uri is not configured (server.public_url)")
 	}
 	if !okURL(in.Issuer, s.Dev) {
 		return port.Connection{}, errs.New(errs.KindInvalid, "oauth connection: issuer must be an https URL")

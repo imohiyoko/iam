@@ -90,3 +90,4 @@
 | [0076](0076-org-managed-users.md) | Org 管理ユーザーは users.managed_org_id で表し、既存のユーザーは本人の同意で切り替える | 承認 |
 | [0077](0077-org-sso.md) | Org 専用 SSO は Org の管理ユーザーのための OIDC の connection にする | 承認 |
 | [0078](0078-org-hierarchy.md) | Org 階層は親の付与と org_role を子孫の判定に効かせ、祖先の一覧を書き込み時に計算する | 承認 |
+| [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |

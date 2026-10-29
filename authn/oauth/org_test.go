@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/imohiyoko/iam/authn/oauth"
@@ -72,6 +73,12 @@ func TestOrgConnectionValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// server.public_url が無ければ戻り先が相対になり、登録できない（設定の誤りで 400）。
+	e.svc.OrgRedirectURI = "/login/oauth/callback"
+	if _, err := e.svc.NewOrgConnection(context.Background(), e.k.RealmID, "org_x", ok); !errors.Is(err, errs.Invalid) || !strings.Contains(err.Error(), "public_url") {
+		t.Errorf("no public url: %v", err)
+	}
+	e.svc.OrgRedirectURI = redirect
 	info, err := oauth.Info(c)
 	if err != nil || info.RedirectURI != redirect || len(info.Scopes) != 2 || info.Issuer != ok.Issuer {
 		t.Fatalf("info = %+v, %v", info, err)

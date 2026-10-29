@@ -45,10 +45,12 @@ type logoutMessage struct {
 	ClientID string `json:"client_id"`
 	UserID   string `json:"user_id"`
 	SID      string `json:"sid"`
+	// FirstAt は最初に積んだ時刻（積み直したときだけ入る。あきらめるまでの時間はここから数える）。
+	FirstAt *time.Time `json:"first_at,omitempty"`
 }
 
 // LineageEnded はログインの系列が終わったとき、その系列の認可を失効させ、Back-Channel Logout を積む（session.LineageHook）。
-// 期限の切れていない認可を持つ連携先に送る（連携先が自分で失効させた認可でも、連携先のログインは残りうるので送る）。
+// 系列の認可を持つ連携先に送る（認可が期限切れでも、連携先が自分で失効させた認可でも、連携先のログインは残りうるので送る）。
 // 停止が解けて同じ系列がまた終わっても、2度は送らない。
 func (t *Tokens) LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, reason, requestID string) error {
 	gs, err := tx.Grants().ListBySID(ctx, realmID, sid)
@@ -58,8 +60,8 @@ func (t *Tokens) LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, rea
 	now := t.Clock.Now()
 	sent := map[string]bool{}
 	for _, g := range gs {
-		// 期限切れの認可と、系列が終わったことで失効させた（送った）認可は飛ばす。
-		if !now.Before(g.ExpiresAt) || (g.RevokedAt != nil && g.RevokeReason == RevokeReasonLogout) {
+		// 系列が終わったことで失効させた（送った）認可は飛ばす。
+		if g.RevokedAt != nil && g.RevokeReason == RevokeReasonLogout {
 			continue
 		}
 		cl, err := tx.Clients().Get(ctx, realmID, g.ClientID)
@@ -116,42 +118,71 @@ func (d *LogoutDeliverer) logger() *slog.Logger {
 	return d.Log
 }
 
-// Deliver は送れたもの・送らなくてよいもの（連携先が消えた・送り先が外れた・読めない・あきらめた）の ID を返す。
-// 送れなかったものは、1件の失敗で残りを止めないよう、エラーにせず次の送出に回す。
+// Deliver は送れたもの・送らなくてよいもの（連携先が消えた・送り先が外れた・読めない・あきらめた）の ID を返す
+// （積み直したものは requeue が配送済みにする）。
+// 送れなかったものは、1件の失敗で残りを止めないよう、エラーにせず outbox の末尾に積み直して次の送出に回す
+// （先頭に残すと、送れないものが1回の取り出し件数を埋めて、後ろの送れるものを塞ぐ）。
 func (d *LogoutDeliverer) Deliver(ctx context.Context, msgs []port.OutboxMessage) ([]string, error) {
 	giveUp := ttlOr(d.GiveUp, DefaultLogoutGiveUp)
 	var done []string
 	for _, m := range msgs {
-		uri, token, err := d.token(ctx, m)
-		if err != nil {
-			d.logger().ErrorContext(ctx, "backchannel logout: skipping message", "id", m.ID, "error", err)
+		var x logoutMessage
+		if err := json.Unmarshal(m.Payload, &x); err != nil {
+			d.logger().ErrorContext(ctx, "backchannel logout: skipping unreadable message", "id", m.ID, "error", err)
 			done = append(done, m.ID)
 			continue
 		}
-		if uri == "" {
+		uri, token, err := d.token(ctx, m.ID, x)
+		if err == nil && uri == "" {
 			done = append(done, m.ID)
 			continue
 		}
-		if err := d.post(ctx, uri, token); err != nil {
-			if d.Clock.Now().Sub(m.CreatedAt) >= giveUp {
-				d.logger().WarnContext(ctx, "backchannel logout: giving up", "id", m.ID, "error", err)
-				done = append(done, m.ID)
-			} else {
-				d.logger().InfoContext(ctx, "backchannel logout: will retry", "id", m.ID, "error", err)
-			}
+		// 保存先や署名の一時的な失敗も、送れなかったときと同じく、あきらめるまで次の送出でまた試す。
+		if err == nil {
+			err = d.post(ctx, uri, token)
+		}
+		if err == nil {
+			done = append(done, m.ID)
 			continue
 		}
-		done = append(done, m.ID)
+		first := m.CreatedAt
+		if x.FirstAt != nil {
+			first = *x.FirstAt
+		}
+		if d.Clock.Now().Sub(first) >= giveUp {
+			d.logger().WarnContext(ctx, "backchannel logout: giving up", "id", m.ID, "error", err)
+			done = append(done, m.ID)
+			continue
+		}
+		// 積み直せなければ（保存先の障害など）、そのまま残して次の送出でまた試す。
+		if rerr := d.requeue(ctx, m, x, first); rerr != nil {
+			d.logger().InfoContext(ctx, "backchannel logout: will retry", "id", m.ID, "error", err, "requeue_error", rerr)
+			continue
+		}
+		d.logger().InfoContext(ctx, "backchannel logout: will retry", "id", m.ID, "error", err)
 	}
 	return done, nil
 }
 
-// token は Logout Token（OIDC Back-Channel Logout 2.4）を作る。送らなくてよければ uri は空。
-func (d *LogoutDeliverer) token(ctx context.Context, m port.OutboxMessage) (uri, token string, err error) {
-	var x logoutMessage
-	if err := json.Unmarshal(m.Payload, &x); err != nil {
-		return "", "", err
+// requeue は送れなかったメッセージを、最初に積んだ時刻を持たせて outbox の末尾に積み直す。積み直しと元のメッセージの
+// 配送済みは同じトランザクションで行う（片方だけ残って、同じものが2通り積まれることがない）。
+func (d *LogoutDeliverer) requeue(ctx context.Context, m port.OutboxMessage, x logoutMessage, first time.Time) error {
+	x.FirstAt = &first
+	b, err := json.Marshal(x)
+	if err != nil {
+		return err
 	}
+	return d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		now := d.Clock.Now()
+		if err := tx.Outbox().Add(ctx, port.OutboxMessage{ID: id.NewExternal(id.Outbox), Topic: m.Topic, Payload: b, CreatedAt: now}); err != nil {
+			return err
+		}
+		return tx.Outbox().MarkDelivered(ctx, []string{m.ID}, now)
+	})
+}
+
+// token は Logout Token（OIDC Back-Channel Logout 2.4）を作る。送らなくてよければ uri は空。
+func (d *LogoutDeliverer) token(ctx context.Context, jti string, x logoutMessage) (uri, token string, err error) {
 	err = d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cl, err := tx.Clients().Get(ctx, x.RealmID, x.ClientID)
 		if errors.Is(err, errs.NotFound) {
@@ -165,7 +196,7 @@ func (d *LogoutDeliverer) token(ctx context.Context, m port.OutboxMessage) (uri,
 		}
 		now := d.Clock.Now()
 		claims := map[string]any{"iss": d.Issuer, "aud": cl.PublicID, "iat": now.Unix(), "exp": now.Add(LogoutTokenTTL).Unix(),
-			"jti": m.ID, "sid": x.SID, "events": map[string]any{logoutEvent: map[string]any{}}}
+			"jti": jti, "sid": x.SID, "events": map[string]any{logoutEvent: map[string]any{}}}
 		// 消去したユーザーは sub を出さない（sid だけで足りる）。
 		if u, err := tx.Users().Get(ctx, x.RealmID, x.UserID); err == nil {
 			claims["sub"] = u.PublicID
