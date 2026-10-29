@@ -51,27 +51,42 @@ func TestParseEmptyUsesDefaults(t *testing.T) {
 
 func TestParseRejects(t *testing.T) {
 	cases := map[string]string{
-		"unknown field":          "dev: true\nbogus: 1\n",
-		"dev notifier":           "notifier: {driver: dev}\n",
-		"same addr":              "dev: true\nserver: {public_addr: ':1', admin_addr: ':1'}\n",
-		"bad range":              "dev: true\nsecurity: {session: {absolute_lifetime: {default: 100d, min: 1h, max: 90d}}}\n",
-		"bad timezone":           "dev: true\nrealm: {slug: x, timezone: Mars/Base}\n",
-		"bad duration":           "dev: true\noutbox: {interval: 1x}\n",
-		"overflow days":          "dev: true\noutbox: {interval: 106752d}\n",
-		"negative min":           "dev: true\nsecurity: {session: {max_auth_age: {default: 15m, min: -1h, max: 1d}}}\n",
-		"options without driver": "dev: true\nstorage: {path: /var/lib/iam/iam.db}\n",
-		"public_url path":        "dev: true\nserver: {public_url: 'https://id.example.com/iam'}\n",
-		"public_url query":       "dev: true\nserver: {public_url: 'https://id.example.com?x=1'}\n",
-		"public_url empty query": "dev: true\nserver: {public_url: 'https://id.example.com/?'}\n",
-		"public_url fragment":    "dev: true\nserver: {public_url: 'https://id.example.com#a'}\n",
-		"public_url userinfo":    "dev: true\nserver: {public_url: 'https://u:p@id.example.com'}\n",
-		"email storage":          "dev: true\nrealm: {slug: x, email_storage: plain}\n",
-		"negative retention":     "dev: true\nrealm: {slug: x, audit_retention: -1h}\n",
+		"unknown field":           "dev: true\nbogus: 1\n",
+		"dev notifier":            "notifier: {driver: dev}\n",
+		"same addr":               "dev: true\nserver: {public_addr: ':1', admin_addr: ':1'}\n",
+		"bad range":               "dev: true\nsecurity: {session: {absolute_lifetime: {default: 100d, min: 1h, max: 90d}}}\n",
+		"bad timezone":            "dev: true\nrealm: {slug: x, timezone: Mars/Base}\n",
+		"bad duration":            "dev: true\noutbox: {interval: 1x}\n",
+		"overflow days":           "dev: true\noutbox: {interval: 106752d}\n",
+		"negative min":            "dev: true\nsecurity: {session: {max_auth_age: {default: 15m, min: -1h, max: 1d}}}\n",
+		"options without driver":  "dev: true\nstorage: {path: /var/lib/iam/iam.db}\n",
+		"public_url path":         "dev: true\nserver: {public_url: 'https://id.example.com/iam'}\n",
+		"public_url query":        "dev: true\nserver: {public_url: 'https://id.example.com?x=1'}\n",
+		"public_url empty query":  "dev: true\nserver: {public_url: 'https://id.example.com/?'}\n",
+		"public_url fragment":     "dev: true\nserver: {public_url: 'https://id.example.com#a'}\n",
+		"public_url userinfo":     "dev: true\nserver: {public_url: 'https://u:p@id.example.com'}\n",
+		"email storage":           "dev: true\nrealm: {slug: x, email_storage: plain}\n",
+		"negative retention":      "dev: true\nrealm: {slug: x, audit_retention: -1h}\n",
+		"unknown hook":            "dev: true\nhooks: {pre_login: {}}\n",
+		"hook timeout":            "dev: true\nhooks: {pre_token: {timeout: 6s}}\n",
+		"hook http":               "hooks: {pre_token: {url: 'http://hooks.example.com', secret_env: S}}\n",
+		"hook without secret":     "dev: true\nhooks: {pre_token: {url: 'https://hooks.example.com'}}\n",
+		"hook secret without url": "dev: true\nhooks: {pre_token: {secret_env: S}}\n",
 	}
 	for name, y := range cases {
 		if _, err := Parse([]byte(y)); err == nil {
 			t.Errorf("%s: want error", name)
 		}
+	}
+}
+
+func TestHooks(t *testing.T) {
+	c, err := Parse([]byte("dev: true\nhooks:\n  pre_token: {url: 'http://localhost:9000/hook', secret_env: HOOK_SECRET, timeout: 1s, fail_open: true}\n  post_authentication: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := c.Hooks["pre_token"]; h.SecretEnv != "HOOK_SECRET" || h.Timeout.D() != time.Second || !h.FailOpen {
+		t.Fatalf("hooks = %+v", c.Hooks)
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -111,6 +112,8 @@ type Manager struct {
 	Orgs OrgPicker
 	// Lineages はログインの系列が終わったときに呼ぶ（Back-Channel Logout。5.2）。nil なら呼ばない。
 	Lineages LineageHook
+	// Hooks はフロー フック（11.8）。nil ならフィーチャー flow_hooks が動いておらず、呼ばない。
+	Hooks *hook.Runner
 }
 
 // LineageHook はログインの系列（sid）が終わったことを受け取る（authn/provider）。失効と同じトランザクションで呼ぶ。
@@ -288,6 +291,13 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	hits = carry(hits, in.Carried)
 	if _, err := m.Warnings.Apply(hits, nil); err != nil {
 		return Issued{}, err
+	}
+	// post_authentication は本人確認を終えた（制限の無いセッションになる）ときだけ呼ぶ。2要素目の後は CompleteSecondFactor が
+	// Issue を呼び直すので、そこで呼ばれる。
+	if restriction == port.RestrictionNone && m.Hooks.Has(port.HookPostAuthentication) {
+		if _, err := m.Hooks.Run(ctx, port.HookInput{Hook: port.HookPostAuthentication, UserID: u.PublicID, AuthMethods: in.AuthMethods}); err != nil {
+			return Issued{}, err
+		}
 	}
 	warningsJSON, err := json.Marshal(nonNilWarnings(hits))
 	if err != nil {

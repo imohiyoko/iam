@@ -92,4 +92,5 @@
 | [0078](0078-org-hierarchy.md) | Org 階層は親の付与と org_role を子孫の判定に効かせ、祖先の一覧を書き込み時に計算する | 承認 |
 | [0079](0079-nested-groups.md) | Group のネストは同じ範囲に限り、含む Group の一覧を管理の操作で計算する | 承認 |
 | [0080](0080-custom-attributes.md) | カスタム属性は realm ごとの定義と JSON の値で持ち、トークンにはスコープ attributes で載せる | 承認 |
+| [0081](0081-flow-hooks.md) | フロー フックは同期の判定だけを持ち、トランザクションの中でタイムアウトを付けて呼ぶ | 承認 |
 | [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |

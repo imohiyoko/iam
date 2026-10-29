@@ -20,6 +20,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/id"
+	"github.com/imohiyoko/iam/shared/port"
 	"github.com/imohiyoko/iam/shared/settings"
 )
 
@@ -59,6 +60,21 @@ type Config struct {
 
 	// ServiceAccounts は汎用サービスアカウント（フィーチャー service_accounts。ADR 0074）。
 	ServiceAccounts ServiceAccounts `yaml:"service_accounts"`
+
+	// Hooks はフロー フック（フィーチャー flow_hooks。design.md 11.8、ADR 0081）。キーはフックの名前。
+	Hooks map[string]Hook `yaml:"hooks"`
+}
+
+// Hook は1つのフロー フック。url が無ければ、組み込む側が Go のインターフェース（app.Deps.Hooks）で渡す。
+type Hook struct {
+	// URL は Webhook の宛先（https。dev: true のときだけ http）。
+	URL string `yaml:"url"`
+	// SecretEnv は署名の秘密（32 バイト以上）を持つ環境変数の名前。読んだ後に消す。
+	SecretEnv string `yaml:"secret_env"`
+	// Timeout は呼び出しのタイムアウト（5 秒以下）。省略すると 2 秒。
+	Timeout Duration `yaml:"timeout"`
+	// FailOpen は失敗（タイムアウト・誤った応答）のときに通すか。既定は止める（fail-closed）。
+	FailOpen bool `yaml:"fail_open"`
 }
 
 // ServiceAccounts はサービスアカウントの設定。
@@ -434,6 +450,33 @@ func (c Config) validatePasskey() []string {
 	return problems
 }
 
+func (c Config) validateHooks() []string {
+	var problems []string
+	for name, h := range c.Hooks {
+		if !slices.Contains(port.Hooks, name) {
+			problems = append(problems, fmt.Sprintf("hooks: unknown hook %q", name))
+			continue
+		}
+		if h.Timeout < 0 || h.Timeout > Duration(5*time.Second) {
+			problems = append(problems, fmt.Sprintf("hooks.%s.timeout must be between 0 and 5s", name))
+		}
+		if h.URL == "" {
+			if h.SecretEnv != "" {
+				problems = append(problems, fmt.Sprintf("hooks.%s.secret_env needs url", name))
+			}
+			continue
+		}
+		u, err := url.Parse(h.URL)
+		if err != nil || !(u.Scheme == "https" || (c.Dev && u.Scheme == "http")) || u.Host == "" || u.User != nil || u.Fragment != "" {
+			problems = append(problems, fmt.Sprintf("hooks.%s.url must be an https URL (http only with dev: true)", name))
+		}
+		if h.SecretEnv == "" {
+			problems = append(problems, fmt.Sprintf("hooks.%s.secret_env is required", name))
+		}
+	}
+	return problems
+}
+
 // WarningActions は security.warnings を評価器の形にする。
 func (c Config) WarningActions() map[string]warning.Action {
 	out := make(map[string]warning.Action, len(c.Security.Warnings))
@@ -567,6 +610,7 @@ func (c Config) Validate() error {
 		problems = append(problems, "outbox.interval must be positive")
 	}
 	problems = append(problems, c.validatePasskey()...)
+	problems = append(problems, c.validateHooks()...)
 	if len(problems) > 0 {
 		return fmt.Errorf("config: %s", strings.Join(problems, "; "))
 	}

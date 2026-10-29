@@ -89,3 +89,10 @@ oidc:
 
 service_accounts:  # 汎用サービスアカウント（フィーチャー service_accounts。ADR 0074）
   token_ttl: 10m  # client credentials で発行するアクセストークンの寿命（1時間以下）
+
+# hooks:  # フロー フック（フィーチャー flow_hooks。ADR 0081）。url の無いフックは Go の実装（app.Deps.Hooks）で渡す
+#   pre_registration:
+#     url: https://hooks.example.com/iam  # 署名は X-IAM-Signature（通知の Webhook と同じ形）
+#     secret_env: IAM_HOOK_SECRET          # 32 バイト以上。読んだ後に消す
+#     timeout: 2s                          # 5 秒以下
+#     fail_open: false                     # 失敗のときに通すか（既定は止める）

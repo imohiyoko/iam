@@ -14,6 +14,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/attribute"
+	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -61,6 +62,8 @@ type Tokens struct {
 	Orgs *org.Service
 	// Attributes はカスタム属性。フィーチャー custom_attributes が動いていなければ nil。
 	Attributes *attribute.Service
+	// Hooks はフロー フック（pre_token）。フィーチャー flow_hooks が動いていなければ nil。
+	Hooks *hook.Runner
 	// Issuer は iss（server.public_url）。
 	Issuer                               string
 	AccessTokenTTL, IDTokenTTL, GrantTTL time.Duration
@@ -151,6 +154,9 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 	claims["auth_time"], claims["amr"], claims["sid"] = g.AuthTime.Unix(), g.AuthMethods, g.SID
 	if nonce != "" {
 		claims["nonce"] = nonce
+	}
+	if err := t.hookClaims(ctx, cl, g, claims); err != nil {
+		return Issued{}, err
 	}
 	b, err := json.Marshal(claims)
 	if err != nil {
@@ -512,4 +518,48 @@ func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token stri
 	return Introspection{Active: true, Scope: strings.Join(g.Scopes, " "), ClientID: cl.PublicID, TokenType: typ, Exp: tok.ExpiresAt.Unix(),
 		Iat: tok.CreatedAt.Unix(), Sub: u.PublicID, Aud: []string{cl.PublicID}, Iss: t.Issuer, SID: g.SID, OrgID: orgPublicID,
 		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods}, nil
+}
+
+// reservedClaims は pre_token のフックが足せないクレーム（IAM が決めるもの）。
+var reservedClaims = []string{"iss", "sub", "aud", "exp", "iat", "nbf", "jti", "auth_time", "nonce", "acr", "amr", "azp", "sid", "at_hash",
+	"c_hash", "org_id", "email", "email_verified", "attributes", "cnf"}
+
+// pre_token のフックが足すクレームの上限。
+const (
+	maxHookClaims     = 20
+	maxHookClaimBytes = 4096
+)
+
+// ErrHookClaims は pre_token のフックの返したクレームが規則に合わないこと（予約されたクレーム、数・大きさの上限）。
+var ErrHookClaims = errs.New(errs.KindInternal, "pre_token hook returned invalid claims")
+
+// hookClaims は pre_token のフック（design.md 11.8）を呼び、返したクレームを ID トークンに足す。止められたら ErrInvalidGrant。
+func (t *Tokens) hookClaims(ctx context.Context, cl port.Client, g port.Grant, claims map[string]any) error {
+	if !t.Hooks.Has(port.HookPreToken) {
+		return nil
+	}
+	in := port.HookInput{Hook: port.HookPreToken, UserID: claims["sub"].(string), AuthMethods: g.AuthMethods, ClientID: cl.PublicID, Scopes: g.Scopes}
+	if o, ok := claims["org_id"].(string); ok {
+		in.OrgID = o
+	}
+	res, err := t.Hooks.Run(ctx, in)
+	if _, ok := errors.AsType[*hook.DeniedError](err); ok {
+		return ErrInvalidGrant
+	}
+	if err != nil {
+		return err
+	}
+	if len(res.Claims) > maxHookClaims {
+		return ErrHookClaims
+	}
+	if b, err := json.Marshal(res.Claims); err != nil || len(b) > maxHookClaimBytes {
+		return ErrHookClaims
+	}
+	for k, v := range res.Claims {
+		if _, taken := claims[k]; k == "" || taken || slices.Contains(reservedClaims, k) {
+			return ErrHookClaims
+		}
+		claims[k] = v
+	}
+	return nil
 }

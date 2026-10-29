@@ -2,7 +2,9 @@ package org
 
 import (
 	"context"
+	"errors"
 
+	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/eventlog"
@@ -74,6 +76,18 @@ func (s *Service) end(ctx context.Context, tx port.Tx, o port.Org, m port.Member
 	managed := IsManaged(u, o)
 	if managed && reason == EndedLeft {
 		return Ended{}, ErrManagedUser
+	}
+	// pre_membership_end は本人の離脱と除名のときだけ呼ぶ（Org やアカウントの削除は止めない。11.8）。
+	if (reason == EndedLeft || reason == EndedRemoved) && s.Hooks.Has(port.HookPreMembershipEnd) {
+		_, err := s.Hooks.Run(ctx, port.HookInput{Hook: port.HookPreMembershipEnd, UserID: u.PublicID, OrgID: o.PublicID,
+			MembershipID: m.PublicID, EndReason: reason})
+		var denied *hook.DeniedError
+		if errors.As(err, &denied) {
+			return Ended{}, errs.WithCode(errs.KindFailedPrecondition, "membership_end_held", "a flow hook held the membership end")
+		}
+		if err != nil {
+			return Ended{}, err
+		}
 	}
 	now := s.Clock.Now()
 	m.Status, m.EndedReason, m.EmailID, m.ManagementRequestedAt, m.UpdatedAt = port.MembershipEnded, reason, "", nil, now

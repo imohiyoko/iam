@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -24,7 +25,9 @@ import (
 // Service はユーザーとメールを扱う。
 type Service struct {
 	Crypter *pii.Crypter
-	Clock   clock.Clock
+	// Hooks はフロー フック（pre_registration。design.md 11.8）。nil なら呼ばない。
+	Hooks *hook.Runner
+	Clock clock.Clock
 	// VerifiedVia は realm が「確認済み」とみなす経路（4.1）。含まれない経路ではユーザーを作らない。
 	VerifiedVia []port.VerifiedVia
 	// ExtraCategories は realm で足した停止の種別（4.7）。
@@ -106,6 +109,12 @@ func (s *Service) CreateWithEmail(ctx context.Context, tx port.Tx, realmID, emai
 	ix, err := s.unusedIndex(ctx, tx, realmID, email)
 	if err != nil {
 		return Created{}, err
+	}
+	// 本人による登録（運営者の作成のほか）の直前に pre_registration のフックを呼ぶ（11.8）。止められたら *hook.DeniedError。
+	if via != port.VerifiedViaAdmin {
+		if _, err := s.Hooks.Run(ctx, port.HookInput{Hook: port.HookPreRegistration, Email: email, VerifiedVia: string(via)}); err != nil {
+			return Created{}, err
+		}
 	}
 	now := s.Clock.Now()
 	u := port.User{ID: id.New(id.User), PublicID: id.NewExternal(id.User), RealmID: realmID, Status: port.UserActive, CreatedAt: now, UpdatedAt: now}
