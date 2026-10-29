@@ -13,9 +13,12 @@ storage:
   driver: sqlite
   path: iam.db
   auto_migrate: "true" # false なら `iam migrate` を明示的に実行する
-  # PostgreSQL（複数のインスタンスから使う）:
-  # driver: postgres
-  # dsn: postgres://iam:secret@db.example.com:5432/iam?sslmode=verify-full
+  # PostgreSQL（複数のインスタンスから使う）は、上の storage を丸ごと次に置き換える（path は残さない）:
+  # storage:
+  #   driver: postgres
+  #   dsn: postgres://iam:secret@db.example.com:5432/iam?sslmode=verify-full
+  #   auto_migrate: "true"
+  #   max_open_conns: "20" # 接続の上限（省略時は 10、0 なら上限なし）
 
 ephemeral:
   driver: memory

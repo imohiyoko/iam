@@ -11,6 +11,7 @@ import (
 
 	"github.com/imohiyoko/iam/adapters/storage/storagetest"
 	"github.com/imohiyoko/iam/shared/clock"
+	"github.com/imohiyoko/iam/shared/plugin"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -45,6 +46,11 @@ func testDSN(t testing.TB) string {
 		t.Fatal(err)
 	}
 	u.Path = "/" + name
+	// クエリの dbname・database はパスより優先されるので消す。
+	q := u.Query()
+	q.Del("dbname")
+	q.Del("database")
+	u.RawQuery = q.Encode()
 	return u.String()
 }
 
@@ -84,4 +90,23 @@ func TestPendingMigrationsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = s.Close()
+}
+
+// 設定の max_open_conns を接続の上限にし、数でない値は拒む。
+func TestPluginMaxOpenConns(t *testing.T) {
+	f, err := plugin.Storage("postgres")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f(context.Background(), plugin.Config{Options: map[string]string{"dsn": "postgres://x", "max_open_conns": "many"}}); err == nil {
+		t.Fatal("non-numeric max_open_conns accepted")
+	}
+	st, err := f(context.Background(), plugin.Config{Options: map[string]string{"dsn": testDSN(t), "max_open_conns": "3"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if got := st.(*Storage).DB().Stats().MaxOpenConnections; got != 3 {
+		t.Fatalf("MaxOpenConnections = %d", got)
+	}
 }

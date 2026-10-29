@@ -124,7 +124,7 @@ func TestOIDCE2EStandardRP(t *testing.T) {
 	}
 	// リフレッシュで出す ID トークンには nonce を入れない（OIDC Core 12.2）。
 	refreshed, err := oidcrp.RefreshTokens[*oidc.IDTokenClaims](ctx, relying, tokens.RefreshToken, "", "")
-	if err != nil || refreshed.IDTokenClaims.SessionID != tokens.IDTokenClaims.SessionID || refreshed.RefreshToken == tokens.RefreshToken {
+	if err != nil || refreshed.IDTokenClaims.SessionID != tokens.IDTokenClaims.SessionID || refreshed.RefreshToken == tokens.RefreshToken || refreshed.IDTokenClaims.Nonce != "" {
 		t.Fatalf("refresh: %+v %v", refreshed, err)
 	}
 
@@ -183,10 +183,11 @@ func TestOIDCE2EMLDSARP(t *testing.T) {
 	var tok struct {
 		IDToken string `json:"id_token"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil || resp.StatusCode != 200 {
+	err = json.NewDecoder(resp.Body).Decode(&tok)
+	_ = resp.Body.Close()
+	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("token: %d %v", resp.StatusCode, err)
 	}
-	_ = resp.Body.Close()
 
 	// JWKS の AKP 鍵（draft-ietf-cose-dilithium）で、crypto/mldsa で直接検証する。
 	parts := strings.Split(tok.IDToken, ".")
@@ -194,7 +195,7 @@ func TestOIDCE2EMLDSARP(t *testing.T) {
 		t.Fatalf("id token: %q", tok.IDToken)
 	}
 	var header struct{ Alg, Kid string }
-	h, _ := base64.RawURLEncoding.DecodeString(parts[0])
+	h := b64(t, parts[0])
 	if json.Unmarshal(h, &header) != nil || header.Alg != "ML-DSA-65" {
 		t.Fatalf("header: %s", h)
 	}
@@ -217,17 +218,30 @@ func TestOIDCE2EMLDSARP(t *testing.T) {
 	if pub == nil {
 		t.Fatalf("no AKP key %s in %+v", header.Kid, set)
 	}
-	sig, _ := base64.RawURLEncoding.DecodeString(parts[2])
+	sig := b64(t, parts[2])
 	if err := mldsa.Verify(pub, []byte(parts[0]+"."+parts[1]), sig, &mldsa.Options{}); err != nil {
 		t.Fatalf("ml-dsa verify: %v", err)
 	}
 	var claims map[string]any
-	payload, _ := base64.RawURLEncoding.DecodeString(parts[1])
+	payload := b64(t, parts[1])
 	if json.Unmarshal(payload, &claims) != nil || claims["iss"] != e.issuer || claims["aud"] != p.clientID || claims["nonce"] != "pq-nonce" ||
 		claims["sub"] != e.l.userID(t, "bob@example.com") {
 		t.Fatalf("claims: %v", claims)
 	}
-	if exp, _ := claims["exp"].(float64); time.Unix(int64(exp), 0).Before(time.Now()) {
+	exp, _ := claims["exp"].(float64)
+	if time.Unix(int64(exp), 0).Before(time.Now()) {
 		t.Fatalf("expired: %v", claims["exp"])
 	}
+	if iat, ok := claims["iat"].(float64); !ok || iat <= 0 || iat > exp {
+		t.Fatalf("iat: %v", claims["iat"])
+	}
+}
+
+func b64(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatalf("base64 %q: %v", s, err)
+	}
+	return b
 }
