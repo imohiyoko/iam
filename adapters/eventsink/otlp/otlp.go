@@ -152,9 +152,38 @@ func (s *Sink) Emit(ctx context.Context, events []audit.Event) error {
 		return fmt.Errorf("eventsink otlp: %w", err)
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
 	if resp.StatusCode/100 != 2 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
 		return fmt.Errorf("eventsink otlp: status %d", resp.StatusCode)
+	}
+	// 2xx の本文は partialSuccess を確かめるために読み切る。読めない・大きすぎるときは、拒まれた記録を見落とさないよう失敗にする。
+	rb, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("eventsink otlp: read response: %w", err)
+	}
+	if len(rb) > maxResponseBytes {
+		return fmt.Errorf("eventsink otlp: response exceeds %d bytes", maxResponseBytes)
+	}
+	return partialFailure(rb)
+}
+
+// partialFailure は 2xx の応答の partialSuccess で拒まれた記録があればエラーにする（送出全体をやり直す。OTLP の仕様では
+// 拒まれた記録は送り直さないが、監査ログは欠けを残さないことを優先する）。
+func partialFailure(body []byte) error {
+	var r struct {
+		PartialSuccess struct {
+			RejectedLogRecords json.Number `json:"rejectedLogRecords"`
+			ErrorMessage       string      `json:"errorMessage"`
+		} `json:"partialSuccess"`
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(body, &r); err != nil {
+		return fmt.Errorf("eventsink otlp: invalid response: %w", err)
+	}
+	if n, err := r.PartialSuccess.RejectedLogRecords.Int64(); err == nil && n > 0 {
+		return fmt.Errorf("eventsink otlp: %d log records rejected: %s", n, r.PartialSuccess.ErrorMessage)
 	}
 	return nil
 }

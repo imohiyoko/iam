@@ -104,10 +104,15 @@ func (s *Service) detachHierarchy(ctx context.Context, tx port.Tx, o port.Org, n
 	return tx.Orgs().SetParent(ctx, o.RealmID, o.ID, "", now)
 }
 
-// ClearParent は Org の親を外す（フィーチャーの無効化の片付け。11.12）。外したら true。
+// ClearParent は Org の親を外す（フィーチャーの無効化の片付け。11.12）。外したら true。子を持つ Org は後に回す
+// （葉から外せば、1件の更新が子孫の祖先の一覧に広がらず、片付けの1回分の量が limit に収まる）。
 func ClearParent(ctx context.Context, tx port.Tx, o port.Org, now time.Time) (bool, error) {
 	if o.ParentID == "" {
 		return false, nil
+	}
+	cs, err := tx.Orgs().ListChildren(ctx, o.RealmID, o.ID)
+	if err != nil || len(cs) > 0 {
+		return false, err
 	}
 	return true, tx.Orgs().SetParent(ctx, o.RealmID, o.ID, "", now)
 }

@@ -196,7 +196,7 @@ orgs                 id, realm_id, kind（personal / shared）, personal_owner_i
                      UNIQUE (realm_id, slug)
 memberships          id, user_id, org_id, status（invited / active / ended）
                      org_role（owner / admin / member）, email_id（この Org で使うメール。4.4）
-                     valid_from, valid_until, ended_reason（self_leave / removed / expired / org_deleted / user_deleted）
+                     valid_from, valid_until, ended_reason（left / removed / expired / org_deleted / user_deleted）
                      created_at, UNIQUE (user_id, org_id)
 invitations          id, realm_id, org_id, email_index, email_ciphertext, org_role
                      valid_from, valid_until, invited_by, expires_at, status（pending / accepted / revoked / expired）, created_at

@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/feature"
 )
@@ -38,7 +41,7 @@ func (f *fakeDNS) set(name string, v ...string) {
 	f.txt[name] = v
 }
 
-func newDomainEnv(t *testing.T, on bool) (*loginEnv, *fakeDNS) {
+func newDomainEnv(t *testing.T, on bool, extra ...string) (*loginEnv, *fakeDNS) {
 	t.Helper()
 	l := newLoginEnvWith(t, func(c *config.Config) {
 		c.Realm.VerifiedVia = []string{"code", "oauth_provider", "admin", "invitation"}
@@ -51,6 +54,7 @@ func newDomainEnv(t *testing.T, on bool) (*loginEnv, *fakeDNS) {
 		if on {
 			names = append(names, feature.OrgManagedUsers)
 		}
+		names = append(names, extra...)
 		c.Features = &names
 	}, feature.Registered())
 	dns := &fakeDNS{txt: map[string][]string{}}
@@ -248,6 +252,13 @@ func TestManagedUsers(t *testing.T) {
 	if code, out := l.mePost(t, owner, member(patMember)+":request-management", nil); code != 204 {
 		t.Fatalf("request again: %d %v", code, out)
 	}
+	// 受け入れには直近の本人確認が要る。
+	l.advance(l.e.cfg.Security.Session.MaxAuthAge.Default.D() + time.Minute)
+	if code, out := l.mePost(t, pat, "/v1/me/orgs/"+acme+":accept-management", nil); code != 401 || out["error"] != "reauthentication_required" {
+		t.Fatalf("accept without recent auth: %d %v", code, out)
+	}
+	_, pat = l.login(t, "pat@acme.example")
+	_, owner = l.login(t, "boss@acme.example")
 	if code, out := l.mePost(t, pat, "/v1/me/orgs/"+acme+":accept-management", nil); code != 204 {
 		t.Fatalf("accept: %d %v", code, out)
 	}
@@ -377,5 +388,115 @@ func TestManagedUsersPowers(t *testing.T) {
 	}
 	if code, out := l.meDo(t, "GET", newbie, "/v1/me/orgs", nil); code != 401 {
 		t.Fatalf("session of deleted managed user: %d %v", code, out)
+	}
+}
+
+// passkey 必須の Org の管理ユーザーで passkey が無い人は、ログインできないのではなく passkey の登録だけができるセッションになる。
+func TestManagedUserPasskeyEnrollment(t *testing.T) {
+	l, dns := newDomainEnv(t, true, feature.OrgLoginPolicy)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	l.verifiedDomain(t, dns, owner, acme, "acme.example")
+	if code, out := l.putSettings(t, owner, acme, map[string]any{"login_policy": map[string]any{"require_passkey": true}}); code != 200 {
+		t.Fatalf("put passkey: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, owner, "/v1/me/orgs/"+acme+"/invitations", map[string]any{"email": "new@acme.example", "role": "member", "managed": true}); code != 201 {
+		t.Fatalf("managed invite: %d %v", code, out)
+	}
+	// 招待からの登録（メールのコード）は、参加を済ませて登録だけのセッションになる。
+	_, token := l.claimToken(t)
+	code, out := l.accept(t, "", token)
+	if code != 200 {
+		t.Fatalf("accept as new user: %d %v", code, out)
+	}
+	if login, _ := out["login"].(map[string]any); login == nil || login["next"] != "enroll" {
+		t.Fatalf("accept login: %v", out)
+	}
+	// メールのコードでのログインも、登録だけのセッションになる。
+	w := l.loginVerify(t, "new@acme.example")
+	var res map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &res)
+	if w.Code != 200 || res["next"] != "enroll" {
+		t.Fatalf("managed login without passkey: %d %s", w.Code, w.Body.String())
+	}
+	var cookie string
+	for _, c := range w.Result().Cookies() {
+		if c.Name == sessionCookie {
+			cookie = c.Value
+		}
+	}
+	if code, out := l.meDo(t, "GET", cookie, "/v1/me/orgs", nil); code != 401 {
+		t.Fatalf("enroll session used the api: %d %v", code, out)
+	}
+	if code, out := l.meDo(t, "GET", cookie, "/v1/me/methods", nil); code != 200 {
+		t.Fatalf("enroll session methods: %d %v", code, out)
+	}
+}
+
+// 運営者は管理 API（orgs:update）で扱え、Org を消すとドメインも消える。
+func TestOrgDomainsAdminAPI(t *testing.T) {
+	l, dns := newDomainEnv(t, true)
+	_, root := l.operator(t, "root@example.com", role.RealmOwner)
+	_, support := l.operator(t, "help@example.com", role.RealmSupport)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	base := "/v1/admin/orgs/" + acme + "/domains"
+
+	if code, out := l.adminDo(t, "GET", support, base, nil); code != 403 {
+		t.Fatalf("list as support: %d %v", code, out)
+	}
+	code, out := l.admin(t, base, root, map[string]string{"domain": "acme.example"})
+	if code != 201 || out["status"] != "pending" {
+		t.Fatalf("add: %d %v", code, out)
+	}
+	dom, value := out["id"].(string), out["txt_value"].(string)
+	if code, out := l.admin(t, base, root, map[string]string{"domain": "acme.example"}); code != 409 || out["error"] != "domain_exists" {
+		t.Fatalf("add again: %d %v", code, out)
+	}
+	if code, out := l.admin(t, base+"/"+dom+":verify", root, nil); code != 409 || out["error"] != "domain_not_verified" {
+		t.Fatalf("verify without TXT: %d %v", code, out)
+	}
+	dns.fail = true
+	if code, out := l.admin(t, base+"/"+dom+":verify", root, nil); code != 503 || out["error"] != "dns_unavailable" {
+		t.Fatalf("verify with DNS failure: %d %v", code, out)
+	}
+	dns.fail = false
+	dns.set("_iam-challenge.acme.example", value)
+	if code, out := l.admin(t, base+"/"+dom+":verify", root, nil); code != 200 || out["status"] != "verified" {
+		t.Fatalf("verify: %d %v", code, out)
+	}
+	if code, out := l.adminDo(t, "GET", root, base, nil); code != 200 || len(out["domains"].([]any)) != 1 {
+		t.Fatalf("list: %d %v", code, out)
+	}
+	// owner の公開 API からも同じものが見える。
+	if code, out := l.meDo(t, "GET", owner, "/v1/me/orgs/"+acme+"/domains", nil); code != 200 ||
+		out["domains"].([]any)[0].(map[string]any)["status"] != "verified" {
+		t.Fatalf("list as owner: %d %v", code, out)
+	}
+
+	// Org を消すと証明済みのドメインも消え、別の Org が登録できる。
+	if code, out := l.admin(t, "/v1/admin/orgs/"+acme+":delete", root, map[string]any{"immediate": true}); code != 200 {
+		t.Fatalf("delete org: %d %v", code, out)
+	}
+	if code, out := l.adminDo(t, "GET", root, base, nil); code != 404 {
+		t.Fatalf("list of a deleted org: %d %v", code, out)
+	}
+	_, other := l.login(t, "eve@evil.example")
+	evil := l.sharedOrg(t, other, "Evil")
+	if code, out := l.admin(t, "/v1/admin/orgs/"+evil+"/domains", root, map[string]string{"domain": "acme.example"}); code != 201 {
+		t.Fatalf("add after the owner org is deleted: %d %v", code, out)
+	}
+	if code, out := l.admin(t, "/v1/admin/orgs/"+evil+"/domains/"+dom+":delete", root, nil); code != 404 {
+		t.Fatalf("delete another org's domain: %d %v", code, out)
+	}
+}
+
+func TestOrgDomainsAdminFeatureOff(t *testing.T) {
+	l, _ := newDomainEnv(t, false)
+	_, root := l.operator(t, "root@example.com", role.RealmOwner)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	if code, out := l.adminDo(t, "GET", root, "/v1/admin/orgs/"+acme+"/domains", nil); code != 404 || out["error"] != "org_managed_users_disabled" {
+		t.Fatalf("admin domains without feature: %d %v", code, out)
 	}
 }

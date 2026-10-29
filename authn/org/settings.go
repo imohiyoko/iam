@@ -131,8 +131,8 @@ func (s *Service) warningsDenied(o port.Org, hits []warning.Warning) error {
 	return err
 }
 
-// CheckSettings は Org が設定しようとする値を確かめる（2.8）。
-func (s *Service) CheckSettings(st Settings) error {
+// CheckSettings は Org が設定しようとする値 st を確かめる（2.8）。prev は保存済みの設定。
+func (s *Service) CheckSettings(st, prev Settings) error {
 	r := s.Rules
 	check := func(rule settings.Duration, v *time.Duration) error {
 		if v == nil {
@@ -147,7 +147,7 @@ func (s *Service) CheckSettings(st Settings) error {
 		check(r.MaxAuthAge, st.MaxAuthAge)); err != nil {
 		return err
 	}
-	if _, err := s.checkPolicy(st.LoginPolicy); err != nil {
+	if _, err := s.checkPolicy(st.LoginPolicy, prev.LoginPolicy); err != nil {
 		return err
 	}
 	if len(st.Warnings) == 0 {
@@ -173,14 +173,14 @@ func (s *Service) UpdateSettings(ctx context.Context, tx port.Tx, o port.Org, st
 	if o.Kind == port.OrgPersonal {
 		return port.Org{}, ErrPersonalOrg
 	}
-	if err := s.CheckSettings(st); err != nil {
-		return port.Org{}, err
-	}
-	st.LoginPolicy, _ = s.checkPolicy(st.LoginPolicy) // 正規化した形で保存する（確かめは CheckSettings で済んでいる）
 	before, err := SettingsOf(o)
 	if err != nil {
 		return port.Org{}, err
 	}
+	if err := s.CheckSettings(st, before); err != nil {
+		return port.Org{}, err
+	}
+	st.LoginPolicy, _ = s.checkPolicy(st.LoginPolicy, before.LoginPolicy) // 正規化した形で保存する（確かめは CheckSettings で済んでいる）
 	var raw []byte
 	if !st.empty() {
 		if raw, err = json.Marshal(st); err != nil {

@@ -54,7 +54,7 @@ CREATE TABLE authz_groups (
 ) STRICT;
 
 CREATE TABLE authz_group_members (
-    group_id    TEXT NOT NULL,
+    group_id    TEXT NOT NULL REFERENCES authz_groups (id) ON DELETE CASCADE,
     member_type TEXT NOT NULL,
     member_id   TEXT NOT NULL,
     created_at  TEXT NOT NULL,

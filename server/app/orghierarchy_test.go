@@ -82,12 +82,17 @@ func TestOrgHierarchy(t *testing.T) {
 		t.Fatalf("missing parent: %d %v", code, out)
 	}
 	personal := ""
-	if code, out := l.meDo(t, "GET", boss, "/v1/me/orgs", nil); code == 200 {
-		for _, o := range out["orgs"].([]any) {
-			if m := o.(map[string]any); m["kind"] == "personal" {
-				personal = m["id"].(string)
-			}
+	code, out = l.meDo(t, "GET", boss, "/v1/me/orgs", nil)
+	if code != 200 {
+		t.Fatalf("list my orgs: %d %v", code, out)
+	}
+	for _, o := range out["orgs"].([]any) {
+		if m := o.(map[string]any); m["kind"] == "personal" {
+			personal = m["id"].(string)
 		}
+	}
+	if personal == "" {
+		t.Fatalf("personal org not found: %v", out)
 	}
 	if code, out := setParent(personal, acme); code != 409 || out["error"] != "personal_org" {
 		t.Fatalf("personal org: %d %v", code, out)
