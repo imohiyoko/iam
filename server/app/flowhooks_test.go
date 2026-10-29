@@ -12,6 +12,7 @@ import (
 
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
+	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/port"
 )
@@ -96,6 +97,12 @@ func TestFlowHooksRegistrationAndLogin(t *testing.T) {
 	if in := pre.last(t); in.Email != "eve@evil.example" || in.Realm == "" || in.VerifiedVia != string(port.VerifiedViaCode) {
 		t.Fatalf("pre_registration input: %+v", in)
 	}
+	if err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+		_, err := l.a.accounts.FindByEmail(ctx, tx, l.a.realm.ID, "eve@evil.example")
+		return err
+	}); !errors.Is(err, errs.NotFound) {
+		t.Fatalf("denied signup made a user: %v", err)
+	}
 	_, cookie := l.login(t, "alice@example.com")
 	aliceID := l.userID(t, "alice@example.com")
 	if in := post.last(t); in.Hook != port.HookPostAuthentication || in.UserID != aliceID || len(in.AuthMethods) == 0 {
@@ -158,6 +165,7 @@ func TestFlowHooksMembershipEnd(t *testing.T) {
 	if code, body := l.mePost(t, pat, "/v1/me/orgs/"+acme+":leave", nil); code != 409 || body["error"] != "membership_end_held" {
 		t.Fatalf("held leave: %d %v", code, body)
 	}
+	l.myOrgEntry(t, pat, acme) // 止められた離脱では所属が残る。
 	in := end.last(t)
 	if in.OrgID != acme || in.UserID != l.userID(t, "pat@example.com") || in.EndReason != "left" || in.MembershipID == "" {
 		t.Fatalf("pre_membership_end input: %+v", in)

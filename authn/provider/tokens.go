@@ -556,7 +556,7 @@ func (t *Tokens) hookClaims(ctx context.Context, cl port.Client, g port.Grant, c
 		return ErrHookClaims
 	}
 	for k, v := range res.Claims {
-		if k == "" || slices.Contains(reservedClaims, k) {
+		if _, taken := claims[k]; k == "" || taken || slices.Contains(reservedClaims, k) {
 			return ErrHookClaims
 		}
 		claims[k] = v

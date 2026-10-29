@@ -79,6 +79,21 @@ func TestRunner(t *testing.T) {
 	if _, err := r.Run(cctx, port.HookInput{Hook: port.HookPreToken}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled: %v", err)
 	}
+	// ctx に従わないフックでも期限で fail-closed にする。
+	block := make(chan struct{})
+	defer close(block)
+	stuck := &Runner{Entries: map[string]Entry{port.HookPreToken: {Hook: hookFunc(func(context.Context, port.HookInput) (port.HookResult, error) {
+		<-block
+		return port.HookResult{Allow: true}, nil
+	}), Timeout: 10 * time.Millisecond}}}
+	start := time.Now()
+	var d *DeniedError
+	if _, err := stuck.Run(ctx, port.HookInput{Hook: port.HookPreToken}); !errors.As(err, &d) {
+		t.Fatalf("stuck hook: %v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("waited past the timeout")
+	}
 }
 
 func TestWebhook(t *testing.T) {
