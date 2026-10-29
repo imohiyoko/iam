@@ -82,3 +82,4 @@
 | [0068](0068-storage-export-import.md) | Storage の書き出しと読み込み（移行）は表ごとの行を JSON Lines で運ぶ | 承認 |
 | [0069](0069-org-login-policy.md) | Org のログインポリシーは Org の設定に持ち、ログインと切り替えのときに判定する | 承認 |
 | [0070](0070-quota.md) | Quota は時刻ごとの上限と人数で判定し、区切りの時刻だけを調べる | 承認 |
+| [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |
