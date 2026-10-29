@@ -156,6 +156,11 @@ func TestInvitationBindsInvitedEmail(t *testing.T) {
 	if code, _ := l.mePost(t, sam, "/v1/me/emails/"+workID+":remove", nil); code != 204 {
 		t.Fatalf("remove after rebind = %d", code)
 	}
+	// index_only に切り替えた直後（掃除前で暗号文が残っている）も、アドレスは見せない（9.6）。
+	l.a.accounts.IndexOnly = true
+	if _, ms := l.members(t, owner, orgID); slices.ContainsFunc(ms.Members, func(m orgMember) bool { return m.Email != "" }) {
+		t.Fatalf("index_only members = %+v", ms)
+	}
 }
 
 func TestInvitationRegistersNewUser(t *testing.T) {
