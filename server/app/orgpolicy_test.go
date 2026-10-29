@@ -119,3 +119,30 @@ func TestOrgLoginPolicy(t *testing.T) {
 		t.Fatalf("settings_changed = %v", changed)
 	}
 }
+
+// 2要素目の前の段では判定しないので、完了のときにポリシーを満たさなければ、ログインは失敗させずに他の Org に入る。
+func TestOrgLoginPolicyAfterSecondFactor(t *testing.T) {
+	l := newPolicyEnv(t, true)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	pat := l.join(t, owner, acme, "pat@acme.example", "member")
+	secret, code, out, _ := l.enrollTOTP(t, pat)
+	if code != 200 {
+		t.Fatalf("totp: %d %v", code, out)
+	}
+	if code, out := l.putSettings(t, owner, acme, map[string]any{"login_policy": map[string]any{"ip_allowlist": []string{"10.0.0.0/8"}}}); code != 200 {
+		t.Fatalf("put ip: %d %v", code, out)
+	}
+	l.advance(30 * time.Second)
+	login, restricted := l.login(t, "pat@acme.example")
+	if login["next"] != "second_factor" {
+		t.Fatalf("login: %v", login)
+	}
+	code, res, upgraded := l.post(t, restricted, "/v1/login/second-factor:verify", map[string]string{"totp_code": l.code(t, secret)})
+	if code != 200 || upgraded == "" {
+		t.Fatalf("verify: %d %v", code, res)
+	}
+	if got := l.activeOrgPublic(t, upgraded); got == acme || got == "" {
+		t.Fatalf("entered %q after second factor", got)
+	}
+}

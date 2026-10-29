@@ -11,6 +11,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -278,7 +279,8 @@ func (s *Service) Bind(ctx context.Context, tx port.Tx, sc Scope, a Actor, ref s
 		if err != nil {
 			return port.RoleBinding{}, err
 		}
-		if g.OrgID != "" && g.OrgID != sc.OrgID {
+		// Group と付与の範囲は揃える。Org の範囲から realm の Group に付与すると、realm の範囲から管理できなくなる。
+		if g.OrgID != sc.OrgID {
 			return port.RoleBinding{}, ErrInvalidPrincipal
 		}
 	}
@@ -317,18 +319,12 @@ func (s *Service) Unbind(ctx context.Context, tx port.Tx, sc Scope, a Actor, b p
 	if err := s.authorize(ctx, tx, sc, a, role.PermRolesManage, role.PermOrgRoles, perms); err != nil {
 		return err
 	}
-	if b.Role == role.RealmOwner && b.ResourceType == "" {
-		bs, err := tx.RoleBindings().ListByRole(ctx, sc.RealmID, role.RealmOwner)
+	if b.Role == role.RealmOwner && b.ResourceType == "" && b.OrgID == "" && b.PrincipalType == port.PrincipalUser {
+		others, err := otherOwners(ctx, tx, sc.RealmID, b.PrincipalID, s.Clock.Now())
 		if err != nil {
 			return err
 		}
-		n := 0
-		for _, x := range bs {
-			if x.OrgID == "" && x.ResourceType == "" && x.PrincipalType == port.PrincipalUser {
-				n++
-			}
-		}
-		if n <= 1 && b.PrincipalType == port.PrincipalUser {
+		if others == 0 {
 			return ErrLastOwner
 		}
 	}
@@ -509,4 +505,80 @@ func (s *Service) rebuildMember(ctx context.Context, tx port.Tx, realmID string,
 		return err
 	}
 	return rebuild(ctx, tx, realmID, ids)
+}
+
+// otherOwners は userID 以外で、realm 全体の realm:owner を直接持ち、使えるユーザーの数を返す（Group 経由は数えない）。
+// 削除済み・削除の予約中、now に有効期間の外か停止中のユーザーは realm を管理できないので数えない。
+func otherOwners(ctx context.Context, tx port.Tx, realmID, userID string, now time.Time) (int, error) {
+	bs, err := tx.RoleBindings().ListByRole(ctx, realmID, role.RealmOwner)
+	if err != nil {
+		return 0, err
+	}
+	seen := map[string]bool{}
+	n := 0
+	for _, b := range bs {
+		if b.OrgID != "" || b.ResourceType != "" || b.PrincipalType != port.PrincipalUser || b.PrincipalID == userID || seen[b.PrincipalID] {
+			continue
+		}
+		seen[b.PrincipalID] = true
+		u, err := tx.Users().Get(ctx, realmID, b.PrincipalID)
+		if errors.Is(err, errs.NotFound) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if u.Status != port.UserActive || u.DeletionScheduledAt != nil {
+			continue
+		}
+		ok, err := usableAt(ctx, tx, u, now)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// usableAt はユーザーが now に有効期間の内で、停止中でないかを返す（account.Check と同じ規則。authz は authn を import しない）。
+func usableAt(ctx context.Context, tx port.Tx, u port.User, now time.Time) (bool, error) {
+	if (u.ValidFrom != nil && now.Before(*u.ValidFrom)) || (u.ValidUntil != nil && !now.Before(*u.ValidUntil)) {
+		return false, nil
+	}
+	ss, err := tx.Suspensions().ListByTarget(ctx, u.RealmID, port.SuspensionTargetUser, u.ID)
+	if err != nil {
+		return false, err
+	}
+	for _, sp := range ss {
+		end := sp.EndsAt
+		if sp.LiftedAt != nil && (end == nil || sp.LiftedAt.Before(*end)) {
+			end = sp.LiftedAt
+		}
+		if !sp.StartsAt.After(now) && (end == nil || end.After(now)) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// IsLastOwner はユーザーが realm 全体の realm:owner を持ち、ほかに使える realm:owner がいないかを返す。
+// 消すと realm を管理できる人がいなくなる。
+func IsLastOwner(ctx context.Context, tx port.Tx, realmID, userID string, now time.Time) (bool, error) {
+	bs, err := tx.RoleBindings().ListByPrincipal(ctx, realmID, port.PrincipalUser, userID)
+	if err != nil {
+		return false, err
+	}
+	owner := false
+	for _, b := range bs {
+		if b.Role == role.RealmOwner && b.OrgID == "" && b.ResourceType == "" {
+			owner = true
+		}
+	}
+	if !owner {
+		return false, nil
+	}
+	others, err := otherOwners(ctx, tx, realmID, userID, now)
+	return others == 0, err
 }

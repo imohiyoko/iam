@@ -418,6 +418,7 @@ func addedSince(ctx context.Context, tx port.Tx, realmID, userID string, since t
 
 // notifyAll は確認済みの全メールに復旧の完了を知らせる（4.12）。宛先は claim で取り出させる。
 // アドレスを保存しない構成（index_only。9.6）のメールがあれば、宛先なしの通知を1件出す（外部が user_id から宛先を解決する）。
+// index_only では、切り替え前の暗号文が掃除前に残っていても宛先付きでは送らない。
 func (s *Service) notifyAll(ctx context.Context, tx port.Tx, realmID string, u port.User, now time.Time) error {
 	es, err := tx.Emails().ListByUser(ctx, realmID, u.ID)
 	if err != nil {
@@ -428,7 +429,7 @@ func (s *Service) notifyAll(ctx context.Context, tx port.Tx, realmID string, u p
 		if e.VerifiedAt == nil {
 			continue
 		}
-		if len(e.Ciphertext) == 0 {
+		if s.Accounts.IndexOnly || len(e.Ciphertext) == 0 {
 			unresolved = true
 			continue
 		}

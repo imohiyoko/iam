@@ -391,7 +391,8 @@ func (a *App) DisableFeature(ctx context.Context, name string, purge bool) (Disa
 			return res, err
 		}
 		res.Purged += n
-		if n < prepareBatch {
+		// 1回で limit に満たなくても続ける（階層は葉から外すので、1回で外せない Org が残る）。何も片付かなければ終わり。
+		if n == 0 {
 			break
 		}
 	}

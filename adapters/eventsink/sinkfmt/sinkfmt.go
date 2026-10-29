@@ -109,7 +109,7 @@ func (e *Encoder) Redact(ev audit.Event) audit.Event {
 	switch e.PII {
 	case PIIRaw:
 	case PIIPseudonymize:
-		ev.IP = e.Pseudonym(ev.IP)
+		ev.IP, ev.UserAgent = e.Pseudonym(ev.IP), e.Pseudonym(ev.UserAgent)
 	default:
 		ev.IP, ev.UserAgent = "", ""
 	}

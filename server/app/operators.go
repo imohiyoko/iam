@@ -266,8 +266,13 @@ var errOutranked = errors.New("target holds permissions the caller lacks")
 
 // outranks は、対象になりすませる操作の前に、呼び出し側が対象のロールの権限をすべて持つかを確かめる。
 func (a *App) outranks(ctx context.Context, tx port.Tx, p adminPrincipal, targetUserID string) error {
-	// 対象の realm の範囲全体の権限を集め、呼び出し側がすべて持つかを確かめる（Group から効く権限も含む）。
-	gs, err := a.authz.Grants(ctx, tx, a.realm.ID, check.Principal{Type: port.PrincipalUser, ID: targetUserID}, "")
+	return a.outranksPrincipal(ctx, tx, p, check.Principal{Type: port.PrincipalUser, ID: targetUserID}, "")
+}
+
+// outranksPrincipal は outranks を任意の主体に広げる。orgID が空でなければその Org の範囲の付与も比べる。
+func (a *App) outranksPrincipal(ctx context.Context, tx port.Tx, p adminPrincipal, target check.Principal, orgID string) error {
+	// 対象の範囲全体の権限を集め、呼び出し側がすべて持つかを確かめる（Group から効く権限も含む）。
+	gs, err := a.authz.Grants(ctx, tx, a.realm.ID, target, orgID)
 	if err != nil {
 		return err
 	}
@@ -277,7 +282,7 @@ func (a *App) outranks(ctx context.Context, tx port.Tx, p adminPrincipal, target
 			need = append(need, g.Permissions...)
 		}
 	}
-	ok, err := a.authz.Holds(ctx, tx, a.realm.ID, check.Principal{Type: p.Type, ID: p.ID}, "", need)
+	ok, err := a.authz.Holds(ctx, tx, a.realm.ID, check.Principal{Type: p.Type, ID: p.ID}, orgID, need)
 	if err != nil {
 		return err
 	}
