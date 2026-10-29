@@ -250,6 +250,11 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.oauth = &oauth.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Dev: cfg.Dev, TTL: cfg.Security.EmailFlow.TTL.D(), Log: d.Logger,
+		// Org 専用 SSO（ADR 0077）。戻り先はホスト型ログイン画面に固定する。
+		OrgRedirectURI: a.issuer + "/login/oauth/callback", AllowPrivateNetworks: cfg.Dev,
+	}
+	if a.orgs != nil && a.orgs.ManagedUsers {
+		a.oauth.OrgSSO = a.orgs
 	}
 	if rpID, rpName, origins, ok := cfg.PasskeyRP(); ok {
 		a.passkeys, err = passkey.New(passkey.Config{RPID: rpID, RPName: rpName, Origins: origins}, passkey.Service{

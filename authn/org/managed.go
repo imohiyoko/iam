@@ -174,8 +174,31 @@ func (s *Service) clearRequest(ctx context.Context, tx port.Tx, o port.Org, m po
 
 // release は u を個人ユーザーに戻す（Org が手放す・除名・Org の削除）。
 func (s *Service) release(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, u port.User, actor audit.Actor, requestID string) error {
-	if err := tx.Users().SetManagedOrg(ctx, o.RealmID, u.ID, "", s.Clock.Now()); err != nil {
+	now := s.Clock.Now()
+	if err := tx.Users().SetManagedOrg(ctx, o.RealmID, u.ID, "", now); err != nil {
 		return err
+	}
+	// Org 専用 SSO の外部 ID は管理ユーザーだけのもの。個人ユーザーに戻したら無効化する（ADR 0077）。
+	is, err := tx.Identities().ListByUser(ctx, o.RealmID, u.ID)
+	if err != nil {
+		return err
+	}
+	for _, i := range is {
+		if i.RevokedAt != nil {
+			continue
+		}
+		c, err := tx.Connections().Get(ctx, o.RealmID, i.ConnectionID)
+		if errors.Is(err, errs.NotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if c.OwnerOrgID == o.ID {
+			if err := tx.Identities().Revoke(ctx, o.RealmID, i.ID, now, RevokeManagementReleased); err != nil {
+				return err
+			}
+		}
 	}
 	return s.recordManaged(ctx, tx, o, EventUserReleased, m, u, actor, requestID)
 }

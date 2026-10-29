@@ -70,6 +70,17 @@ func (q *Queries) CountManagedUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countOwnedConnections = `-- name: CountOwnedConnections :one
+SELECT COUNT(*) FROM authn_connections WHERE realm_id = ? AND owner_org_id <> ''
+`
+
+func (q *Queries) CountOwnedConnections(ctx context.Context, realmID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countOwnedConnections, realmID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countPasswords = `-- name: CountPasswords :one
 SELECT count(*) FROM authn_password_credentials
 `
@@ -82,16 +93,17 @@ func (q *Queries) CountPasswords(ctx context.Context) (int64, error) {
 }
 
 const createConnection = `-- name: CreateConnection :exec
-INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at) VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at, owner_org_id) VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateConnectionParams struct {
-	ID        string
-	RealmID   string
-	Slug      string
-	Type      string
-	Config    []byte
-	CreatedAt string
+	ID         string
+	RealmID    string
+	Slug       string
+	Type       string
+	Config     []byte
+	CreatedAt  string
+	OwnerOrgID string
 }
 
 func (q *Queries) CreateConnection(ctx context.Context, arg CreateConnectionParams) error {
@@ -102,6 +114,7 @@ func (q *Queries) CreateConnection(ctx context.Context, arg CreateConnectionPara
 		arg.Type,
 		arg.Config,
 		arg.CreatedAt,
+		arg.OwnerOrgID,
 	)
 	return err
 }
@@ -527,6 +540,23 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 	return err
 }
 
+const deleteConnection = `-- name: DeleteConnection :execrows
+DELETE FROM authn_connections WHERE realm_id = ? AND id = ?
+`
+
+type DeleteConnectionParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteConnection, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteEmail = `-- name: DeleteEmail :execrows
 DELETE FROM authn_user_emails WHERE realm_id = ? AND id = ?
 `
@@ -823,7 +853,7 @@ func (q *Queries) GetActivePassword(ctx context.Context, arg GetActivePasswordPa
 }
 
 const getConnection = `-- name: GetConnection :one
-SELECT id, realm_id, slug, type, config, created_at FROM authn_connections WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, slug, type, config, created_at, owner_org_id FROM authn_connections WHERE realm_id = ? AND id = ?
 `
 
 type GetConnectionParams struct {
@@ -841,12 +871,13 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (A
 		&i.Type,
 		&i.Config,
 		&i.CreatedAt,
+		&i.OwnerOrgID,
 	)
 	return i, err
 }
 
 const getConnectionBySlug = `-- name: GetConnectionBySlug :one
-SELECT id, realm_id, slug, type, config, created_at FROM authn_connections WHERE realm_id = ? AND slug = ?
+SELECT id, realm_id, slug, type, config, created_at, owner_org_id FROM authn_connections WHERE realm_id = ? AND slug = ?
 `
 
 type GetConnectionBySlugParams struct {
@@ -864,6 +895,7 @@ func (q *Queries) GetConnectionBySlug(ctx context.Context, arg GetConnectionBySl
 		&i.Type,
 		&i.Config,
 		&i.CreatedAt,
+		&i.OwnerOrgID,
 	)
 	return i, err
 }
@@ -1519,7 +1551,7 @@ func (q *Queries) LiftSuspension(ctx context.Context, arg LiftSuspensionParams) 
 }
 
 const listConnections = `-- name: ListConnections :many
-SELECT id, realm_id, slug, type, config, created_at FROM authn_connections WHERE realm_id = ? ORDER BY slug
+SELECT id, realm_id, slug, type, config, created_at, owner_org_id FROM authn_connections WHERE realm_id = ? ORDER BY slug
 `
 
 func (q *Queries) ListConnections(ctx context.Context, realmID string) ([]AuthnConnection, error) {
@@ -1538,6 +1570,47 @@ func (q *Queries) ListConnections(ctx context.Context, realmID string) ([]AuthnC
 			&i.Type,
 			&i.Config,
 			&i.CreatedAt,
+			&i.OwnerOrgID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConnectionsByOwner = `-- name: ListConnectionsByOwner :many
+SELECT id, realm_id, slug, type, config, created_at, owner_org_id FROM authn_connections WHERE realm_id = ? AND owner_org_id = ? ORDER BY created_at, id
+`
+
+type ListConnectionsByOwnerParams struct {
+	RealmID    string
+	OwnerOrgID string
+}
+
+func (q *Queries) ListConnectionsByOwner(ctx context.Context, arg ListConnectionsByOwnerParams) ([]AuthnConnection, error) {
+	rows, err := q.db.QueryContext(ctx, listConnectionsByOwner, arg.RealmID, arg.OwnerOrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnConnection
+	for rows.Next() {
+		var i AuthnConnection
+		if err := rows.Scan(
+			&i.ID,
+			&i.RealmID,
+			&i.Slug,
+			&i.Type,
+			&i.Config,
+			&i.CreatedAt,
+			&i.OwnerOrgID,
 		); err != nil {
 			return nil, err
 		}
@@ -2175,6 +2248,30 @@ type RenamePasskeyParams struct {
 
 func (q *Queries) RenamePasskey(ctx context.Context, arg RenamePasskeyParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, renamePasskey, arg.Name, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const revokeIdentitiesByConnection = `-- name: RevokeIdentitiesByConnection :execrows
+UPDATE authn_user_identities SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND connection_id = ? AND revoked_at IS NULL
+`
+
+type RevokeIdentitiesByConnectionParams struct {
+	RevokedAt    sql.NullString
+	RevokeReason string
+	RealmID      string
+	ConnectionID string
+}
+
+func (q *Queries) RevokeIdentitiesByConnection(ctx context.Context, arg RevokeIdentitiesByConnectionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeIdentitiesByConnection,
+		arg.RevokedAt,
+		arg.RevokeReason,
+		arg.RealmID,
+		arg.ConnectionID,
+	)
 	if err != nil {
 		return 0, err
 	}

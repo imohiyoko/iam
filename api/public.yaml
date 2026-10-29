@@ -175,6 +175,10 @@ paths:
         プロバイダが確認済みのメールなら登録する。メールが別のユーザーで登録済みなら自動リンクせず
         `409 account_exists` を返す（4.2。ログインしてから連携する）。プロバイダがメールを確認済みとしていなければ
         `400 email_unverified`。
+
+        Org 専用 SSO（ADR 0077）の connection では、その Org の管理ユーザーだけがログインでき、その Org に入る
+        （入れなければ `403`）。登録はその Org が証明したドメインのアドレスに限り（`400 email_domain_not_verified`）、
+        その Org の管理ユーザーとメンバーとして作る。Org の Quota が足りなければ `409 quota_exceeded`。
       requestBody:
         required: true
         content:
@@ -197,10 +201,41 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Denied" }
         "409":
-          description: メールが別のユーザーで登録済み（自動リンクしない）
+          description: メールが別のユーザーで登録済み（自動リンクしない）、Org 専用 SSO で Org の Quota が足りない
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/login/sso:discover:
+    post:
+      operationId: discoverSSO
+      summary: メールのドメインから Org 専用 SSO の connection を探す（ADR 0077）
+      description: |
+        アドレスのドメインを証明済みの Org があれば、その Org の connection（`/v1/login/oauth/{connection}:start` に渡す）を返す。
+        無ければ空。ドメインが SSO を使うことは公開の情報とみなす（アドレスの登録の有無は返さない）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, maxLength: 320 }
+      responses:
+        "200":
+          description: 見つかった connection（無ければ空）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connections]
+                properties:
+                  connections:
+                    type: array
+                    items: { type: string, description: connection（公開の ID） }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/login/passkey:start:
@@ -735,6 +770,7 @@ paths:
       description: |
         ログイン済みの本人だけが連携できる（4.2）。戻り先で受け取った `state` と `code` を
         `/v1/me/identities:complete` に渡す。`flow_id` はブラウザには `__Host-iam_oauth` Cookie でも渡す。
+        Org 専用 SSO の connection は、その Org の管理ユーザーだけが連携できる（`409 not_managed_by_org`。ADR 0077）。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -762,6 +798,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /v1/me/identities:complete:
     post:
@@ -1595,6 +1632,91 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}/connections:
+    get:
+      operationId: listOrgConnections
+      summary: Org 専用 SSO の connection の一覧（Org の owner。11.3、ADR 0077）
+      description: フィーチャー `org_managed_users` が動いていなければ 404。クライアントシークレットは返さない。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 登録の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connections]
+                properties:
+                  connections:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgConnection" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: addOrgConnection
+      summary: Org 専用 SSO の connection（OIDC）を登録する（Org の owner。ADR 0077）
+      description: |
+        Org の IdP（OIDC）を登録する。IdP には応答の `redirect_uri`（ホスト型ログイン画面の戻り先。Org は選べない）を登録する。
+        URL は https に限り、トークンエンドポイントは公開のアドレスに限る。その Org の管理ユーザーだけがログインでき、
+        登録は Org が証明したドメインのアドレスに限る。個人 Org には登録できない（`409 personal_org`）。
+        Org の connection が上限（5）に達していれば `409 connection_limit`。設定の誤りは `400 invalid_connection`（サーバーの server.public_url が無ければ `400 public_url_required`）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [issuer, authorization_endpoint, token_endpoint, client_id, client_secret]
+              properties:
+                issuer: { type: string, maxLength: 2048, description: ID トークンの iss }
+                authorization_endpoint: { type: string, maxLength: 2048 }
+                token_endpoint: { type: string, maxLength: 2048 }
+                client_id: { type: string, maxLength: 2048 }
+                client_secret: { type: string, maxLength: 2048 }
+                scopes:
+                  type: array
+                  maxItems: 20
+                  description: 既定は openid と email。openid を含むこと
+                  items: { type: string }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgConnection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/orgs/{id}/connections/{connection_id}:delete:
+    post:
+      operationId: deleteOrgConnection
+      summary: Org 専用 SSO の connection を消す（Org の owner）
+      description: 紐付けた外部 ID は無効化する（その connection ではログインできなくなる）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: connection_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 消した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/me/orgs/{id}/members/{membership_id}:request-management:
     post:
       operationId: requestOrgManagement
@@ -2367,6 +2489,9 @@ components:
           maxItems: 100
           description: 要求の IP がこのどれか（CIDR）に入ること
           items: { type: string }
+        require_sso:
+          type: boolean
+          description: この Org の connection（Org 専用 SSO。ADR 0077）で認証したセッションだけを入れる。フィーチャー org_managed_users も要る
     OrgSettingsView:
       type: object
       required: [settings, effective]
@@ -2418,6 +2543,20 @@ components:
         txt_value: { type: string, description: TXT の値（`iam-domain-verification=<token>`） }
         verified_at: { type: string, format: date-time }
         checked_at: { type: string, format: date-time, description: 最後に TXT を確かめた時刻 }
+        created_at: { type: string, format: date-time }
+    OrgConnection:
+      type: object
+      required: [id, issuer, authorization_endpoint, token_endpoint, client_id, scopes, redirect_uri, created_at]
+      properties:
+        id: { type: string, description: "公開の connection ID（con_…）。`/v1/login/oauth/{connection}:start` に渡す" }
+        issuer: { type: string }
+        authorization_endpoint: { type: string }
+        token_endpoint: { type: string }
+        client_id: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+        redirect_uri: { type: string, description: IdP に登録する戻り先 }
         created_at: { type: string, format: date-time }
     MyEmail:
       type: object

@@ -26,12 +26,13 @@ type AuthnClient struct {
 }
 
 type AuthnConnection struct {
-	ID        string
-	RealmID   string
-	Slug      string
-	Type      string
-	Config    []byte
-	CreatedAt string
+	ID         string
+	RealmID    string
+	Slug       string
+	Type       string
+	Config     []byte
+	CreatedAt  string
+	OwnerOrgID string
 }
 
 type AuthnOidcGrant struct {

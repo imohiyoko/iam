@@ -158,5 +158,9 @@ func (s *Service) purge(ctx context.Context, tx port.Tx, o port.Org, actor audit
 		}
 	}
 	now := s.Clock.Now()
+	// Org 専用 SSO の connection を消す（ADR 0077。ドメインは上で消したので、別の Org が証明できるようになる）。
+	if _, err := PurgeConnections(ctx, tx, o.RealmID, o.ID, now, -1); err != nil {
+		return err
+	}
 	return tx.Orgs().SetDeletion(ctx, o.RealmID, o.ID, o.DeletionScheduledAt, &now, now)
 }

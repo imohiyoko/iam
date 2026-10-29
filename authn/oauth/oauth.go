@@ -49,6 +49,16 @@ var ErrAccountExists = errs.New(errs.KindConflict, "an account with this email a
 // ErrEmailUnverified は、未登録で、プロバイダがメールを確認済みとしていないこと（登録に使えない）。
 var ErrEmailUnverified = errs.New(errs.KindInvalid, "the provider has not verified the email address")
 
+// ErrSSODomainNotVerified は、Org 専用 SSO の登録で、プロバイダが返したアドレスのドメインを Org が証明していないこと
+// （ADR 0077）。本人確認の後なので理由を返してよい。
+var ErrSSODomainNotVerified = errs.WithCode(errs.KindInvalid, "email_domain_not_verified", "the org has not verified the email domain")
+
+// ErrQuotaExceeded は、Org 専用 SSO の登録で、Org の Quota が足りないこと（errors.Is で比べる）。
+var ErrQuotaExceeded = &errs.Error{Kind: errs.KindConflict, Code: errs.CodeQuotaExceeded}
+
+// ErrNotManagedByOwner は、Org 専用 SSO の connection を、その Org の管理ユーザーでない人が連携しようとしたこと（ADR 0077）。
+var ErrNotManagedByOwner = errs.WithCode(errs.KindFailedPrecondition, "not_managed_by_org", "the connection belongs to an org that does not manage this user")
+
 // Type は connections.type。
 const Type = "oidc"
 
@@ -125,6 +135,22 @@ type Service struct {
 	Dev  bool
 	TTL  time.Duration // フローの期限。既定 10 分
 	Log  *slog.Logger
+	// OrgSSO は Org 専用 SSO（ADR 0077）での登録を Org に引き渡す。nil なら Org 専用の connection を使えない。
+	OrgSSO OrgSSO
+	// OrgRedirectURI は Org 専用の connection の戻り先（ホスト型ログイン画面の /login/oauth/callback）。Org は選べない。
+	OrgRedirectURI string
+	// Resolver は Org 専用の connection のトークンエンドポイントの名前解決（SSRF 対策。nil なら net.DefaultResolver）。
+	Resolver Resolver
+	// AllowPrivateNetworks は Org 専用の connection の宛先を確かめない（開発・テストだけ）。
+	AllowPrivateNetworks bool
+}
+
+// OrgSSO は Org 専用 SSO の登録で Org の側が行うこと（authn/org が実装する）。
+type OrgSSO interface {
+	// SSODomainVerified は email（正規化済み）のドメインを Org（内部 ID）が証明済みかを返す。
+	SSODomainVerified(ctx context.Context, tx port.Tx, realmID, orgID, email string) (bool, error)
+	// AdmitSSO は Org 専用 SSO で登録したユーザーを、その Org の管理ユーザーとメンバーにする。
+	AdmitSSO(ctx context.Context, tx port.Tx, orgID string, u port.User, emailID, requestID string) error
 }
 
 // Client は要求の接続元（監査ログとセッションに残す）。
@@ -164,7 +190,7 @@ func (s *Service) connection(ctx context.Context, realmID, slug string) (port.Co
 	if err != nil {
 		return port.Connection{}, Config{}, err
 	}
-	if c.Type != Type {
+	if c.Type != Type || (c.OwnerOrgID != "" && s.OrgSSO == nil) {
 		return port.Connection{}, Config{}, errs.New(errs.KindNotFound, "connection %s is not an oauth connection", slug)
 	}
 	var cfg Config
@@ -234,6 +260,12 @@ func (s *Service) start(ctx context.Context, realmID, slug, redirectURI, linkUse
 	c, cfg, err := s.connection(ctx, realmID, slug)
 	if err != nil {
 		return Started{}, err
+	}
+	if linkUserID != "" && c.OwnerOrgID != "" {
+		// Org 専用の connection は、その Org の管理ユーザーだけが使える（Org の IdP がなりすませる相手を限る。ADR 0077）。
+		if err := s.managedByOwner(ctx, realmID, c, linkUserID); err != nil {
+			return Started{}, err
+		}
 	}
 	if redirectURI == "" {
 		redirectURI = cfg.RedirectURIs[0]
@@ -306,7 +338,7 @@ func (s *Service) Complete(ctx context.Context, realmID string, in Complete) (Re
 	out, err := s.complete(ctx, realmID, in)
 	if err != nil {
 		s.recordFailure(ctx, realmID, in.Client, err)
-		if errors.Is(err, ErrAccountExists) || errors.Is(err, ErrEmailUnverified) {
+		if errors.Is(err, ErrAccountExists) || errors.Is(err, ErrEmailUnverified) || errors.Is(err, ErrSSODomainNotVerified) || errors.Is(err, ErrQuotaExceeded) {
 			return Result{}, err
 		}
 		if denied, ok := errors.AsType[errs.Denial](err); ok {
@@ -334,7 +366,7 @@ var ErrIdentityExists = errs.WithCode(errs.KindConflict, "identity_exists", "the
 func (s *Service) CompleteLink(ctx context.Context, realmID, userID string, in Complete) (port.Identity, error) {
 	ident, err := s.completeLink(ctx, realmID, userID, in)
 	if err != nil {
-		if errors.Is(err, ErrIdentityExists) {
+		if errors.Is(err, ErrIdentityExists) || errors.Is(err, ErrNotManagedByOwner) {
 			return port.Identity{}, err
 		}
 		s.recordFailure(ctx, realmID, in.Client, err)
@@ -362,6 +394,9 @@ func (s *Service) completeLink(ctx context.Context, realmID, userID string, in C
 		u, err := tx.Users().Get(ctx, realmID, userID)
 		if err != nil {
 			return err
+		}
+		if conn.OwnerOrgID != "" && u.ManagedOrgID != conn.OwnerOrgID {
+			return ErrNotManagedByOwner
 		}
 		ident = port.Identity{ID: id.New(id.Identity), PublicID: id.NewExternal(id.Identity), RealmID: realmID, UserID: u.ID,
 			ConnectionID: conn.ID, ProviderSubject: c.Subject, CreatedAt: s.Clock.Now()}
@@ -428,7 +463,10 @@ func (s *Service) finish(ctx context.Context, realmID string, in Complete, linkU
 	if err := cfg.Validate(s.Dev); err != nil {
 		return port.Connection{}, claims{}, err
 	}
-	c, err := s.exchange(ctx, cfg, st, in.Code, now)
+	if conn.OwnerOrgID != "" && s.OrgSSO == nil {
+		return port.Connection{}, claims{}, errors.New("org connections are disabled")
+	}
+	c, err := s.exchange(ctx, cfg, st, in.Code, now, conn.OwnerOrgID != "")
 	if err != nil {
 		return port.Connection{}, claims{}, err
 	}
@@ -500,7 +538,8 @@ func (s *Service) httpClient() *http.Client {
 const exchangeTimeout = 10 * time.Second
 
 // exchange は認可コードをトークンエンドポイントで ID トークンに替え、クレームを確かめる。
-func (s *Service) exchange(ctx context.Context, cfg Config, st state, code string, now time.Time) (claims, error) {
+// owned（Org 専用の connection）なら、トークンエンドポイントは公開のアドレスに限る（orgClient）。
+func (s *Service) exchange(ctx context.Context, cfg Config, st state, code string, now time.Time, owned bool) (claims, error) {
 	secret, err := s.Crypter.Open(ctx, secretPurpose, cfg.ClientSecret)
 	if err != nil {
 		return claims{}, fmt.Errorf("client secret: %w", err)
@@ -522,7 +561,13 @@ func (s *Service) exchange(ctx context.Context, cfg Config, st state, code strin
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	resp, err := s.httpClient().Do(req) // #nosec G704 -- token_url は運営者が設定し、Validate で https に限る
+	client := s.httpClient()
+	if owned {
+		if client, err = s.orgClient(ctx, req); err != nil {
+			return claims{}, err
+		}
+	}
+	resp, err := client.Do(req) // #nosec G704 -- token_url は Validate で https に限り、Org が設定したものは公開のアドレスに限る
 	if err != nil {
 		return claims{}, fmt.Errorf("token endpoint: %w", err)
 	}
@@ -595,11 +640,15 @@ func (s *Service) login(ctx context.Context, realmID string, conn port.Connectio
 		if err != nil {
 			return err
 		}
+		// Org 専用の connection では、その Org の管理ユーザーだけがログインでき、その Org に入る（ADR 0077）。
+		if conn.OwnerOrgID != "" && u.ManagedOrgID != conn.OwnerOrgID {
+			return errors.New("user is not managed by the connection's org")
+		}
 		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
 			return err
 		}
 		is, err := s.Sessions.Issue(ctx, tx, session.Issue{
-			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"fed"}, Credentials: []string{ident.ID}, OrgEmail: verifiedEmail(c),
+			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"fed"}, Credentials: []string{ident.ID}, OrgEmail: verifiedEmail(c), OrgID: conn.OwnerOrgID,
 			Evidence: warning.Evidence{OAuthEmailVerified: new(bool(c.EmailVerified))},
 			IP:       in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID, ReplaceToken: in.ReplaceToken,
 		})
@@ -626,12 +675,32 @@ func (s *Service) signup(ctx context.Context, tx port.Tx, realmID string, conn p
 	if c.Email == "" || !c.EmailVerified {
 		return port.Identity{}, ErrEmailUnverified
 	}
-	created, err := s.Accounts.CreateWithEmail(ctx, tx, realmID, c.Email, port.VerifiedViaOAuthProvider, audit.Actor{}, cl.RequestID)
+	via := port.VerifiedViaOAuthProvider
+	if conn.OwnerOrgID != "" {
+		// Org 専用 SSO は、Org が証明したドメインのアドレスだけを、その Org の IdP が確認したものとして受け入れる（ADR 0077）。
+		addr, err := account.NormalizeEmail(c.Email)
+		if err != nil {
+			return port.Identity{}, ErrEmailUnverified
+		}
+		switch ok, err := s.OrgSSO.SSODomainVerified(ctx, tx, realmID, conn.OwnerOrgID, addr); {
+		case err != nil:
+			return port.Identity{}, err
+		case !ok:
+			return port.Identity{}, ErrSSODomainNotVerified
+		}
+		via = port.VerifiedViaSSO
+	}
+	created, err := s.Accounts.CreateWithEmail(ctx, tx, realmID, c.Email, via, audit.Actor{}, cl.RequestID)
 	if errors.Is(err, errs.Conflict) {
 		return port.Identity{}, ErrAccountExists
 	}
 	if err != nil {
 		return port.Identity{}, err
+	}
+	if conn.OwnerOrgID != "" {
+		if err := s.OrgSSO.AdmitSSO(ctx, tx, conn.OwnerOrgID, created.User, created.Email.ID, cl.RequestID); err != nil {
+			return port.Identity{}, err
+		}
 	}
 	ident := port.Identity{ID: id.New(id.Identity), PublicID: id.NewExternal(id.Identity), RealmID: realmID, UserID: created.User.ID, ConnectionID: conn.ID,
 		ProviderSubject: c.Subject, CreatedAt: now}

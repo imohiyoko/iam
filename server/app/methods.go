@@ -247,6 +247,8 @@ func (s publicServer) StartLinkIdentity(ctx context.Context, req publicapi.Start
 	}
 	st, err := s.a.oauth.StartLink(ctx, s.a.realm.ID, req.Connection, redirectURI, au.PrincipalID)
 	switch {
+	case errors.Is(err, oauth.ErrNotManagedByOwner):
+		return publicapi.StartLinkIdentity409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: errCode(err)}}, nil
 	case errors.Is(err, errs.NotFound):
 		return publicapi.StartLinkIdentity404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	case errors.Is(err, errs.Invalid):

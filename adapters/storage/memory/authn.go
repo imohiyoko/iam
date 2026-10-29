@@ -210,6 +210,24 @@ func (r identities) GetByPublicID(_ context.Context, realmID, publicID string) (
 	return port.Identity{}, errs.New(errs.KindNotFound, "identity")
 }
 
+func (r identities) Get(_ context.Context, realmID, id string) (port.Identity, error) {
+	i, err := get(r.t.s.identities, realmID, id, func(i port.Identity) string { return i.RealmID }, "identity")
+	return cloneIdentity(i), err
+}
+
+func (r identities) RevokeByConnection(_ context.Context, realmID, connectionID string, at time.Time, reason string) (int, error) {
+	n := 0
+	for k, x := range r.t.s.identities {
+		if x.RealmID == realmID && x.ConnectionID == connectionID && x.RevokedAt == nil {
+			x = cloneIdentity(x)
+			x.RevokedAt, x.RevokeReason = &at, reason
+			setKey(r.t, r.t.s.identities, k, x)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r identities) Revoke(_ context.Context, realmID, id string, at time.Time, reason string) error {
 	i, err := get(r.t.s.identities, realmID, id, func(i port.Identity) string { return i.RealmID }, "identity")
 	if err != nil || i.RevokedAt != nil {
@@ -274,6 +292,35 @@ func (r connections) List(_ context.Context, realmID string) ([]port.Connection,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
 	return out, nil
+}
+
+func (r connections) ListByOwner(_ context.Context, realmID, orgID string) ([]port.Connection, error) {
+	var out []port.Connection
+	for _, x := range r.t.s.connections {
+		if x.RealmID == realmID && x.OwnerOrgID == orgID {
+			out = append(out, cloneConnection(x))
+		}
+	}
+	sortByCreated(out, func(x port.Connection) (time.Time, string) { return x.CreatedAt, x.ID })
+	return out, nil
+}
+
+func (r connections) CountOwned(_ context.Context, realmID string) (int, error) {
+	n := 0
+	for _, x := range r.t.s.connections {
+		if x.RealmID == realmID && x.OwnerOrgID != "" {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r connections) Delete(_ context.Context, realmID, id string) error {
+	if _, err := get(r.t.s.connections, realmID, id, func(c port.Connection) string { return c.RealmID }, "connection"); err != nil {
+		return err
+	}
+	deleteKey(r.t, r.t.s.connections, id)
+	return nil
 }
 
 // ---------------------------------------------------------------------------

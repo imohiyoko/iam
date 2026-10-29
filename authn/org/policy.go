@@ -16,6 +16,7 @@ import (
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/feature"
+	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -32,6 +33,8 @@ const (
 	PolicyRequirePasskey        = "require_passkey"
 	PolicyMembershipEmailDomain = "membership_email_domain"
 	PolicyIPAllowlist           = "ip_allowlist"
+	// PolicyRequireSSO はその Org の connection（Org 専用 SSO。ADR 0077）での認証。フィーチャー org_managed_users も要る。
+	PolicyRequireSSO = "require_sso"
 )
 
 // 上限。
@@ -48,10 +51,12 @@ type LoginPolicy struct {
 	MembershipEmailDomains []string `json:"membership_email_domains,omitempty"`
 	// IPAllowlist はログイン・切り替えの要求の IP がこのどれか（CIDR）に入ること。
 	IPAllowlist []string `json:"ip_allowlist,omitempty"`
+	// RequireSSO はその Org の connection で認証したセッションだけを入れる（ADR 0077）。
+	RequireSSO bool `json:"require_sso,omitempty"`
 }
 
 func (p *LoginPolicy) empty() bool {
-	return p == nil || (!p.RequirePasskey && len(p.MembershipEmailDomains) == 0 && len(p.IPAllowlist) == 0)
+	return p == nil || (!p.RequirePasskey && !p.RequireSSO && len(p.MembershipEmailDomains) == 0 && len(p.IPAllowlist) == 0)
 }
 
 // checkPolicy は設定しようとするポリシー p を確かめ、正規化したものを返す。フィーチャーが止まっていても、
@@ -70,6 +75,9 @@ func (s *Service) checkPolicy(p, prev *LoginPolicy) (*LoginPolicy, error) {
 		}
 		return nil, settingInvalid("login_policy: the org_login_policy feature is not enabled")
 	}
+	if out.RequireSSO && !s.ManagedUsers && (prev == nil || !prev.RequireSSO) {
+		return nil, settingInvalid("login_policy.require_sso: the org_managed_users feature is not enabled")
+	}
 	return out, nil
 }
 
@@ -77,7 +85,7 @@ func normalizePolicy(p *LoginPolicy) (*LoginPolicy, error) {
 	if p.empty() {
 		return nil, nil
 	}
-	out := &LoginPolicy{RequirePasskey: p.RequirePasskey}
+	out := &LoginPolicy{RequirePasskey: p.RequirePasskey, RequireSSO: p.RequireSSO}
 	if len(p.MembershipEmailDomains) > MaxPolicyDomains || len(p.IPAllowlist) > MaxPolicyCIDRs {
 		return nil, settingInvalid("login_policy: too many entries")
 	}
@@ -136,6 +144,15 @@ func (s *Service) policyDenied(ctx context.Context, tx port.Tx, o port.Org, m po
 	if len(p.IPAllowlist) > 0 && !ipAllowed(in.IP, p.IPAllowlist) {
 		codes = append(codes, "policy."+PolicyIPAllowlist)
 	}
+	if p.RequireSSO && s.ManagedUsers { // フィーチャーがオフなら判定しない（無効化の片付けで外す）
+		ok, err := usedOrgConnection(ctx, tx, o, in.Credentials)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			codes = append(codes, "policy."+PolicyRequireSSO)
+		}
+	}
 	if len(codes) == 0 {
 		return nil
 	}
@@ -173,6 +190,33 @@ func (s *Service) emailInDomains(ctx context.Context, tx port.Tx, m port.Members
 	return false, nil
 }
 
+// usedOrgConnection は、認証に使った認証情報（内部 ID）に o の connection の外部 ID があるかを返す。
+func usedOrgConnection(ctx context.Context, tx port.Tx, o port.Org, credentials []string) (bool, error) {
+	for _, c := range credentials {
+		if !strings.HasPrefix(c, string(id.Identity)+"_") {
+			continue
+		}
+		ident, err := tx.Identities().Get(ctx, o.RealmID, c)
+		if errors.Is(err, errs.NotFound) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		conn, err := tx.Connections().Get(ctx, o.RealmID, ident.ConnectionID)
+		if errors.Is(err, errs.NotFound) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if conn.OwnerOrgID == o.ID && ident.RevokedAt == nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func ipAllowed(ip string, cidrs []string) bool {
 	addr, err := netip.ParseAddr(ip)
 	if err != nil {
@@ -200,6 +244,31 @@ func ClearLoginPolicy(ctx context.Context, tx port.Tx, o port.Org, now time.Time
 		return false, err
 	}
 	st.LoginPolicy = nil
+	var raw []byte
+	if !st.empty() {
+		if raw, err = json.Marshal(st); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Orgs().SetSettings(ctx, o.RealmID, o.ID, raw, now)
+}
+
+// HasRequireSSO は Org のログインポリシーに require_sso があるかを返す（org_managed_users の無効化で数える。11.12）。
+func HasRequireSSO(o port.Org) (bool, error) {
+	st, err := SettingsOf(o)
+	return st.LoginPolicy != nil && st.LoginPolicy.RequireSSO, err
+}
+
+// ClearRequireSSO は Org のログインポリシーから require_sso を外す（org_managed_users の無効化の片付け。11.12）。外したら true。
+func ClearRequireSSO(ctx context.Context, tx port.Tx, o port.Org, now time.Time) (bool, error) {
+	st, err := SettingsOf(o)
+	if err != nil || st.LoginPolicy == nil || !st.LoginPolicy.RequireSSO {
+		return false, err
+	}
+	st.LoginPolicy.RequireSSO = false
+	if st.LoginPolicy.empty() {
+		st.LoginPolicy = nil
+	}
 	var raw []byte
 	if !st.empty() {
 		if raw, err = json.Marshal(st); err != nil {

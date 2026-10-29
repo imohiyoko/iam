@@ -333,7 +333,40 @@ func testIdentities(t *testing.T, h Harness) {
 		if got, err := repo.GetBySubject(ctx, r, conn, "sub-1"); err != nil || got.ID != again.ID {
 			return fmt.Errorf("GetBySubject after relink = %+v, %v", got, err)
 		}
+		if got, err := repo.Get(ctx, r, i.ID); err != nil || got.RevokedAt == nil {
+			return fmt.Errorf("identities.Get(revoked) = %+v, %v", got, err)
+		}
+		if _, err := repo.Get(ctx, id.New(id.Realm), i.ID); err == nil || !errors.Is(err, errs.NotFound) {
+			return fmt.Errorf("identities.Get(other realm) = %v", err)
+		}
 		return notFound("revoke in another realm", repo.Revoke(ctx, id.New(id.Realm), again.ID, at, "x"))
+	})
+	// connection ごとの無効化：無効化されていないものだけを数え、別の connection と realm には触れない。
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.Identities()
+		if n, err := repo.RevokeByConnection(ctx, id.New(id.Realm), conn, at, "x"); err != nil || n != 0 {
+			return fmt.Errorf("RevokeByConnection(other realm) = %d, %v", n, err)
+		}
+		if n, err := repo.RevokeByConnection(ctx, r, conn, at, "connection_deleted"); err != nil || n != 1 {
+			return fmt.Errorf("RevokeByConnection = %d, %v", n, err)
+		}
+		if _, err := repo.GetBySubject(ctx, r, conn, "sub-1"); !errors.Is(err, errs.NotFound) {
+			return fmt.Errorf("GetBySubject after RevokeByConnection = %v", err)
+		}
+		list, err := repo.ListByUser(ctx, r, u)
+		if err != nil {
+			return err
+		}
+		active := 0
+		for _, x := range list {
+			if x.RevokedAt == nil {
+				active++
+			}
+		}
+		if active != 1 { // 別の connection のもの
+			return fmt.Errorf("active identities after RevokeByConnection = %d", active)
+		}
+		return nil
 	})
 }
 
@@ -380,6 +413,56 @@ func testConnections(t *testing.T, h Harness) {
 		}
 		_, err = repo.Get(ctx, r2, c.ID)
 		return notFound("connection from another realm", err)
+	})
+	// Org 専用の connection（ADR 0077）。
+	o1, o2 := id.New(id.Org), id.New(id.Org)
+	owned := []port.Connection{
+		{ID: id.New(id.Connection), RealmID: r1, Slug: "o1-b", Type: "oidc", Config: []byte("{}"), CreatedAt: T0.Add(time.Minute), OwnerOrgID: o1},
+		{ID: id.New(id.Connection), RealmID: r1, Slug: "o1-a", Type: "oidc", Config: []byte("{}"), CreatedAt: T0.Add(2 * time.Minute), OwnerOrgID: o1},
+		{ID: id.New(id.Connection), RealmID: r1, Slug: "o2", Type: "oidc", Config: []byte("{}"), CreatedAt: T0, OwnerOrgID: o2},
+	}
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.Connections()
+		for _, c := range owned {
+			if err := repo.Create(ctx, c); err != nil {
+				return err
+			}
+		}
+		got, err := repo.Get(ctx, r1, owned[0].ID)
+		if err != nil || !reflect.DeepEqual(got, owned[0]) {
+			return fmt.Errorf("connections.Get(owned) = %+v, %v", got, err)
+		}
+		list, err := repo.ListByOwner(ctx, r1, o1)
+		if err != nil || len(list) != 2 || list[0].ID != owned[0].ID || list[1].ID != owned[1].ID {
+			return fmt.Errorf("connections.ListByOwner = %+v, %v", list, err)
+		}
+		if list, err := repo.ListByOwner(ctx, r2, o1); err != nil || len(list) != 0 {
+			return fmt.Errorf("connections.ListByOwner(other realm) = %+v, %v", list, err)
+		}
+		if n, err := repo.CountOwned(ctx, r1); err != nil || n != 3 {
+			return fmt.Errorf("connections.CountOwned = %d, %v", n, err)
+		}
+		if n, err := repo.CountOwned(ctx, r2); err != nil || n != 0 {
+			return fmt.Errorf("connections.CountOwned(other realm) = %d, %v", n, err)
+		}
+		if err := notFound("delete in another realm", repo.Delete(ctx, r2, owned[0].ID)); err != nil {
+			return err
+		}
+		if err := repo.Delete(ctx, r1, owned[0].ID); err != nil {
+			return err
+		}
+		if err := notFound("deleted connection", repo.Delete(ctx, r1, owned[0].ID)); err != nil {
+			return err
+		}
+		_, err = repo.Get(ctx, r1, owned[0].ID)
+		if err := notFound("get deleted connection", err); err != nil {
+			return err
+		}
+		n, err := repo.CountOwned(ctx, r1)
+		if err != nil || n != 2 {
+			return fmt.Errorf("connections.CountOwned after delete = %d, %v", n, err)
+		}
+		return nil
 	})
 }
 
@@ -830,9 +913,10 @@ var authnIsolationCases = []IsolationCase{
 		},
 	},
 	{
-		Name: "Connections.Get+GetBySlug+List",
+		Name: "Connections.Get+GetBySlug+List+ListByOwner+CountOwned",
 		Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
-			return tx.Connections().Create(ctx, port.Connection{ID: isoConn, RealmID: r, Slug: "iso", Type: "oidc", Config: []byte("{}"), CreatedAt: T0})
+			return tx.Connections().Create(ctx, port.Connection{ID: isoConn, RealmID: r, Slug: "iso", Type: "oidc", Config: []byte("{}"), CreatedAt: T0,
+				OwnerOrgID: isoOrg})
 		},
 		Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {
 			a, err := countOne(tx.Connections().Get(ctx, r, isoConn))
@@ -844,7 +928,15 @@ var authnIsolationCases = []IsolationCase{
 				return 0, err
 			}
 			c, err := count(tx.Connections().List(ctx, r))
-			return a + b + c, err
+			if err != nil {
+				return 0, err
+			}
+			d, err := count(tx.Connections().ListByOwner(ctx, r, isoOrg))
+			if err != nil {
+				return 0, err
+			}
+			e, err := tx.Connections().CountOwned(ctx, r)
+			return a + b + c + d + e, err
 		},
 	},
 	{

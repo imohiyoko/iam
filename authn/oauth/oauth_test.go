@@ -101,7 +101,13 @@ func setup(t *testing.T) *env {
 // authorize はプロバイダでのログインを模し、Complete の入力を返す。edit でクレームを書き換えられる。
 func (e *env) authorize(t *testing.T, sub, email string, verified bool, edit ...func(map[string]any)) oauth.Complete {
 	t.Helper()
-	st, err := e.svc.Start(context.Background(), e.k.RealmID, "test", "")
+	return e.authorizeSlug(t, "test", sub, email, verified, edit...)
+}
+
+// authorizeSlug は connection（slug）を指定する authorize。
+func (e *env) authorizeSlug(t *testing.T, slug, sub, email string, verified bool, edit ...func(map[string]any)) oauth.Complete {
+	t.Helper()
+	st, err := e.svc.Start(context.Background(), e.k.RealmID, slug, "")
 	if err != nil {
 		t.Fatal(err)
 	}

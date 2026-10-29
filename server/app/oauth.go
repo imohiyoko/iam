@@ -55,6 +55,11 @@ func (s publicServer) CompleteOAuthLogin(ctx context.Context, req publicapi.Comp
 		return publicapi.CompleteOAuthLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	switch {
+	// コードつきのものを先に比べる（コードの無い ErrAccountExists・ErrEmailUnverified は同じ種類のエラーすべてに一致する）。
+	case errors.Is(err, oauth.ErrSSODomainNotVerified):
+		return publicapi.CompleteOAuthLogin400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: errCode(err)}}, nil
+	case errors.Is(err, oauth.ErrQuotaExceeded):
+		return publicapi.CompleteOAuthLogin409JSONResponse(conflictOf(err, errs.CodeQuotaExceeded)), nil
 	case errors.Is(err, oauth.ErrAccountExists):
 		return publicapi.CompleteOAuthLogin409JSONResponse{Error: "account_exists"}, nil
 	case errors.Is(err, oauth.ErrEmailUnverified):

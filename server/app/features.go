@@ -41,17 +41,34 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.QuotaGrants().Purge(ctx, limit)
 		}},
-	// 管理ユーザーは個人ユーザーに戻し、ドメインを消す（ADR 0076）。
+	// 管理ユーザーは個人ユーザーに戻し、Org 専用 SSO の connection（外部 ID を無効化する）、ログインポリシーの require_sso、
+	// ドメインを消す（ADR 0076、0077）。
 	feature.OrgManagedUsers: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		n, err := tx.Users().CountManaged(ctx)
 		if err != nil {
 			return 0, err
 		}
+		c, err := eachOwnedConnections(ctx, tx, -1, time.Time{}, false)
+		if err != nil {
+			return 0, err
+		}
+		p, err := eachOrg(ctx, tx, -1, func(o port.Org) (bool, error) { return org.HasRequireSSO(o) })
+		if err != nil {
+			return 0, err
+		}
 		d, err := tx.OrgDomains().Count(ctx)
-		return n + d, err
+		return n + c + p + d, err
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
 		n, err := tx.Users().ReleaseManaged(ctx, limit, now)
 		if err != nil || n >= limit {
+			return n, err
+		}
+		c, err := eachOwnedConnections(ctx, tx, limit-n, now, true)
+		if n += c; err != nil || n >= limit {
+			return n, err
+		}
+		p, err := eachOrg(ctx, tx, limit-n, func(o port.Org) (bool, error) { return org.ClearRequireSSO(ctx, tx, o, now) })
+		if n += p; err != nil || n >= limit {
 			return n, err
 		}
 		d, err := tx.OrgDomains().Purge(ctx, limit-n)
@@ -68,6 +85,45 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Passwords().Purge(ctx, limit)
 		}},
+}
+
+// eachOwnedConnections は全 realm の Org 専用の connection を数える。purge なら limit（0 以上なら）まで消す。
+func eachOwnedConnections(ctx context.Context, tx port.Tx, limit int, now time.Time, purge bool) (int, error) {
+	realms, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range realms {
+		if !purge {
+			c, err := tx.Connections().CountOwned(ctx, r.ID)
+			if err != nil {
+				return 0, err
+			}
+			n += c
+			continue
+		}
+		cs, err := tx.Connections().List(ctx, r.ID)
+		if err != nil {
+			return n, err
+		}
+		owners := map[string]bool{}
+		for _, c := range cs {
+			if c.OwnerOrgID != "" {
+				owners[c.OwnerOrgID] = true
+			}
+		}
+		for o := range owners {
+			if limit >= 0 && n >= limit {
+				return n, nil
+			}
+			c, err := org.PurgeConnections(ctx, tx, r.ID, o, now, limit-n)
+			if n += c; err != nil {
+				return n, err
+			}
+		}
+	}
+	return n, nil
 }
 
 // countSharedOrgs は削除されていない共有 Org を数える。

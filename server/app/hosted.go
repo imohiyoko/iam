@@ -183,7 +183,9 @@ func (h *hosted) connections(ctx context.Context) ([]string, error) {
 	err := h.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cs, err := tx.Connections().List(ctx, h.a.realm.ID)
 		for _, c := range cs {
-			out = append(out, c.Slug)
+			if c.OwnerOrgID == "" { // Org 専用 SSO はドメインから探す（ADR 0077）
+				out = append(out, c.Slug)
+			}
 		}
 		return err
 	})

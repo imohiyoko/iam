@@ -522,6 +522,22 @@ type MyTOTP struct {
 	Id string `json:"id"`
 }
 
+// OrgConnection defines model for OrgConnection.
+type OrgConnection struct {
+	AuthorizationEndpoint string    `json:"authorization_endpoint"`
+	ClientId              string    `json:"client_id"`
+	CreatedAt             time.Time `json:"created_at"`
+
+	// Id 公開の connection ID（con_…）。`/v1/login/oauth/{connection}:start` に渡す
+	Id     string `json:"id"`
+	Issuer string `json:"issuer"`
+
+	// RedirectUri IdP に登録する戻り先
+	RedirectUri   string   `json:"redirect_uri"`
+	Scopes        []string `json:"scopes"`
+	TokenEndpoint string   `json:"token_endpoint"`
+}
+
 // OrgDomain defines model for OrgDomain.
 type OrgDomain struct {
 	// CheckedAt 最後に TXT を確かめた時刻
@@ -575,6 +591,9 @@ type OrgLoginPolicy struct {
 
 	// RequirePasskey passkey で本人確認したセッションだけを入れる
 	RequirePasskey *bool `json:"require_passkey,omitempty"`
+
+	// RequireSso この Org の connection（Org 専用 SSO。ADR 0077）で認証したセッションだけを入れる。フィーチャー org_managed_users も要る
+	RequireSso *bool `json:"require_sso,omitempty"`
 }
 
 // OrgMember defines model for OrgMember.
@@ -865,6 +884,11 @@ type VerifySecondFactorJSONBody struct {
 	TotpCode    *string                 `json:"totp_code,omitempty"`
 }
 
+// DiscoverSSOJSONBody defines parameters for DiscoverSSO.
+type DiscoverSSOJSONBody struct {
+	Email string `json:"email"`
+}
+
 // CancelMyAccountDeletionJSONBody defines parameters for CancelMyAccountDeletion.
 type CancelMyAccountDeletionJSONBody struct {
 	ReturnToken *bool `json:"return_token,omitempty"`
@@ -897,6 +921,20 @@ type CompleteLinkIdentityJSONBody struct {
 // CreateMyOrgJSONBody defines parameters for CreateMyOrg.
 type CreateMyOrgJSONBody struct {
 	Name string `json:"name"`
+}
+
+// AddOrgConnectionJSONBody defines parameters for AddOrgConnection.
+type AddOrgConnectionJSONBody struct {
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	ClientId              string `json:"client_id"`
+	ClientSecret          string `json:"client_secret"`
+
+	// Issuer ID トークンの iss
+	Issuer string `json:"issuer"`
+
+	// Scopes 既定は openid と email。openid を含むこと
+	Scopes        *[]string `json:"scopes,omitempty"`
+	TokenEndpoint string    `json:"token_endpoint"`
 }
 
 // AddOrgDomainJSONBody defines parameters for AddOrgDomain.
@@ -1048,6 +1086,9 @@ type PasswordLoginJSONRequestBody PasswordLoginJSONBody
 // VerifySecondFactorJSONRequestBody defines body for VerifySecondFactor for application/json ContentType.
 type VerifySecondFactorJSONRequestBody VerifySecondFactorJSONBody
 
+// DiscoverSSOJSONRequestBody defines body for DiscoverSSO for application/json ContentType.
+type DiscoverSSOJSONRequestBody DiscoverSSOJSONBody
+
 // CancelMyAccountDeletionJSONRequestBody defines body for CancelMyAccountDeletion for application/json ContentType.
 type CancelMyAccountDeletionJSONRequestBody CancelMyAccountDeletionJSONBody
 
@@ -1065,6 +1106,9 @@ type CompleteLinkIdentityJSONRequestBody CompleteLinkIdentityJSONBody
 
 // CreateMyOrgJSONRequestBody defines body for CreateMyOrg for application/json ContentType.
 type CreateMyOrgJSONRequestBody CreateMyOrgJSONBody
+
+// AddOrgConnectionJSONRequestBody defines body for AddOrgConnection for application/json ContentType.
+type AddOrgConnectionJSONRequestBody AddOrgConnectionJSONBody
 
 // AddOrgDomainJSONRequestBody defines body for AddOrgDomain for application/json ContentType.
 type AddOrgDomainJSONRequestBody AddOrgDomainJSONBody
@@ -1188,6 +1232,9 @@ type ServerInterface interface {
 	// VerifySecondFactor 2要素目を確かめ、通常のセッションに替える
 	// (POST /v1/login/second-factor:verify)
 	VerifySecondFactor(w http.ResponseWriter, r *http.Request)
+	// DiscoverSSO メールのドメインから Org 専用 SSO の connection を探す（ADR 0077）
+	// (POST /v1/login/sso:discover)
+	DiscoverSSO(w http.ResponseWriter, r *http.Request)
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
@@ -1227,6 +1274,15 @@ type ServerInterface interface {
 	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
 	// (POST /v1/me/orgs)
 	CreateMyOrg(w http.ResponseWriter, r *http.Request)
+	// ListOrgConnections Org 専用 SSO の connection の一覧（Org の owner。11.3、ADR 0077）
+	// (GET /v1/me/orgs/{id}/connections)
+	ListOrgConnections(w http.ResponseWriter, r *http.Request, id string)
+	// AddOrgConnection Org 専用 SSO の connection（OIDC）を登録する（Org の owner。ADR 0077）
+	// (POST /v1/me/orgs/{id}/connections)
+	AddOrgConnection(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteOrgConnection Org 専用 SSO の connection を消す（Org の owner）
+	// (POST /v1/me/orgs/{id}/connections/{connection_id}:delete)
+	DeleteOrgConnection(w http.ResponseWriter, r *http.Request, id string, connectionId string)
 	// ListOrgDomains Org のドメインの一覧（Org の owner。11.3）
 	// (GET /v1/me/orgs/{id}/domains)
 	ListOrgDomains(w http.ResponseWriter, r *http.Request, id string)
@@ -1609,6 +1665,20 @@ func (siw *ServerInterfaceWrapper) VerifySecondFactor(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// DiscoverSSO operation middleware
+func (siw *ServerInterfaceWrapper) DiscoverSSO(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DiscoverSSO(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Logout operation middleware
 func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
 
@@ -1830,6 +1900,93 @@ func (siw *ServerInterfaceWrapper) CreateMyOrg(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateMyOrg(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOrgConnections operation middleware
+func (siw *ServerInterfaceWrapper) ListOrgConnections(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrgConnections(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddOrgConnection operation middleware
+func (siw *ServerInterfaceWrapper) AddOrgConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddOrgConnection(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteOrgConnection operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOrgConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "connection_id" -------------
+	var connectionId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection_id", r.PathValue("connection_id"), &connectionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteOrgConnection(w, r, id, connectionId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3532,6 +3689,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/link:redeem", wrapper.RedeemLoginLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth/{connection}:start", wrapper.StartOAuthLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth:complete", wrapper.CompleteOAuthLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/sso:discover", wrapper.DiscoverSSO)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:start", wrapper.StartPasskeyLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:finish", wrapper.FinishPasskeyLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/password", wrapper.PasswordLogin)
@@ -3586,6 +3744,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains", wrapper.AddOrgDomain)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains/{domain_id}:verify", wrapper.VerifyOrgDomain)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains/{domain_id}:delete", wrapper.DeleteOrgDomain)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/connections", wrapper.ListOrgConnections)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/connections", wrapper.AddOrgConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/connections/{connection_id}:delete", wrapper.DeleteOrgConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:request-management", wrapper.RequestOrgManagement)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:release-management", wrapper.ReleaseOrgManagement)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:delete-account", wrapper.DeleteManagedAccount)
@@ -4441,6 +4602,59 @@ func (response VerifySecondFactor429JSONResponse) VisitVerifySecondFactorRespons
 	return err
 }
 
+type DiscoverSSORequestObject struct {
+	Body *DiscoverSSOJSONRequestBody
+}
+
+type DiscoverSSOResponseObject interface {
+	VisitDiscoverSSOResponse(w http.ResponseWriter) error
+}
+
+type DiscoverSSO200JSONResponse struct {
+	Connections []string `json:"connections"`
+}
+
+func (response DiscoverSSO200JSONResponse) VisitDiscoverSSOResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DiscoverSSO400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response DiscoverSSO400JSONResponse) VisitDiscoverSSOResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DiscoverSSO429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response DiscoverSSO429JSONResponse) VisitDiscoverSSOResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type LogoutRequestObject struct {
 }
 
@@ -4886,6 +5100,20 @@ func (response StartLinkIdentity404JSONResponse) VisitStartLinkIdentityResponse(
 	return err
 }
 
+type StartLinkIdentity409JSONResponse struct{ ConflictJSONResponse }
+
+func (response StartLinkIdentity409JSONResponse) VisitStartLinkIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type UnlinkMyIdentityRequestObject struct {
 	Id string `json:"id"`
 }
@@ -5160,6 +5388,224 @@ func (response CreateMyOrg403JSONResponse) VisitCreateMyOrgResponse(w http.Respo
 type CreateMyOrg404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response CreateMyOrg404JSONResponse) VisitCreateMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgConnectionsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListOrgConnectionsResponseObject interface {
+	VisitListOrgConnectionsResponse(w http.ResponseWriter) error
+}
+
+type ListOrgConnections200JSONResponse struct {
+	Connections []OrgConnection `json:"connections"`
+}
+
+func (response ListOrgConnections200JSONResponse) VisitListOrgConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgConnections401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListOrgConnections401JSONResponse) VisitListOrgConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgConnections403JSONResponse struct{ DeniedJSONResponse }
+
+func (response ListOrgConnections403JSONResponse) VisitListOrgConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgConnections404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListOrgConnections404JSONResponse) VisitListOrgConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgConnectionRequestObject struct {
+	Id   string `json:"id"`
+	Body *AddOrgConnectionJSONRequestBody
+}
+
+type AddOrgConnectionResponseObject interface {
+	VisitAddOrgConnectionResponse(w http.ResponseWriter) error
+}
+
+type AddOrgConnection201JSONResponse OrgConnection
+
+func (response AddOrgConnection201JSONResponse) VisitAddOrgConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgConnection400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AddOrgConnection400JSONResponse) VisitAddOrgConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgConnection401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AddOrgConnection401JSONResponse) VisitAddOrgConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgConnection403JSONResponse struct{ DeniedJSONResponse }
+
+func (response AddOrgConnection403JSONResponse) VisitAddOrgConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgConnection404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AddOrgConnection404JSONResponse) VisitAddOrgConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgConnection409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddOrgConnection409JSONResponse) VisitAddOrgConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgConnectionRequestObject struct {
+	Id           string `json:"id"`
+	ConnectionId string `json:"connection_id"`
+}
+
+type DeleteOrgConnectionResponseObject interface {
+	VisitDeleteOrgConnectionResponse(w http.ResponseWriter) error
+}
+
+type DeleteOrgConnection204Response struct {
+}
+
+func (response DeleteOrgConnection204Response) VisitDeleteOrgConnectionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteOrgConnection401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteOrgConnection401JSONResponse) VisitDeleteOrgConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgConnection403JSONResponse struct{ DeniedJSONResponse }
+
+func (response DeleteOrgConnection403JSONResponse) VisitDeleteOrgConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrgConnection404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteOrgConnection404JSONResponse) VisitDeleteOrgConnectionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -9382,6 +9828,9 @@ type StrictServerInterface interface {
 	// VerifySecondFactor 2要素目を確かめ、通常のセッションに替える
 	// (POST /v1/login/second-factor:verify)
 	VerifySecondFactor(ctx context.Context, request VerifySecondFactorRequestObject) (VerifySecondFactorResponseObject, error)
+	// DiscoverSSO メールのドメインから Org 専用 SSO の connection を探す（ADR 0077）
+	// (POST /v1/login/sso:discover)
+	DiscoverSSO(ctx context.Context, request DiscoverSSORequestObject) (DiscoverSSOResponseObject, error)
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
@@ -9421,6 +9870,15 @@ type StrictServerInterface interface {
 	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
 	// (POST /v1/me/orgs)
 	CreateMyOrg(ctx context.Context, request CreateMyOrgRequestObject) (CreateMyOrgResponseObject, error)
+	// ListOrgConnections Org 専用 SSO の connection の一覧（Org の owner。11.3、ADR 0077）
+	// (GET /v1/me/orgs/{id}/connections)
+	ListOrgConnections(ctx context.Context, request ListOrgConnectionsRequestObject) (ListOrgConnectionsResponseObject, error)
+	// AddOrgConnection Org 専用 SSO の connection（OIDC）を登録する（Org の owner。ADR 0077）
+	// (POST /v1/me/orgs/{id}/connections)
+	AddOrgConnection(ctx context.Context, request AddOrgConnectionRequestObject) (AddOrgConnectionResponseObject, error)
+	// DeleteOrgConnection Org 専用 SSO の connection を消す（Org の owner）
+	// (POST /v1/me/orgs/{id}/connections/{connection_id}:delete)
+	DeleteOrgConnection(ctx context.Context, request DeleteOrgConnectionRequestObject) (DeleteOrgConnectionResponseObject, error)
 	// ListOrgDomains Org のドメインの一覧（Org の owner。11.3）
 	// (GET /v1/me/orgs/{id}/domains)
 	ListOrgDomains(ctx context.Context, request ListOrgDomainsRequestObject) (ListOrgDomainsResponseObject, error)
@@ -10019,6 +10477,37 @@ func (sh *strictHandler) VerifySecondFactor(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// DiscoverSSO operation middleware
+func (sh *strictHandler) DiscoverSSO(w http.ResponseWriter, r *http.Request) {
+	var request DiscoverSSORequestObject
+
+	var body DiscoverSSOJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DiscoverSSO(ctx, request.(DiscoverSSORequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DiscoverSSO")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DiscoverSSOResponseObject); ok {
+		if err := validResponse.VisitDiscoverSSOResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Logout operation middleware
 func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	var request LogoutRequestObject
@@ -10380,6 +10869,92 @@ func (sh *strictHandler) CreateMyOrg(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateMyOrgResponseObject); ok {
 		if err := validResponse.VisitCreateMyOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOrgConnections operation middleware
+func (sh *strictHandler) ListOrgConnections(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListOrgConnectionsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrgConnections(ctx, request.(ListOrgConnectionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrgConnections")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrgConnectionsResponseObject); ok {
+		if err := validResponse.VisitListOrgConnectionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddOrgConnection operation middleware
+func (sh *strictHandler) AddOrgConnection(w http.ResponseWriter, r *http.Request, id string) {
+	var request AddOrgConnectionRequestObject
+
+	request.Id = id
+
+	var body AddOrgConnectionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddOrgConnection(ctx, request.(AddOrgConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddOrgConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddOrgConnectionResponseObject); ok {
+		if err := validResponse.VisitAddOrgConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteOrgConnection operation middleware
+func (sh *strictHandler) DeleteOrgConnection(w http.ResponseWriter, r *http.Request, id string, connectionId string) {
+	var request DeleteOrgConnectionRequestObject
+
+	request.Id = id
+	request.ConnectionId = connectionId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteOrgConnection(ctx, request.(DeleteOrgConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteOrgConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteOrgConnectionResponseObject); ok {
+		if err := validResponse.VisitDeleteOrgConnectionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
