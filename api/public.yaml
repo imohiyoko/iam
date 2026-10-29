@@ -1489,7 +1489,9 @@ paths:
     get:
       operationId: listOrgDomains
       summary: Org のドメインの一覧（Org の owner。11.3）
-      description: フィーチャー `org_managed_users` が動いていなければ 404。
+      description: |
+        Org の権限 `org:settings`（組み込みのロールでは owner だけが持つ。ドメインの4つの操作で同じ）。
+        フィーチャー `org_managed_users` が動いていなければ 404。
       security:
         - cookieAuth: []
         - bearerAuth: []
