@@ -8,6 +8,19 @@ import (
 	"database/sql"
 )
 
+type AuthnAttributeDef struct {
+	RealmID      string
+	Key          string
+	Type         string
+	EnumValues   string
+	MaxLength    int64
+	UserEditable int64
+	InToken      int64
+	Encrypted    int64
+	CreatedAt    string
+	UpdatedAt    string
+}
+
 type AuthnClient struct {
 	ID                     string
 	PublicID               string
@@ -224,6 +237,14 @@ type AuthnUser struct {
 	LegalHold           int64
 	ManagedOrgID        sql.NullString
 	ManagedAt           sql.NullString
+}
+
+type AuthnUserAttribute struct {
+	RealmID   string
+	UserID    string
+	Key       string
+	Value     []byte
+	UpdatedAt string
 }
 
 type AuthnUserDataKey struct {

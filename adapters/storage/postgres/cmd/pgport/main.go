@@ -19,7 +19,7 @@ const (
 )
 
 // glue は Repository の実装（SQLite に依らないファイル）。
-var glue = []string{"authn.go", "authz.go", "oidc.go", "org.go", "passkey.go", "password.go", "recovery.go", "suspension.go", "totp.go"}
+var glue = []string{"attributes.go", "authn.go", "authz.go", "oidc.go", "org.go", "passkey.go", "password.go", "recovery.go", "suspension.go", "totp.go"}
 
 var (
 	blockRE   = regexp.MustCompile(`(?m)^-- name:`)

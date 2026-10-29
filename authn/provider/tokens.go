@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -33,9 +34,11 @@ import (
 const (
 	ScopeOpenID = "openid"
 	ScopeEmail  = "email"
+	// ScopeAttributes はカスタム属性のうち、トークンに載せるもの（フィーチャー custom_attributes。ADR 0080）。
+	ScopeAttributes = "attributes"
 )
 
-// Scopes は対応するスコープ（Discovery の scopes_supported）。
+// Scopes は対応するスコープ（Discovery の scopes_supported）。フィーチャーで足すもの（ScopeAttributes）は含まない。
 var Scopes = []string{ScopeOpenID, ScopeEmail}
 
 // 既定の寿命。
@@ -56,6 +59,8 @@ type Tokens struct {
 	Accounts *account.Service
 	// Orgs は Org の可否と結び付けたメール。フィーチャー org が動いていなければ nil。
 	Orgs *org.Service
+	// Attributes はカスタム属性。フィーチャー custom_attributes が動いていなければ nil。
+	Attributes *attribute.Service
 	// Issuer は iss（server.public_url）。
 	Issuer                               string
 	AccessTokenTTL, IDTokenTTL, GrantTTL time.Duration
@@ -166,7 +171,7 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 	return Issued{AccessToken: token, RefreshToken: refresh, ExpiresIn: ttl, IDToken: idToken, Scopes: g.Scopes, Grant: g}, nil
 }
 
-// userClaims は sub と、スコープで許したユーザーのクレーム（org_id、email）を返す。ID トークンと UserInfo で共通。
+// userClaims は sub と、スコープで許したユーザーのクレーム（org_id、attributes、email）を返す。ID トークンと UserInfo で共通。
 // メールは Org の文脈で見せてよいもの（Membership に結び付けたメール。4.4）だけ。
 func (t *Tokens) userClaims(ctx context.Context, tx port.Tx, g port.Grant) (map[string]any, error) {
 	u, err := tx.Users().Get(ctx, g.RealmID, g.UserID)
@@ -180,6 +185,15 @@ func (t *Tokens) userClaims(ctx context.Context, tx port.Tx, g port.Grant) (map[
 	}
 	if orgPublicID != "" {
 		claims["org_id"] = orgPublicID
+	}
+	if t.Attributes != nil && slices.Contains(g.Scopes, ScopeAttributes) {
+		vs, err := t.Attributes.Values(ctx, tx, u, true)
+		if err != nil {
+			return nil, err
+		}
+		if len(vs) > 0 {
+			claims["attributes"] = vs
+		}
 	}
 	if !slices.Contains(g.Scopes, ScopeEmail) {
 		return claims, nil

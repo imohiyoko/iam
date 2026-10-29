@@ -1414,6 +1414,134 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/attributes:
+    get:
+      operationId: listAttributeDefs
+      summary: カスタム属性の定義の一覧（design.md 11.7、ADR 0080）
+      description: |
+        権限 `attributes:read`。key の順。フィーチャー custom_attributes が動いていなければ `404 attributes_disabled`。
+      responses:
+        "200":
+          description: key の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attributes]
+                properties:
+                  attributes:
+                    type: array
+                    items: { $ref: "#/components/schemas/AttributeDef" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createAttributeDef
+      summary: カスタム属性を定義する
+      description: |
+        権限 `attributes:manage`。`key` は `^[a-z][a-z0-9_]{0,39}$`。`type` は `string`（`max_length` 1〜1024、既定 256）・
+        `integer`（±2^53−1）・`boolean`・`enum`（`values` に 1〜50 個）。`type` と `encrypted` は後から変えられない。
+        `encrypted` なら値をユーザーのデータ鍵で暗号化する（ユーザーの削除で読めなくなる）。`in_token` ならスコープ `attributes` の
+        ID トークン・UserInfo の `attributes` クレームに載せる。realm に 50 まで（`409 attribute_limit`）。同じ key は `409 attribute_exists`、
+        定義の誤りは `400 invalid_attribute`。`attribute.defined` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttributeDefInput" }
+      responses:
+        "201":
+          description: 定義した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttributeDef" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/attributes/{key}:
+    put:
+      operationId: updateAttributeDef
+      summary: カスタム属性の定義を変える
+      description: |
+        権限 `attributes:manage`。`values`・`max_length`・`user_editable`・`in_token` を置き換える（`type` と `encrypted` は変えない）。
+        制約を厳しくしても、既にある値はそのまま（次に書くときに確かめる）。`attribute.updated` を監査ログに残す。
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AttributeDefUpdate" }
+      responses:
+        "200":
+          description: 変えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AttributeDef" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/attributes/{key}:delete:
+    post:
+      operationId: deleteAttributeDef
+      summary: カスタム属性の定義と、そのすべての値を消す
+      description: |
+        権限 `attributes:manage`。取り消せない。`attribute.deleted` を監査ログに残す。
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 消した }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/attributes:
+    get:
+      operationId: getUserAttributes
+      summary: ユーザーのカスタム属性の値
+      description: |
+        権限 `attributes:read`。値の無い属性は含まない。復号できない値（データ鍵の削除）も含まない。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 値
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserAttributes" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateUserAttributes
+      summary: ユーザーのカスタム属性の値を書く
+      description: |
+        権限 `attributes:write`。`attributes` の key の値を置き換え、`null` なら消す（ほかの key はそのまま）。知らない key は
+        `400 unknown_attribute`、型・制約に合わない値は `400 invalid_attribute_value`（どれかが誤りなら何も書かない）。
+        `user.attributes_updated`（key だけ。値は残さない）を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserAttributes" }
+      responses:
+        "200":
+          description: 書いた後の値
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserAttributes" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/service-accounts:
     get:
       operationId: listServiceAccounts
@@ -1673,6 +1801,45 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    AttributeDef:
+      type: object
+      required: [key, type, values, user_editable, in_token, encrypted, created_at, updated_at]
+      properties:
+        key: { type: string }
+        type: { type: string, enum: [string, integer, boolean, enum] }
+        values: { type: array, items: { type: string }, description: enum の選択肢 }
+        max_length: { type: integer, description: string の最大の文字数 }
+        user_editable: { type: boolean }
+        in_token: { type: boolean }
+        encrypted: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AttributeDefInput:
+      type: object
+      required: [key, type]
+      properties:
+        key: { type: string, maxLength: 40 }
+        type: { type: string, enum: [string, integer, boolean, enum] }
+        values: { type: array, maxItems: 50, items: { type: string } }
+        max_length: { type: integer, minimum: 1, maximum: 1024 }
+        user_editable: { type: boolean, default: false }
+        in_token: { type: boolean, default: false }
+        encrypted: { type: boolean, default: false }
+    AttributeDefUpdate:
+      type: object
+      properties:
+        values: { type: array, maxItems: 50, items: { type: string } }
+        max_length: { type: integer, minimum: 1, maximum: 1024 }
+        user_editable: { type: boolean, default: false }
+        in_token: { type: boolean, default: false }
+    UserAttributes:
+      type: object
+      required: [attributes]
+      properties:
+        attributes:
+          type: object
+          additionalProperties: {}
+          description: key ごとの値（書くときの null は消す）
     ServiceAccount:
       type: object
       required: [id, name, created_at, deleted]

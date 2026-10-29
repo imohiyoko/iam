@@ -944,6 +944,55 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /v1/me/attributes:
+    get:
+      operationId: getMyAttributes
+      summary: 自分のカスタム属性の値（design.md 11.7、ADR 0080）
+      description: |
+        値の無い属性は含まない。`editable` は本人が書ける属性の key。フィーチャー custom_attributes が動いていなければ `404`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 値
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyAttributes" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: updateMyAttributes
+      summary: 自分のカスタム属性の値を書く
+      description: |
+        本人が編集できる属性（`user_editable`）だけ。`attributes` の key の値を置き換え、`null` なら消す。編集できない属性は
+        `403 attribute_not_editable`、知らない key は `400 unknown_attribute`、型・制約に合わない値は `400 invalid_attribute_value`
+        （どれかが誤りなら何も書かない）。`user.attributes_updated` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attributes]
+              properties:
+                attributes:
+                  type: object
+                  additionalProperties: {}
+      responses:
+        "200":
+          description: 書いた後の値
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyAttributes" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/me/password:set:
     post:
       operationId: setMyPassword
@@ -2350,6 +2399,14 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    MyAttributes:
+      type: object
+      required: [attributes, editable]
+      properties:
+        attributes:
+          type: object
+          additionalProperties: {}
+        editable: { type: array, items: { type: string } }
     Health:
       type: object
       required: [status]

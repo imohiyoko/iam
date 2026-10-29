@@ -271,6 +271,20 @@ func TestDisableNestedGroupsWithData(t *testing.T) {
 	}
 }
 
+// custom_attributes は値と定義を消す。
+func TestDisableCustomAttributesWithData(t *testing.T) {
+	l := allFeaturesEnv(t)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	if code, out := l.adminDo(t, "POST", owner, "/v1/admin/attributes", map[string]any{"key": "tier", "type": "string"}); code != 201 {
+		t.Fatalf("define: %d %v", code, out)
+	}
+	l.login(t, "pat@example.com")
+	if code, out := l.adminDo(t, "PATCH", owner, "/v1/admin/users/"+l.userID(t, "pat@example.com")+"/attributes", map[string]any{"attributes": map[string]any{"tier": "gold"}}); code != 200 {
+		t.Fatalf("write: %d %v", code, out)
+	}
+	disableWithData(t, l, feature.CustomAttributes, 2)
+}
+
 // 階層は葉から外すので、子を持つ Org は後の回に外れる（1回で外せなくても片付けを続ける）。
 func TestDisableOrgHierarchyWithData(t *testing.T) {
 	l := allFeaturesEnv(t)

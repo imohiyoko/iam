@@ -61,6 +61,7 @@ type Tx interface {
 	RoleBindings() RoleBindingRepo
 	Roles() RoleRepo
 	Groups() GroupRepo
+	Attributes() AttributeRepo
 	Clients() ClientRepo
 	SigningKeys() SigningKeyRepo
 	Grants() GrantRepo

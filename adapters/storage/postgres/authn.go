@@ -505,6 +505,7 @@ func (r users) Erase(ctx context.Context, realmID, id string, at time.Time) erro
 		q.EraseUserSessions(ctx, db.EraseUserSessionsParams{RealmID: realmID, PrincipalID: id}),
 		q.EraseUserRoleBindings(ctx, db.EraseUserRoleBindingsParams{RealmID: realmID, PrincipalID: id}),
 		q.EraseUserGroupMembers(ctx, db.EraseUserGroupMembersParams{RealmID: realmID, UserID: id}),
+		q.EraseUserAttributes(ctx, db.EraseUserAttributesParams{RealmID: realmID, UserID: id}),
 		q.EraseUserGrantTokens(ctx, db.EraseUserGrantTokensParams{RealmID: realmID, UserID: id}),
 		q.EraseUserGrants(ctx, db.EraseUserGrantsParams{RealmID: realmID, UserID: id}),
 	} {
