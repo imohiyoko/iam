@@ -141,6 +141,20 @@ func Run(t *testing.T, h Harness) {
 			t.Fatalf("new window: %d", n)
 		}
 	})
+	t.Run("IncrKeepsSetExpiry", func(t *testing.T) {
+		s := h.New(t)
+		// Set した値（"0" でも）を増やすときは、Set の期限を変えない。
+		if err := s.Set(ctx, "rl", []byte("0"), h.TTL*10); err != nil {
+			t.Fatal(err)
+		}
+		if n, _ := s.Incr(ctx, "rl", h.TTL); n != 1 {
+			t.Fatal(n)
+		}
+		h.Wait(t, h.TTL*2)
+		if v, ok, _ := s.Get(ctx, "rl"); !ok || string(v) != "1" {
+			t.Fatalf("counter after Set: %q %v", v, ok)
+		}
+	})
 	t.Run("NotACounter", func(t *testing.T) {
 		s := h.New(t)
 		_ = s.Set(ctx, "k", []byte("abc"), time.Hour)

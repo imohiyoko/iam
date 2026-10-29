@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"math"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/imohiyoko/iam/adapters/ephemeral/ephemeraltest"
+	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -32,6 +35,32 @@ func TestContract(t *testing.T) {
 		Wait: func(_ *testing.T, d time.Duration) { time.Sleep(d) },
 		TTL:  100 * time.Millisecond,
 	})
+}
+
+// 期限はミリ秒に切り上げる（1ms 未満を 0 にすると、Incr の PEXPIRE 0 でキーがすぐ消える）。
+func TestCeilMS(t *testing.T) {
+	for in, want := range map[time.Duration]time.Duration{
+		500 * time.Microsecond:             time.Millisecond,
+		time.Millisecond:                   time.Millisecond,
+		time.Millisecond + time.Nanosecond: 2 * time.Millisecond,
+		100 * time.Millisecond:             100 * time.Millisecond,
+		time.Second + 999*time.Microsecond: time.Second + time.Millisecond,
+		time.Duration(math.MaxInt64):       time.Duration(math.MaxInt64).Truncate(time.Millisecond),
+	} {
+		if got := ceilMS(in); got != want {
+			t.Errorf("ceilMS(%v) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+// 繋がらないときは KindUnavailable（呼び出し側は 503 にする）。
+func TestOpenUnavailable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := Open(ctx, "redis://127.0.0.1:1/0", "")
+	if e, ok := errors.AsType[*errs.Error](err); !ok || e.Kind != errs.KindUnavailable {
+		t.Fatalf("Open: %v", err)
+	}
 }
 
 func TestOpenRejectsBadURL(t *testing.T) {

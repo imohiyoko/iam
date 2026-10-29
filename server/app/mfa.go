@@ -158,6 +158,9 @@ func (s publicServer) StartRegisterTOTP(ctx context.Context, _ publicapi.StartRe
 	if !ok {
 		return publicapi.StartRegisterTOTP401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
+	if s.stale(au) {
+		return publicapi.StartRegisterTOTP401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
 	e, err := s.a.totp.BeginEnroll(ctx, s.a.realm.ID, au.PrincipalID)
 	if code, ok := stateCode(err); ok {
 		return publicapi.StartRegisterTOTP409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
@@ -173,6 +176,9 @@ func (s publicServer) ConfirmRegisterTOTP(ctx context.Context, req publicapi.Con
 	au, ok := authFrom(ctx)
 	if !ok || req.Body == nil {
 		return fail, nil
+	}
+	if s.stale(au) {
+		return publicapi.ConfirmRegisterTOTP401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	c := s.a.clientOf(ctx)
 	var t port.TOTPCredential
@@ -216,8 +222,10 @@ func (s publicServer) ConfirmRegisterTOTP(ctx context.Context, req publicapi.Con
 }
 
 func (s publicServer) RevokeMyTOTP(ctx context.Context, req publicapi.RevokeMyTOTPRequestObject) (publicapi.RevokeMyTOTPResponseObject, error) {
-	if _, ok := authFrom(ctx); !ok {
+	if au, ok := authFrom(ctx); !ok {
 		return publicapi.RevokeMyTOTP401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	} else if s.stale(au) {
+		return publicapi.RevokeMyTOTP401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	nf, _, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
 		_, err := s.a.accounts.RevokeTOTP(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Id, au.Actor(), requestID(ctx))
