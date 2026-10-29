@@ -293,7 +293,9 @@ type CheckRequest struct {
 	PrincipalId   string                     `json:"principal_id"`
 	PrincipalType *CheckRequestPrincipalType `json:"principal_type,omitempty"`
 	ResourceId    *string                    `json:"resource_id,omitempty"`
-	ResourceType  *string                    `json:"resource_type,omitempty"`
+
+	// ResourceType `org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`
+	ResourceType *string `json:"resource_type,omitempty"`
 }
 
 // CheckRequestPrincipalType defines model for CheckRequest.PrincipalType.

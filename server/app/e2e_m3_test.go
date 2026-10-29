@@ -18,7 +18,7 @@ import (
 // M3 の完了条件（roadmap.md M3）。条件ごとのテスト：
 //   - 仕事用メールでログインすると会社の Org に入る。passkey の既定 Org も効く：TestInvitationBindsInvitedEmail、TestPasskeyPreferredOrg、下の E2E
 //   - Org の管理者から、結び付けたメール以外が見えない：TestInvitationBindsInvitedEmail、下の E2E
-//     （連携先へのメールの受け渡しは M5 の OIDC で、同じく Membership に結び付けたメールだけを渡す）
+//     （連携先へも同じく Membership に結び付けたメールだけを渡す：TestOIDCOrgEmailIsBoundEmail）
 //   - 最後のオーナーは抜けられない。個人ユーザーの退会は Org の設定で止められない：TestLeaveOrg、下の E2E
 //   - 削除後、監査ログに残った個人情報が復号できない：shared/eventlog の TestClientSealing、下の E2E
 //   - Org をオフにした構成で M1・M2 の E2E がそのまま通る：TestE2EOrgOff
@@ -26,11 +26,13 @@ import (
 // 下の E2E はゴール（1人が個人と会社の顔を持ち、会社の管理者には会社の顔だけが見え、抜けても消しても痕跡が読めない）を通しで確かめる。
 
 func TestE2EM3WorkAndPersonal(t *testing.T) {
+	const samUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 	l := newLoginEnvWith(t, func(c *config.Config) {
 		c.Server.PublicURL = passkeyOrigin
 		c.Passkey.Origins = []string{passkeyOrigin}
 		c.Realm.VerifiedVia = []string{"code", "oauth_provider", "admin", "invitation"}
 	}, feature.Registered())
+	l.ua = samUA
 
 	// 会社の Org を作り、個人のアドレスで登録済みの sam を仕事用のアドレスで招待する。
 	_, boss := l.login(t, "boss@acme.example")
@@ -76,14 +78,24 @@ func TestE2EM3WorkAndPersonal(t *testing.T) {
 	}
 
 	// 会社の管理者には、Membership に結び付けた仕事用のアドレスだけが見える。
-	_, ms := l.members(t, boss, acme)
+	code, ms := l.members(t, boss, acme)
+	if code != 200 {
+		t.Fatalf("members: %d", code)
+	}
+	seen := false
 	for _, m := range ms.Members {
-		if m.UserID == samID && m.Email != "sam@acme.example" {
-			t.Fatalf("org admin sees %q", m.Email)
+		if m.UserID == samID {
+			seen = true
+			if m.Email != "sam@acme.example" {
+				t.Fatalf("org admin sees %q", m.Email)
+			}
 		}
 		if m.Email == "sam@home.example" {
 			t.Fatal("org admin sees the personal email")
 		}
+	}
+	if !seen {
+		t.Fatal("org admin does not see sam")
 	}
 
 	// 最後のオーナーは抜けられない。sam は Acme の設定に関わらず抜けられ、セッションは個人 Org に移る。
@@ -110,8 +122,8 @@ func TestE2EM3WorkAndPersonal(t *testing.T) {
 	if len(samEvents) == 0 {
 		t.Fatal("no audit events with client data for sam")
 	}
-	if ip, _, err := l.openClient(t, samEvents[0]); err != nil || ip == "" {
-		t.Fatalf("open before deletion: %q %v", ip, err)
+	if ip, ua, err := l.openClient(t, samEvents[0]); err != nil || ip == "" || ua != samUA {
+		t.Fatalf("open before deletion: %q %q %v", ip, ua, err)
 	}
 	_, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
 	if status, out := l.admin(t, "/v1/admin/users/"+samID+":delete", admin, map[string]bool{"immediate": true}); status != 200 {
@@ -120,6 +132,9 @@ func TestE2EM3WorkAndPersonal(t *testing.T) {
 	for _, e := range samEvents {
 		if _, _, err := l.openClient(t, e); !errors.Is(err, eventlog.ErrClientUnreadable) {
 			t.Fatalf("%s after deletion: %v", e.Type, err)
+		}
+		if e.UserAgent != "Chrome on Windows" {
+			t.Fatalf("payload user agent = %q", e.UserAgent)
 		}
 		if e.IP != "" && e.IP[len(e.IP)-3:] != "/24" && e.IP[len(e.IP)-3:] != "/48" {
 			t.Fatalf("payload ip = %q", e.IP)

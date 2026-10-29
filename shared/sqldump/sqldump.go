@@ -182,12 +182,10 @@ func Import(ctx context.Context, q Querier, d Dialect, r io.Reader) (Stats, erro
 		return nil, err
 	}
 	for _, t := range target {
-		rows, err := q.QueryContext(ctx, "SELECT 1 FROM "+quote(t.Name)+" LIMIT 1") // #nosec G202 -- 名前はスキーマから
+		has, err := hasRows(ctx, q, t.Name)
 		if err != nil {
 			return nil, err
 		}
-		has := rows.Next()
-		_ = rows.Close()
 		if has {
 			return nil, fmt.Errorf("%w (%s)", ErrNotEmpty, t.Name)
 		}
@@ -262,4 +260,15 @@ func columnList(cols []string) string {
 		q[i] = quote(c)
 	}
 	return strings.Join(q, ", ")
+}
+
+// hasRows は表に行があるかを返す（読み出しの失敗を空と取り違えない）。
+func hasRows(ctx context.Context, q Querier, table string) (bool, error) {
+	rows, err := q.QueryContext(ctx, "SELECT 1 FROM "+quote(table)+" LIMIT 1") // #nosec G202 -- 名前はスキーマから
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	has := rows.Next()
+	return has, rows.Err()
 }
