@@ -159,6 +159,31 @@ func TestAdminAPIWithOperatorSession(t *testing.T) {
 	}
 }
 
+// 1要素目だけの制限つきのセッションでは、運営者でも管理 API を使えない（2段階認証を飛ばせない）。
+func TestAdminAPIRejectsRestrictedSession(t *testing.T) {
+	l := newLoginEnv(t)
+	_, full := l.operator(t, "owner@example.com", role.RealmOwner)
+	secret, status, res, _ := l.enrollTOTP(t, full)
+	if status != 200 {
+		t.Fatalf("totp confirm: %d %v", status, res)
+	}
+	login, restricted := l.login(t, "owner@example.com")
+	if login["next"] != "second_factor" {
+		t.Fatalf("login: %v", login)
+	}
+	if status, res := l.admin(t, "/v1/admin/users", restricted, map[string]string{"email": "a@example.com"}); status != 401 || res["error"] != "authentication_failed" {
+		t.Fatalf("restricted session on admin API: %d %v", status, res)
+	}
+	l.advance(30 * time.Second)
+	status, _, upgraded := l.post(t, restricted, "/v1/login/second-factor:verify", map[string]string{"totp_code": l.code(t, secret)})
+	if status != 200 || upgraded == "" {
+		t.Fatalf("verify: %d", status)
+	}
+	if status, res := l.admin(t, "/v1/admin/users", upgraded, map[string]string{"email": "a@example.com"}); status != 201 {
+		t.Fatalf("upgraded session: %d %v", status, res)
+	}
+}
+
 func TestAdminAPIRequiresAuth(t *testing.T) {
 	l := newLoginEnv(t)
 	for _, tok := range []string{"", "garbage", "ses_00000000000000000000000000.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"} {
