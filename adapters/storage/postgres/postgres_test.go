@@ -46,6 +46,11 @@ func testDSN(t testing.TB) string {
 		t.Fatal(err)
 	}
 	u.Path = "/" + name
+	// クエリの dbname・database はパスより優先されるので消す。
+	q := u.Query()
+	q.Del("dbname")
+	q.Del("database")
+	u.RawQuery = q.Encode()
 	return u.String()
 }
 

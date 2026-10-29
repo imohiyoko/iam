@@ -40,7 +40,7 @@ func init() {
 		if dsn == "" {
 			return nil, errors.New("storage postgres: dsn is required")
 		}
-		maxOpen, err := strconv.Atoi(cfg.Option("max_open_conns", "0"))
+		maxOpen, err := strconv.Atoi(cfg.Option("max_open_conns", defaultMaxOpenConns))
 		if err != nil || maxOpen < 0 {
 			return nil, fmt.Errorf("storage postgres: max_open_conns must be a non-negative integer: %q", cfg.Option("max_open_conns", ""))
 		}
@@ -62,9 +62,13 @@ const txLockKey = 0x69616d
 type Options struct {
 	// AutoMigrate は起動時に未適用のマイグレーションを適用するか。false なら未適用があると Open が失敗する。
 	AutoMigrate bool
-	// MaxOpenConns は開いておく接続の上限（0 なら上限なし）。
+	// MaxOpenConns は開いておく接続の上限（0 なら上限なし）。Tx は advisory lock で1つずつ進むので、待っている Tx が
+	// 接続を持ったまま増えないよう、設定ファイルからは既定で defaultMaxOpenConns に抑える。
 	MaxOpenConns int
 }
+
+// defaultMaxOpenConns は設定ファイルで max_open_conns を省いたときの接続の上限。
+const defaultMaxOpenConns = "10"
 
 // Storage は PostgreSQL の Storage。
 type Storage struct {
@@ -80,6 +84,10 @@ func Open(ctx context.Context, dsn string, opt Options) (*Storage, error) {
 		return nil, err
 	}
 	d.SetMaxOpenConns(opt.MaxOpenConns)
+	if opt.MaxOpenConns > 0 {
+		d.SetMaxIdleConns(opt.MaxOpenConns)
+	}
+	d.SetConnMaxIdleTime(5 * time.Minute)
 	s := &Storage{db: d}
 	if err := d.PingContext(ctx); err != nil {
 		_ = d.Close()
