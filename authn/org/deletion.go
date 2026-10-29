@@ -147,6 +147,16 @@ func (s *Service) purge(ctx context.Context, tx port.Tx, o port.Org, actor audit
 			return err
 		}
 	}
+	// ドメインを消す（証明済みのドメインを、消えた Org が持ち続けないように）。
+	ds, err := tx.OrgDomains().ListByOrg(ctx, o.RealmID, o.ID)
+	if err != nil {
+		return err
+	}
+	for _, d := range ds {
+		if err := s.RemoveDomain(ctx, tx, o, d, actor, requestID); err != nil {
+			return err
+		}
+	}
 	now := s.Clock.Now()
 	return tx.Orgs().SetDeletion(ctx, o.RealmID, o.ID, o.DeletionScheduledAt, &now, now)
 }
