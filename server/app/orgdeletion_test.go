@@ -43,6 +43,7 @@ func TestOrgDeletion(t *testing.T) {
 	if code != 201 {
 		t.Fatalf("invite: %d", code)
 	}
+	_, laterToken := l.claimToken(t)
 
 	if code, body := l.mePost(t, pat, "/v1/me/orgs/"+acme+":delete", nil); code != 403 || body["error"] != "permission_denied" {
 		t.Fatalf("member deletes: %d %v", code, body)
@@ -60,6 +61,10 @@ func TestOrgDeletion(t *testing.T) {
 	}
 	if code, body, _ := l.post(t, pat, "/v1/me/orgs/"+acme+":switch", nil); code != 403 || reasonsOf(body) != org.CodeDeletionScheduled {
 		t.Fatalf("switch: %d %v", code, body)
+	}
+	// 招待を受け入れても入れない。
+	if code, body := l.accept(t, "", laterToken); code != 409 || body["error"] != "deletion_scheduled" {
+		t.Fatalf("accept while scheduled: %d %v", code, body)
 	}
 	// 取り消せる。
 	if code, body := l.mePost(t, owner, "/v1/me/orgs/"+acme+":cancel-deletion", nil); code != 204 {
@@ -125,6 +130,10 @@ func TestOperatorDeletesOrg(t *testing.T) {
 		t.Fatalf("delete personal: %d %v", status, out)
 	}
 	_, inv := l.invite(t, owner, acme, "x@acme.example", "member")
+	// オーナーが予約していても、運営者は今削除できる。
+	if code, body := l.mePost(t, owner, "/v1/me/orgs/"+acme+":delete", nil); code != 200 {
+		t.Fatalf("owner schedules: %d %v", code, body)
+	}
 	status, out := l.admin(t, "/v1/admin/orgs/"+acme+":delete", admin, map[string]bool{"immediate": true})
 	if status != 200 || out["deleted_at"] == nil {
 		t.Fatalf("immediate delete: %d %v", status, out)
@@ -138,6 +147,11 @@ func TestOperatorDeletesOrg(t *testing.T) {
 	}
 	if status, _ := l.admin(t, "/v1/admin/orgs/"+acme+":delete", admin, nil); status != 404 {
 		t.Fatalf("delete twice: %d", status)
+	}
+	// オーナーの予約は取り消してあり、発火しない。
+	l.advance(31 * 24 * time.Hour)
+	if _, err := l.a.scheduler.Fire(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }
 

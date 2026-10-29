@@ -59,7 +59,7 @@ func TestLoginWithWorkEmailEntersCompanyOrg(t *testing.T) {
 	}
 	// 所属していない Org には切り替えられない。
 	_, outsider := l.login(t, "out@example.com")
-	if code, _, _ := l.post(t, outsider, "/v1/me/orgs/"+acme+":switch", nil); code != 403 {
+	if code, _, _ := l.post(t, outsider, "/v1/me/orgs/"+acme+":switch", nil); code != 404 {
 		t.Fatalf("outsider switch = %d", code)
 	}
 }
@@ -96,5 +96,29 @@ func TestPasskeyPreferredOrg(t *testing.T) {
 	status, login, _ := l.passkeyLogin(t, a)
 	if status != 200 || login["org_id"] != acme {
 		t.Fatalf("passkey login = %d %v", status, login)
+	}
+}
+
+// 入れ替えの後に今のセッションをログアウトしたら、猶予の残る古い Cookie では Org を切り替えられない（系列を蘇らせない）。
+func TestSwitchFromRotationGraceAfterLogout(t *testing.T) {
+	l := newOrgEnv(t, "code", "oauth_provider", "admin", "invitation")
+	_, old := l.login(t, "pat@home.example")
+	_, orgs := l.myOrgs(t, old)
+	l.advance(l.a.cfg.Security.Session.RotationInterval.D() + time.Second)
+	w := l.do(t, l.a.PublicHandler(), "GET", "/v1/me/sessions", nil, "Cookie", sessionCookie+"="+old)
+	var rotated string
+	for _, c := range w.Result().Cookies() {
+		if c.Name == sessionCookie {
+			rotated = c.Value
+		}
+	}
+	if w.Code != 200 || rotated == "" || rotated == old {
+		t.Fatalf("rotation = %d %q", w.Code, rotated)
+	}
+	if w := l.do(t, l.a.PublicHandler(), "POST", "/v1/logout", nil, "Cookie", sessionCookie+"="+rotated); w.Code != 204 {
+		t.Fatalf("logout = %d", w.Code)
+	}
+	if code, body, _ := l.post(t, old, "/v1/me/orgs/"+orgs.Orgs[0].ID+":switch", nil); code != 401 {
+		t.Fatalf("switch from the grace cookie = %d %v", code, body)
 	}
 }
