@@ -32,7 +32,7 @@ type adminPrincipal struct {
 }
 
 // withAdminAuth は管理 API の認証。Bearer のトークンが運営者のセッションならそのユーザー、
-// そうでなければサービスアカウントの API キーとして確かめる。権限の判定は各操作で行う。
+// そうでなければサービスアカウントの API キーかアクセストークンとして確かめる。権限の判定は各操作で行う。
 func (a *App) withAdminAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -58,7 +58,7 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 			var sa port.ServiceAccount
 			err := a.deps.Storage.Tx(r.Context(), func(ctx context.Context, tx port.Tx) error {
 				var err error
-				sa, err = serviceaccount.Authenticate(ctx, tx, a.realm.ID, key, a.deps.Clock.Now())
+				sa, err = a.serviceAccounts.Authenticate(ctx, tx, a.realm.ID, key, a.deps.Clock.Now())
 				return err
 			})
 			if err != nil && !errors.Is(err, serviceaccount.ErrInvalid) {

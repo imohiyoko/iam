@@ -155,6 +155,17 @@ outbox: {interval: 50ms}
 		}
 	}
 
+	// 通知の配信用のサービスアカウント（2.4、ADR 0074）。
+	out.Reset()
+	if err := run(ctx, []string{"service-account", "create", "-config", cfgPath, "-name", "delivery"}, &out, &out); err != nil {
+		t.Fatalf("service-account: %v\n%s", err, out.String())
+	}
+	saLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	deliveryKey := saLines[len(saLines)-1]
+	if !strings.HasPrefix(deliveryKey, "sac_") {
+		t.Fatalf("service-account output:\n%s", out.String())
+	}
+
 	sctx, cancel := context.WithCancel(ctx)
 	var stdout syncBuffer
 	done := make(chan error, 1)
@@ -226,6 +237,11 @@ outbox: {interval: 50ms}
 	}
 	if status, res = s.login(t, "carol@example.com"); status == 200 {
 		t.Fatalf("suspended login: %d %v", status, res)
+	}
+
+	// 配信用のキーで管理 API の通知の取り出しを呼べる（無い通知は 404。認可は通っている）。
+	if status, res = postJSON(t, adm+"/v1/admin/notifications/ntf_00000000000000000000000000:claim", deliveryKey, nil); status != 404 {
+		t.Fatalf("delivery claim: %d %v", status, res)
 	}
 
 	// ログアウトしたトークンは使えない。

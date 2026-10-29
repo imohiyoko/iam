@@ -213,9 +213,19 @@ func testRetentionSweep(t *testing.T, h Harness) {
 	record(t, s, clk, r, 4)
 	clk.Advance(10 * 24 * time.Hour)
 	record(t, s, clk, r, 2)
+	// 期限の切れたサービスアカウントのトークン（ADR 0074）。
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		for _, exp := range []time.Time{T0.Add(time.Hour), clk.Now().Add(time.Hour)} {
+			if err := tx.ServiceAccounts().CreateToken(ctx, port.ServiceAccountToken{ID: id.New(id.SAToken), RealmID: r, ServiceAccountID: "sva_x",
+				CredentialID: "sac_x", Hash: []byte("h"), CreatedAt: T0, ExpiresAt: exp}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	ret := &eventlog.Retention{Storage: s, Clock: clk, RealmID: r, Audit: 5 * 24 * time.Hour, Ended: 24 * time.Hour, Batch: 2}
 	n, err := ret.Sweep(context.Background())
-	if err != nil || n.Audit != 4 {
+	if err != nil || n.Audit != 4 || n.Tokens != 1 {
 		t.Fatalf("Sweep = %+v, %v", n, err)
 	}
 	if _, last, err := eventlog.Verify(context.Background(), s); err != nil || last != 7 {

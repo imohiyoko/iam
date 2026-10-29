@@ -115,10 +115,15 @@ type AuthnRevokedPasskeyCredential struct {
 }
 
 type AuthnServiceAccount struct {
-	ID        string
-	RealmID   string
-	Name      string
-	CreatedAt string
+	ID         string
+	RealmID    string
+	Name       string
+	CreatedAt  string
+	OrgID      string
+	ValidFrom  sql.NullString
+	ValidUntil sql.NullString
+	DeletedAt  sql.NullString
+	CreatedBy  string
 }
 
 type AuthnServiceAccountCredential struct {
@@ -130,6 +135,18 @@ type AuthnServiceAccountCredential struct {
 	CreatedAt        string
 	ExpiresAt        sql.NullString
 	RevokedAt        sql.NullString
+	PublicKey        []byte
+	Alg              string
+}
+
+type AuthnServiceAccountToken struct {
+	ID               string
+	RealmID          string
+	ServiceAccountID string
+	CredentialID     string
+	TokenHash        []byte
+	CreatedAt        string
+	ExpiresAt        string
 }
 
 type AuthnSession struct {

@@ -100,20 +100,39 @@ WHERE realm_id = sqlc.arg(realm_id) AND principal_type = 'user' AND principal_id
 RETURNING id;
 
 -- name: CreateServiceAccount :exec
-INSERT INTO authn_service_accounts (id, realm_id, name, created_at) VALUES ($1, $2, $3, $4);
+INSERT INTO authn_service_accounts (id, realm_id, org_id, name, valid_from, valid_until, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: GetServiceAccount :one
 SELECT * FROM authn_service_accounts WHERE realm_id = $1 AND id = $2;
 
+-- name: ListServiceAccounts :many
+SELECT * FROM authn_service_accounts WHERE realm_id = sqlc.arg(realm_id) AND id > sqlc.arg(after) ORDER BY id LIMIT sqlc.arg(lim)::bigint;
+
+-- name: DeleteServiceAccount :execrows
+UPDATE authn_service_accounts SET deleted_at = coalesce(deleted_at, sqlc.arg(at)) WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
+
 -- name: CreateServiceAccountCredential :exec
-INSERT INTO authn_service_account_credentials (id, realm_id, service_account_id, type, secret_hash, created_at, expires_at, revoked_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO authn_service_account_credentials (id, realm_id, service_account_id, type, secret_hash, public_key, alg, created_at, expires_at, revoked_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: GetServiceAccountCredential :one
 SELECT * FROM authn_service_account_credentials WHERE realm_id = $1 AND id = $2;
 
+-- name: ListServiceAccountCredentials :many
+SELECT * FROM authn_service_account_credentials WHERE realm_id = $1 AND service_account_id = $2 ORDER BY created_at, id;
+
 -- name: RevokeServiceAccountCredential :execrows
 UPDATE authn_service_account_credentials SET revoked_at = coalesce(revoked_at, sqlc.arg(at)) WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
+
+-- name: CreateServiceAccountToken :exec
+INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: GetServiceAccountToken :one
+SELECT * FROM authn_service_account_tokens WHERE realm_id = $1 AND id = $2;
+
+-- name: DeleteExpiredServiceAccountTokens :execrows
+DELETE FROM authn_service_account_tokens WHERE id IN (
+    SELECT t.id FROM authn_service_account_tokens t WHERE t.expires_at < sqlc.arg(before) LIMIT sqlc.arg(lim)::bigint);
 
 -- name: CreatePasskey :exec
 INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,

@@ -270,29 +270,37 @@ func (q *Queries) CreateRecoveryCode(ctx context.Context, arg CreateRecoveryCode
 }
 
 const createServiceAccount = `-- name: CreateServiceAccount :exec
-INSERT INTO authn_service_accounts (id, realm_id, name, created_at) VALUES ($1, $2, $3, $4)
+INSERT INTO authn_service_accounts (id, realm_id, org_id, name, valid_from, valid_until, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateServiceAccountParams struct {
-	ID        string
-	RealmID   string
-	Name      string
-	CreatedAt string
+	ID         string
+	RealmID    string
+	OrgID      string
+	Name       string
+	ValidFrom  sql.NullString
+	ValidUntil sql.NullString
+	CreatedBy  string
+	CreatedAt  string
 }
 
 func (q *Queries) CreateServiceAccount(ctx context.Context, arg CreateServiceAccountParams) error {
 	_, err := q.db.ExecContext(ctx, createServiceAccount,
 		arg.ID,
 		arg.RealmID,
+		arg.OrgID,
 		arg.Name,
+		arg.ValidFrom,
+		arg.ValidUntil,
+		arg.CreatedBy,
 		arg.CreatedAt,
 	)
 	return err
 }
 
 const createServiceAccountCredential = `-- name: CreateServiceAccountCredential :exec
-INSERT INTO authn_service_account_credentials (id, realm_id, service_account_id, type, secret_hash, created_at, expires_at, revoked_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO authn_service_account_credentials (id, realm_id, service_account_id, type, secret_hash, public_key, alg, created_at, expires_at, revoked_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type CreateServiceAccountCredentialParams struct {
@@ -301,6 +309,8 @@ type CreateServiceAccountCredentialParams struct {
 	ServiceAccountID string
 	Type             string
 	SecretHash       []byte
+	PublicKey        []byte
+	Alg              string
 	CreatedAt        string
 	ExpiresAt        sql.NullString
 	RevokedAt        sql.NullString
@@ -313,9 +323,38 @@ func (q *Queries) CreateServiceAccountCredential(ctx context.Context, arg Create
 		arg.ServiceAccountID,
 		arg.Type,
 		arg.SecretHash,
+		arg.PublicKey,
+		arg.Alg,
 		arg.CreatedAt,
 		arg.ExpiresAt,
 		arg.RevokedAt,
+	)
+	return err
+}
+
+const createServiceAccountToken = `-- name: CreateServiceAccountToken :exec
+INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type CreateServiceAccountTokenParams struct {
+	ID               string
+	RealmID          string
+	ServiceAccountID string
+	CredentialID     string
+	TokenHash        []byte
+	CreatedAt        string
+	ExpiresAt        string
+}
+
+func (q *Queries) CreateServiceAccountToken(ctx context.Context, arg CreateServiceAccountTokenParams) error {
+	_, err := q.db.ExecContext(ctx, createServiceAccountToken,
+		arg.ID,
+		arg.RealmID,
+		arg.ServiceAccountID,
+		arg.CredentialID,
+		arg.TokenHash,
+		arg.CreatedAt,
+		arg.ExpiresAt,
 	)
 	return err
 }
@@ -514,6 +553,24 @@ func (q *Queries) DeleteEndedSessions(ctx context.Context, arg DeleteEndedSessio
 	return result.RowsAffected()
 }
 
+const deleteExpiredServiceAccountTokens = `-- name: DeleteExpiredServiceAccountTokens :execrows
+DELETE FROM authn_service_account_tokens WHERE id IN (
+    SELECT t.id FROM authn_service_account_tokens t WHERE t.expires_at < $1 LIMIT $2::bigint)
+`
+
+type DeleteExpiredServiceAccountTokensParams struct {
+	Before string
+	Lim    int64
+}
+
+func (q *Queries) DeleteExpiredServiceAccountTokens(ctx context.Context, arg DeleteExpiredServiceAccountTokensParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteExpiredServiceAccountTokens, arg.Before, arg.Lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteFiredScheduledEvents = `-- name: DeleteFiredScheduledEvents :execrows
 DELETE FROM scheduled_events WHERE id IN (
     SELECT e.id FROM scheduled_events e WHERE e.fired_at IS NOT NULL AND e.fired_at < $1 LIMIT $2::bigint)
@@ -544,6 +601,24 @@ type DeleteRecoveryCodesParams struct {
 func (q *Queries) DeleteRecoveryCodes(ctx context.Context, arg DeleteRecoveryCodesParams) error {
 	_, err := q.db.ExecContext(ctx, deleteRecoveryCodes, arg.RealmID, arg.UserID)
 	return err
+}
+
+const deleteServiceAccount = `-- name: DeleteServiceAccount :execrows
+UPDATE authn_service_accounts SET deleted_at = coalesce(deleted_at, $1) WHERE realm_id = $2 AND id = $3
+`
+
+type DeleteServiceAccountParams struct {
+	At      sql.NullString
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) DeleteServiceAccount(ctx context.Context, arg DeleteServiceAccountParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteServiceAccount, arg.At, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const dueScheduledEvents = `-- name: DueScheduledEvents :many
@@ -1113,7 +1188,7 @@ func (q *Queries) GetPassword(ctx context.Context, arg GetPasswordParams) (Authn
 }
 
 const getServiceAccount = `-- name: GetServiceAccount :one
-SELECT id, realm_id, name, created_at FROM authn_service_accounts WHERE realm_id = $1 AND id = $2
+SELECT id, realm_id, name, created_at, org_id, valid_from, valid_until, deleted_at, created_by FROM authn_service_accounts WHERE realm_id = $1 AND id = $2
 `
 
 type GetServiceAccountParams struct {
@@ -1129,12 +1204,17 @@ func (q *Queries) GetServiceAccount(ctx context.Context, arg GetServiceAccountPa
 		&i.RealmID,
 		&i.Name,
 		&i.CreatedAt,
+		&i.OrgID,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.DeletedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
 
 const getServiceAccountCredential = `-- name: GetServiceAccountCredential :one
-SELECT id, realm_id, service_account_id, type, secret_hash, created_at, expires_at, revoked_at FROM authn_service_account_credentials WHERE realm_id = $1 AND id = $2
+SELECT id, realm_id, service_account_id, type, secret_hash, created_at, expires_at, revoked_at, public_key, alg FROM authn_service_account_credentials WHERE realm_id = $1 AND id = $2
 `
 
 type GetServiceAccountCredentialParams struct {
@@ -1154,6 +1234,32 @@ func (q *Queries) GetServiceAccountCredential(ctx context.Context, arg GetServic
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.PublicKey,
+		&i.Alg,
+	)
+	return i, err
+}
+
+const getServiceAccountToken = `-- name: GetServiceAccountToken :one
+SELECT id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at FROM authn_service_account_tokens WHERE realm_id = $1 AND id = $2
+`
+
+type GetServiceAccountTokenParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) GetServiceAccountToken(ctx context.Context, arg GetServiceAccountTokenParams) (AuthnServiceAccountToken, error) {
+	row := q.db.QueryRowContext(ctx, getServiceAccountToken, arg.RealmID, arg.ID)
+	var i AuthnServiceAccountToken
+	err := row.Scan(
+		&i.ID,
+		&i.RealmID,
+		&i.ServiceAccountID,
+		&i.CredentialID,
+		&i.TokenHash,
+		&i.CreatedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -1596,6 +1702,92 @@ func (q *Queries) ListRecoveryCodes(ctx context.Context, arg ListRecoveryCodesPa
 			&i.Hash,
 			&i.CreatedAt,
 			&i.UsedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServiceAccountCredentials = `-- name: ListServiceAccountCredentials :many
+SELECT id, realm_id, service_account_id, type, secret_hash, created_at, expires_at, revoked_at, public_key, alg FROM authn_service_account_credentials WHERE realm_id = $1 AND service_account_id = $2 ORDER BY created_at, id
+`
+
+type ListServiceAccountCredentialsParams struct {
+	RealmID          string
+	ServiceAccountID string
+}
+
+func (q *Queries) ListServiceAccountCredentials(ctx context.Context, arg ListServiceAccountCredentialsParams) ([]AuthnServiceAccountCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listServiceAccountCredentials, arg.RealmID, arg.ServiceAccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnServiceAccountCredential
+	for rows.Next() {
+		var i AuthnServiceAccountCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.RealmID,
+			&i.ServiceAccountID,
+			&i.Type,
+			&i.SecretHash,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.PublicKey,
+			&i.Alg,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServiceAccounts = `-- name: ListServiceAccounts :many
+SELECT id, realm_id, name, created_at, org_id, valid_from, valid_until, deleted_at, created_by FROM authn_service_accounts WHERE realm_id = $1 AND id > $2 ORDER BY id LIMIT $3::bigint
+`
+
+type ListServiceAccountsParams struct {
+	RealmID string
+	After   string
+	Lim     int64
+}
+
+func (q *Queries) ListServiceAccounts(ctx context.Context, arg ListServiceAccountsParams) ([]AuthnServiceAccount, error) {
+	rows, err := q.db.QueryContext(ctx, listServiceAccounts, arg.RealmID, arg.After, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnServiceAccount
+	for rows.Next() {
+		var i AuthnServiceAccount
+		if err := rows.Scan(
+			&i.ID,
+			&i.RealmID,
+			&i.Name,
+			&i.CreatedAt,
+			&i.OrgID,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.DeletedAt,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}

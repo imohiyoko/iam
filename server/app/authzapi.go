@@ -65,6 +65,16 @@ func resolvePrincipal(ctx context.Context, tx port.Tx, sc manage.Scope, typ, pub
 			return manage.Target{}, err
 		}
 		return manage.Target{Principal: check.Principal{Type: port.PrincipalUser, ID: u.ID}, PublicID: u.PublicID}, nil
+	case typ == string(port.PrincipalServiceAccount):
+		// サービスアカウントの ID は外部 ID（ADR 0045）。Org の範囲では、その Org に属するものだけ。
+		sa, err := tx.ServiceAccounts().Get(ctx, sc.RealmID, publicID)
+		if errors.Is(err, errs.NotFound) || (err == nil && (sa.DeletedAt != nil || sa.OrgID != sc.OrgID && sc.OrgID != "")) {
+			return manage.Target{}, errInvalidPrincipal
+		}
+		if err != nil {
+			return manage.Target{}, err
+		}
+		return manage.Target{Principal: check.Principal{Type: port.PrincipalServiceAccount, ID: sa.ID}, PublicID: sa.ID}, nil
 	case typ == string(port.PrincipalGroup) && allowGroup:
 		g, err := tx.Groups().GetByPublicID(ctx, sc.RealmID, publicID)
 		if errors.Is(err, errs.NotFound) || (err == nil && g.OrgID != sc.OrgID) {
@@ -91,8 +101,10 @@ func principalPublicID(ctx context.Context, tx port.Tx, realmID string, t port.P
 		var g port.Group
 		g, err = tx.Groups().Get(ctx, realmID, internalID)
 		pub = g.PublicID
+	case port.PrincipalServiceAccount:
+		// サービスアカウントの ID は外部 ID（ADR 0045）。
+		return internalID, nil
 	default:
-		// サービスアカウントは公開 ID を持たない（管理の API からは付与しない）。内部 ID は出さない。
 		return "", nil
 	}
 	if errors.Is(err, errs.NotFound) {

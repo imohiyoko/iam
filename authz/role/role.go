@@ -63,6 +63,8 @@ const (
 	PermClientsManage = "clients:manage"
 	// PermSigningKeysRotate は ID トークンの署名鍵のローテーション（9.3）。
 	PermSigningKeysRotate = "signing_keys:rotate"
+	// PermServiceAccountsManage は汎用サービスアカウントとその認証情報の作成・削除（ADR 0074）。
+	PermServiceAccountsManage = "service_accounts:manage"
 )
 
 // SuspensionPerm は停止の種別ごとの停止・解除の権限（`suspensions:<category>`。4.11）。
@@ -78,9 +80,9 @@ func suspend(categories ...string) []string {
 }
 
 var builtin = map[string][]string{
-	RealmOwner: append([]string{PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
+	RealmOwner: append([]string{PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
 		PermCredentialsRevoke, PermSuspensionsAny}, suspend("tos_violation", "customer_request", "security_risk", "billing")...),
-	RealmAdmin: append([]string{PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke},
+	RealmAdmin: append([]string{PermServiceAccountsManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke},
 		suspend("tos_violation", "customer_request")...),
 	RealmSecurity:        append([]string{PermSessionsRevoke, PermCredentialsRevoke}, suspend("security_risk")...),
 	RealmSupport:         {PermOrgsRead, PermSuspensionsRead, PermUsersRecover},

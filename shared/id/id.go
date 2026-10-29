@@ -92,6 +92,7 @@ const (
 	Suspension     Prefix = "sus"
 	ServiceAccount Prefix = "sva"
 	SACredential   Prefix = "sac"
+	SAToken        Prefix = "sat"
 	Client         Prefix = "cli"
 	SigningKey     Prefix = "sgk"
 	Grant          Prefix = "gnt"

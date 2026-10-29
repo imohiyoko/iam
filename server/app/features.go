@@ -41,6 +41,13 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.QuotaGrants().Purge(ctx, limit)
 		}},
+	feature.ServiceAccounts: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachServiceAccount(ctx, tx, -1, func(port.ServiceAccount) (bool, error) { return true, nil })
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachServiceAccount(ctx, tx, limit, func(sa port.ServiceAccount) (bool, error) {
+			return true, tx.ServiceAccounts().SetDeleted(ctx, sa.RealmID, sa.ID, now)
+		})
+	}},
 	feature.Password: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.Passwords().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Passwords().Purge(ctx, limit)
@@ -68,6 +75,50 @@ func eachOrg(ctx context.Context, tx port.Tx, limit int, fn func(port.Org) (bool
 			for _, o := range page {
 				after = o.ID
 				ok, err := fn(o)
+				if err != nil {
+					return n, err
+				}
+				if ok {
+					n++
+				}
+				if limit >= 0 && n >= limit {
+					return n, nil
+				}
+			}
+			if len(page) < prepareBatch {
+				break
+			}
+		}
+	}
+	return n, nil
+}
+
+// eachServiceAccount は全 realm の、削除していない配信用でないサービスアカウント（フィーチャー service_accounts のデータ）に
+// fn を呼び、true を返した数を数える。limit が 0 以上なら、その数で止める。
+func eachServiceAccount(ctx context.Context, tx port.Tx, limit int, fn func(port.ServiceAccount) (bool, error)) (int, error) {
+	realms, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range realms {
+		for after := ""; ; {
+			page, err := tx.ServiceAccounts().List(ctx, r.ID, after, prepareBatch)
+			if err != nil {
+				return n, err
+			}
+			for _, sa := range page {
+				after = sa.ID
+				if sa.DeletedAt != nil {
+					continue
+				}
+				if delivery, err := deliveryOnly(ctx, tx, sa); err != nil || delivery {
+					if err != nil {
+						return n, err
+					}
+					continue
+				}
+				ok, err := fn(sa)
 				if err != nil {
 					return n, err
 				}
