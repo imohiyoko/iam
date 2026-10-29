@@ -209,14 +209,14 @@ Group のネスト、Org 階層（M7）。
 - 保持期間の処理（監査ログの切り詰めとチェックポイント、IP の切り詰め）、メールの最小化モード（6.5、9.6）
 - PostgreSQL と Redis のアダプタ、`iam storage export / import`（2.4）
 - `iam build`、`iam features plan / enable / disable`、公式イメージ（全部入り・最小構成）と署名・SBOM（11.11、11.12、13.8）
-- 運用文書（鍵のバックアップ、アップグレード、障害時の手順）
+- 運用文書（鍵のバックアップ、アップグレード、障害時の手順）（[operations.md](operations.md)）
 
 ### 完了条件
 
-- [ ] E2E が2構成（SQLite + インメモリ、PostgreSQL + Redis）で通る
-- [ ] SQLite から PostgreSQL への移行の E2E が通る
-- [ ] 各フィーチャーの、データがある状態での有効化・無効化のテストが通る
-- [ ] Quota の時刻つき判定（期間が重ならない人の枠の共有、将来の減少）のテストが並行実行でも通る
+- [x] E2E が2構成（SQLite + インメモリ、PostgreSQL + Redis）で通る
+- [x] SQLite から PostgreSQL への移行の E2E が通る
+- [x] 各フィーチャーの、データがある状態での有効化・無効化のテストが通る
+- [x] Quota の時刻つき判定（期間が重ならない人の枠の共有、将来の減少）のテストが並行実行でも通る
 - [ ] OpenID Foundation の適合試験（Basic OP 相当）に、[適合性メモ](oidc-conformance.md)の既知の差異以外で合格
   （公開した環境で実行し、結果を適合性メモに追記する）
 
