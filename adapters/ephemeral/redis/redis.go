@@ -6,6 +6,7 @@ package redis
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -46,7 +47,7 @@ func Open(ctx context.Context, url, prefix string) (*Store, error) {
 	s := New(goredis.NewClient(opt), prefix)
 	if err := s.c.Ping(ctx).Err(); err != nil {
 		_ = s.c.Close()
-		return nil, err
+		return nil, mapErr(err)
 	}
 	return s, nil
 }
@@ -67,9 +68,13 @@ func ttlErr(ttl time.Duration) error {
 }
 
 // ceilMS は ttl をミリ秒に切り上げる（Redis の期限はミリ秒単位。切り捨てると 1ms 未満が 0 になり、Set は拒まれ、
-// Incr は PEXPIRE 0 でキーがすぐ消える）。
+// Incr は PEXPIRE 0 でキーがすぐ消える）。足すと溢れるほど長いときは切り捨てる。
 func ceilMS(ttl time.Duration) time.Duration {
-	return (ttl + time.Millisecond - 1).Truncate(time.Millisecond)
+	d := ttl.Truncate(time.Millisecond)
+	if d < ttl && d <= math.MaxInt64-time.Millisecond {
+		d += time.Millisecond
+	}
+	return d
 }
 
 // mapErr は接続の失敗などを KindUnavailable にする（呼び出し側は 503 にする）。
@@ -116,10 +121,11 @@ func (s *Store) Take(ctx context.Context, key string) ([]byte, bool, error) {
 	return v, true, nil
 }
 
-// incrScript は1増やし、新しいキーのときだけ期限を付ける（固定窓）。
+// incrScript は1増やし、新しいキーのときだけ期限を付ける（固定窓。Set した "0" を増やしても期限は変えない）。
 var incrScript = goredis.NewScript(`
+local fresh = redis.call('EXISTS', KEYS[1]) == 0
 local n = redis.call('INCR', KEYS[1])
-if n == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+if fresh then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
 return n`)
 
 func (s *Store) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
