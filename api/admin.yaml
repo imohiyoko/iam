@@ -757,6 +757,7 @@ paths:
         権限 `orgs:update`。`parent_id` を省略か null にすると親を外す。親の Org の付与と org_role が、子孫の Org の範囲の
         判定に効く（親の使える所属を持つ間、子の Org が使えるとき）。個人 Org は `409 personal_org`、削除した Org は
         `409 org_deleted`、循環は `409 hierarchy_cycle`、段数（根を含めて 5）を超えるなら `409 hierarchy_too_deep`。
+        `parent_id` の Org が無ければ `400 parent_not_found`。
         フィーチャー org_hierarchy が動いていなければ `404 hierarchy_disabled`。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }

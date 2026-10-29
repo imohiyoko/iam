@@ -114,8 +114,8 @@ func (s adminServer) orgDeletion(ctx context.Context, publicID string, change fu
 		if o, err = change(ctx, tx, o, p); err != nil {
 			return err
 		}
-		out = orgView(o, "")
-		return nil
+		out, err = s.orgOut(ctx, tx, o)
+		return err
 	})
 	if o, ok, err := outcomeOf(nil, err); !ok {
 		return adminapi.Org{}, o, err

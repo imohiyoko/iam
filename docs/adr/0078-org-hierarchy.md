@@ -2,7 +2,7 @@
 
 - 状態: 承認
 - 日付: 2026-10-27
-- 関連: [design.md](../design.md) 3.2、4.5、11.4、[0064](0064-authz-check.md)
+- 関連: [design.md](../design.md) 3.2、4.5、11.4、[0064](0064-authz-roles-groups-check.md)
 
 ## 背景
 
