@@ -149,11 +149,10 @@ func Verify(prev []byte, firstSeq int64, records []Record) ([]byte, error) {
 	return prev, nil
 }
 
-// External は外部出力（EventSink）向けのイベント。個人情報を含めない。
-// 仮名化などの出力先ごとの選択は M6 で追加する（design.md 6.3）。
+// External は外部出力（EventSink）向けに outbox へ積むイベント。全文の暗号文（Client）を外す。
+// 切り詰めた IP と User-Agent の大分類は残し、出力先ごとに そのまま・仮名化・出さない を選ぶ
+// （design.md 6.3、adapters/eventsink/sinkfmt、ADR 0071）。
 func External(e Event) Event {
-	e.IP = ""
-	e.UserAgent = ""
 	e.Client = ""
 	return e
 }

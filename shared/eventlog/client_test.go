@@ -49,11 +49,11 @@ func TestClientSealing(t *testing.T) {
 	alice := record(t, s, k, audit.Actor{Type: "user", ID: u.PublicID})
 	anon := record(t, s, k, audit.Actor{Type: "anonymous"})
 
-	// ペイロードには切り詰めた値だけを平文で置き、全文は client に暗号化して置く。外部出力には出さない。
+	// ペイロードには切り詰めた値だけを平文で置き、全文は client に暗号化して置く。全文は外部出力には出さない。
 	if alice.IP != "203.0.113.0/24" || alice.UserAgent != "Chrome on Windows" || alice.Client == "" {
 		t.Fatalf("event = %+v", alice)
 	}
-	if x := audit.External(alice); x.IP != "" || x.UserAgent != "" || x.Client != "" {
+	if x := audit.External(alice); x.IP != alice.IP || x.UserAgent != alice.UserAgent || x.Client != "" {
 		t.Fatalf("external = %+v", x)
 	}
 	for _, e := range []audit.Event{alice, anon} {

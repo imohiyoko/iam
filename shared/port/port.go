@@ -215,7 +215,7 @@ type KeyStore interface {
 // EventSink
 
 // EventSink は監査ログなどの外部出力（design.md 6.3）。
-// 受け取るイベントは audit.External で個人情報を外したもの。
+// 受け取るイベントは audit.External のもの（全文の暗号文は無く、切り詰めた IP と UA は出力先が出し方を選ぶ。sinkfmt）。
 type EventSink interface {
 	Emit(ctx context.Context, events []audit.Event) error
 }
