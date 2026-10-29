@@ -241,6 +241,21 @@ func TestOIDCAuthorizationCodeFlow(t *testing.T) {
 	if status, info := l.userinfo(t, tok["access_token"].(string)); status != 200 || info["sub"] != alice || info["email"] != "alice@example.com" {
 		t.Fatalf("userinfo: %d %v", status, info)
 	}
+	// POST の本文の access_token でも受ける（OIDC Core 5.3.1）。
+	if w := l.oidcDo(t, "POST", oidcUserinfo, url.Values{"access_token": {tok["access_token"].(string)}}, ""); w.Code != 200 ||
+		!strings.Contains(w.Body.String(), alice) {
+		t.Fatalf("userinfo POST: %d %s", w.Code, w.Body)
+	}
+	// client_secret_post（本文の client_id と client_secret）でも認証できる。nonce の無い認可要求も受け、ID トークンに
+	// nonce を入れない。
+	cp := p.code(t, l.oidcDo(t, "GET", p.authorizeURL(url.Values{"nonce": nil}), nil, cookie))
+	status, tp := p.exchange(t, cp, url.Values{"client_id": {p.clientID}, "client_secret": {p.secret}}, "Accept", "application/json")
+	if status != 200 {
+		t.Fatalf("client_secret_post: %d %v", status, tp)
+	}
+	if c := l.idClaims(t, tp["id_token"].(string), port.AlgES256); c["nonce"] != nil || c["sub"] != alice {
+		t.Fatalf("id token without nonce: %v", c)
+	}
 
 	// ログイン済みならそのまま戻る。セッションの ID を入れ替えても sid は変わらない。
 	l.advance(l.a.cfg.Security.Session.RotationInterval.D() + time.Second)
@@ -315,7 +330,7 @@ func TestOIDCAuthorizationCodeFlow(t *testing.T) {
 	for _, e := range l.auditTypes(t) {
 		types[e.Type]++
 	}
-	if types["oidc.authorized"] != 2 {
+	if types["oidc.authorized"] != 3 {
 		t.Fatalf("audit: %v", types)
 	}
 }
@@ -349,6 +364,67 @@ func TestOIDCPublicClientMLDSAAndOrg(t *testing.T) {
 	if status, out := other.exchange(t, c2, nil); status != 400 || out["error"] != "invalid_grant" {
 		t.Fatalf("code for another client: %d %v", status, out)
 	}
+}
+
+// 連携先にも、Org の管理者と同じく、Membership に結び付けたメールだけを渡す（roadmap M5）。
+func TestOIDCOrgEmailIsBoundEmail(t *testing.T) {
+	l := newLoginEnvWith(t, func(c *config.Config) {
+		withIssuer(c)
+		c.Realm.VerifiedVia = []string{"code", "oauth_provider", "admin", "invitation"}
+	}, feature.Registered())
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+
+	// 個人のアドレスで登録済みの sam を、仕事用のアドレスで会社の Org に招待する。
+	_, boss := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, boss, "Acme")
+	_, home := l.login(t, "sam@home.example")
+	l.advance(time.Second)
+	if code, body := l.addEmail(t, home, "sam@acme.example"); code != 200 {
+		t.Fatalf("add work email: %d %v", code, body)
+	}
+	if code, body := l.invite(t, boss, acme, "sam@acme.example", "member"); code != 201 {
+		t.Fatalf("invite: %d %v", code, body)
+	}
+	_, token := l.claimToken(t)
+	if code, body := l.accept(t, home, token); code != 200 {
+		t.Fatalf("accept: %d %v", code, body)
+	}
+
+	check := func(name, code, email string) {
+		t.Helper()
+		status, tok := p.exchange(t, code, nil)
+		if status != 200 {
+			t.Fatalf("%s: token: %d %v", name, status, tok)
+		}
+		if claims := l.idClaims(t, tok["id_token"].(string), port.AlgES256); claims["email"] != email {
+			t.Fatalf("%s: id token email = %v", name, claims["email"])
+		}
+		if status, info := l.userinfo(t, tok["access_token"].(string)); status != 200 || info["email"] != email {
+			t.Fatalf("%s: userinfo: %d %v", name, status, info)
+		}
+	}
+	// 個人のアドレスでログインしても、Acme にいる間は結び付けた仕事用のアドレスを渡す。
+	l.advance(time.Second)
+	_, cookie := l.login(t, "sam@home.example")
+	status, _, cookie := l.post(t, cookie, "/v1/me/orgs/"+acme+":switch", nil)
+	if status != 200 || l.activeOrgPublic(t, cookie) != acme {
+		t.Fatalf("switch to Acme: %d", status)
+	}
+	check("acme", p.code(t, l.oidcDo(t, "GET", p.authorizeURL(nil), nil, cookie)), "sam@acme.example")
+	// 個人 Org に切り替えると、主のアドレスを渡す。
+	personal := ""
+	_, orgs := l.myOrgs(t, cookie)
+	for _, o := range orgs.Orgs {
+		if o.Kind == "personal" {
+			personal = o.ID
+		}
+	}
+	status, _, cookie = l.post(t, cookie, "/v1/me/orgs/"+personal+":switch", nil)
+	if status != 200 {
+		t.Fatalf("switch: %d", status)
+	}
+	check("personal", p.code(t, l.oidcDo(t, "GET", p.authorizeURL(nil), nil, cookie)), "sam@home.example")
 }
 
 func TestOIDCPrivateKeyJWT(t *testing.T) {

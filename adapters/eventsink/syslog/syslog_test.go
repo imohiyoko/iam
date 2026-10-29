@@ -59,11 +59,11 @@ func TestSyslogTCPFraming(t *testing.T) {
 		t.Fatalf("messages = %q", msgs)
 	}
 	// facility 13（log audit）* 8 + informational 6 = 110、失敗は notice 5 = 109。MSGID の空白は除く。
-	if !strings.HasPrefix(msgs[0], "<110>1 2026-10-27T01:02:03.000000Z iam iam ") || !strings.Contains(msgs[0], " login.succeeded - {") ||
+	if !strings.HasPrefix(msgs[0], "<110>1 2026-10-27T01:02:03.000000Z iam iam ") || !strings.Contains(msgs[0], " login.succeeded - \ufeff{") ||
 		strings.Contains(msgs[0], "203.0.113") {
 		t.Fatalf("first = %q", msgs[0])
 	}
-	if !strings.HasPrefix(msgs[1], "<109>1 ") || !strings.Contains(msgs[1], " loginfailed - {") {
+	if !strings.HasPrefix(msgs[1], "<109>1 ") || !strings.Contains(msgs[1], " loginfailed - \ufeff{") {
 		t.Fatalf("second = %q", msgs[1])
 	}
 }

@@ -73,6 +73,22 @@ func TestIndexOnlyRecoveredNotificationHasNoAddress(t *testing.T) {
 	if _, status, _, _ := l.enrollTOTP(t, cookie); status != 200 {
 		t.Fatal("totp")
 	}
+	l.recoverExpectingNoAddress(t)
+}
+
+// encrypted から index_only に切り替えた直後（掃除前で暗号文が残っている）も、宛先付きでは送らない。
+func TestIndexOnlySwitchRecoveredNotificationHasNoAddress(t *testing.T) {
+	l := newRecoveryEnv(t, nil)
+	_, cookie := l.login(t, "pat@example.com")
+	if _, status, _, _ := l.enrollTOTP(t, cookie); status != 200 {
+		t.Fatal("totp")
+	}
+	l.a.accounts.IndexOnly = true
+	l.recoverExpectingNoAddress(t)
+}
+
+func (l *loginEnv) recoverExpectingNoAddress(t *testing.T) {
+	t.Helper()
 	_, st := l.mePost(t, "", "/v1/recovery/email:start", map[string]string{"email": "pat@example.com"})
 	code := l.claimLast(t)
 	status, out, rec := l.post(t, "", "/v1/recovery/email:verify", map[string]string{"flow_id": st["flow_id"].(string), "code": code})

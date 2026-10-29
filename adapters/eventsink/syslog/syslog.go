@@ -145,8 +145,11 @@ func (s *Sink) format(e audit.Event) ([]byte, error) {
 	}
 	head := fmt.Sprintf("<%d>1 %s %s %s %d %s - ", s.Facility*8+sev, e.Time.UTC().Format("2006-01-02T15:04:05.000000Z07:00"),
 		field(s.Hostname, 255), field(s.AppName, 48), os.Getpid(), field(e.Type, maxMsgID))
-	return append([]byte(head), body...), nil
+	// MSG は UTF-8 なので BOM を先に付ける（RFC 5424 6.4）。
+	return append(append([]byte(head), utf8BOM...), body...), nil
 }
+
+var utf8BOM = []byte{0xef, 0xbb, 0xbf}
 
 // field は RFC 5424 のヘッダーの項目（表示できる ASCII、空白なし、長さの上限）。空なら -。
 func field(v string, limit int) string {
