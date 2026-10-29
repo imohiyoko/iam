@@ -186,7 +186,9 @@ type OrgPick struct {
 	AuthMethods []string
 	IP          string
 	// Partial は2要素目の前の段。ログインポリシーは完了のときに判定する。
-	Partial   bool
+	Partial bool
+	// Fallback は、Explicit に入れなければ明示的な指定が無いものとして決め直す（2要素目の前の段で決めた Org を引き継ぐとき）。
+	Fallback  bool
 	RequestID string
 }
 
@@ -219,6 +221,8 @@ type Issue struct {
 	Recovery bool
 	// OrgID は入る Org の内部 ID（明示的な指定、2要素目の前の段の Org）。空なら OrgPicker が手がかりから決める。
 	OrgID string
+	// OrgFallback は、OrgID に入れなければ手がかりから決め直す（2要素目の前の段の Org。ログインポリシーは完了のときに判定する）。
+	OrgFallback bool
 	// OrgEmail は OAuth のプロバイダが返したアドレス（Org の手がかり）。
 	OrgEmail string
 }
@@ -309,7 +313,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	var choices []string
 	if m.Orgs != nil {
 		picked, err := m.Orgs.Pick(ctx, tx, u, OrgPick{Explicit: in.OrgID, Credentials: in.Credentials, Email: in.OrgEmail, Warnings: hits,
-			AuthMethods: in.AuthMethods, IP: in.IP, Partial: restriction != port.RestrictionNone, RequestID: in.RequestID})
+			AuthMethods: in.AuthMethods, IP: in.IP, Partial: restriction != port.RestrictionNone, Fallback: in.OrgFallback, RequestID: in.RequestID})
 		if err != nil {
 			return Issued{}, err
 		}
@@ -491,7 +495,7 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
 		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt,
-		OrgID: old.ActiveOrgID,
+		OrgID: old.ActiveOrgID, OrgFallback: true,
 	})
 	if err != nil {
 		return Issued{}, err
@@ -527,6 +531,7 @@ func (m *Manager) DeletionCancelled(ctx context.Context, tx port.Tx, realmID, se
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: old.AuthMethods, Credentials: old.AuthCredentialIDs,
 		IP: ip, UserAgent: userAgent, RequestID: requestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt, OrgID: old.ActiveOrgID,
+		OrgFallback: true,
 	})
 	if err != nil {
 		return Issued{}, err
