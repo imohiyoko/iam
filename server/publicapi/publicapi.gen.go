@@ -394,7 +394,8 @@ type LoginResult struct {
 	ExpiresAt time.Time `json:"expires_at"`
 
 	// Next セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-	// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+	// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。`cancel_deletion` はアカウントの削除の
+	// 猶予期間の間で、`/v1/me/account:cancel-deletion` とログアウトだけができる（4.10）。制限つきのセッションは短い期限で失効し、
 	// 決まった API にしか使えない（他は未ログインの扱い）。
 	Next *LoginResultNext `json:"next,omitempty"`
 
@@ -420,7 +421,8 @@ type LoginResult struct {
 }
 
 // LoginResultNext セッションが制限つきのときの次の手順（4.1、2.8、4.12）。`second_factor` は2要素目の確認待ち、`enroll` は2要素目の
-// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。制限つきのセッションは短い期限で失効し、
+// 登録だけ、`recovery` は新しい認証手段の登録と復旧の完了だけができる。`cancel_deletion` はアカウントの削除の
+// 猶予期間の間で、`/v1/me/account:cancel-deletion` とログアウトだけができる（4.10）。制限つきのセッションは短い期限で失効し、
 // 決まった API にしか使えない（他は未ログインの扱い）。
 type LoginResultNext string
 
@@ -430,8 +432,10 @@ type MyCheckRequest struct {
 	Action string `json:"action"`
 
 	// OrgId 判定の文脈の Org の公開 ID。省けば active な Org
-	OrgId        *string `json:"org_id,omitempty"`
-	ResourceId   *string `json:"resource_id,omitempty"`
+	OrgId      *string `json:"org_id,omitempty"`
+	ResourceId *string `json:"resource_id,omitempty"`
+
+	// ResourceType `org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`
 	ResourceType *string `json:"resource_type,omitempty"`
 }
 

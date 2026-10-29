@@ -88,3 +88,4 @@
 | [0074](0074-service-accounts.md) | 汎用サービスアカウントは管理 API で作り、API キーか client credentials の短命トークンで管理 API を使う | 承認 |
 | [0075](0075-org-domain-verification.md) | Org のドメインの所有は DNS の TXT で証明し、証明済みのドメインは realm で1つの Org だけが持つ | 承認 |
 | [0076](0076-org-managed-users.md) | Org 管理ユーザーは users.managed_org_id で表し、既存のユーザーは本人の同意で切り替える | 承認 |
+| [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |

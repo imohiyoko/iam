@@ -37,11 +37,17 @@ func (s *Service) ScheduleDeletion(ctx context.Context, tx port.Tx, o port.Org, 
 	if o.DeletedAt != nil {
 		return port.Org{}, errs.New(errs.KindNotFound, "org")
 	}
-	if o.DeletionScheduledAt != nil {
+	if grace > 0 && o.DeletionScheduledAt != nil {
 		return port.Org{}, ErrDeletionScheduled
 	}
 	now := s.Clock.Now()
 	if grace <= 0 {
+		// 予約済みでも今削除する。残っている予約は取り消す。
+		if o.DeletionScheduledAt != nil {
+			if err := tx.ScheduledEvents().CancelByRef(ctx, o.RealmID, deletionRef(o)); err != nil {
+				return port.Org{}, err
+			}
+		}
 		o.DeletionScheduledAt = new(now)
 		if err := s.purge(ctx, tx, o, actor, requestID); err != nil {
 			return port.Org{}, err
@@ -138,6 +144,16 @@ func (s *Service) purge(ctx context.Context, tx port.Tx, o port.Org, actor audit
 			continue
 		}
 		if err := s.close(ctx, tx, inv, port.InvitationRevoked, actor.ID); err != nil {
+			return err
+		}
+	}
+	// ドメインを消す（証明済みのドメインを、消えた Org が持ち続けないように）。
+	ds, err := tx.OrgDomains().ListByOrg(ctx, o.RealmID, o.ID)
+	if err != nil {
+		return err
+	}
+	for _, d := range ds {
+		if err := s.RemoveDomain(ctx, tx, o, d, actor, requestID); err != nil {
 			return err
 		}
 	}

@@ -568,7 +568,7 @@ type Membership struct {
 	EmailID     string
 	ValidFrom   *time.Time
 	ValidUntil  *time.Time
-	EndedReason string // self_leave / removed / expired / org_deleted / user_deleted
+	EndedReason string // left / removed / expired / org_deleted / user_deleted
 	// ManagementRequestedAt は Org の owner がこのユーザーの管理を求めた時刻（本人の同意を待つ。ADR 0076）。
 	ManagementRequestedAt *time.Time
 	CreatedAt             time.Time
