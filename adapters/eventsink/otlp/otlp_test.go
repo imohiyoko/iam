@@ -74,6 +74,17 @@ func TestOTLPLogs(t *testing.T) {
 	if err := sink.Emit(context.Background(), []audit.Event{e}); err != nil {
 		t.Fatal(err)
 	}
+	// 解析できない本文・大きすぎる本文は、拒まれた記録を見落とさないよう失敗にする。空の本文は成功。
+	for _, r := range []string{"not json", `{"partialSuccess":{"rejectedLogRecords":0},"pad":"` + strings.Repeat("x", maxResponseBytes) + `"}`} {
+		reply = r
+		if err := sink.Emit(context.Background(), []audit.Event{e}); err == nil {
+			t.Fatalf("response %.20q must fail", r)
+		}
+	}
+	reply = ""
+	if err := sink.Emit(context.Background(), []audit.Event{e}); err != nil {
+		t.Fatal(err)
+	}
 	status = http.StatusServiceUnavailable
 	if err := sink.Emit(context.Background(), []audit.Event{e}); err == nil {
 		t.Fatal("5xx must fail")
