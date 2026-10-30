@@ -121,6 +121,10 @@ func TestConditionEval(t *testing.T) {
 		{`{"any":[{"amr_has":["otp"]},{"factors_at_least":2}]}`, ac, true, nil},
 		{`{"any":[{"amr_has":["otp"]},{"factors_at_least":3}]}`, ac, false, []string{check.UnmetAMR, check.UnmetFactors}},
 		{`{"attested":true}`, &check.AuthContext{}, false, []string{check.UnmetAttested}},
+		// 子の無い all・any と、空の条件は満たさない（検査を通らない条件でも fail-closed）。
+		{`{"all":[]}`, ac, false, nil},
+		{`{"any":[]}`, ac, false, nil},
+		{`{}`, ac, false, nil},
 		// 文脈が無ければ何も満たさない。
 		{`{"auth_within":86400}`, nil, false, []string{check.UnmetAuthAge}},
 		{`{"risk_below":{"type":"ip","score":100}}`, nil, false, []string{"condition.risk.ip"}},
