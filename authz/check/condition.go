@@ -209,13 +209,16 @@ func (c Condition) Eval(ac *AuthContext, now time.Time, bands Bands) (bool, []st
 func (c Condition) eval(ac *AuthContext, now time.Time, bands Bands) (bool, []string) {
 	switch {
 	case c.All != nil:
+		// 子の無い all は満たさない（検査を通らない条件でも fail-closed）。成否は理由のコードの有無でなく子の結果で決める
+		// （理由の無い不成立の子もある）。
 		var unmet []string
+		all := len(c.All) > 0
 		for _, ch := range c.All {
 			if ok, u := ch.eval(ac, now, bands); !ok {
-				unmet = append(unmet, u...)
+				all, unmet = false, append(unmet, u...)
 			}
 		}
-		return len(unmet) == 0, unmet
+		return all, unmet
 	case c.Any != nil:
 		var unmet []string
 		for _, ch := range c.Any {
@@ -228,6 +231,9 @@ func (c Condition) eval(ac *AuthContext, now time.Time, bands Bands) (bool, []st
 		return false, unmet
 	}
 	if code, ok := c.leaf(ac, now, bands); !ok {
+		if code == "" {
+			return false, nil // 葉の無い条件（理由のコードは無い）
+		}
 		return false, []string{code}
 	}
 	return true, nil
