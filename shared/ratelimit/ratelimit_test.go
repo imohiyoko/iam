@@ -65,3 +65,50 @@ func TestDisabled(t *testing.T) {
 		}
 	}
 }
+
+// AllowFrom は接続元ごとに Limit 回、接続元を問わず Total 回まで許す。他の接続元が使い切っても本人の分は残る。
+func TestAllowFrom(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC))
+	l := &ratelimit.Limiter{Cache: newCounter(), Clock: clk, Window: time.Minute, Limit: 2, Total: 5}
+	ctx := context.Background()
+	for i := range 2 {
+		if err := l.AllowFrom(ctx, "email:a", "203.0.113.1"); err != nil {
+			t.Fatalf("attacker request %d: %v", i, err)
+		}
+	}
+	if err := l.AllowFrom(ctx, "email:a", "203.0.113.1"); err == nil {
+		t.Fatal("attacker over the per-source limit")
+	}
+	// 同じ /64 は同じ接続元。
+	if err := l.AllowFrom(ctx, "email:a", "2001:db8::1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.AllowFrom(ctx, "email:a", "2001:db8::2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.AllowFrom(ctx, "email:a", "2001:db8::3"); err == nil {
+		t.Fatal("same /64 over the per-source limit")
+	}
+	// 本人の接続元の分は残る。接続元を問わない上限（5）を超えれば止める。
+	if err := l.AllowFrom(ctx, "email:a", "198.51.100.7"); err != nil {
+		t.Fatalf("victim: %v", err)
+	}
+	if err := l.AllowFrom(ctx, "email:a", "192.0.2.9"); err == nil {
+		t.Fatal("over the total")
+	}
+}
+
+// 接続元が分からなくても、合計の上限は効く。
+func TestAllowFromEmptyIP(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC))
+	l := &ratelimit.Limiter{Cache: newCounter(), Clock: clk, Window: time.Minute, Limit: 5, Total: 2}
+	ctx := context.Background()
+	for i := range 2 {
+		if err := l.AllowFrom(ctx, "acct:a", ""); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+	if err := l.AllowFrom(ctx, "acct:a", ""); err == nil {
+		t.Fatal("total not applied without an ip")
+	}
+}
