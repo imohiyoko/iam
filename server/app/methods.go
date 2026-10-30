@@ -201,7 +201,7 @@ func (s publicServer) MakeMyEmailPrimary(ctx context.Context, req publicapi.Make
 	if !ok {
 		return publicapi.MakeMyEmailPrimary401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
-	// primary は通知と復旧の宛先になるので、追加・削除と同じく直近の認証を求める。
+	// primary は連携先に渡す email クレームと Org の既定のメールになるので、追加・削除と同じく直近の認証を求める。
 	if s.stale(ctx, au) {
 		return publicapi.MakeMyEmailPrimary401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
