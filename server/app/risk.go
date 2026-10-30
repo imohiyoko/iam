@@ -230,13 +230,14 @@ func (s adminServer) PutRiskType(ctx context.Context, req adminapi.PutRiskTypeRe
 	return adminapi.PutRiskType200JSONResponse(out), nil
 }
 
-// riskWriter は評価器（risk:write を持つサービスアカウント）かを確かめる。人の運営者は risk:write を持っても拒む。
+// riskWriter は評価器（risk:write を持つサービスアカウントの API キー）かを確かめる。人の運営者やアクセストークンは
+// risk:write を持っても拒む。
 func (s adminServer) riskWriter(ctx context.Context) (adminPrincipal, outcome, bool, error) {
 	p, d, err := s.a.authorize(ctx, role.PermRiskWrite)
 	if o, ok, err := outcomeOf(d, err); !ok {
 		return p, o, false, err
 	}
-	if p.Type != port.PrincipalServiceAccount {
+	if p.Type != port.PrincipalServiceAccount || p.AccessToken {
 		return p, failed(http.StatusForbidden, errs.CodePermissionDenied), false, nil
 	}
 	return p, outcome{}, true, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"net/url"
 	"reflect"
 	"slices"
 	"sync"
@@ -162,6 +163,15 @@ func TestRisk(t *testing.T) {
 	// 人の運営者は risk:write を持っていても使えない。
 	if code, out := setSession(owner, map[string]any{"account": 90}); code != 403 {
 		t.Fatalf("operator sets risk: %d %v", code, out)
+	}
+	// 評価器のアクセストークンも使えない（API キーだけ）。
+	_, out = l.admin(t, "/v1/admin/service-accounts/"+sa+"/credentials", owner, map[string]any{"type": "client_secret"})
+	code, out = l.token(t, url.Values{"grant_type": {"client_credentials"}, "client_id": {sa}, "client_secret": {out["secret"].(string)}}, "")
+	if code != 200 {
+		t.Fatalf("token: %d %v", code, out)
+	}
+	if code, out := setSession(out["access_token"].(string), map[string]any{"account": 90}); code != 403 {
+		t.Fatalf("access token sets risk: %d %v", code, out)
 	}
 	for _, risk := range []map[string]any{{}, {"account": 101}, {"account": -1}, {"nope.x": 1}, {"device": 10}} {
 		if code, out := setSession(key, risk); code != 400 || out["error"] != "invalid_risk" {
