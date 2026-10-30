@@ -40,6 +40,9 @@ type realmSettings struct {
 	DeclaredContextClients []string `json:"declared_context_clients"`
 }
 
+// maxDeclaredContextClients は DeclaredContextClients の件数の上限（API の maxItems と同じ）。
+const maxDeclaredContextClients = 100
+
 type realmQuotaSettings struct {
 	Invited   bool `json:"invited"`
 	Future    bool `json:"future"`
@@ -85,6 +88,9 @@ func (s realmSettings) validate() error {
 	}
 	if s.OrgDeletionGraceSeconds < 0 || s.UserDeletionGraceSeconds < 0 {
 		problems = append(problems, "deletion_grace")
+	}
+	if len(s.DeclaredContextClients) > maxDeclaredContextClients {
+		problems = append(problems, "declared_context_clients")
 	}
 	if len(problems) > 0 {
 		return errs.WithCode(errs.KindInvalid, "invalid_realm_settings", "invalid realm settings: "+strings.Join(problems, ", "))
