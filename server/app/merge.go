@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/imohiyoko/iam/authn/merge"
+	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
@@ -20,7 +21,7 @@ func (s publicServer) CreateMyMergeToken(ctx context.Context, _ publicapi.Create
 	if s.a.merge == nil {
 		return publicapi.CreateMyMergeToken404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	}
-	if !s.recent(au) {
+	if !s.recent(ctx, au, role.ActionMeMerge) {
 		return publicapi.CreateMyMergeToken401JSONResponse{UnauthenticatedJSONResponse: publicapi.UnauthenticatedJSONResponse{Error: "reauthentication_required"}}, nil
 	}
 	var t merge.Token
@@ -49,7 +50,7 @@ func (s publicServer) MergeIntoMe(ctx context.Context, req publicapi.MergeIntoMe
 	if s.a.merge == nil {
 		return publicapi.MergeIntoMe404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	}
-	if !s.recent(au) {
+	if !s.recent(ctx, au, role.ActionMeMerge) {
 		return publicapi.MergeIntoMe401JSONResponse{UnauthenticatedJSONResponse: publicapi.UnauthenticatedJSONResponse{Error: "reauthentication_required"}}, nil
 	}
 	var m merge.Merged

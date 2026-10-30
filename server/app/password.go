@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/password"
+	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
@@ -71,7 +72,11 @@ func (s publicServer) SetMyPassword(ctx context.Context, req publicapi.SetMyPass
 	if req.Body == nil {
 		return publicapi.SetMyPassword400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
-	recent := s.recent(au)
+	recent := s.recent(ctx, au, role.ActionMePassword)
+	// 今のパスワードは max_auth_age の代わりになるが、操作の要件の代わりにはならない。
+	if au.Restriction != port.RestrictionRecovery && !recent && !s.meets(ctx, au, role.ActionMePassword) {
+		return publicapi.SetMyPassword401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
 	var err error
 	if au.Restriction == port.RestrictionRecovery {
 		// 復旧では今のパスワードを求めない（忘れたときの再設定。4.12）。
@@ -102,6 +107,10 @@ func (s publicServer) RemoveMyPassword(ctx context.Context, req publicapi.Remove
 	}
 	if s.a.password == nil || req.Body == nil {
 		return publicapi.RemoveMyPassword404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	// 今のパスワードは max_auth_age の代わりになるが、認証の手段の操作の要件（me:methods）の代わりにはならない。
+	if au.Restriction == port.RestrictionNone && !s.meets(ctx, au, role.ActionMeMethods) {
+		return publicapi.RemoveMyPassword401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	err := s.a.password.Remove(ctx, s.a.realm.ID, au.PrincipalID, req.Body.CurrentPassword, au.SessionID, au.Actor(), requestID(ctx))
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {

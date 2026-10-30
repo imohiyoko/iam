@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/imohiyoko/iam/authz/role"
+	"github.com/imohiyoko/iam/shared/port"
 )
 
 // 操作の名前空間の要件と Org の要件（ADR 0084）を HTTP で確かめる。
@@ -177,5 +180,68 @@ func TestRequirements(t *testing.T) {
 	// 条件を外したので、すぐに通る。
 	if out := meCheck(alice, "payment:send", nil); out["allowed"] != true {
 		t.Fatalf("send after clearing: %v", out)
+	}
+}
+
+// 本人の重要な操作は、max_auth_age に加えて名前空間 me の要件を求める（max_auth_age の載せ替え。ADR 0084）。
+func TestSensitiveOperationRequirements(t *testing.T) {
+	l := newOrgEnv(t, "code", "oauth_provider", "admin", "invitation")
+	_, op := l.operator(t, "root@example.com", role.RealmOwner)
+	if code, out := l.adminDo(t, "PUT", op, "/v1/admin/action-namespaces/me", map[string]any{"requirements": map[string]any{
+		role.ActionMeDelete: map[string]any{"auth_within": 60}}}); code != 200 {
+		t.Fatalf("put me: %d %v", code, out)
+	}
+	_, alice := l.login(t, "alice@example.com")
+	// max_auth_age（15 分）の内でも、要件の 60 秒を過ぎれば再認証を求める。要件の無い操作は今までどおり。
+	l.advance(2 * time.Minute)
+	if code, out := l.mePost(t, alice, "/v1/me/account:delete", nil); code != 401 || out["error"] != "reauthentication_required" {
+		t.Fatalf("delete after 2m: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, alice, "/v1/me/recovery-codes:regenerate", nil); code != 200 {
+		t.Fatalf("regenerate after 2m: %d %v", code, out)
+	}
+	_, alice = l.login(t, "alice@example.com")
+	if code, out := l.mePost(t, alice, "/v1/me/account:delete", nil); code != 200 {
+		t.Fatalf("delete after login: %d %v", code, out)
+	}
+}
+
+// 今のパスワードは max_auth_age の代わりになるが、パスワードの変更・削除の操作の要件は別に満たす（ADR 0084）。
+func TestPasswordOperationRequirements(t *testing.T) {
+	l := newPasswordEnv(t)
+	_, cookie := l.login(t, "pat@example.com")
+	const pw = "a long and memorable passphrase"
+	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": pw}); status != 204 {
+		t.Fatalf("set: %d %v", status, res)
+	}
+	require := func(action string) {
+		t.Helper()
+		settings := []byte(`{"requirements":{"` + action + `":{"amr_has":["hwk"]}}}`)
+		if err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+			now := l.a.deps.Clock.Now()
+			return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: l.a.realm.ID, Name: "me", Settings: settings, CreatedAt: now, UpdatedAt: now})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		l.a.authz.Invalidate(l.a.realm.ID)
+	}
+	// 削除は me:methods、変更は me:password を見る（取り違えれば次のどちらかが通らない）。
+	const pw2 = "another long passphrase"
+	require(role.ActionMeMethods)
+	if status, res := l.mePost(t, cookie, "/v1/me/password:remove", map[string]string{"current_password": pw}); status != 401 || res["error"] != "reauthentication_required" {
+		t.Fatalf("remove with unmet me:methods: %d %v", status, res)
+	}
+	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": pw2, "current_password": pw}); status != 204 {
+		t.Fatalf("change under me:methods only: %d %v", status, res)
+	}
+	require(role.ActionMePassword)
+	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": pw, "current_password": pw2}); status != 401 || res["error"] != "reauthentication_required" {
+		t.Fatalf("change with unmet me:password: %d %v", status, res)
+	}
+	if status, _, _ := l.passwordLogin(t, "pat@example.com", pw2); status != 200 {
+		t.Fatalf("password unchanged: %d", status)
+	}
+	if status, res := l.mePost(t, cookie, "/v1/me/password:remove", map[string]string{"current_password": pw2}); status != 204 {
+		t.Fatalf("remove under me:password only: %d %v", status, res)
 	}
 }

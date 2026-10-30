@@ -139,11 +139,21 @@ func (c *Checker) Decide(ctx context.Context, realmID string, r Request) (Decisi
 	if err != nil {
 		return Decision{}, err
 	}
-	inTx := func(fn func(ctx context.Context, tx port.Tx) error) error { return c.Storage.Tx(ctx, fn) }
-	return c.decide(gs, r, source{
+	return c.decide(gs, r, c.source(ctx, realmID, r))
+}
+
+// Require は操作の要件（名前空間と Org の要件。ADR 0084）だけを評価する。付与を問わない操作（本人の重要な操作など）に使う。
+func (c *Checker) Require(ctx context.Context, realmID string, r Request) (Decision, error) {
+	r = normalize(r)
+	return c.decide([]Grant{{Permissions: []string{r.Action}}}, r, c.source(ctx, realmID, r))
+}
+
+// source は Decide の材料（境界と要件）を、キャッシュとそのたびのトランザクションで読む。
+func (c *Checker) source(ctx context.Context, realmID string, r Request) source {
+	return source{
 		bands: func() (Bands, error) {
 			var b Bands
-			err := inTx(func(ctx context.Context, tx port.Tx) error {
+			err := c.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 				var err error
 				b, err = RealmBands(ctx, tx, realmID)
 				return err
@@ -153,7 +163,7 @@ func (c *Checker) Decide(ctx context.Context, realmID string, r Request) (Decisi
 		requirements: func() (requirements, error) {
 			return c.cachedRequirements(ctx, realmID, NamespaceOf(r.Action), r.OrgID)
 		},
-	})
+	}
 }
 
 // DecideTx は呼び出し側のトランザクションで Decide を行う。
