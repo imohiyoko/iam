@@ -328,6 +328,6 @@ func (r actionNamespaces) List(ctx context.Context, realmID string) ([]port.Acti
 }
 
 func (r actionNamespaces) Put(ctx context.Context, n port.ActionNamespace) error {
-	return mapErr(r.q.PutActionNamespace(ctx, db.PutActionNamespaceParams{RealmID: n.RealmID, Name: n.Name, Settings: n.Settings,
+	return mapErr(r.q.PutActionNamespace(ctx, db.PutActionNamespaceParams{RealmID: n.RealmID, Name: n.Name, Settings: nonNil(n.Settings),
 		CreatedAt: formatTime(n.CreatedAt), UpdatedAt: formatTime(n.UpdatedAt)}))
 }
