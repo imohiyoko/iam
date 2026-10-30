@@ -734,6 +734,8 @@ paths:
     post:
       operationId: makeMyEmailPrimary
       summary: 確認済みのメールを primary にする
+      description: |
+        直近の本人確認が要る（`max_auth_age` を過ぎていれば `401 reauthentication_required`）。
       security:
         - cookieAuth: []
         - bearerAuth: []
