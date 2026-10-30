@@ -1,12 +1,14 @@
 package app
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/imohiyoko/iam/authz/role"
+	"github.com/imohiyoko/iam/shared/port"
 )
 
 // 操作の名前空間の要件と Org の要件（ADR 0084）を HTTP で確かめる。
@@ -201,5 +203,32 @@ func TestSensitiveOperationRequirements(t *testing.T) {
 	_, alice = l.login(t, "alice@example.com")
 	if code, out := l.mePost(t, alice, "/v1/me/account:delete", nil); code != 200 {
 		t.Fatalf("delete after login: %d %v", code, out)
+	}
+}
+
+// 今のパスワードは max_auth_age の代わりになるが、パスワードの変更・削除の操作の要件は別に満たす（ADR 0084）。
+func TestPasswordOperationRequirements(t *testing.T) {
+	l := newPasswordEnv(t)
+	_, cookie := l.login(t, "pat@example.com")
+	const pw = "a long and memorable passphrase"
+	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": pw}); status != 204 {
+		t.Fatalf("set: %d %v", status, res)
+	}
+	settings := []byte(`{"requirements":{"me:password":{"amr_has":["hwk"]},"me:methods":{"amr_has":["hwk"]}}}`)
+	if err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+		now := l.a.deps.Clock.Now()
+		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: l.a.realm.ID, Name: "me", Settings: settings, CreatedAt: now, UpdatedAt: now})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	l.a.authz.Invalidate(l.a.realm.ID)
+	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": "another long passphrase", "current_password": pw}); status != 401 || res["error"] != "reauthentication_required" {
+		t.Fatalf("change with unmet requirement: %d %v", status, res)
+	}
+	if status, res := l.mePost(t, cookie, "/v1/me/password:remove", map[string]string{"current_password": pw}); status != 401 || res["error"] != "reauthentication_required" {
+		t.Fatalf("remove with unmet requirement: %d %v", status, res)
+	}
+	if status, _, _ := l.passwordLogin(t, "pat@example.com", pw); status != 200 {
+		t.Fatalf("password unchanged: %d", status)
 	}
 }

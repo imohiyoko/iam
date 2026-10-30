@@ -34,6 +34,12 @@ func (s publicServer) recent(ctx context.Context, au auth, action string) bool {
 	if s.a.deps.Clock.Now().Sub(au.AuthenticatedAt) > age {
 		return false
 	}
+	return s.meets(ctx, au, action)
+}
+
+// meets はセッションが本人の重要な操作 action の要件（名前空間 `me` と active な Org。ADR 0084）を満たすか。今のパスワードで
+// max_auth_age の代わりにする操作（パスワードの変更・削除）でも、要件は別に満たす。読めなければ満たさない（fail-closed）。
+func (s publicServer) meets(ctx context.Context, au auth, action string) bool {
 	d, err := s.a.authz.Require(ctx, s.a.realm.ID, check.Request{Principal: check.Principal{Type: au.PrincipalType, ID: au.PrincipalID}, Action: action,
 		OrgID: au.ActiveOrgID, Context: sessionContext(au.Validated)})
 	if err != nil {
