@@ -474,6 +474,8 @@ type Introspection struct {
 	OrgID     string   `json:"org_id,omitempty"`
 	AuthTime  int64    `json:"auth_time,omitempty"`
 	AMR       []string `json:"amr,omitempty"`
+	// Risk はログインの系列の今のセッションのリスクの点数（種類 → 点数。ADR 0084）。毎回セッションから求める。
+	Risk map[string]int `json:"risk,omitempty"`
 }
 
 // Introspect はトークン（アクセストークンかリフレッシュトークン）が今使えるかを返す（RFC 7662）。
@@ -503,6 +505,10 @@ func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token stri
 		}
 		return Introspection{}, err
 	}
+	risk, err := t.LineageRisk(ctx, tx, realmID, g.SID)
+	if err != nil {
+		return Introspection{}, err
+	}
 	u, err := tx.Users().Get(ctx, realmID, g.UserID)
 	if err != nil {
 		return Introspection{}, err
@@ -517,7 +523,19 @@ func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token stri
 	}
 	return Introspection{Active: true, Scope: strings.Join(g.Scopes, " "), ClientID: cl.PublicID, TokenType: typ, Exp: tok.ExpiresAt.Unix(),
 		Iat: tok.CreatedAt.Unix(), Sub: u.PublicID, Aud: []string{cl.PublicID}, Iss: t.Issuer, SID: g.SID, OrgID: orgPublicID,
-		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods}, nil
+		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods, Risk: risk}, nil
+}
+
+// LineageRisk はログインの系列 sid の今のセッションのリスクの点数（一覧で有効な種類だけ）。今のセッションが無ければ nil。
+func (t *Tokens) LineageRisk(ctx context.Context, tx port.Tx, realmID, sid string) (map[string]int, error) {
+	s, err := tx.Sessions().GetCurrentBySID(ctx, realmID, sid)
+	if errors.Is(err, errs.NotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return session.Risk(ctx, tx, s)
 }
 
 // reservedClaims は pre_token のフックが足せないクレーム（IAM が決めるもの）。

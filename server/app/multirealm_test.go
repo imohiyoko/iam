@@ -277,6 +277,7 @@ func TestMultiRealm(t *testing.T) {
 		{"POST", "/v1/admin/realms", map[string]any{"slug": "Bad Slug"}, 400, "invalid_slug"},
 		{"POST", "/v1/admin/realms", map[string]any{"slug": "gamma", "hosts": []string{"10.0.0.1"}}, 400, "invalid_hosts"},
 		{"POST", "/v1/admin/realms", map[string]any{"slug": "gamma", "settings": map[string]any{"timezone": "Mars/Base"}}, 400, "invalid_realm_settings"},
+		{"POST", "/v1/admin/realms", map[string]any{"slug": "gamma", "settings": map[string]any{"declared_context_clients": make([]string, 101)}}, 400, "invalid_realm_settings"},
 		{"PATCH", "/v1/admin/realms/" + l.a.realm.ID, map[string]any{"hosts": []string{}}, 409, "default_realm"},
 		{"GET", "/v1/admin/realms/nope", nil, 404, "not_found"},
 	} {

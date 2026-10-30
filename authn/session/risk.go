@@ -60,6 +60,11 @@ func sessionRisk(ctx context.Context, tx port.Tx, s port.Session) (map[string]in
 	return kept, nil
 }
 
+// Risk はセッションの点数のうち、一覧で今も有効なもの（イントロスペクションと判定の文脈に使う）。
+func Risk(ctx context.Context, tx port.Tx, s port.Session) (map[string]int, error) {
+	return sessionRisk(ctx, tx, s)
+}
+
 // hookRisk はフックの応答の点数から、一覧で有効で範囲内のものを残す。捨てた種類の名前も返す（監査ログに残す）。
 func hookRisk(ctx context.Context, tx port.Tx, realmID string, scores map[string]int) (map[string]int, []string, error) {
 	if len(scores) == 0 {

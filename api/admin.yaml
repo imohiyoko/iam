@@ -2618,6 +2618,32 @@ components:
         org_id: { type: string, description: 判定の文脈の Org の公開 ID }
         resource_type: { type: string, maxLength: 64, description: "`org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`" }
         resource_id: { type: string, maxLength: 256 }
+        sid:
+          type: string
+          maxLength: 256
+          description: |
+            主体のログインの系列（ID トークンの `sid`）。渡せば IAM がその今のセッションから認証の文脈を組み立てる（ADR 0084。
+            `attested`）。系列が使えないか主体のものでなければ文脈なし（条件は満たさない）
+        access_token:
+          type: string
+          maxLength: 4096
+          description: 主体のアクセストークン。`sid` と同じく IAM が文脈を組み立てる（`sid` より優先）。使えないか主体のものでなければ文脈なし
+        context: { $ref: "#/components/schemas/DeclaredContext" }
+    DeclaredContext:
+      type: object
+      description: |
+        連携先が申告する認証の文脈（ADR 0084）。realm の設定 `declared_context_clients` に載せた呼び出し元のときだけ使い、
+        それ以外は捨てる。`sid` か `access_token` があれば捨てる。申告の文脈は `attested` でなく、付与の条件の `attested` と、
+        名前空間・Org の要件を満たさない。リスクは一覧で有効な種類・範囲内の値だけを使う
+      properties:
+        amr:
+          type: array
+          maxItems: 16
+          items: { type: string, maxLength: 32 }
+        auth_time: { type: string, format: date-time }
+        risk:
+          type: object
+          additionalProperties: { type: integer }
     CheckResult:
       type: object
       required: [allowed]
@@ -2702,6 +2728,11 @@ components:
             invited: { type: boolean }
             future: { type: boolean }
             suspended: { type: boolean }
+        declared_context_clients:
+          type: array
+          maxItems: 100
+          description: 判定（authz:check）で認証の文脈を申告できるサービスアカウントの ID（ADR 0084）。申告は attested でない
+          items: { type: string }
     Realm:
       type: object
       required: [id, slug, hosts, default, settings, created_at, updated_at]
@@ -2715,7 +2746,7 @@ components:
         issuer: { type: string, description: OIDC の iss（server.public_url が無ければ無い） }
         settings:
           type: object
-          required: [timezone, verified_via, org_creation, org_deletion_grace_seconds, user_deletion_grace_seconds, email_storage, quota_count]
+          required: [timezone, verified_via, org_creation, org_deletion_grace_seconds, user_deletion_grace_seconds, email_storage, quota_count, declared_context_clients]
           properties:
             timezone: { type: string }
             verified_via:
@@ -2732,6 +2763,9 @@ components:
                 invited: { type: boolean }
                 future: { type: boolean }
                 suspended: { type: boolean }
+            declared_context_clients:
+              type: array
+              items: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     RealmInput:

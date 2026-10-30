@@ -176,6 +176,9 @@ type Realm struct {
 	EndedRetention Duration `yaml:"ended_retention"`
 	// EmailStorage はメールの保持モード（9.6）：encrypted（暗号文 + インデックス）/ index_only（インデックスのみ）。
 	EmailStorage string `yaml:"email_storage"`
+	// DeclaredContextClients は判定（authz:check）で認証の文脈を申告できる呼び出し元（サービスアカウントの公開 ID。ADR 0084）。
+	// 申告の文脈は attested でなく、付与の条件にしか効かない。空なら誰も申告できない。
+	DeclaredContextClients []string `yaml:"declared_context_clients"`
 }
 
 // KnownEmailStorage は realm.email_storage の値。
