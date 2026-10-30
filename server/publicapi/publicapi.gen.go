@@ -324,6 +324,11 @@ func (e InviteToOrgJSONBodyRole) Valid() bool {
 // CheckResult defines model for CheckResult.
 type CheckResult struct {
 	Allowed bool `json:"allowed"`
+
+	// Unmet 条件で拒んだときの、満たさなかった条件の理由のコード（`condition.amr`・`condition.factors`・`condition.auth_age`・
+	// `condition.risk.<種類>`・`condition.attested`。ADR 0084）。付与の条件だけで拒み、その付与が条件を満たせば許されたときに
+	// 限って返す。連携先はこれを見て step-up を促せる
+	Unmet *[]string `json:"unmet,omitempty"`
 }
 
 // Error defines model for Error.
@@ -728,8 +733,10 @@ type Role struct {
 
 // RoleBinding defines model for RoleBinding.
 type RoleBinding struct {
-	CreatedAt time.Time `json:"created_at"`
-	Id        string    `json:"id"`
+	// Condition 付与の条件（ADR 0084）。無ければ条件なし
+	Condition *map[string]interface{} `json:"condition,omitempty"`
+	CreatedAt time.Time               `json:"created_at"`
+	Id        string                  `json:"id"`
 
 	// PrincipalId 主体の公開 ID
 	PrincipalId string `json:"principal_id"`
@@ -745,7 +752,13 @@ type RoleBinding struct {
 
 // RoleBindingInput defines model for RoleBindingInput.
 type RoleBindingInput struct {
-	PrincipalId string `json:"principal_id"`
+	// Condition 付与の条件（ADR 0084）。条件を満たすときだけ付与が効く。型付きの木で、各節はちょうど1つの項目を持つ：
+	// `all`・`any`（子の配列）、`amr_has`（手段の配列。いずれかを使った）、`factors_at_least`（1〜3）、
+	// `auth_within`（認証からの秒。1〜86400）、`risk_below`（`{type, score}`。点数が未満。score は 1〜100）、
+	// `risk_at_most`（`{type, level}`。level は low / medium / high）、`attested`（true。文脈を IAM が確かめた）。
+	// 深さ 4・葉 16 まで。リスクの種類は realm の一覧で有効なものだけ。外れれば `400 invalid_condition`。
+	Condition   *map[string]interface{} `json:"condition,omitempty"`
+	PrincipalId string                  `json:"principal_id"`
 
 	// PrincipalType user / group
 	PrincipalType string  `json:"principal_type"`

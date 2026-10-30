@@ -286,7 +286,7 @@ func (a *App) outranksPrincipal(ctx context.Context, tx port.Tx, p adminPrincipa
 			need = append(need, g.Permissions...)
 		}
 	}
-	ok, err := a.authz.Holds(ctx, tx, a.realm.ID, check.Principal{Type: p.Type, ID: p.ID}, orgID, need)
+	ok, err := a.authz.Holds(ctx, tx, a.realm.ID, check.Principal{Type: p.Type, ID: p.ID}, orgID, need, p.Context)
 	if err != nil {
 		return err
 	}

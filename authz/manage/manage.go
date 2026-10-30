@@ -8,6 +8,7 @@ package manage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/port"
+	"github.com/imohiyoko/iam/shared/risk"
 )
 
 // 上限。
@@ -68,6 +70,9 @@ type Actor struct {
 	Principal check.Principal
 	Audit     audit.Actor
 	RequestID string
+	// Context は操作する主体の認証の文脈（ADR 0084）。権限の検査は、この文脈で条件を満たす付与だけを数える。nil なら
+	// 条件付きの付与は数えない。
+	Context *check.AuthContext
 }
 
 // Target は付与・所属の主体（ユーザー・サービスアカウントは呼び出し側が authn で確かめて渡す）。
@@ -81,7 +86,7 @@ func (s *Service) authorize(ctx context.Context, tx port.Tx, sc Scope, a Actor, 
 	if sc.OrgID != "" {
 		perm = orgPerm
 	}
-	ok, err := s.Checker.CheckTx(ctx, tx, sc.RealmID, check.Request{Principal: a.Principal, Action: perm, OrgID: sc.OrgID})
+	ok, err := s.Checker.CheckTx(ctx, tx, sc.RealmID, check.Request{Principal: a.Principal, Action: perm, OrgID: sc.OrgID, Context: a.Context})
 	if err != nil {
 		return err
 	}
@@ -92,7 +97,7 @@ func (s *Service) authorize(ctx context.Context, tx port.Tx, sc Scope, a Actor, 
 	if len(grants) == 0 {
 		return nil
 	}
-	held, err := s.Checker.Holds(ctx, tx, sc.RealmID, a.Principal, sc.OrgID, grants)
+	held, err := s.Checker.Holds(ctx, tx, sc.RealmID, a.Principal, sc.OrgID, grants, a.Context)
 	if err != nil {
 		return err
 	}
@@ -266,10 +271,24 @@ func (s *Service) requireMember(ctx context.Context, tx port.Tx, sc Scope, p che
 }
 
 // Bind はロールを付与する。res が空なら範囲全体。
-func (s *Service) Bind(ctx context.Context, tx port.Tx, sc Scope, a Actor, ref string, t Target, res check.Resource) (port.RoleBinding, error) {
+func (s *Service) Bind(ctx context.Context, tx port.Tx, sc Scope, a Actor, ref string, t Target, res check.Resource, cond *check.Condition) (port.RoleBinding, error) {
 	r, err := ResolveRole(ctx, tx, sc, ref)
 	if err != nil {
 		return port.RoleBinding{}, err
+	}
+	var condJSON []byte
+	if cond != nil {
+		// 条件は保存の前に検査する（判定のときには検査しない。ADR 0084）。リスクの種類は realm の一覧で有効なものだけ。
+		rows, err := tx.RiskTypes().List(ctx, sc.RealmID)
+		if err != nil {
+			return port.RoleBinding{}, err
+		}
+		if err := cond.Validate(risk.CatalogOf(rows).Enabled); err != nil {
+			return port.RoleBinding{}, err
+		}
+		if condJSON, err = json.Marshal(cond); err != nil {
+			return port.RoleBinding{}, err
+		}
 	}
 	if (res.Type == "") != (res.ID == "") || res.Type == check.ResourceOrg {
 		return port.RoleBinding{}, errs.WithCode(errs.KindInvalid, "invalid_resource", "invalid resource")
@@ -292,13 +311,16 @@ func (s *Service) Bind(ctx context.Context, tx port.Tx, sc Scope, a Actor, ref s
 	}
 	b := port.RoleBinding{ID: id.New(id.RoleBinding), PublicID: id.NewExternal(id.RoleBinding), RealmID: sc.RealmID, Role: r.Key,
 		PrincipalType: t.Principal.Type, PrincipalID: t.Principal.ID, OrgID: sc.OrgID, ResourceType: res.Type, ResourceID: res.ID,
-		CreatedAt: s.Clock.Now()}
+		Condition: condJSON, CreatedAt: s.Clock.Now()}
 	if err := tx.RoleBindings().Create(ctx, b); err != nil {
 		return port.RoleBinding{}, err
 	}
 	details := map[string]any{"binding_id": b.PublicID, "role": r.Name, "principal_type": string(t.Principal.Type), "principal_id": t.PublicID}
 	if res.Type != "" {
 		details["resource_type"], details["resource_id"] = res.Type, res.ID
+	}
+	if cond != nil {
+		details["condition"] = cond
 	}
 	return b, s.record(ctx, tx, sc, a, "role.granted", details)
 }

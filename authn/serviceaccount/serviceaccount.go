@@ -94,31 +94,45 @@ type Authenticator struct {
 	DeliveryOnly func(ctx context.Context, tx port.Tx, a port.ServiceAccount) (bool, error)
 }
 
+// Authenticated は確かめたサービスアカウントと、その認証の手段・時刻（認可の条件の文脈。ADR 0084）。
+type Authenticated struct {
+	Account port.ServiceAccount
+	// Method は認証情報の種類（amr）：API キーは sak、アクセストークンは発行に使った client_secret か private_key_jwt。
+	Method string
+	// AuthTime は認証の時刻：API キーは now、アクセストークンは発行の時刻。
+	AuthTime time.Time
+}
+
+// MethodAPIKey は API キーの認証の手段（amr）。
+const MethodAPIKey = "sak"
+
 // Authenticate は API キーかアクセストークンを確かめ、使えるサービスアカウントを返す。使えないものは ErrInvalid、
 // ストレージの障害はそれ以外のエラー（呼び出し側は認証の失敗として扱わない）。
-func (au Authenticator) Authenticate(ctx context.Context, tx port.Tx, realmID, bearer string, now time.Time) (port.ServiceAccount, error) {
+func (au Authenticator) Authenticate(ctx context.Context, tx port.Tx, realmID, bearer string, now time.Time) (Authenticated, error) {
+	var out Authenticated
 	var accountID string
 	if strings.HasPrefix(bearer, tokenPrefix) {
-		t, err := checkToken(ctx, tx, realmID, bearer, now)
+		t, method, err := checkToken(ctx, tx, realmID, bearer, now)
 		if err != nil {
-			return port.ServiceAccount{}, err
+			return Authenticated{}, err
 		}
-		accountID = t.ServiceAccountID
+		accountID, out.Method, out.AuthTime = t.ServiceAccountID, method, t.CreatedAt
 	} else {
 		c, err := checkSecret(ctx, tx, realmID, bearer, TypeAPIKey, now)
 		if err != nil {
-			return port.ServiceAccount{}, err
+			return Authenticated{}, err
 		}
-		accountID = c.ServiceAccountID
+		accountID, out.Method, out.AuthTime = c.ServiceAccountID, MethodAPIKey, now
 	}
 	a, err := tx.ServiceAccounts().Get(ctx, realmID, accountID)
 	if err != nil {
-		return port.ServiceAccount{}, invalidOr(err)
+		return Authenticated{}, invalidOr(err)
 	}
 	if err := au.usable(ctx, tx, a, now); err != nil {
-		return port.ServiceAccount{}, err
+		return Authenticated{}, err
 	}
-	return a, nil
+	out.Account = a
+	return out, nil
 }
 
 // usable はサービスアカウントが now に使えるか（削除・有効期間・停止・Org・フィーチャー）を確かめる。
@@ -185,28 +199,28 @@ func checkSecret(ctx context.Context, tx port.Tx, realmID, key, typ string, now 
 	return c, nil
 }
 
-// checkToken はアクセストークンを確かめる。発行に使った認証情報を無効化すれば、トークンも使えない。
-func checkToken(ctx context.Context, tx port.Tx, realmID, token string, now time.Time) (port.ServiceAccountToken, error) {
+// checkToken はアクセストークンを確かめ、発行に使った認証情報の種類も返す。発行に使った認証情報を無効化すれば、トークンも使えない。
+func checkToken(ctx context.Context, tx port.Tx, realmID, token string, now time.Time) (port.ServiceAccountToken, string, error) {
 	tid, secret, ok := strings.Cut(token, ".")
 	if !ok || !id.Valid(id.SAToken, tid) || len(secret) != secretLength {
-		return port.ServiceAccountToken{}, ErrInvalid
+		return port.ServiceAccountToken{}, "", ErrInvalid
 	}
 	t, err := tx.ServiceAccounts().GetToken(ctx, realmID, tid)
 	if err != nil {
-		return port.ServiceAccountToken{}, invalidOr(err)
+		return port.ServiceAccountToken{}, "", invalidOr(err)
 	}
 	h := sha256.Sum256([]byte(secret))
 	if subtle.ConstantTimeCompare(t.Hash, h[:]) != 1 || !now.Before(t.ExpiresAt) {
-		return port.ServiceAccountToken{}, ErrInvalid
+		return port.ServiceAccountToken{}, "", ErrInvalid
 	}
 	c, err := tx.ServiceAccounts().GetCredential(ctx, realmID, t.CredentialID)
 	if err != nil {
-		return port.ServiceAccountToken{}, invalidOr(err)
+		return port.ServiceAccountToken{}, "", invalidOr(err)
 	}
 	if !live(c, now) {
-		return port.ServiceAccountToken{}, ErrInvalid
+		return port.ServiceAccountToken{}, "", ErrInvalid
 	}
-	return t, nil
+	return t, c.Type, nil
 }
 
 // live は認証情報が無効化されておらず、期限の内か。

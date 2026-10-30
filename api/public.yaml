@@ -2786,6 +2786,10 @@ components:
         principal_id: { type: string, description: 主体の公開 ID }
         resource_type: { type: string }
         resource_id: { type: string }
+        condition:
+          type: object
+          additionalProperties: true
+          description: 付与の条件（ADR 0084）。無ければ条件なし
         created_at: { type: string, format: date-time }
     RoleBindings:
       type: object
@@ -2803,6 +2807,15 @@ components:
         principal_id: { type: string }
         resource_type: { type: string, maxLength: 64 }
         resource_id: { type: string, maxLength: 256 }
+        condition:
+          type: object
+          additionalProperties: true
+          description: |
+            付与の条件（ADR 0084）。条件を満たすときだけ付与が効く。型付きの木で、各節はちょうど1つの項目を持つ：
+            `all`・`any`（子の配列）、`amr_has`（手段の配列。いずれかを使った）、`factors_at_least`（1〜3）、
+            `auth_within`（認証からの秒。1〜86400）、`risk_below`（`{type, score}`。点数が未満。score は 1〜100）、
+            `risk_at_most`（`{type, level}`。level は low / medium / high）、`attested`（true。文脈を IAM が確かめた）。
+            深さ 4・葉 16 まで。リスクの種類は realm の一覧で有効なものだけ。外れれば `400 invalid_condition`。
     Group:
       type: object
       required: [id, name, created_at]
@@ -2855,3 +2868,10 @@ components:
       required: [allowed]
       properties:
         allowed: { type: boolean }
+        unmet:
+          type: array
+          items: { type: string }
+          description: |
+            条件で拒んだときの、満たさなかった条件の理由のコード（`condition.amr`・`condition.factors`・`condition.auth_age`・
+            `condition.risk.<種類>`・`condition.attested`。ADR 0084）。付与の条件だけで拒み、その付与が条件を満たせば許されたときに
+            限って返す。連携先はこれを見て step-up を促せる

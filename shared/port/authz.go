@@ -50,7 +50,9 @@ type RoleBinding struct {
 	// ResourceType と ResourceID は付与の範囲のリソース。空なら Org 全体（OrgID が空なら realm 全体）。
 	ResourceType string
 	ResourceID   string
-	CreatedAt    time.Time
+	// Condition は付与の条件（authz/check の条件の言語の JSON。ADR 0084）。nil なら条件なし。
+	Condition []byte
+	CreatedAt time.Time
 }
 
 // RoleBindingRepo は role_bindings の Repository。
