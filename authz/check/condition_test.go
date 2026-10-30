@@ -125,6 +125,9 @@ func TestConditionEval(t *testing.T) {
 		{`{"all":[]}`, ac, false, nil},
 		{`{"any":[]}`, ac, false, nil},
 		{`{}`, ac, false, nil},
+		{`{"all":[{"all":[]}]}`, ac, false, nil},
+		{`{"all":[{}]}`, ac, false, nil},
+		{`{"all":[{"amr_has":["hwk"]},{"any":[]}]}`, ac, false, nil},
 		// 文脈が無ければ何も満たさない。
 		{`{"auth_within":86400}`, nil, false, []string{check.UnmetAuthAge}},
 		{`{"risk_below":{"type":"ip","score":100}}`, nil, false, []string{"condition.risk.ip"}},
@@ -146,6 +149,11 @@ func TestConditionEval(t *testing.T) {
 	}
 	if ok, _ := parse(t, `{"amr_has":["hwk"]}`).EvalRequirement(ac, now, bands); !ok {
 		t.Error("requirement with an attested context")
+	}
+	for _, cond := range []string{`{}`, `{"all":[]}`} {
+		if ok, _ := parse(t, cond).EvalRequirement(ac, now, bands); ok {
+			t.Errorf("requirement %s with an attested context should not hold", cond)
+		}
 	}
 }
 
