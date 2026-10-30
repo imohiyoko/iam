@@ -207,6 +207,11 @@ func TestMultiRealm(t *testing.T) {
 		!strings.Contains(w.Body.String(), `/realms/acme/login/assets/login.js`) {
 		t.Fatalf("hosted login in acme: %d %s", w.Code, w.Body)
 	}
+	// パスで指す realm のフローの Cookie は realm ごとの名前にする（同じホストの realm で混ざらない）。
+	if w := acme.do(t, false, "POST", "/v1/login/passkey:start", nil); w.Code != 200 ||
+		!strings.Contains(w.Header().Get("Set-Cookie"), passkeyCookie+".acme=") {
+		t.Fatalf("passkey flow cookie in acme: %d %v", w.Code, w.Header()["Set-Cookie"])
+	}
 
 	// 知らない realm、ホスト名を持つ realm のパスは 404。
 	for _, path := range []string{"/realms/nope/v1/me/sessions", "/realms/beta/v1/me/sessions"} {
@@ -220,6 +225,11 @@ func TestMultiRealm(t *testing.T) {
 	op, err := ra.CreateOperator(context.Background(), "ops@acme.example", role.RealmOwner, 0)
 	if err == nil {
 		t.Fatalf("ttl 0 accepted: %+v", op)
+	}
+	for _, ttl := range []int64{1, 86401, 1 << 62} {
+		if code, out := l.adminDo(t, "POST", owner, "/v1/admin/realms/"+ra.realm.ID+"/operators", map[string]any{"email": "ops@acme.example", "ttl_seconds": ttl}); code != 400 || out["error"] != "invalid_ttl" {
+			t.Fatalf("operator ttl %d: %d %v", ttl, code, out)
+		}
 	}
 	code, opOut := l.adminDo(t, "POST", owner, "/v1/admin/realms/"+ra.realm.ID+"/operators", map[string]any{"email": "ops@acme.example"})
 	if code != 201 || opOut["created"] != true || !strings.HasPrefix(opOut["login_url"].(string), multiRealmURL+"/realms/acme/login/link#token=") {

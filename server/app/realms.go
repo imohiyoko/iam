@@ -164,9 +164,14 @@ type realmTable struct {
 
 // loadRealms は DB の realm を読み、既定以外の realm の App を（変わったものだけ）作り直す。
 func (a *App) loadRealms(ctx context.Context) error {
+	a.realms.reload.Lock()
+	defer a.realms.reload.Unlock()
+	return a.loadRealmsLocked(ctx)
+}
+
+// loadRealmsLocked は loadRealms の本体。呼び出し側が reload を持つ。
+func (a *App) loadRealmsLocked(ctx context.Context) error {
 	t := a.realms
-	t.reload.Lock()
-	defer t.reload.Unlock()
 	var list []port.Realm
 	if err := a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
@@ -260,20 +265,26 @@ func (a *App) forRealm(realmID string) (*App, bool) {
 }
 
 // refreshRealms は間隔を過ぎていれば realm を読み直す。読めなければ今の表のまま続ける。トランザクションの外で呼ぶ。
+// 他の要求が読み直していれば待たずに今の表を使う（要求ごとに読み直しが並ばない）。
 func (a *App) refreshRealms(ctx context.Context) {
 	t := a.realms
-	if t == nil {
+	if t == nil || !a.realmsStale() || !t.reload.TryLock() {
 		return
 	}
-	t.mu.RLock()
-	stale := a.deps.Clock.Now().Sub(t.loaded) >= t.refresh
-	t.mu.RUnlock()
-	if !stale {
-		return
+	defer t.reload.Unlock()
+	if !a.realmsStale() {
+		return // 確かめてからロックを取るまでに、他の要求が読み直した
 	}
-	if err := a.loadRealms(ctx); err != nil {
+	if err := a.loadRealmsLocked(ctx); err != nil {
 		a.deps.Logger.WarnContext(ctx, "realm: reload failed", "error", err)
 	}
+}
+
+func (a *App) realmsStale() bool {
+	t := a.realms
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return a.deps.Clock.Now().Sub(t.loaded) >= t.refresh
 }
 
 // watchRealms は ctx が終わるまで、refresh の間隔で realm を読み直す。

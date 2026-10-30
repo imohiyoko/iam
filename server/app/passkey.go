@@ -22,8 +22,8 @@ func (s publicServer) passkeyClient(ctx context.Context) passkey.Client {
 	return passkey.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}
 }
 
-func setPasskeyCookie(ctx context.Context, flowID string, maxAge int) {
-	setCookie(ctx, &http.Cookie{Name: passkeyCookie, Value: flowID, Path: "/", Secure: true, HttpOnly: true,
+func (s publicServer) setPasskeyCookie(ctx context.Context, flowID string, maxAge int) {
+	setCookie(ctx, &http.Cookie{Name: s.a.cookie(passkeyCookie), Value: flowID, Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: maxAge})
 }
 
@@ -33,16 +33,16 @@ func (s publicServer) ceremony(ctx context.Context, st passkey.Started) (publica
 	if err := json.Unmarshal(st.Options, &opts); err != nil {
 		return publicapi.PasskeyCeremony{}, err
 	}
-	setPasskeyCookie(ctx, st.FlowID, max(int(st.ExpiresAt.Sub(s.a.deps.Clock.Now())/time.Second), 1))
+	s.setPasskeyCookie(ctx, st.FlowID, max(int(st.ExpiresAt.Sub(s.a.deps.Clock.Now())/time.Second), 1))
 	return publicapi.PasskeyCeremony{FlowId: st.FlowID, Options: opts, ExpiresAt: st.ExpiresAt}, nil
 }
 
 // flowID は本文か Cookie のフロー ID。
-func passkeyFlowID(ctx context.Context, body *string) string {
+func (s publicServer) passkeyFlowID(ctx context.Context, body *string) string {
 	if v := deref(body); v != "" {
 		return v
 	}
-	return cookie(ctx, passkeyCookie)
+	return cookie(ctx, s.a.cookie(passkeyCookie))
 }
 
 func myPasskey(p port.Passkey) publicapi.MyPasskey {
@@ -85,13 +85,13 @@ func (s publicServer) FinishPasskeyLogin(ctx context.Context, req publicapi.Fini
 	if err != nil {
 		return fail, nil
 	}
-	in := passkey.Login{FlowID: passkeyFlowID(ctx, req.Body.FlowId), Response: resp, Client: s.passkeyClient(ctx)}
+	in := passkey.Login{FlowID: s.passkeyFlowID(ctx, req.Body.FlowId), Response: resp, Client: s.passkeyClient(ctx)}
 	if tok, viaCookie := s.a.sessionToken(httpFrom(ctx).r); viaCookie {
 		in.ReplaceToken = tok
 	}
 	res, err := s.a.passkeys.FinishLogin(ctx, s.a.realm.ID, in)
 	// 失敗でもフローは使い終わったので Cookie を消す。
-	setPasskeyCookie(ctx, "", -1)
+	s.setPasskeyCookie(ctx, "", -1)
 	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.FinishPasskeyLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
@@ -142,13 +142,13 @@ func (s publicServer) FinishRegisterPasskey(ctx context.Context, req publicapi.F
 	if err != nil {
 		return fail, nil
 	}
-	in := passkey.Register{FlowID: passkeyFlowID(ctx, req.Body.FlowId), Response: resp, Name: deref(req.Body.Name), Client: s.passkeyClient(ctx)}
+	in := passkey.Register{FlowID: s.passkeyFlowID(ctx, req.Body.FlowId), Response: resp, Name: deref(req.Body.Name), Client: s.passkeyClient(ctx)}
 	p, err := s.a.passkeys.FinishRegister(ctx, s.a.realm.ID, au.PrincipalID, in)
 	if errors.Is(err, account.ErrPasskeyName) {
 		// 名前の誤りはフローを使う前に返すので、Cookie は消さない（直して送り直せる）。
 		return publicapi.FinishRegisterPasskey400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_name"}}, nil
 	}
-	setPasskeyCookie(ctx, "", -1)
+	s.setPasskeyCookie(ctx, "", -1)
 	if code, ok := stateCode(err); ok {
 		return publicapi.FinishRegisterPasskey409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
 	}

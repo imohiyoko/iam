@@ -228,8 +228,8 @@ func (r realms) Create(ctx context.Context, v port.Realm) error {
 }
 
 func (r realms) addHosts(ctx context.Context, realmID string, hosts []string) error {
-	for _, h := range hosts {
-		if err := r.q.AddRealmHost(ctx, db.AddRealmHostParams{Host: h, RealmID: realmID}); err != nil {
+	for i, h := range hosts {
+		if err := r.q.AddRealmHost(ctx, db.AddRealmHostParams{Host: h, RealmID: realmID, Position: int64(i)}); err != nil {
 			return mapErr(err)
 		}
 	}

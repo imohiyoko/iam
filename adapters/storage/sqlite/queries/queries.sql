@@ -18,13 +18,13 @@ SELECT id, slug, settings, created_at, updated_at FROM authn_realms ORDER BY id;
 UPDATE authn_realms SET settings = ?, updated_at = ? WHERE id = ?;
 
 -- name: ListRealmHosts :many
-SELECT host, realm_id FROM authn_realm_hosts ORDER BY host;
+SELECT host, realm_id FROM authn_realm_hosts ORDER BY realm_id, position;
 
 -- name: ListHostsOfRealm :many
-SELECT host FROM authn_realm_hosts WHERE realm_id = ? ORDER BY host;
+SELECT host FROM authn_realm_hosts WHERE realm_id = ? ORDER BY position;
 
 -- name: AddRealmHost :exec
-INSERT INTO authn_realm_hosts (host, realm_id) VALUES (?, ?);
+INSERT INTO authn_realm_hosts (host, realm_id, position) VALUES (?, ?, ?);
 
 -- name: DeleteRealmHosts :exec
 DELETE FROM authn_realm_hosts WHERE realm_id = ?;

@@ -16,7 +16,7 @@ import (
 func testRealmHosts(t *testing.T, h Harness) {
 	s, _ := open(t, h)
 	a, b := newRealm("a"), newRealm("b")
-	a.Hosts = []string{"a.example.com", "login.a.example"}
+	a.Hosts = []string{"login.a.example", "a.example.com"} // 順を保つ（最初のホストが issuer）
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		for _, r := range []port.Realm{a, b} {
 			if err := tx.Realms().Create(ctx, r); err != nil {
@@ -39,7 +39,7 @@ func testRealmHosts(t *testing.T, h Harness) {
 		if err := tx.Realms().Update(ctx, b); err != nil {
 			return err
 		}
-		a.Hosts, a.UpdatedAt = []string{"a.example.com"}, T0.Add(2)
+		a.Hosts, a.UpdatedAt = []string{"z.a.example", "a.example.com"}, T0.Add(2)
 		if err := tx.Realms().Update(ctx, a); err != nil {
 			return err
 		}

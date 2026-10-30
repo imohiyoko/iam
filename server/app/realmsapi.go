@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -383,7 +384,11 @@ func (s adminServer) createRealmOperator(ctx context.Context, p adminPrincipal, 
 		roleName = *body.Role
 	}
 	if body.TtlSeconds != nil {
-		ttl = time.Duration(*body.TtlSeconds) * time.Second
+		// 運営者の最初のログインのトークンは 60 秒から（admin.yaml）。掛け算の前に範囲を確かめる。
+		var err error
+		if ttl, err = loginlink.TTLSeconds(*body.TtlSeconds); err != nil || ttl < time.Minute {
+			return errs.WithCode(errs.KindInvalid, "invalid_ttl", "ttl_seconds must be within [60, 86400]")
+		}
 	}
 	op, err := ra.createOperator(ctx, body.Email, roleName, ttl, p.Actor, requestID(ctx))
 	if err != nil {

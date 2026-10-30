@@ -32,16 +32,17 @@ func (q *Queries) AddOutbox(ctx context.Context, arg AddOutboxParams) error {
 }
 
 const addRealmHost = `-- name: AddRealmHost :exec
-INSERT INTO authn_realm_hosts (host, realm_id) VALUES ($1, $2)
+INSERT INTO authn_realm_hosts (host, realm_id, position) VALUES ($1, $2, $3)
 `
 
 type AddRealmHostParams struct {
-	Host    string
-	RealmID string
+	Host     string
+	RealmID  string
+	Position int64
 }
 
 func (q *Queries) AddRealmHost(ctx context.Context, arg AddRealmHostParams) error {
-	_, err := q.db.ExecContext(ctx, addRealmHost, arg.Host, arg.RealmID)
+	_, err := q.db.ExecContext(ctx, addRealmHost, arg.Host, arg.RealmID, arg.Position)
 	return err
 }
 
@@ -379,7 +380,7 @@ func (q *Queries) ListFeatures(ctx context.Context) ([]SharedInstalledFeature, e
 }
 
 const listHostsOfRealm = `-- name: ListHostsOfRealm :many
-SELECT host FROM authn_realm_hosts WHERE realm_id = $1 ORDER BY host
+SELECT host FROM authn_realm_hosts WHERE realm_id = $1 ORDER BY position
 `
 
 func (q *Queries) ListHostsOfRealm(ctx context.Context, realmID string) ([]string, error) {
@@ -406,18 +407,23 @@ func (q *Queries) ListHostsOfRealm(ctx context.Context, realmID string) ([]strin
 }
 
 const listRealmHosts = `-- name: ListRealmHosts :many
-SELECT host, realm_id FROM authn_realm_hosts ORDER BY host
+SELECT host, realm_id FROM authn_realm_hosts ORDER BY realm_id, position
 `
 
-func (q *Queries) ListRealmHosts(ctx context.Context) ([]AuthnRealmHost, error) {
+type ListRealmHostsRow struct {
+	Host    string
+	RealmID string
+}
+
+func (q *Queries) ListRealmHosts(ctx context.Context) ([]ListRealmHostsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listRealmHosts)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AuthnRealmHost
+	var items []ListRealmHostsRow
 	for rows.Next() {
-		var i AuthnRealmHost
+		var i ListRealmHostsRow
 		if err := rows.Scan(&i.Host, &i.RealmID); err != nil {
 			return nil, err
 		}

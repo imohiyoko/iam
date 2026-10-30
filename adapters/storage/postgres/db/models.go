@@ -115,8 +115,9 @@ type AuthnRealm struct {
 }
 
 type AuthnRealmHost struct {
-	Host    string
-	RealmID string
+	Host     string
+	RealmID  string
+	Position int64
 }
 
 type AuthnRecoveryCode struct {

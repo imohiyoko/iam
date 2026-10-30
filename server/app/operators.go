@@ -160,7 +160,7 @@ func (s adminServer) IssueLoginLink(ctx context.Context, req adminapi.IssueLogin
 	}
 	ttl := loginLinkTTL
 	if req.Body != nil && req.Body.TtlSeconds != nil {
-		ttl = time.Duration(*req.Body.TtlSeconds) * time.Second
+		ttl, _ = loginlink.TTLSeconds(int64(*req.Body.TtlSeconds)) // 範囲の外は 0 で、次の ValidTTL が拒む
 	}
 	if err := loginlink.ValidTTL(ttl); err != nil {
 		return adminapi.IssueLoginLink400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_ttl", err.Error()))}, nil

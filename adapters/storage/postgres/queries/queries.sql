@@ -20,13 +20,13 @@ SELECT id, slug, settings, created_at, updated_at FROM authn_realms ORDER BY id;
 UPDATE authn_realms SET settings = $1, updated_at = $2 WHERE id = $3;
 
 -- name: ListRealmHosts :many
-SELECT host, realm_id FROM authn_realm_hosts ORDER BY host;
+SELECT host, realm_id FROM authn_realm_hosts ORDER BY realm_id, position;
 
 -- name: ListHostsOfRealm :many
-SELECT host FROM authn_realm_hosts WHERE realm_id = $1 ORDER BY host;
+SELECT host FROM authn_realm_hosts WHERE realm_id = $1 ORDER BY position;
 
 -- name: AddRealmHost :exec
-INSERT INTO authn_realm_hosts (host, realm_id) VALUES ($1, $2);
+INSERT INTO authn_realm_hosts (host, realm_id, position) VALUES ($1, $2, $3);
 
 -- name: DeleteRealmHosts :exec
 DELETE FROM authn_realm_hosts WHERE realm_id = $1;
