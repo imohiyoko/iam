@@ -214,21 +214,34 @@ func TestPasswordOperationRequirements(t *testing.T) {
 	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": pw}); status != 204 {
 		t.Fatalf("set: %d %v", status, res)
 	}
-	settings := []byte(`{"requirements":{"me:password":{"amr_has":["hwk"]},"me:methods":{"amr_has":["hwk"]}}}`)
-	if err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
-		now := l.a.deps.Clock.Now()
-		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: l.a.realm.ID, Name: "me", Settings: settings, CreatedAt: now, UpdatedAt: now})
-	}); err != nil {
-		t.Fatal(err)
+	require := func(action string) {
+		t.Helper()
+		settings := []byte(`{"requirements":{"` + action + `":{"amr_has":["hwk"]}}}`)
+		if err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+			now := l.a.deps.Clock.Now()
+			return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: l.a.realm.ID, Name: "me", Settings: settings, CreatedAt: now, UpdatedAt: now})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		l.a.authz.Invalidate(l.a.realm.ID)
 	}
-	l.a.authz.Invalidate(l.a.realm.ID)
-	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": "another long passphrase", "current_password": pw}); status != 401 || res["error"] != "reauthentication_required" {
-		t.Fatalf("change with unmet requirement: %d %v", status, res)
-	}
+	// 削除は me:methods、変更は me:password を見る（取り違えれば次のどちらかが通らない）。
+	const pw2 = "another long passphrase"
+	require(role.ActionMeMethods)
 	if status, res := l.mePost(t, cookie, "/v1/me/password:remove", map[string]string{"current_password": pw}); status != 401 || res["error"] != "reauthentication_required" {
-		t.Fatalf("remove with unmet requirement: %d %v", status, res)
+		t.Fatalf("remove with unmet me:methods: %d %v", status, res)
 	}
-	if status, _, _ := l.passwordLogin(t, "pat@example.com", pw); status != 200 {
+	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": pw2, "current_password": pw}); status != 204 {
+		t.Fatalf("change under me:methods only: %d %v", status, res)
+	}
+	require(role.ActionMePassword)
+	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": pw, "current_password": pw2}); status != 401 || res["error"] != "reauthentication_required" {
+		t.Fatalf("change with unmet me:password: %d %v", status, res)
+	}
+	if status, _, _ := l.passwordLogin(t, "pat@example.com", pw2); status != 200 {
 		t.Fatalf("password unchanged: %d", status)
+	}
+	if status, res := l.mePost(t, cookie, "/v1/me/password:remove", map[string]string{"current_password": pw2}); status != 204 {
+		t.Fatalf("remove under me:password only: %d %v", status, res)
 	}
 }
