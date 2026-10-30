@@ -324,7 +324,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
 		Notify: a.notify, Log: d.Logger,
 		Config:     emailflow.Config{TTL: cfg.Security.EmailFlow.TTL.D(), MaxAttempts: cfg.Security.EmailFlow.MaxAttempts},
-		PerAccount: a.limiter(cfg.Security.Login.RateLimit.PerAccount),
+		PerAccount: a.accountLimiter(),
 	}
 	a.perIP = a.limiter(cfg.Security.Login.RateLimit.PerIP)
 	a.links = &loginlink.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Sessions: a.sessions, Log: d.Logger}
@@ -332,7 +332,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	a.recovery = &recovery.Service{
 		Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Notify: a.notify,
 		Params:     password.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
-		PerAccount: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
+		PerAccount: a.accountLimiter(), Log: d.Logger,
 	}
 
 	a.oauth = &oauth.Service{
@@ -371,7 +371,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.password = &password.Service{
 			Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Breach: d.BreachCheck,
 			Params:    password.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
-			MinLength: minLength, PerAccount: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
+			MinLength: minLength, PerAccount: a.accountLimiter(), Log: d.Logger,
 		}
 	}
 	if plan.IsActive(feature.AccountMerge) {
@@ -404,6 +404,13 @@ type devClaimer interface {
 func (a *App) limiter(limit int) *ratelimit.Limiter {
 	rl := a.cfg.Security.Login.RateLimit
 	return &ratelimit.Limiter{Cache: a.deps.Ephemeral, Clock: a.deps.Clock, Window: rl.Window.D(), Limit: int64(limit)}
+}
+
+// accountLimiter はメールアドレスごとの上限（接続元ごとに per_account、接続元を問わず per_account_total）。
+func (a *App) accountLimiter() *ratelimit.Limiter {
+	l := a.limiter(a.cfg.Security.Login.RateLimit.PerAccount)
+	l.Total = int64(a.cfg.Security.Login.RateLimit.PerAccountTotal)
+	return l
 }
 
 // activateOnFreshInstall は、空の DB（台帳も realm も無い）で起動したとき、有効にするフィーチャーを台帳に

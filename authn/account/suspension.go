@@ -110,6 +110,16 @@ func (s *Service) Suspend(ctx context.Context, tx port.Tx, realmID string, t Tar
 			return x, false, err
 		}
 	}
+	// 最後の使える realm:owner は止めない（止めると管理 API だけでは realm を管理できる人がいなくなる。予約も同じ）。
+	if t.Type == port.SuspensionTargetUser && s.Roles != nil {
+		last, err := s.Roles.IsLastOwner(ctx, tx, realmID, t.ID, now)
+		if err != nil {
+			return port.Suspension{}, false, err
+		}
+		if last {
+			return port.Suspension{}, false, ErrLastRealmOwner
+		}
+	}
 	sp := port.Suspension{
 		ID: id.New(id.Suspension), PublicID: id.NewExternal(id.Suspension), RealmID: realmID,
 		TargetType: t.Type, TargetID: t.ID, Category: in.Category, Reason: in.Reason,
@@ -208,6 +218,16 @@ func (s *Service) SetValidity(ctx context.Context, tx port.Tx, realmID string, u
 		return port.User{}, err
 	}
 	now := s.Clock.Now()
+	// 最後の使える realm:owner には、いずれ使えなくなる有効期間を付けない（制限を外すのはよい）。
+	if until != nil || (from != nil && from.After(now)) {
+		last, err := s.lastOwner(ctx, tx, u)
+		if err != nil {
+			return port.User{}, err
+		}
+		if last {
+			return port.User{}, ErrLastRealmOwner
+		}
+	}
 	if err := tx.Users().SetValidity(ctx, realmID, u.ID, from, until, now); err != nil {
 		return port.User{}, err
 	}

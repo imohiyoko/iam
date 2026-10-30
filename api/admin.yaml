@@ -212,7 +212,8 @@ paths:
       description: |
         権限 `users:update`。`valid_from`・`valid_until` の両方を置き換える（省略か null は制限なし）。期間の外では
         ログインできず、既存のセッションも境界の時刻ちょうどに使えなくなる。境界の時刻に `user.validity_started`・
-        `user.validity_ended` を監査ログに出す（判定はこの処理の遅れに左右されない）。
+        `user.validity_ended` を監査ログに出す（判定はこの処理の遅れに左右されない）。最後の使える `realm:owner` に
+        終わりか未来の始まりを付けるのは `409 last_owner`（先に別のユーザーに付与する）。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -230,6 +231,7 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
 
   /v1/admin/users/{id}:delete:
     post:
@@ -314,7 +316,7 @@ paths:
         今から、未来なら予約。`ends_at` を省略で無期限。重ねられ、1つでも有効なら停止中。停止中はログインできず、
         既存のセッションも使えない（遅くとも `validity_max_delay` の後。予約は開始の時刻ちょうど）。本人には
         `suspended.<category>` だけを返し、`reason` は見せない。`external_ref` が同じ停止（対象と種別も同じ）が
-        あれば、新しく作らず 200 でそれを返す。
+        あれば、新しく作らず 200 でそれを返す。最後の使える `realm:owner` は止められない（予約も。`409 last_owner`）。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -337,6 +339,7 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
     get:
       operationId: listUserSuspensions
       summary: ユーザーの停止の一覧（解除・終了したものも含む）

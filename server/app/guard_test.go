@@ -15,6 +15,7 @@ import (
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/port"
+	"github.com/imohiyoko/iam/shared/ratelimit"
 )
 
 // auditTypes は監査ログのイベントの種類を古い順に返す。
@@ -158,8 +159,8 @@ func TestIPBucket(t *testing.T) {
 		"2001:db8:1:2::9":      "2001:db8:1:2::/64",
 		"not-an-ip":            "not-an-ip",
 	} {
-		if got := ipBucket(in); got != want {
-			t.Errorf("ipBucket(%q) = %q, want %q", in, got, want)
+		if got := ratelimit.Bucket(in); got != want {
+			t.Errorf("Bucket(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

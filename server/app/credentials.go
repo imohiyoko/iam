@@ -77,10 +77,16 @@ func (s adminServer) RevokeUserCredential(ctx context.Context, req adminapi.Revo
 		if err != nil {
 			return err
 		}
+		if err := s.a.outranks(ctx, tx, p, u.ID); err != nil {
+			return err
+		}
 		return s.a.accounts.AdminRevokeCredential(ctx, tx, s.a.realm.ID, u, req.CredentialId, p.Actor, requestID(ctx))
 	})
 	if errors.Is(err, errs.NotFound) {
 		return adminapi.RevokeUserCredential404JSONResponse(adminError("not_found", "")), nil
+	}
+	if errors.Is(err, errOutranked) {
+		return adminapi.RevokeUserCredential403JSONResponse(adminError(errs.CodePermissionDenied, "")), nil
 	}
 	if err != nil {
 		return nil, err
@@ -110,6 +116,9 @@ func (s adminServer) RevokeUserPassword(ctx context.Context, req adminapi.Revoke
 		if err != nil {
 			return err
 		}
+		if err := s.a.outranks(ctx, tx, p, u.ID); err != nil {
+			return err
+		}
 		if err := s.a.accounts.AdminRevokePassword(ctx, tx, s.a.realm.ID, u, p.Actor, requestID(ctx)); err != nil {
 			return err
 		}
@@ -119,6 +128,9 @@ func (s adminServer) RevokeUserPassword(ctx context.Context, req adminapi.Revoke
 	})
 	if errors.Is(err, errs.NotFound) {
 		return adminapi.RevokeUserPassword404JSONResponse(adminError("not_found", "")), nil
+	}
+	if errors.Is(err, errOutranked) {
+		return adminapi.RevokeUserPassword403JSONResponse(adminError(errs.CodePermissionDenied, "")), nil
 	}
 	if err != nil {
 		return nil, err
@@ -144,6 +156,9 @@ func (s adminServer) RevokeAllUserCredentials(ctx context.Context, req adminapi.
 		if err != nil {
 			return err
 		}
+		if err := s.a.outranks(ctx, tx, p, u.ID); err != nil {
+			return err
+		}
 		if r, err = s.a.accounts.RevokeAllCredentials(ctx, tx, s.a.realm.ID, u, p.Actor, requestID(ctx)); err != nil {
 			return err
 		}
@@ -152,6 +167,9 @@ func (s adminServer) RevokeAllUserCredentials(ctx context.Context, req adminapi.
 	})
 	if errors.Is(err, errs.NotFound) {
 		return adminapi.RevokeAllUserCredentials404JSONResponse(adminError("not_found", "")), nil
+	}
+	if errors.Is(err, errOutranked) {
+		return adminapi.RevokeAllUserCredentials403JSONResponse(adminError(errs.CodePermissionDenied, "")), nil
 	}
 	if err != nil {
 		return nil, err

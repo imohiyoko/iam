@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -53,7 +52,7 @@ func (a *App) withLoginGuard(h http.Handler) http.Handler {
 
 func (a *App) limitIP(w http.ResponseWriter, r *http.Request, h http.Handler) {
 	c, _ := r.Context().Value(clientKey{}).(client)
-	err := a.perIP.Allow(r.Context(), "ip:"+a.realm.ID+":"+ipBucket(c.IP))
+	err := a.perIP.Allow(r.Context(), "ip:"+a.realm.ID+":"+ratelimit.Bucket(c.IP))
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		if ex.First {
 			a.recordRateLimit(r.Context(), "ip", r.URL.Path)
@@ -66,15 +65,6 @@ func (a *App) limitIP(w http.ResponseWriter, r *http.Request, h http.Handler) {
 		return
 	}
 	h.ServeHTTP(w, r)
-}
-
-// ipBucket は回数を数える単位。IPv6 は利用者が /64 を自由に使えるため、/64 でまとめる。
-func ipBucket(ip string) string {
-	p := net.ParseIP(ip)
-	if p == nil || p.To4() != nil {
-		return ip
-	}
-	return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 // recordRateLimit は発動を監査ログに残す（窓ごとに1回。6.1）。
