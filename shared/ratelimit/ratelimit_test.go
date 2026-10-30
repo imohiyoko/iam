@@ -97,3 +97,18 @@ func TestAllowFrom(t *testing.T) {
 		t.Fatal("over the total")
 	}
 }
+
+// 接続元が分からなくても、合計の上限は効く。
+func TestAllowFromEmptyIP(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC))
+	l := &ratelimit.Limiter{Cache: newCounter(), Clock: clk, Window: time.Minute, Limit: 5, Total: 2}
+	ctx := context.Background()
+	for i := range 2 {
+		if err := l.AllowFrom(ctx, "acct:a", ""); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+	if err := l.AllowFrom(ctx, "acct:a", ""); err == nil {
+		t.Fatal("total not applied without an ip")
+	}
+}

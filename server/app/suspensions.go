@@ -273,6 +273,8 @@ func (s adminServer) SuspendUser(ctx context.Context, req adminapi.SuspendUserRe
 		return adminapi.SuspendUser403JSONResponse(o.body), nil
 	case o.status == http.StatusNotFound:
 		return adminapi.SuspendUser404JSONResponse(o.body), nil
+	case o.status == http.StatusConflict:
+		return adminapi.SuspendUser409JSONResponse(o.body), nil
 	}
 	return nil, errUnexpected(o)
 }
@@ -482,6 +484,8 @@ func (s adminServer) UpdateUser(ctx context.Context, req adminapi.UpdateUserRequ
 		return adminapi.UpdateUser404JSONResponse(adminError("not_found", "")), nil
 	case errors.Is(err, errOutranked):
 		return adminapi.UpdateUser403JSONResponse(adminError(errs.CodePermissionDenied, "")), nil
+	case errors.Is(err, account.ErrLastRealmOwner):
+		return adminapi.UpdateUser409JSONResponse(adminError(errCode(err), "")), nil
 	case errors.Is(err, errs.Invalid):
 		return adminapi.UpdateUser400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError(errCode(err), ""))}, nil
 	case err != nil:

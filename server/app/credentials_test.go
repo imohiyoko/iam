@@ -167,4 +167,45 @@ func TestAdminActionsRespectOutranks(t *testing.T) {
 	if status, out := l.admin(t, "/v1/admin/users/"+adminID+"/credentials:revoke-all", owner, nil); status != 200 {
 		t.Fatalf("revoke admin's credentials by owner: %d %v", status, out)
 	}
+
+	// 最後の使える realm:owner は止められず、終わりのある有効期間も付けられない（予約も同じ）。
+	if status, out := l.admin(t, users+"/suspensions", owner, map[string]any{"category": "security_risk", "reason": "x"}); status != 409 || out["error"] != "last_owner" {
+		t.Fatalf("suspend the last owner: %d %v", status, out)
+	}
+	if status, out := l.admin(t, users+"/suspensions", owner, map[string]any{"category": "security_risk", "reason": "x",
+		"starts_at": l.a.deps.Clock.Now().Add(time.Hour)}); status != 409 {
+		t.Fatalf("schedule a suspension of the last owner: %d %v", status, out)
+	}
+	if status, out := l.adminDo(t, "PATCH", owner, users, map[string]any{"valid_until": l.a.deps.Clock.Now().Add(time.Hour)}); status != 409 || out["error"] != "last_owner" {
+		t.Fatalf("validity of the last owner: %d %v", status, out)
+	}
+	if status, out := l.adminDo(t, "PATCH", owner, users, map[string]any{}); status != 200 {
+		t.Fatalf("clear the validity of the last owner: %d %v", status, out)
+	}
+
+	// リソースを限った付与も比べる（上で無効化した admin とは別の運営者で）。
+	admin2ID, admin2 := l.operator(t, "admin2@example.com", role.RealmAdmin)
+	_, _ = l.login(t, "carol@example.com")
+	carolID := l.userID(t, "carol@example.com")
+	status, out = l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "project-admin", "permissions": []string{"project:admin"}})
+	if status != 201 {
+		t.Fatalf("create role: %d %v", status, out)
+	}
+	projectAdmin := out["id"].(string)
+	bindOn := func(userID string) {
+		t.Helper()
+		if status, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": projectAdmin, "principal_type": "user", "principal_id": userID,
+			"resource_type": "project", "resource_id": "p1"}); status != 201 {
+			t.Fatalf("bind on p1: %d %v", status, out)
+		}
+	}
+	bindOn(carolID)
+	carol := "/v1/admin/users/" + carolID + "/credentials:revoke-all"
+	if status, out := l.admin(t, carol, admin2, nil); status != 403 {
+		t.Fatalf("revoke a project admin's credentials without the project role: %d %v", status, out)
+	}
+	bindOn(admin2ID)
+	if status, out := l.admin(t, carol, admin2, nil); status != 200 {
+		t.Fatalf("revoke with the same project role: %d %v", status, out)
+	}
 }

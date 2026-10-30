@@ -46,13 +46,11 @@ func (l *Limiter) Allow(ctx context.Context, key string) error {
 }
 
 // AllowFrom は key を接続元 ip（Bucket でまとめる）ごとに Limit 回まで、接続元を問わず Total 回まで許す。アカウントの
-// 上限を第三者が使い切って、本人を締め出すのを難しくする（本人の接続元の分は残る）。ip が空なら接続元を問わず Limit 回。
+// 上限を第三者が使い切って、本人を締め出すのを難しくする（本人の接続元の分は残る）。ip が空なら、空の接続元を1つの接続元として
+// 数える（Total も同じく効く）。
 func (l *Limiter) AllowFrom(ctx context.Context, key, ip string) error {
 	if l == nil {
 		return nil
-	}
-	if ip == "" {
-		return l.allow(ctx, key, l.Limit)
 	}
 	if err := l.allow(ctx, key+":from:"+Bucket(ip), l.Limit); err != nil {
 		return err
