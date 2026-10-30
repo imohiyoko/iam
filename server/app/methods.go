@@ -197,8 +197,13 @@ func (s publicServer) change(ctx context.Context, fn func(ctx context.Context, t
 }
 
 func (s publicServer) MakeMyEmailPrimary(ctx context.Context, req publicapi.MakeMyEmailPrimaryRequestObject) (publicapi.MakeMyEmailPrimaryResponseObject, error) {
-	if _, ok := authFrom(ctx); !ok {
+	au, ok := authFrom(ctx)
+	if !ok {
 		return publicapi.MakeMyEmailPrimary401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	// primary は通知と復旧の宛先になるので、追加・削除と同じく直近の認証を求める。
+	if s.stale(ctx, au) {
+		return publicapi.MakeMyEmailPrimary401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	nf, code, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
 		return s.a.accounts.SetPrimaryEmail(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Id, au.Actor(), requestID(ctx))
