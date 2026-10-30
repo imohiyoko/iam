@@ -1307,6 +1307,7 @@ paths:
         寿命を超えたセッションでこの Org に切り替えると `401 reauthentication_required`。
         deny にした警告に当たるセッションはこの Org に入れない（`warning_denied.<code>`。ログインは個人 Org などで成功する）。
         変更は `org.settings_changed` として監査ログに残す。個人 Org は `409 personal_org`。
+        `requirements`（Org の要件）を変えた後に、呼び出し側が `org:settings` を満たさなくなるなら `409 requirement_lockout`（自分を締め出さない）。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -2604,6 +2605,15 @@ components:
           description: 警告のコードごとのアクション
           additionalProperties: { type: string, enum: [ignore, warn, deny] }
         login_policy: { $ref: "#/components/schemas/OrgLoginPolicy" }
+        requirements:
+          type: object
+          description: >-
+            Org の要件（ADR 0084）。操作（ワイルドカード `payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。
+            この Org を文脈にした判定で、どの付与で許されたかに関係なく求め、`attested` を暗黙に AND する（厳しくする方向だけ）。
+            Org 階層がオンなら祖先の Org の要件も AND する。操作が外れれば invalid_requirement、条件が外れれば invalid_condition
+          additionalProperties:
+            type: object
+            additionalProperties: true
     OrgLoginPolicy:
       type: object
       description: >-

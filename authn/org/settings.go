@@ -42,10 +42,12 @@ type Settings struct {
 	Warnings         map[string]warning.Action `json:"warnings,omitempty"`
 	// LoginPolicy は入場の条件（フィーチャー org_login_policy。policy.go）。
 	LoginPolicy *LoginPolicy `json:"login_policy,omitempty"`
+	// Requirements は Org の要件（操作 → 条件。ADR 0084）。条件の形と検査は authz/check が決める（呼び出し側が保存の前に確かめる）。
+	Requirements map[string]json.RawMessage `json:"requirements,omitempty"`
 }
 
 func (st Settings) empty() bool {
-	return st.AbsoluteLifetime == nil && st.IdleTimeout == nil && st.MaxAuthAge == nil && len(st.Warnings) == 0 && st.LoginPolicy.empty()
+	return st.AbsoluteLifetime == nil && st.IdleTimeout == nil && st.MaxAuthAge == nil && len(st.Warnings) == 0 && st.LoginPolicy.empty() && len(st.Requirements) == 0
 }
 
 // Rules はホスト先が決める、Org の段の設定の規則。
@@ -215,6 +217,9 @@ func auditSettings(st Settings) map[string]any {
 	}
 	if !st.LoginPolicy.empty() {
 		out["login_policy"] = st.LoginPolicy
+	}
+	if len(st.Requirements) > 0 {
+		out["requirements"] = st.Requirements
 	}
 	return out
 }

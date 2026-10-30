@@ -63,6 +63,7 @@ type Tx interface {
 	Groups() GroupRepo
 	Attributes() AttributeRepo
 	RiskTypes() RiskTypeRepo
+	ActionNamespaces() ActionNamespaceRepo
 	Clients() ClientRepo
 	SigningKeys() SigningKeyRepo
 	Grants() GrantRepo

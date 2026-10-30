@@ -51,6 +51,15 @@ func errCode(err error) string {
 	return ""
 }
 
+// errMessage は errs.Error の説明（運営者向け。秘密や個人情報を含めないエラーにだけ使う）。
+func errMessage(err error) string {
+	var e *errs.Error
+	if errors.As(err, &e) {
+		return e.Msg
+	}
+	return ""
+}
+
 func (s publicServer) SetMyPassword(ctx context.Context, req publicapi.SetMyPasswordRequestObject) (publicapi.SetMyPasswordResponseObject, error) {
 	au, ok := authFrom(ctx)
 	if !ok {

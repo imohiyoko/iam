@@ -56,6 +56,9 @@ func testRoleBindings(t *testing.T, h Harness) {
 		if list, err = repo.ListByRole(ctx, r, "realm:owner"); err != nil || len(list) != 3 {
 			return fmt.Errorf("ListByRole = %+v, %v", list, err)
 		}
+		if list, err = repo.ListConditional(ctx, r); err != nil || len(list) != 1 || !reflect.DeepEqual(list[0], onResource) {
+			return fmt.Errorf("ListConditional = %+v, %v", list, err)
+		}
 		if list, err = repo.ListByOrg(ctx, r, org); err != nil || len(list) != 2 || list[0].ID != inOrg.ID {
 			return fmt.Errorf("ListByOrg = %+v, %v", list, err)
 		}
@@ -436,6 +439,50 @@ func testRiskTypes(t *testing.T, h Harness) {
 		}
 		if got, err := repo.List(ctx, id.New(id.Realm)); err != nil || len(got) != 0 {
 			return fmt.Errorf("riskTypes.List of another realm = %+v, %v", got, err)
+		}
+		return nil
+	})
+}
+
+// testActionNamespaces は realm の操作の名前空間ごとの設定（ADR 0084）。
+func testActionNamespaces(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, other := id.New(id.Realm), id.New(id.Realm)
+	pay := port.ActionNamespace{RealmID: r, Name: "payment", Settings: []byte(`{"requirements":{"payment:send":{"auth_within":300}}}`), CreatedAt: T0, UpdatedAt: T0}
+	orgs := port.ActionNamespace{RealmID: r, Name: "orgs", Settings: []byte(`{}`), CreatedAt: T0, UpdatedAt: T0}
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.ActionNamespaces()
+		if _, err := repo.Get(ctx, r, "payment"); notFound("actionNamespaces.Get before Put", err) != nil {
+			return notFound("actionNamespaces.Get before Put", err)
+		}
+		for _, x := range []port.ActionNamespace{pay, orgs, {RealmID: other, Name: "payment", Settings: []byte(`{}`), CreatedAt: T0, UpdatedAt: T0}} {
+			if err := repo.Put(ctx, x); err != nil {
+				return err
+			}
+		}
+		// 置き直しは作成時刻を保つ。
+		upd := pay
+		upd.Settings, upd.CreatedAt, upd.UpdatedAt = []byte(`{"bands":{"account":{"medium":10,"high":40}}}`), T0.Add(time.Hour), T0.Add(time.Hour)
+		if err := repo.Put(ctx, upd); err != nil {
+			return err
+		}
+		want := upd
+		want.CreatedAt = T0
+		if got, err := repo.Get(ctx, r, "payment"); err != nil || !reflect.DeepEqual(got, want) {
+			return fmt.Errorf("actionNamespaces.Get = %+v, %v", got, err)
+		}
+		if got, err := repo.List(ctx, r); err != nil || !reflect.DeepEqual(got, []port.ActionNamespace{orgs, want}) {
+			return fmt.Errorf("actionNamespaces.List = %+v, %v", got, err)
+		}
+		if got, err := repo.List(ctx, id.New(id.Realm)); err != nil || len(got) != 0 {
+			return fmt.Errorf("actionNamespaces.List of another realm = %+v, %v", got, err)
+		}
+		// 設定が nil でも置ける（空の設定として読める）。
+		if err := repo.Put(ctx, port.ActionNamespace{RealmID: other, Name: "empty", CreatedAt: T0, UpdatedAt: T0}); err != nil {
+			return fmt.Errorf("actionNamespaces.Put with nil settings: %w", err)
+		}
+		if got, err := repo.Get(ctx, other, "empty"); err != nil || len(got.Settings) != 0 {
+			return fmt.Errorf("actionNamespaces.Get with nil settings = %+v, %v", got, err)
 		}
 		return nil
 	})

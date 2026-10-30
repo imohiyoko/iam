@@ -645,6 +645,9 @@ type OrgSettings struct {
 	// MaxAuthAgeSeconds 重要な操作に求める直近の認証の期限
 	MaxAuthAgeSeconds *int64 `json:"max_auth_age_seconds,omitempty"`
 
+	// Requirements Org の要件（ADR 0084）。操作（ワイルドカード `payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。 この Org を文脈にした判定で、どの付与で許されたかに関係なく求め、`attested` を暗黙に AND する（厳しくする方向だけ）。 Org 階層がオンなら祖先の Org の要件も AND する。操作が外れれば invalid_requirement、条件が外れれば invalid_condition
+	Requirements *map[string]map[string]interface{} `json:"requirements,omitempty"`
+
 	// Warnings 警告のコードごとのアクション
 	Warnings *map[string]OrgSettingsWarnings `json:"warnings,omitempty"`
 }

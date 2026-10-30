@@ -78,6 +78,7 @@ type Checker struct {
 
 	mu    sync.Mutex
 	cache map[key]entry
+	reqs  map[reqKey]reqEntry
 	gen   map[string]uint64 // realm ごとの世代。Invalidate で進める
 }
 
@@ -131,21 +132,27 @@ func (c *Checker) CheckTx(ctx context.Context, tx port.Tx, realmID string, r Req
 }
 
 // Decide は判定し、条件で拒んだときは満たさなかった条件の理由を返す（ADR 0084）。材料は Check と同じくキャッシュから使う。
-// 条件はキャッシュの外で、判定のたびに文脈と突き合わせる。
+// 条件と要件はキャッシュの外で、判定のたびに文脈と突き合わせる。
 func (c *Checker) Decide(ctx context.Context, realmID string, r Request) (Decision, error) {
 	r = normalize(r)
 	gs, err := c.cached(ctx, realmID, r.Principal, r.OrgID)
 	if err != nil {
 		return Decision{}, err
 	}
-	return c.decide(gs, r, func() (Bands, error) {
-		var b Bands
-		err := c.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-			var err error
-			b, err = RealmBands(ctx, tx, realmID)
-			return err
-		})
-		return b, err
+	inTx := func(fn func(ctx context.Context, tx port.Tx) error) error { return c.Storage.Tx(ctx, fn) }
+	return c.decide(gs, r, source{
+		bands: func() (Bands, error) {
+			var b Bands
+			err := inTx(func(ctx context.Context, tx port.Tx) error {
+				var err error
+				b, err = RealmBands(ctx, tx, realmID)
+				return err
+			})
+			return b, err
+		},
+		requirements: func() (requirements, error) {
+			return c.cachedRequirements(ctx, realmID, NamespaceOf(r.Action), r.OrgID)
+		},
 	})
 }
 
@@ -156,7 +163,10 @@ func (c *Checker) DecideTx(ctx context.Context, tx port.Tx, realmID string, r Re
 	if err != nil {
 		return Decision{}, err
 	}
-	return c.decide(gs, r, func() (Bands, error) { return RealmBands(ctx, tx, realmID) })
+	return c.decide(gs, r, source{
+		bands:        func() (Bands, error) { return RealmBands(ctx, tx, realmID) },
+		requirements: func() (requirements, error) { return c.Requirements(ctx, tx, realmID, NamespaceOf(r.Action), r.OrgID) },
+	})
 }
 
 // RealmBands は realm の一覧のリスクの段階の境界（有効な種類だけ）。
@@ -168,38 +178,105 @@ func RealmBands(ctx context.Context, tx port.Tx, realmID string) (Bands, error) 
 	return Bands(risk.CatalogOf(rows).Bands()), nil
 }
 
+// source は判定が必要になったときだけ読む材料（境界と要件）。
+type source struct {
+	bands        func() (Bands, error)
+	requirements func() (requirements, error)
+}
+
 // decide は操作を許す付与があるかを見る。条件なしの付与か、条件を満たす付与があれば許す。条件付きの付与だけが操作を
 // 許すなら、それらの満たさなかった条件の理由を返す（付与が無い拒否は理由なし。権限の有無を条件の理由で漏らさない）。
-// 境界は r.Bands が無ければ、条件付きの付与に当たったときに bands で読む。
-func (c *Checker) decide(gs []Grant, r Request, bands func() (Bands, error)) (Decision, error) {
+// 付与で許すなら、操作に当たる名前空間の要件と Org の要件をすべて AND する（ADR 0084）。
+// 境界は r.Bands（無ければ realm の一覧）に名前空間の境界を重ねたもの。
+func (c *Checker) decide(gs []Grant, r Request, src source) (Decision, error) {
 	if r.Action == "" {
 		return Decision{}, nil
 	}
 	now := c.Clock.Now()
+	var rq *requirements
+	loadRequirements := func() (requirements, error) {
+		if rq == nil {
+			x, err := src.requirements()
+			if err != nil {
+				return requirements{}, err
+			}
+			rq = &x
+		}
+		return *rq, nil
+	}
+	var bands Bands
+	loadBands := func() (Bands, error) {
+		if bands != nil {
+			return bands, nil
+		}
+		base := r.Bands
+		if base == nil {
+			b, err := src.bands()
+			if err != nil {
+				return nil, err
+			}
+			base = b
+		}
+		x, err := loadRequirements()
+		if err != nil {
+			return nil, err
+		}
+		bands = bandsWith(base, x.namespace.Bands)
+		if bands == nil {
+			bands = Bands{}
+		}
+		return bands, nil
+	}
+
 	var unmet []string
-	conditional := false
+	allow, conditional := false, false
 	for _, g := range gs {
 		if !g.covers(r.Resource, r.Action) {
 			continue
 		}
 		if g.Condition == nil {
-			return Decision{Allow: true}, nil
+			allow = true
+			break
 		}
-		if r.Bands == nil {
-			b, err := bands()
-			if err != nil {
-				return Decision{}, err
-			}
-			r.Bands = b
+		b, err := loadBands()
+		if err != nil {
+			return Decision{}, err
 		}
-		ok, u := g.Condition.Eval(r.Context, now, r.Bands)
+		ok, u := g.Condition.Eval(r.Context, now, b)
 		if ok {
-			return Decision{Allow: true}, nil
+			allow = true
+			break
 		}
 		conditional, unmet = true, append(unmet, u...)
 	}
-	if !conditional {
-		return Decision{}, nil
+	if !allow {
+		if !conditional {
+			return Decision{}, nil
+		}
+		slices.Sort(unmet)
+		return Decision{Unmet: slices.Compact(unmet)}, nil
+	}
+
+	x, err := loadRequirements()
+	if err != nil {
+		return Decision{}, err
+	}
+	conds := x.matching(r.Action)
+	if len(conds) == 0 {
+		return Decision{Allow: true}, nil
+	}
+	b, err := loadBands()
+	if err != nil {
+		return Decision{}, err
+	}
+	unmet = nil
+	for _, cond := range conds {
+		if ok, u := cond.EvalRequirement(r.Context, now, b); !ok {
+			unmet = append(unmet, u...)
+		}
+	}
+	if len(unmet) == 0 {
+		return Decision{Allow: true}, nil
 	}
 	slices.Sort(unmet)
 	return Decision{Unmet: slices.Compact(unmet)}, nil
@@ -419,12 +496,18 @@ func permissionsOf(b port.EffectiveBinding) []string {
 
 // conditionOf は付与の条件を読む。読めない条件の付与は効かせない（fail-closed）。保存のときに検査しているので、通常は起きない。
 func conditionOf(b port.EffectiveBinding) (*Condition, bool) {
-	if len(b.Condition) == 0 {
-		return nil, true
+	c, err := ParseCondition(b.Condition)
+	return c, err == nil
+}
+
+// ParseCondition は保存した付与の条件を読む。空なら nil（条件なし）。
+func ParseCondition(raw []byte) (*Condition, error) {
+	if len(raw) == 0 {
+		return nil, nil
 	}
 	var c Condition
-	if err := json.Unmarshal(b.Condition, &c); err != nil {
-		return nil, false
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, err
 	}
-	return &c, true
+	return &c, nil
 }

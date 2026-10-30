@@ -477,6 +477,8 @@ paths:
         `400 invalid_risk_type`。`band` は段階の境界（1 ≦ `medium` < `high` ≦ 100。省けば今の値、新しい種類なら既定の 30・70）。
         外れれば `400 invalid_band`。止めた種類の点数はセッションから捨てる（判定に使わない）。種類の数には上限を置かない。
         変わったときだけ `realm.risk_types_changed` を監査ログに残す。
+        止める（`enabled: false`）のは、その種類を見る条件（付与の条件・名前空間の設定・Org の要件）が無いときだけ。残っていれば
+        `409 risk_type_in_use`（`message` に見ている付与の数・名前空間・Org の数）。先に条件を外してから止める。
       parameters:
         - { name: name, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -493,6 +495,55 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/action-namespaces/{name}:
+    get:
+      operationId: getActionNamespace
+      summary: 操作の名前空間の設定（要件と段階の境界。ADR 0084）
+      description: |
+        権限 `requirements:manage`（realm 全体か、`resource_type = action_namespace`・`resource_id = <name>` の付与）。
+        設定していない名前空間は空の設定を返す（`updated_at` が無い）。
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 名前空間の設定
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActionNamespace" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: putActionNamespace
+      summary: 操作の名前空間の設定を置き換える（ADR 0084）
+      description: |
+        権限は GET と同じ。`name` は `[a-z][a-z0-9_.-]{0,63}`（外れれば `400 invalid_namespace`）。全体の置き換え。
+        `requirements` は操作（この名前空間のもの。ワイルドカード `payment:*` 可）→ 条件（RoleBindingInput の `condition` と
+        同じ言語）。最大 64 件。操作が外れれば `400 invalid_requirement`、条件が外れれば `400 invalid_condition`。
+        要件は、どの付与で許されたかに関係なくその操作に求め、`attested` を暗黙に AND する。同じ操作に当たる要件はすべて AND する。
+        `bands` はリスクの種類 → 段階の境界で、この名前空間の判定（付与の条件と要件の `risk_at_most`）に使う。realm の境界より
+        緩められない（`medium`・`high` とも realm 以下）。一覧で有効な種類だけ。外れれば `400 invalid_band`。
+        変えた後の設定で、呼び出し側がこの操作（`requirements:manage`）を続けられなくなるなら `409 requirement_lockout`。
+        変わったときだけ `authz.requirement_updated` を監査ログに残す。
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActionNamespaceInput" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActionNamespace" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
 
   /v1/admin/connections:
     post:
@@ -2051,6 +2102,35 @@ components:
       properties:
         enabled: { type: boolean }
         band: { $ref: "#/components/schemas/RiskBand" }
+    ActionNamespace:
+      type: object
+      required: [name, requirements, bands]
+      properties:
+        name: { type: string }
+        requirements:
+          type: object
+          description: 操作 → 条件
+          additionalProperties:
+            type: object
+            additionalProperties: true
+        bands:
+          type: object
+          description: リスクの種類 → 段階の境界
+          additionalProperties: { $ref: "#/components/schemas/RiskBand" }
+        updated_at: { type: string, format: date-time, description: 設定を変えた時刻（設定していなければ無い） }
+    ActionNamespaceInput:
+      type: object
+      properties:
+        requirements:
+          type: object
+          description: 操作 → 条件。省けば要件なし
+          additionalProperties:
+            type: object
+            additionalProperties: true
+        bands:
+          type: object
+          description: リスクの種類 → 段階の境界。省けば realm の境界
+          additionalProperties: { $ref: "#/components/schemas/RiskBand" }
     RiskUpdate:
       type: object
       required: [risk]
@@ -2164,6 +2244,15 @@ components:
           description: 警告のコードごとのアクション
           additionalProperties: { type: string, enum: [ignore, warn, deny] }
         login_policy: { $ref: "#/components/schemas/OrgLoginPolicy" }
+        requirements:
+          type: object
+          description: >-
+            Org の要件（ADR 0084）。操作（ワイルドカード `payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。
+            この Org を文脈にした判定で、どの付与で許されたかに関係なく求め、`attested` を暗黙に AND する（厳しくする方向だけ）。
+            Org 階層がオンなら祖先の Org の要件も AND する。操作が外れれば invalid_requirement、条件が外れれば invalid_condition
+          additionalProperties:
+            type: object
+            additionalProperties: true
     OrgLoginPolicy:
       type: object
       description: >-

@@ -67,6 +67,8 @@ type RoleBindingRepo interface {
 	ListByRole(ctx context.Context, realmID, role string) ([]RoleBinding, error)
 	// ListByOrg は org の（orgID が空なら realm 全体の）付与を返す。
 	ListByOrg(ctx context.Context, realmID, orgID string) ([]RoleBinding, error)
+	// ListConditional は realm の、条件の付いた付与（ADR 0084）を作成時刻の順に返す（Org・リソースの範囲を問わない）。
+	ListConditional(ctx context.Context, realmID string) ([]RoleBinding, error)
 	// ListEffective は判定のために、主体の直接の付与と、主体が所属する Group の付与を、独自のロールの中身とともに
 	// 1回で返す（作成時刻の順、同時刻は ID の順）。nested なら、所属する Group を含む Group（閉包、design.md 11.5）の付与も返す。
 	ListEffective(ctx context.Context, realmID string, t PrincipalType, principalID string, nested bool) ([]EffectiveBinding, error)
@@ -159,4 +161,24 @@ type RiskTypeRepo interface {
 	List(ctx context.Context, realmID string) ([]RiskType, error)
 	// Put は行を置く（あれば Enabled・境界・UpdatedAt を置き換え、CreatedAt は保つ）。
 	Put(ctx context.Context, t RiskType) error
+}
+
+// ActionNamespace は action_namespaces の1行（realm の操作の名前空間ごとの設定。ADR 0084）。
+type ActionNamespace struct {
+	RealmID string
+	Name    string // 名前空間（`payment` など）
+	// Settings は要件と段階の境界（JSON。形は authz/check の Namespace）。
+	Settings  []byte
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ActionNamespaceRepo は action_namespaces の Repository。
+type ActionNamespaceRepo interface {
+	// Get は名前空間の行を返す。無ければ errs.NotFound。
+	Get(ctx context.Context, realmID, name string) (ActionNamespace, error)
+	// List は realm の行を名前の順に返す。
+	List(ctx context.Context, realmID string) ([]ActionNamespace, error)
+	// Put は行を置く（あれば Settings・UpdatedAt を置き換え、CreatedAt は保つ）。
+	Put(ctx context.Context, n ActionNamespace) error
 }

@@ -291,6 +291,14 @@ type AuthnUserIdentity struct {
 	RevokeReason    string
 }
 
+type AuthzActionNamespace struct {
+	RealmID   string
+	Name      string
+	Settings  []byte
+	CreatedAt string
+	UpdatedAt string
+}
+
 type AuthzGroup struct {
 	ID        string
 	PublicID  string

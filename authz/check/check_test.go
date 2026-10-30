@@ -2,6 +2,7 @@ package check_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -10,7 +11,9 @@ import (
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/internal/testkit"
 	"github.com/imohiyoko/iam/shared/clock"
+	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
+	"github.com/imohiyoko/iam/shared/risk"
 )
 
 var realm string
@@ -373,4 +376,100 @@ func TestConditionalGrants(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// 名前空間の要件と Org の要件（ADR 0084）：付与で許した操作に、どの付与かに関係なく条件を求める。
+func TestRequirements(t *testing.T) {
+	m := members{alice.ID: {"o_root": port.OrgMember, "o_leaf": port.OrgMember}}
+	e := newEnv(t, m)
+	e.c.Hierarchy = true
+	now := e.clk.Now()
+	e.tx(func(ctx context.Context, tx port.Tx) error {
+		for _, id := range []string{"o_root", "o_leaf"} {
+			if err := tx.Orgs().Create(ctx, port.Org{ID: id, PublicID: id + "_pub", RealmID: realm, Kind: port.OrgShared, Name: id, CreatedAt: now, UpdatedAt: now}); err != nil {
+				return err
+			}
+		}
+		if err := tx.Orgs().SetParent(ctx, realm, "o_leaf", "o_root", now); err != nil {
+			return err
+		}
+		if err := tx.Orgs().SetSettings(ctx, realm, "o_root", []byte(`{"requirements":{"payment:send":{"factors_at_least":2}}}`), now); err != nil {
+			return err
+		}
+		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: realm, Name: "payment", CreatedAt: now, UpdatedAt: now,
+			Settings: []byte(`{"requirements":{"payment:*":{"auth_within":300},"payment:send":{"risk_at_most":{"type":"account","level":"low"}}},"bands":{"account":{"medium":20,"high":60}}}`)})
+	})
+	payer := e.role("", "payment:send", "payment:read", "doc:read")
+	e.bind(payer.ID, alice, "", "", "")
+	e.bind(payer.ID, bob, "", "", "")
+
+	fresh := &check.AuthContext{AMR: []string{"hwk", "user"}, Factors: 2, AuthTime: now, Risk: map[string]int{"account": 10}, Attested: true}
+	old := &check.AuthContext{AMR: []string{"pwd"}, Factors: 1, AuthTime: now.Add(-time.Hour), Risk: map[string]int{"account": 10}, Attested: true}
+	// 名前空間の境界（medium 20）では 25 は medium。realm の既定（30）なら low。
+	risky := &check.AuthContext{AMR: []string{"hwk", "user"}, Factors: 2, AuthTime: now, Risk: map[string]int{"account": 25}, Attested: true}
+	declared := &check.AuthContext{AMR: []string{"hwk", "user"}, Factors: 2, AuthTime: now, Risk: map[string]int{"account": 10}}
+	for _, c := range []struct {
+		name string
+		r    check.Request
+		want check.Decision
+	}{
+		{"fresh", check.Request{Principal: alice, Action: "payment:send", Context: fresh}, check.Decision{Allow: true}},
+		// 同じ操作に当たる要件（`payment:*` と `payment:send`）はすべて AND する。
+		{"old", check.Request{Principal: alice, Action: "payment:read", Context: old}, check.Decision{Unmet: []string{"condition.auth_age"}}},
+		{"no context", check.Request{Principal: alice, Action: "payment:send"}, check.Decision{Unmet: []string{"condition.attested", "condition.auth_age", "condition.risk.account"}}},
+		{"namespace bands", check.Request{Principal: alice, Action: "payment:send", Context: risky}, check.Decision{Unmet: []string{"condition.risk.account"}}},
+		// 要件は attested() を暗黙に AND する。
+		{"declared", check.Request{Principal: alice, Action: "payment:read", Context: declared}, check.Decision{Unmet: []string{"condition.attested"}}},
+		// 別の名前空間の操作には効かない。付与の無い操作は理由なし。
+		{"other namespace", check.Request{Principal: alice, Action: "doc:read", Context: old}, check.Decision{Allow: true}},
+		{"no grant", check.Request{Principal: alice, Action: "payment:approve", Context: old}, check.Decision{}},
+		// Org の要件は判定の Org と祖先のもの。
+		{"org leaf", check.Request{Principal: alice, Action: "payment:send", OrgID: "o_leaf", Context: &check.AuthContext{AMR: []string{"pwd"}, Factors: 1, AuthTime: now, Attested: true, Risk: map[string]int{"account": 1}}},
+			check.Decision{Unmet: []string{"condition.factors"}}},
+		{"org fresh", check.Request{Principal: alice, Action: "payment:send", OrgID: "o_leaf", Context: fresh}, check.Decision{Allow: true}},
+	} {
+		if got := e.decide(c.r); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: Decide = %+v, want %+v", c.name, got, c.want)
+		}
+	}
+	// 変更は Invalidate ですぐ効く（キャッシュした要件を捨てる）。
+	e.tx(func(ctx context.Context, tx port.Tx) error {
+		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: realm, Name: "payment", Settings: []byte(`{}`), CreatedAt: now, UpdatedAt: now})
+	})
+	e.c.Invalidate(realm)
+	if got := e.decide(check.Request{Principal: alice, Action: "payment:read", Context: old}); !got.Allow {
+		t.Errorf("after clearing: %+v", got)
+	}
+	// 階層がオフなら祖先の要件は効かない。
+	e.c.Hierarchy = false
+	e.c.Invalidate(realm)
+	if got := e.decide(check.Request{Principal: alice, Action: "payment:send", OrgID: "o_leaf", Context: old}); !got.Allow {
+		t.Errorf("hierarchy off: %+v", got)
+	}
+}
+
+func TestRequirementsValidate(t *testing.T) {
+	cat := risk.CatalogOf([]port.RiskType{{Name: "device", Enabled: false}})
+	ok := check.Namespace{Requirements: check.Requirements{"payment:*": {AuthWithin: 300}}, Bands: map[string]risk.Band{"account": {Medium: 20, High: 60}}}
+	if err := ok.Validate("payment", cat); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		ns   check.Namespace
+		code string
+	}{
+		{"Payment", check.Namespace{}, "invalid_namespace"},
+		{"payment", check.Namespace{Requirements: check.Requirements{"doc:read": {AuthWithin: 300}}}, "invalid_requirement"},
+		{"payment", check.Namespace{Requirements: check.Requirements{"payment": {AuthWithin: 300}}}, "invalid_requirement"},
+		{"payment", check.Namespace{Requirements: check.Requirements{"payment:send": {}}}, "invalid_condition"},
+		{"payment", check.Namespace{Requirements: check.Requirements{"payment:send": {RiskBelow: &check.RiskScore{Type: "device", Score: 10}}}}, "invalid_condition"},
+		{"payment", check.Namespace{Bands: map[string]risk.Band{"device": {Medium: 10, High: 20}}}, "invalid_band"},
+		{"payment", check.Namespace{Bands: map[string]risk.Band{"account": {Medium: 40, High: 60}}}, "invalid_band"},
+		{"payment", check.Namespace{Bands: map[string]risk.Band{"account": {Medium: 20, High: 20}}}, "invalid_band"},
+	} {
+		if err := c.ns.Validate(c.name, cat); errs.KindOf(err) != errs.KindInvalid || !errors.Is(err, errs.WithCode(errs.KindInvalid, c.code, "")) {
+			t.Errorf("%s %+v: %v, want %s", c.name, c.ns, err, c.code)
+		}
+	}
 }
