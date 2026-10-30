@@ -77,7 +77,9 @@ type state struct {
 	attrDefs   map[string]port.AttributeDef
 	attrValues map[string]port.UserAttribute
 	// riskTypes のキーは realm_id + name。
-	riskTypes   map[string]port.RiskType
+	riskTypes map[string]port.RiskType
+	// namespaces のキーは realm_id + name。
+	namespaces  map[string]port.ActionNamespace
 	orgs        map[string]port.Org
 	memberships map[string]port.Membership
 	invitations map[string]port.Invitation
@@ -112,7 +114,7 @@ func New(clk clock.Clock) *Storage {
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
 		saTokens:     map[string]port.ServiceAccountToken{},
 		roleBindings: map[string]port.RoleBinding{}, roles: map[string]port.Role{}, groups: map[string]port.Group{},
-		groupMembers: map[string]port.GroupMember{}, groupClosure: map[string]groupLink{}, attrDefs: map[string]port.AttributeDef{}, attrValues: map[string]port.UserAttribute{}, riskTypes: map[string]port.RiskType{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
+		groupMembers: map[string]port.GroupMember{}, groupClosure: map[string]groupLink{}, attrDefs: map[string]port.AttributeDef{}, attrValues: map[string]port.UserAttribute{}, riskTypes: map[string]port.RiskType{}, namespaces: map[string]port.ActionNamespace{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 		invitations: map[string]port.Invitation{}, quotaGrants: map[string]port.QuotaGrant{}, orgDomains: map[string]port.OrgDomain{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
 		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{},
 	}}
@@ -160,32 +162,33 @@ func (t *tx) AuditKeys() port.DataKeyRepo  { return dataKeys{t, t.s.auditKeys} }
 func (t *tx) Audit() port.AuditRepo        { return auditRepo{t} }
 func (t *tx) Outbox() port.OutboxRepo      { return outbox{t} }
 
-func (t *tx) Users() port.UserRepo                     { return users{t} }
-func (t *tx) Emails() port.EmailRepo                   { return emails{t} }
-func (t *tx) Identities() port.IdentityRepo            { return identities{t} }
-func (t *tx) Passkeys() port.PasskeyRepo               { return passkeys{t} }
-func (t *tx) TOTP() port.TOTPRepo                      { return totps{t} }
-func (t *tx) Passwords() port.PasswordRepo             { return passwords{t} }
-func (t *tx) RecoveryCodes() port.RecoveryCodeRepo     { return recoveryCodes{t} }
-func (t *tx) Suspensions() port.SuspensionRepo         { return suspensions{t} }
-func (t *tx) ScheduledEvents() port.ScheduledEventRepo { return scheduledEvents{t} }
-func (t *tx) Connections() port.ConnectionRepo         { return connections{t} }
-func (t *tx) Sessions() port.SessionRepo               { return sessions{t} }
-func (t *tx) Orgs() port.OrgRepo                       { return orgs{t} }
-func (t *tx) Memberships() port.MembershipRepo         { return memberships{t} }
-func (t *tx) Invitations() port.InvitationRepo         { return invitations{t} }
-func (t *tx) QuotaGrants() port.QuotaGrantRepo         { return quotaGrants{t} }
-func (t *tx) OrgDomains() port.OrgDomainRepo           { return orgDomains{t} }
-func (t *tx) ServiceAccounts() port.ServiceAccountRepo { return accounts{t} }
-func (t *tx) RoleBindings() port.RoleBindingRepo       { return roleBindings{t} }
-func (t *tx) Roles() port.RoleRepo                     { return roles{t} }
-func (t *tx) Groups() port.GroupRepo                   { return groups{t} }
-func (t *tx) Attributes() port.AttributeRepo           { return attributes{t} }
-func (t *tx) RiskTypes() port.RiskTypeRepo             { return riskTypes{t} }
-func (t *tx) Clients() port.ClientRepo                 { return clients{t} }
-func (t *tx) SigningKeys() port.SigningKeyRepo         { return signingKeys{t} }
-func (t *tx) Grants() port.GrantRepo                   { return grants{t} }
-func (t *tx) OIDCTokens() port.OIDCTokenRepo           { return oidcTokens{t} }
+func (t *tx) Users() port.UserRepo                       { return users{t} }
+func (t *tx) Emails() port.EmailRepo                     { return emails{t} }
+func (t *tx) Identities() port.IdentityRepo              { return identities{t} }
+func (t *tx) Passkeys() port.PasskeyRepo                 { return passkeys{t} }
+func (t *tx) TOTP() port.TOTPRepo                        { return totps{t} }
+func (t *tx) Passwords() port.PasswordRepo               { return passwords{t} }
+func (t *tx) RecoveryCodes() port.RecoveryCodeRepo       { return recoveryCodes{t} }
+func (t *tx) Suspensions() port.SuspensionRepo           { return suspensions{t} }
+func (t *tx) ScheduledEvents() port.ScheduledEventRepo   { return scheduledEvents{t} }
+func (t *tx) Connections() port.ConnectionRepo           { return connections{t} }
+func (t *tx) Sessions() port.SessionRepo                 { return sessions{t} }
+func (t *tx) Orgs() port.OrgRepo                         { return orgs{t} }
+func (t *tx) Memberships() port.MembershipRepo           { return memberships{t} }
+func (t *tx) Invitations() port.InvitationRepo           { return invitations{t} }
+func (t *tx) QuotaGrants() port.QuotaGrantRepo           { return quotaGrants{t} }
+func (t *tx) OrgDomains() port.OrgDomainRepo             { return orgDomains{t} }
+func (t *tx) ServiceAccounts() port.ServiceAccountRepo   { return accounts{t} }
+func (t *tx) RoleBindings() port.RoleBindingRepo         { return roleBindings{t} }
+func (t *tx) Roles() port.RoleRepo                       { return roles{t} }
+func (t *tx) Groups() port.GroupRepo                     { return groups{t} }
+func (t *tx) Attributes() port.AttributeRepo             { return attributes{t} }
+func (t *tx) RiskTypes() port.RiskTypeRepo               { return riskTypes{t} }
+func (t *tx) ActionNamespaces() port.ActionNamespaceRepo { return actionNamespaces{t} }
+func (t *tx) Clients() port.ClientRepo                   { return clients{t} }
+func (t *tx) SigningKeys() port.SigningKeyRepo           { return signingKeys{t} }
+func (t *tx) Grants() port.GrantRepo                     { return grants{t} }
+func (t *tx) OIDCTokens() port.OIDCTokenRepo             { return oidcTokens{t} }
 
 // setKey は map の値を設定し、取り消し方を記録する。
 func setKey[K comparable, V any](t *tx, m map[K]V, k K, v V) {

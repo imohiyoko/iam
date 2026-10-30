@@ -242,6 +242,28 @@ func (q *Queries) DeleteRoleBinding(ctx context.Context, arg DeleteRoleBindingPa
 	return result.RowsAffected()
 }
 
+const getActionNamespace = `-- name: GetActionNamespace :one
+SELECT realm_id, name, settings, created_at, updated_at FROM authz_action_namespaces WHERE realm_id = ? AND name = ?
+`
+
+type GetActionNamespaceParams struct {
+	RealmID string
+	Name    string
+}
+
+func (q *Queries) GetActionNamespace(ctx context.Context, arg GetActionNamespaceParams) (AuthzActionNamespace, error) {
+	row := q.db.QueryRowContext(ctx, getActionNamespace, arg.RealmID, arg.Name)
+	var i AuthzActionNamespace
+	err := row.Scan(
+		&i.RealmID,
+		&i.Name,
+		&i.Settings,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getGroup = `-- name: GetGroup :one
 SELECT id, public_id, realm_id, org_id, name, created_at, updated_at FROM authz_groups WHERE realm_id = ? AND id = ?
 `
@@ -387,6 +409,78 @@ func (q *Queries) InsertGroupAncestor(ctx context.Context, arg InsertGroupAncest
 		arg.Depth,
 	)
 	return err
+}
+
+const listActionNamespaces = `-- name: ListActionNamespaces :many
+SELECT realm_id, name, settings, created_at, updated_at FROM authz_action_namespaces WHERE realm_id = ? ORDER BY name
+`
+
+func (q *Queries) ListActionNamespaces(ctx context.Context, realmID string) ([]AuthzActionNamespace, error) {
+	rows, err := q.db.QueryContext(ctx, listActionNamespaces, realmID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthzActionNamespace
+	for rows.Next() {
+		var i AuthzActionNamespace
+		if err := rows.Scan(
+			&i.RealmID,
+			&i.Name,
+			&i.Settings,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConditionalRoleBindings = `-- name: ListConditionalRoleBindings :many
+SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at, condition FROM authz_role_bindings WHERE realm_id = ? AND length(condition) > 0 ORDER BY created_at, id
+`
+
+func (q *Queries) ListConditionalRoleBindings(ctx context.Context, realmID string) ([]AuthzRoleBinding, error) {
+	rows, err := q.db.QueryContext(ctx, listConditionalRoleBindings, realmID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthzRoleBinding
+	for rows.Next() {
+		var i AuthzRoleBinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.Role,
+			&i.PrincipalType,
+			&i.PrincipalID,
+			&i.OrgID,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.CreatedAt,
+			&i.Condition,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listEffectiveRoleBindings = `-- name: ListEffectiveRoleBindings :many
@@ -982,6 +1076,30 @@ func (q *Queries) PurgeNestedGroupMembers(ctx context.Context, lim int64) (int64
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const putActionNamespace = `-- name: PutActionNamespace :exec
+INSERT INTO authz_action_namespaces (realm_id, name, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (realm_id, name) DO UPDATE SET settings = excluded.settings, updated_at = excluded.updated_at
+`
+
+type PutActionNamespaceParams struct {
+	RealmID   string
+	Name      string
+	Settings  []byte
+	CreatedAt string
+	UpdatedAt string
+}
+
+func (q *Queries) PutActionNamespace(ctx context.Context, arg PutActionNamespaceParams) error {
+	_, err := q.db.ExecContext(ctx, putActionNamespace,
+		arg.RealmID,
+		arg.Name,
+		arg.Settings,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }
 
 const putRiskType = `-- name: PutRiskType :exec

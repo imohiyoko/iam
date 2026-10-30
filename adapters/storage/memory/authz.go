@@ -79,6 +79,10 @@ func (r roleBindings) ListByOrg(_ context.Context, realmID, orgID string) ([]por
 	return r.list(func(x port.RoleBinding) bool { return x.RealmID == realmID && x.OrgID == orgID }), nil
 }
 
+func (r roleBindings) ListConditional(_ context.Context, realmID string) ([]port.RoleBinding, error) {
+	return r.list(func(x port.RoleBinding) bool { return x.RealmID == realmID && len(x.Condition) > 0 }), nil
+}
+
 func (r roleBindings) ListEffective(_ context.Context, realmID string, t port.PrincipalType, principalID string, nested bool) ([]port.EffectiveBinding, error) {
 	groupOrg := map[string]string{}
 	for _, m := range r.t.s.groupMembers {
@@ -448,5 +452,38 @@ func (r riskTypes) Put(_ context.Context, t port.RiskType) error {
 		t.CreatedAt = old.CreatedAt
 	}
 	setKey(r.t, r.t.s.riskTypes, k, t)
+	return nil
+}
+
+type actionNamespaces struct{ t *tx }
+
+func (r actionNamespaces) Get(_ context.Context, realmID, name string) (port.ActionNamespace, error) {
+	n, ok := r.t.s.namespaces[attrKey(realmID, name)]
+	if !ok {
+		return port.ActionNamespace{}, errs.New(errs.KindNotFound, "action namespace")
+	}
+	n.Settings = bytes.Clone(n.Settings)
+	return n, nil
+}
+
+func (r actionNamespaces) List(_ context.Context, realmID string) ([]port.ActionNamespace, error) {
+	var out []port.ActionNamespace
+	for _, n := range r.t.s.namespaces {
+		if n.RealmID == realmID {
+			n.Settings = bytes.Clone(n.Settings)
+			out = append(out, n)
+		}
+	}
+	slices.SortFunc(out, func(a, b port.ActionNamespace) int { return strings.Compare(a.Name, b.Name) })
+	return out, nil
+}
+
+func (r actionNamespaces) Put(_ context.Context, n port.ActionNamespace) error {
+	k := attrKey(n.RealmID, n.Name)
+	if old, ok := r.t.s.namespaces[k]; ok {
+		n.CreatedAt = old.CreatedAt
+	}
+	n.Settings = bytes.Clone(n.Settings)
+	setKey(r.t, r.t.s.namespaces, k, n)
 	return nil
 }

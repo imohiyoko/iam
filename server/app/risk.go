@@ -2,9 +2,13 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -40,6 +44,82 @@ func riskTypes(ctx context.Context, tx port.Tx, realmID string) ([]adminapi.Risk
 		out = append(out, riskTypeOut(n, cat[n], byName[n]))
 	}
 	return out, nil
+}
+
+// riskTypeRefs は種類 name を見る条件の数：条件付きの付与、名前空間の設定（名前）、Org の要件（削除していない Org）。
+type riskTypeRefs struct {
+	bindings   int
+	namespaces []string
+	orgs       int
+}
+
+func (r riskTypeRefs) empty() bool { return r.bindings == 0 && len(r.namespaces) == 0 && r.orgs == 0 }
+
+func (r riskTypeRefs) String() string {
+	var parts []string
+	if r.bindings > 0 {
+		parts = append(parts, fmt.Sprintf("%d role bindings", r.bindings))
+	}
+	if len(r.namespaces) > 0 {
+		parts = append(parts, "action namespaces "+strings.Join(r.namespaces, ", "))
+	}
+	if r.orgs > 0 {
+		parts = append(parts, fmt.Sprintf("requirements of %d orgs", r.orgs))
+	}
+	return "risk type is referenced by " + strings.Join(parts, "; ")
+}
+
+// orgsPage は Org の要件を探すときの1回に読む Org の数。
+const orgsPage = 500
+
+func findRiskTypeRefs(ctx context.Context, tx port.Tx, realmID, name string) (riskTypeRefs, error) {
+	var out riskTypeRefs
+	bs, err := tx.RoleBindings().ListConditional(ctx, realmID)
+	if err != nil {
+		return out, err
+	}
+	for _, b := range bs {
+		// 読めない条件は判定で付与を効かせない（fail-closed）ので、止めても変わらない。
+		if c, err := check.ParseCondition(b.Condition); err == nil && c != nil && slices.Contains(c.RiskTypes(), name) {
+			out.bindings++
+		}
+	}
+	nss, err := tx.ActionNamespaces().List(ctx, realmID)
+	if err != nil {
+		return out, err
+	}
+	for _, row := range nss {
+		ns, err := check.ParseNamespace(row.Settings)
+		if err != nil {
+			return out, err
+		}
+		if slices.Contains(ns.RiskTypes(), name) {
+			out.namespaces = append(out.namespaces, row.Name)
+		}
+	}
+	after := ""
+	for {
+		os, err := tx.Orgs().List(ctx, realmID, after, orgsPage)
+		if err != nil {
+			return out, err
+		}
+		for _, o := range os {
+			if o.DeletedAt != nil {
+				continue
+			}
+			rs, err := check.OrgRequirements(o.Settings)
+			if err != nil {
+				return out, err
+			}
+			if slices.Contains(rs.RiskTypes(), name) {
+				out.orgs++
+			}
+		}
+		if len(os) < orgsPage {
+			return out, nil
+		}
+		after = os[len(os)-1].ID
+	}
 }
 
 func (s adminServer) ListRiskTypes(ctx context.Context, _ adminapi.ListRiskTypesRequestObject) (adminapi.ListRiskTypesResponseObject, error) {
@@ -110,6 +190,16 @@ func (s adminServer) PutRiskType(ctx context.Context, req adminapi.PutRiskTypeRe
 				saved = &rows[i]
 			}
 		}
+		// 見ている条件が残っていれば止められない（ずっと満たさない条件を残さない）。
+		if prev.Enabled && !next.Enabled {
+			refs, err := findRiskTypeRefs(ctx, tx, s.a.realm.ID, req.Name)
+			if err != nil {
+				return err
+			}
+			if !refs.empty() {
+				return errs.WithCode(errs.KindConflict, "risk_type_in_use", refs.String())
+			}
+		}
 		if !had || prev != next {
 			row := port.RiskType{RealmID: s.a.realm.ID, Name: req.Name, Enabled: next.Enabled, BandMedium: next.Band.Medium, BandHigh: next.Band.High,
 				CreatedAt: now, UpdatedAt: now}
@@ -131,6 +221,9 @@ func (s adminServer) PutRiskType(ctx context.Context, req adminapi.PutRiskTypeRe
 		out = riskTypeOut(req.Name, next, saved)
 		return nil
 	})
+	if code, ok := stateCode(err); ok {
+		return adminapi.PutRiskType409JSONResponse(adminError(code, errMessage(err))), nil
+	}
 	if err != nil {
 		return nil, err
 	}

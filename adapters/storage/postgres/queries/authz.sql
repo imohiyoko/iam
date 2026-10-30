@@ -19,6 +19,9 @@ SELECT * FROM authz_role_bindings WHERE realm_id = $1 AND role = $2 ORDER BY cre
 -- name: ListRoleBindingsByOrg :many
 SELECT * FROM authz_role_bindings WHERE realm_id = $1 AND org_id = $2 ORDER BY created_at, id;
 
+-- name: ListConditionalRoleBindings :many
+SELECT * FROM authz_role_bindings WHERE realm_id = $1 AND length(condition) > 0 ORDER BY created_at, id;
+
 -- name: ListEffectiveRoleBindings :many
 SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at, b.condition,
        COALESCE(g.org_id, '') AS group_org_id, r.public_id AS custom_public_id, r.org_id AS custom_org_id, r.name AS custom_name,
@@ -142,3 +145,13 @@ SELECT * FROM authz_risk_types WHERE realm_id = $1 ORDER BY name;
 INSERT INTO authz_risk_types (realm_id, name, enabled, band_medium, band_high, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (realm_id, name) DO UPDATE SET enabled = excluded.enabled, band_medium = excluded.band_medium, band_high = excluded.band_high,
     updated_at = excluded.updated_at;
+
+-- name: GetActionNamespace :one
+SELECT * FROM authz_action_namespaces WHERE realm_id = $1 AND name = $2;
+
+-- name: ListActionNamespaces :many
+SELECT * FROM authz_action_namespaces WHERE realm_id = $1 ORDER BY name;
+
+-- name: PutActionNamespace :exec
+INSERT INTO authz_action_namespaces (realm_id, name, settings, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (realm_id, name) DO UPDATE SET settings = excluded.settings, updated_at = excluded.updated_at;

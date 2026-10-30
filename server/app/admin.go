@@ -92,6 +92,11 @@ func (a *App) authorize(ctx context.Context, perm string) (adminPrincipal, *deni
 
 // authorizeWith は authorize で、cached なら判定の材料のキャッシュを使う（数の多い問い合わせ。check の API）。
 func (a *App) authorizeWith(ctx context.Context, perm string, cached bool) (adminPrincipal, *denial, error) {
+	return a.authorizeOn(ctx, perm, check.Resource{}, cached)
+}
+
+// authorizeOn は authorizeWith で、判定の対象のリソースを res に限る（リソース単位の付与も効く）。
+func (a *App) authorizeOn(ctx context.Context, perm string, res check.Resource, cached bool) (adminPrincipal, *denial, error) {
 	p, ok := ctx.Value(adminKey{}).(adminPrincipal)
 	if !ok {
 		return p, &denial{http.StatusUnauthorized, adminapi.Error{Error: errs.CodeAuthenticationFailed}}, nil
@@ -104,12 +109,12 @@ func (a *App) authorizeWith(ctx context.Context, perm string, cached bool) (admi
 	var allowed bool
 	var err error
 	if cached {
-		allowed, err = a.authz.Check(ctx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm, Context: p.Context})
+		allowed, err = a.authz.Check(ctx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm, Resource: res, Context: p.Context})
 	} else {
 		err = a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 			var err error
 			// 運営者の操作は数が少なく、取り消しをすぐに効かせたいので、キャッシュを使わずに判定する。
-			allowed, err = a.authz.CheckTx(ctx, tx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm, Context: p.Context})
+			allowed, err = a.authz.CheckTx(ctx, tx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm, Resource: res, Context: p.Context})
 			return err
 		})
 	}

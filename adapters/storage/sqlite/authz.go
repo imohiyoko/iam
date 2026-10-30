@@ -50,6 +50,11 @@ func (r roleBindings) ListByOrg(ctx context.Context, realmID, orgID string) ([]p
 	return rows(rs, err, toRoleBinding)
 }
 
+func (r roleBindings) ListConditional(ctx context.Context, realmID string) ([]port.RoleBinding, error) {
+	rs, err := r.q.ListConditionalRoleBindings(ctx, realmID)
+	return rows(rs, err, toRoleBinding)
+}
+
 // ListEffective は1つのクエリで、直接の付与と所属する Group（nested なら、それを含む Group も）の付与を、Group の Org と
 // 独自のロールの中身とともに集める。
 func (r roleBindings) ListEffective(ctx context.Context, realmID string, t port.PrincipalType, principalID string, nested bool) ([]port.EffectiveBinding, error) {
@@ -296,4 +301,33 @@ func (r riskTypes) List(ctx context.Context, realmID string) ([]port.RiskType, e
 func (r riskTypes) Put(ctx context.Context, t port.RiskType) error {
 	return mapErr(r.q.PutRiskType(ctx, db.PutRiskTypeParams{RealmID: t.RealmID, Name: t.Name, Enabled: boolInt(t.Enabled), BandMedium: int64(t.BandMedium),
 		BandHigh: int64(t.BandHigh), CreatedAt: formatTime(t.CreatedAt), UpdatedAt: formatTime(t.UpdatedAt)}))
+}
+
+// ---------------------------------------------------------------------------
+// 操作の名前空間ごとの設定（ADR 0084）
+
+type actionNamespaces struct{ q *db.Queries }
+
+func toActionNamespace(r db.AuthzActionNamespace) (port.ActionNamespace, error) {
+	var p times
+	n := port.ActionNamespace{RealmID: r.RealmID, Name: r.Name, Settings: r.Settings, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+	return n, p.err
+}
+
+func (r actionNamespaces) Get(ctx context.Context, realmID, name string) (port.ActionNamespace, error) {
+	row, err := r.q.GetActionNamespace(ctx, db.GetActionNamespaceParams{RealmID: realmID, Name: name})
+	if err != nil {
+		return port.ActionNamespace{}, mapErr(err)
+	}
+	return toActionNamespace(row)
+}
+
+func (r actionNamespaces) List(ctx context.Context, realmID string) ([]port.ActionNamespace, error) {
+	rs, err := r.q.ListActionNamespaces(ctx, realmID)
+	return rows(rs, err, toActionNamespace)
+}
+
+func (r actionNamespaces) Put(ctx context.Context, n port.ActionNamespace) error {
+	return mapErr(r.q.PutActionNamespace(ctx, db.PutActionNamespaceParams{RealmID: n.RealmID, Name: n.Name, Settings: n.Settings,
+		CreatedAt: formatTime(n.CreatedAt), UpdatedAt: formatTime(n.UpdatedAt)}))
 }

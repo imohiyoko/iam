@@ -570,6 +570,28 @@ func (e IssueServiceAccountToken200JSONResponseBodyTokenType) Valid() bool {
 	}
 }
 
+// ActionNamespace defines model for ActionNamespace.
+type ActionNamespace struct {
+	// Bands リスクの種類 → 段階の境界
+	Bands map[string]RiskBand `json:"bands"`
+	Name  string              `json:"name"`
+
+	// Requirements 操作 → 条件
+	Requirements map[string]map[string]interface{} `json:"requirements"`
+
+	// UpdatedAt 設定を変えた時刻（設定していなければ無い）
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// ActionNamespaceInput defines model for ActionNamespaceInput.
+type ActionNamespaceInput struct {
+	// Bands リスクの種類 → 段階の境界。省けば realm の境界
+	Bands *map[string]RiskBand `json:"bands,omitempty"`
+
+	// Requirements 操作 → 条件。省けば要件なし
+	Requirements *map[string]map[string]interface{} `json:"requirements,omitempty"`
+}
+
 // AdminUser defines model for AdminUser.
 type AdminUser struct {
 	// DeletionScheduledAt 削除の予定（猶予期間の終わり）
@@ -900,6 +922,9 @@ type OrgSettings struct {
 
 	// MaxAuthAgeSeconds 重要な操作に求める直近の認証の期限
 	MaxAuthAgeSeconds *int64 `json:"max_auth_age_seconds,omitempty"`
+
+	// Requirements Org の要件（ADR 0084）。操作（ワイルドカード `payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。 この Org を文脈にした判定で、どの付与で許されたかに関係なく求め、`attested` を暗黙に AND する（厳しくする方向だけ）。 Org 階層がオンなら祖先の Org の要件も AND する。操作が外れれば invalid_requirement、条件が外れれば invalid_condition
+	Requirements *map[string]map[string]interface{} `json:"requirements,omitempty"`
 
 	// Warnings 警告のコードごとのアクション
 	Warnings *map[string]OrgSettingsWarnings `json:"warnings,omitempty"`
@@ -1439,6 +1464,9 @@ type IssueRecoveryLinkJSONBody struct {
 	TtlSeconds *int   `json:"ttl_seconds,omitempty"`
 }
 
+// PutActionNamespaceJSONRequestBody defines body for PutActionNamespace for application/json ContentType.
+type PutActionNamespaceJSONRequestBody = ActionNamespaceInput
+
 // CreateAttributeDefJSONRequestBody defines body for CreateAttributeDef for application/json ContentType.
 type CreateAttributeDefJSONRequestBody = AttributeDefInput
 
@@ -1576,6 +1604,12 @@ type ServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// GetActionNamespace 操作の名前空間の設定（要件と段階の境界。ADR 0084）
+	// (GET /v1/admin/action-namespaces/{name})
+	GetActionNamespace(w http.ResponseWriter, r *http.Request, name string)
+	// PutActionNamespace 操作の名前空間の設定を置き換える（ADR 0084）
+	// (PUT /v1/admin/action-namespaces/{name})
+	PutActionNamespace(w http.ResponseWriter, r *http.Request, name string)
 	// ListAttributeDefs カスタム属性の定義の一覧（design.md 11.7、ADR 0080）
 	// (GET /v1/admin/attributes)
 	ListAttributeDefs(w http.ResponseWriter, r *http.Request)
@@ -1853,6 +1887,58 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetActionNamespace operation middleware
+func (siw *ServerInterfaceWrapper) GetActionNamespace(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetActionNamespace(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutActionNamespace operation middleware
+func (siw *ServerInterfaceWrapper) PutActionNamespace(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutActionNamespace(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4155,6 +4241,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:risk", wrapper.SetUserRisk)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/risk-types", wrapper.ListRiskTypes)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/risk-types/{name}", wrapper.PutRiskType)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/action-namespaces/{name}", wrapper.GetActionNamespace)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/action-namespaces/{name}", wrapper.PutActionNamespace)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs", wrapper.CreateOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.GetOrg)
@@ -4259,6 +4347,149 @@ func (response GetHealth503JSONResponse) VisitGetHealthResponse(w http.ResponseW
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActionNamespaceRequestObject struct {
+	Name string `json:"name"`
+}
+
+type GetActionNamespaceResponseObject interface {
+	VisitGetActionNamespaceResponse(w http.ResponseWriter) error
+}
+
+type GetActionNamespace200JSONResponse ActionNamespace
+
+func (response GetActionNamespace200JSONResponse) VisitGetActionNamespaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActionNamespace400JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetActionNamespace400JSONResponse) VisitGetActionNamespaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActionNamespace401JSONResponse Error
+
+func (response GetActionNamespace401JSONResponse) VisitGetActionNamespaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetActionNamespace403JSONResponse Error
+
+func (response GetActionNamespace403JSONResponse) VisitGetActionNamespaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutActionNamespaceRequestObject struct {
+	Name string `json:"name"`
+	Body *PutActionNamespaceJSONRequestBody
+}
+
+type PutActionNamespaceResponseObject interface {
+	VisitPutActionNamespaceResponse(w http.ResponseWriter) error
+}
+
+type PutActionNamespace200JSONResponse ActionNamespace
+
+func (response PutActionNamespace200JSONResponse) VisitPutActionNamespaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutActionNamespace400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PutActionNamespace400JSONResponse) VisitPutActionNamespaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutActionNamespace401JSONResponse Error
+
+func (response PutActionNamespace401JSONResponse) VisitPutActionNamespaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutActionNamespace403JSONResponse Error
+
+func (response PutActionNamespace403JSONResponse) VisitPutActionNamespaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutActionNamespace409JSONResponse Error
+
+func (response PutActionNamespace409JSONResponse) VisitPutActionNamespaceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8111,6 +8342,20 @@ func (response PutRiskType403JSONResponse) VisitPutRiskTypeResponse(w http.Respo
 	return err
 }
 
+type PutRiskType409JSONResponse Error
+
+func (response PutRiskType409JSONResponse) VisitPutRiskTypeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListRoleBindingsRequestObject struct {
 }
 
@@ -10900,6 +11145,12 @@ type StrictServerInterface interface {
 	// GetHealth ヘルスチェック
 	// (GET /healthz)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
+	// GetActionNamespace 操作の名前空間の設定（要件と段階の境界。ADR 0084）
+	// (GET /v1/admin/action-namespaces/{name})
+	GetActionNamespace(ctx context.Context, request GetActionNamespaceRequestObject) (GetActionNamespaceResponseObject, error)
+	// PutActionNamespace 操作の名前空間の設定を置き換える（ADR 0084）
+	// (PUT /v1/admin/action-namespaces/{name})
+	PutActionNamespace(ctx context.Context, request PutActionNamespaceRequestObject) (PutActionNamespaceResponseObject, error)
 	// ListAttributeDefs カスタム属性の定義の一覧（design.md 11.7、ADR 0080）
 	// (GET /v1/admin/attributes)
 	ListAttributeDefs(ctx context.Context, request ListAttributeDefsRequestObject) (ListAttributeDefsResponseObject, error)
@@ -11219,6 +11470,65 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
 		if err := validResponse.VisitGetHealthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetActionNamespace operation middleware
+func (sh *strictHandler) GetActionNamespace(w http.ResponseWriter, r *http.Request, name string) {
+	var request GetActionNamespaceRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetActionNamespace(ctx, request.(GetActionNamespaceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetActionNamespace")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetActionNamespaceResponseObject); ok {
+		if err := validResponse.VisitGetActionNamespaceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutActionNamespace operation middleware
+func (sh *strictHandler) PutActionNamespace(w http.ResponseWriter, r *http.Request, name string) {
+	var request PutActionNamespaceRequestObject
+
+	request.Name = name
+
+	var body PutActionNamespaceJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutActionNamespace(ctx, request.(PutActionNamespaceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutActionNamespace")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutActionNamespaceResponseObject); ok {
+		if err := validResponse.VisitPutActionNamespaceResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
