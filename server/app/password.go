@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/password"
+	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
@@ -71,7 +72,7 @@ func (s publicServer) SetMyPassword(ctx context.Context, req publicapi.SetMyPass
 	if req.Body == nil {
 		return publicapi.SetMyPassword400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
-	recent := s.recent(au)
+	recent := s.recent(ctx, au, role.ActionMePassword)
 	var err error
 	if au.Restriction == port.RestrictionRecovery {
 		// 復旧では今のパスワードを求めない（忘れたときの再設定。4.12）。

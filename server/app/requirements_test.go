@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/imohiyoko/iam/authz/role"
 )
@@ -177,5 +178,28 @@ func TestRequirements(t *testing.T) {
 	// 条件を外したので、すぐに通る。
 	if out := meCheck(alice, "payment:send", nil); out["allowed"] != true {
 		t.Fatalf("send after clearing: %v", out)
+	}
+}
+
+// 本人の重要な操作は、max_auth_age に加えて名前空間 me の要件を求める（max_auth_age の載せ替え。ADR 0084）。
+func TestSensitiveOperationRequirements(t *testing.T) {
+	l := newOrgEnv(t, "code", "oauth_provider", "admin", "invitation")
+	_, op := l.operator(t, "root@example.com", role.RealmOwner)
+	if code, out := l.adminDo(t, "PUT", op, "/v1/admin/action-namespaces/me", map[string]any{"requirements": map[string]any{
+		role.ActionMeDelete: map[string]any{"auth_within": 60}}}); code != 200 {
+		t.Fatalf("put me: %d %v", code, out)
+	}
+	_, alice := l.login(t, "alice@example.com")
+	// max_auth_age（15 分）の内でも、要件の 60 秒を過ぎれば再認証を求める。要件の無い操作は今までどおり。
+	l.advance(2 * time.Minute)
+	if code, out := l.mePost(t, alice, "/v1/me/account:delete", nil); code != 401 || out["error"] != "reauthentication_required" {
+		t.Fatalf("delete after 2m: %d %v", code, out)
+	}
+	if code, out := l.mePost(t, alice, "/v1/me/recovery-codes:regenerate", nil); code != 200 {
+		t.Fatalf("regenerate after 2m: %d %v", code, out)
+	}
+	_, alice = l.login(t, "alice@example.com")
+	if code, out := l.mePost(t, alice, "/v1/me/account:delete", nil); code != 200 {
+		t.Fatalf("delete after login: %d %v", code, out)
 	}
 }

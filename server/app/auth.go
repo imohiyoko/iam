@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authz/check"
 )
 
 // sessionCookie はセッションの Cookie の名前。`__Host-` で Secure・Path=/・Domain なしを強制する（design.md 5.2）。
@@ -22,13 +23,24 @@ type auth struct {
 	viaCookie bool
 }
 
-// recent は直近に認証したセッションか（active な Org の max_auth_age の内。5.4）。
-func (s publicServer) recent(au auth) bool {
+// recent は本人の重要な操作 action に足りる、直近に認証したセッションか（5.4）。active な Org の max_auth_age の内であることに
+// 加えて、名前空間 `me` と active な Org の要件（ADR 0084。auth_within などで操作ごとに厳しくできる）を満たすこと。
+// 要件を読めなければ満たさない（fail-closed）。
+func (s publicServer) recent(ctx context.Context, au auth, action string) bool {
 	age := au.MaxAuthAge
 	if age <= 0 {
 		age = s.a.cfg.Security.Session.MaxAuthAge.Default.D()
 	}
-	return s.a.deps.Clock.Now().Sub(au.AuthenticatedAt) <= age
+	if s.a.deps.Clock.Now().Sub(au.AuthenticatedAt) > age {
+		return false
+	}
+	d, err := s.a.authz.Require(ctx, s.a.realm.ID, check.Request{Principal: check.Principal{Type: au.PrincipalType, ID: au.PrincipalID}, Action: action,
+		OrgID: au.ActiveOrgID, Context: sessionContext(au.Validated)})
+	if err != nil {
+		s.a.deps.Logger.ErrorContext(ctx, "requirements of a sensitive operation", "action", action, "error", err)
+		return false
+	}
+	return d.Allow
 }
 
 func authFrom(ctx context.Context) (auth, bool) {

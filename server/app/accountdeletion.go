@@ -30,7 +30,7 @@ func (s publicServer) DeleteMyAccount(ctx context.Context, _ publicapi.DeleteMyA
 	if !ok {
 		return publicapi.DeleteMyAccount401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
-	if !s.recent(au) {
+	if !s.recent(ctx, au, role.ActionMeDelete) {
 		return publicapi.DeleteMyAccount401JSONResponse{UnauthenticatedJSONResponse: publicapi.UnauthenticatedJSONResponse{Error: "reauthentication_required"}}, nil
 	}
 	var out publicapi.DeleteMyAccount200JSONResponse
