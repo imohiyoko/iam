@@ -94,6 +94,9 @@ type Authenticator struct {
 	DeliveryOnly func(ctx context.Context, tx port.Tx, a port.ServiceAccount) (bool, error)
 }
 
+// IsAccessToken は bearer がアクセストークン（API キーでない）の形かを返す。
+func IsAccessToken(bearer string) bool { return strings.HasPrefix(bearer, tokenPrefix) }
+
 // Authenticate は API キーかアクセストークンを確かめ、使えるサービスアカウントを返す。使えないものは ErrInvalid、
 // ストレージの障害はそれ以外のエラー（呼び出し側は認証の失敗として扱わない）。
 func (au Authenticator) Authenticate(ctx context.Context, tx port.Tx, realmID, bearer string, now time.Time) (port.ServiceAccount, error) {
