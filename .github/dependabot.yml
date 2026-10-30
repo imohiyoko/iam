@@ -1,0 +1,10 @@
+# 固定した（コミットの SHA で指す）actions を更新する PR を出す。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

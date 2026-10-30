@@ -7,6 +7,7 @@ package ratelimit
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"time"
 
@@ -20,6 +21,8 @@ type Limiter struct {
 	Clock  clock.Clock
 	Window time.Duration
 	Limit  int64
+	// Total は AllowFrom で、接続元を問わない上限（0 以下なら無い）。
+	Total int64
 }
 
 // ExceededError は上限を超えたことを表す。
@@ -36,7 +39,36 @@ func (e *ExceededError) Error() string {
 // Allow は key の回数を1つ数え、上限を超えれば *ExceededError を返す。
 // key は呼び出し側で個人情報を含まない形にする（メールアドレスならブラインドインデックス）。
 func (l *Limiter) Allow(ctx context.Context, key string) error {
-	if l == nil || l.Limit <= 0 || l.Window <= 0 {
+	if l == nil {
+		return nil
+	}
+	return l.allow(ctx, key, l.Limit)
+}
+
+// AllowFrom は key を接続元 ip（Bucket でまとめる）ごとに Limit 回まで、接続元を問わず Total 回まで許す。アカウントの
+// 上限を第三者が使い切って、本人を締め出すのを難しくする（本人の接続元の分は残る）。ip が空なら、空の接続元を1つの接続元として
+// 数える（Total も同じく効く）。
+func (l *Limiter) AllowFrom(ctx context.Context, key, ip string) error {
+	if l == nil {
+		return nil
+	}
+	if err := l.allow(ctx, key+":from:"+Bucket(ip), l.Limit); err != nil {
+		return err
+	}
+	return l.allow(ctx, key, l.Total)
+}
+
+// Bucket は接続元を数える単位。IPv6 は利用者が /64 を自由に使えるため、/64 でまとめる。
+func Bucket(ip string) string {
+	p := net.ParseIP(ip)
+	if p == nil || p.To4() != nil {
+		return ip
+	}
+	return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
+func (l *Limiter) allow(ctx context.Context, key string, limit int64) error {
+	if limit <= 0 || l.Window <= 0 {
 		return nil
 	}
 	now := l.Clock.Now()
@@ -46,8 +78,8 @@ func (l *Limiter) Allow(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if n > l.Limit {
-		return &ExceededError{RetryAfter: end.Sub(now), First: n == l.Limit+1}
+	if n > limit {
+		return &ExceededError{RetryAfter: end.Sub(now), First: n == limit+1}
 	}
 	return nil
 }

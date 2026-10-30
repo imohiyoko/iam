@@ -225,8 +225,11 @@ type RateLimit struct {
 	Window Duration `yaml:"window"`
 	// PerIP は接続元ごとの上限（IPv6 は /64 で数える）。
 	PerIP int `yaml:"per_ip"`
-	// PerAccount はメールアドレスごとの、メールのフローの開始の上限。
+	// PerAccount はメールアドレスと接続元ごとの、メールのフローの開始・パスワードとリカバリーコードの照合の上限。
 	PerAccount int `yaml:"per_account"`
+	// PerAccountTotal はメールアドレスごとの、接続元を問わない上限（第三者が本人を締め出すのを難しくするため、PerAccount
+	// より大きくする）。0 なら無い。
+	PerAccountTotal int `yaml:"per_account_total"`
 }
 
 // SecondFactor は2段階認証の設定。2要素目（passkey / TOTP）を登録したユーザーには、Required でなくても2要素目を求める。
@@ -378,7 +381,7 @@ func Default() Config {
 			Password:     Password{Argon2: Argon2{MemoryKiB: 64 * 1024, Iterations: 2, Parallelism: 1}},
 			Recovery:     Recovery{Methods: slices.Clone(KnownRecoveryMethods), TTL: Duration(15 * time.Minute)},
 			Login: Login{MinResponseTime: Duration(300 * time.Millisecond),
-				RateLimit: RateLimit{Window: Duration(10 * time.Minute), PerIP: 100, PerAccount: 5}},
+				RateLimit: RateLimit{Window: Duration(10 * time.Minute), PerIP: 100, PerAccount: 5, PerAccountTotal: 20}},
 		},
 		Outbox: Outbox{Interval: Duration(time.Second), Batch: 100},
 		IDs:    IDs{Internal: "uuidv7", External: "random"},
@@ -570,8 +573,11 @@ func (c Config) Validate() error {
 	if l := c.Security.Login; l.MinResponseTime.D() < 0 || l.MinResponseTime.D() > 5*time.Second {
 		problems = append(problems, "security.login.min_response_time must be within [0, 5s]")
 	}
-	if rl := c.Security.Login.RateLimit; rl.PerIP < 0 || rl.PerAccount < 0 || ((rl.PerIP > 0 || rl.PerAccount > 0) && rl.Window.D() <= 0) {
+	if rl := c.Security.Login.RateLimit; rl.PerIP < 0 || rl.PerAccount < 0 || rl.PerAccountTotal < 0 || ((rl.PerIP > 0 || rl.PerAccount > 0 || rl.PerAccountTotal > 0) && rl.Window.D() <= 0) {
 		problems = append(problems, "security.login.rate_limit: limits must not be negative and window must be positive")
+	}
+	if rl := c.Security.Login.RateLimit; rl.PerAccount > 0 && rl.PerAccountTotal > 0 && rl.PerAccountTotal < rl.PerAccount {
+		problems = append(problems, "security.login.rate_limit.per_account_total must be at least per_account")
 	}
 	if err := warning.Validate(c.WarningActions()); err != nil {
 		problems = append(problems, "security."+err.Error())

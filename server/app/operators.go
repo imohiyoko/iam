@@ -275,18 +275,31 @@ func (a *App) outranks(ctx context.Context, tx port.Tx, p adminPrincipal, target
 
 // outranksPrincipal は outranks を任意の主体に広げる。orgID が空でなければその Org の範囲の付与も比べる。
 func (a *App) outranksPrincipal(ctx context.Context, tx port.Tx, p adminPrincipal, target check.Principal, orgID string) error {
-	// 対象の範囲全体の権限を集め、呼び出し側がすべて持つかを確かめる（Group から効く権限も含む）。
+	// 対象の範囲全体の権限を集め、呼び出し側がすべて持つかを確かめる（Group から効く権限も含む）。リソースを限った付与は、
+	// 呼び出し側が同じリソースでその権限を持つか（範囲全体の付与でもよい）を確かめる。
 	gs, err := a.authz.Grants(ctx, tx, a.realm.ID, target, orgID)
 	if err != nil {
 		return err
 	}
+	caller := check.Principal{Type: p.Type, ID: p.ID}
 	var need []string
 	for _, g := range gs {
 		if g.ResourceType == "" {
 			need = append(need, g.Permissions...)
+			continue
+		}
+		for _, perm := range g.Permissions {
+			ok, err := a.authz.CheckTx(ctx, tx, a.realm.ID, check.Request{Principal: caller, Action: perm, OrgID: orgID,
+				Resource: check.Resource{Type: g.ResourceType, ID: g.ResourceID}})
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errOutranked
+			}
 		}
 	}
-	ok, err := a.authz.Holds(ctx, tx, a.realm.ID, check.Principal{Type: p.Type, ID: p.ID}, orgID, need)
+	ok, err := a.authz.Holds(ctx, tx, a.realm.ID, caller, orgID, need)
 	if err != nil {
 		return err
 	}

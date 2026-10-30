@@ -134,3 +134,78 @@ func (l *loginEnv) passwordLoginCookie(t *testing.T, email, pw string) (int, str
 	}
 	return status, c
 }
+
+// 下位のロールの運営者は、上位のロールの運営者の認証情報を無効化できず、停止・有効期間も変えられない（ADR 0052、0053）。
+func TestAdminActionsRespectOutranks(t *testing.T) {
+	l := newPasskeyEnv(t)
+	ownerID, owner := l.operator(t, "owner@example.com", role.RealmOwner)
+	adminID, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
+	_, sec := l.operator(t, "sec@example.com", role.RealmSecurity)
+	users := "/v1/admin/users/" + ownerID
+	for _, path := range []string{users + "/credentials:revoke-all", users + "/password:revoke", users + "/credentials/psk_missing:revoke"} {
+		if status, out := l.admin(t, path, sec, nil); status != 403 {
+			t.Fatalf("%s by security: %d %v", path, status, out)
+		}
+	}
+	if status, out := l.admin(t, users+"/suspensions", sec, map[string]any{"category": "security_risk", "reason": "x"}); status != 403 {
+		t.Fatalf("suspend owner by security: %d %v", status, out)
+	}
+	if status, out := l.adminDo(t, "PATCH", admin, users, map[string]any{"valid_until": l.a.deps.Clock.Now().Add(time.Hour)}); status != 403 {
+		t.Fatalf("validity of owner by admin: %d %v", status, out)
+	}
+	// 上位からは変えられる。上位が付けた停止を下位は解除できない。
+	status, out := l.admin(t, "/v1/admin/users/"+adminID+"/suspensions", owner, map[string]any{"category": "security_risk", "reason": "x"})
+	if status != 201 {
+		t.Fatalf("suspend admin by owner: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/suspensions/"+out["id"].(string)+":lift", sec, map[string]any{"reason": "x"}); status != 403 {
+		t.Fatalf("lift admin's suspension by security: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/suspensions/"+out["id"].(string)+":lift", owner, map[string]any{"reason": "x"}); status != 200 {
+		t.Fatalf("lift by owner: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/users/"+adminID+"/credentials:revoke-all", owner, nil); status != 200 {
+		t.Fatalf("revoke admin's credentials by owner: %d %v", status, out)
+	}
+
+	// 最後の使える realm:owner は止められず、終わりのある有効期間も付けられない（予約も同じ）。
+	if status, out := l.admin(t, users+"/suspensions", owner, map[string]any{"category": "security_risk", "reason": "x"}); status != 409 || out["error"] != "last_owner" {
+		t.Fatalf("suspend the last owner: %d %v", status, out)
+	}
+	if status, out := l.admin(t, users+"/suspensions", owner, map[string]any{"category": "security_risk", "reason": "x",
+		"starts_at": l.a.deps.Clock.Now().Add(time.Hour)}); status != 409 {
+		t.Fatalf("schedule a suspension of the last owner: %d %v", status, out)
+	}
+	if status, out := l.adminDo(t, "PATCH", owner, users, map[string]any{"valid_until": l.a.deps.Clock.Now().Add(time.Hour)}); status != 409 || out["error"] != "last_owner" {
+		t.Fatalf("validity of the last owner: %d %v", status, out)
+	}
+	if status, out := l.adminDo(t, "PATCH", owner, users, map[string]any{}); status != 200 {
+		t.Fatalf("clear the validity of the last owner: %d %v", status, out)
+	}
+
+	// リソースを限った付与も比べる（上で無効化した admin とは別の運営者で）。
+	admin2ID, admin2 := l.operator(t, "admin2@example.com", role.RealmAdmin)
+	_, _ = l.login(t, "carol@example.com")
+	carolID := l.userID(t, "carol@example.com")
+	status, out = l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "project-admin", "permissions": []string{"project:admin"}})
+	if status != 201 {
+		t.Fatalf("create role: %d %v", status, out)
+	}
+	projectAdmin := out["id"].(string)
+	bindOn := func(userID string) {
+		t.Helper()
+		if status, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": projectAdmin, "principal_type": "user", "principal_id": userID,
+			"resource_type": "project", "resource_id": "p1"}); status != 201 {
+			t.Fatalf("bind on p1: %d %v", status, out)
+		}
+	}
+	bindOn(carolID)
+	carol := "/v1/admin/users/" + carolID + "/credentials:revoke-all"
+	if status, out := l.admin(t, carol, admin2, nil); status != 403 {
+		t.Fatalf("revoke a project admin's credentials without the project role: %d %v", status, out)
+	}
+	bindOn(admin2ID)
+	if status, out := l.admin(t, carol, admin2, nil); status != 200 {
+		t.Fatalf("revoke with the same project role: %d %v", status, out)
+	}
+}

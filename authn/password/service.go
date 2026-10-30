@@ -117,7 +117,7 @@ func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, 
 	if err != nil {
 		return Result{}, ErrAuthFailed
 	}
-	if err := s.allow(ctx, realmID, email); err != nil {
+	if err := s.allow(ctx, realmID, email, in.Client.IP); err != nil {
 		return Result{}, err
 	}
 	if len(in.Password) > MaxInputBytes {
@@ -246,7 +246,7 @@ func (s *Service) check(ctx context.Context, realmID, email, pw string) (checked
 	return checked{PasswordCredential: cred, rehash: rehash}, u, emailID, nil
 }
 
-func (s *Service) allow(ctx context.Context, realmID, key string) error {
+func (s *Service) allow(ctx context.Context, realmID, key, ip string) error {
 	if s.PerAccount == nil {
 		return nil
 	}
@@ -254,7 +254,7 @@ func (s *Service) allow(ctx context.Context, realmID, key string) error {
 	if err != nil {
 		return err
 	}
-	return s.PerAccount.Allow(ctx, "password:"+realmID+":"+base64.RawURLEncoding.EncodeToString(ix.Value))
+	return s.PerAccount.AllowFrom(ctx, "password:"+realmID+":"+base64.RawURLEncoding.EncodeToString(ix.Value), ip)
 }
 
 // breached は漏洩済みかを返す。確認できなければ nil（警告を出さず、ログに残す）。
