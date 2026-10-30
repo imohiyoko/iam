@@ -36,6 +36,8 @@ type realmSettings struct {
 	UserDeletionGraceSeconds int64              `json:"user_deletion_grace_seconds"`
 	EmailStorage             string             `json:"email_storage"`
 	QuotaCount               realmQuotaSettings `json:"quota_count"`
+	// DeclaredContextClients は判定で認証の文脈を申告できるサービスアカウント（公開 ID。ADR 0084）。
+	DeclaredContextClients []string `json:"declared_context_clients"`
 }
 
 type realmQuotaSettings struct {
@@ -49,7 +51,7 @@ func defaultRealmSettings(c config.Realm) realmSettings {
 	return realmSettings{
 		Timezone: c.Timezone, VerifiedVia: slices.Clone(c.VerifiedVia), OrgCreation: c.OrgCreation,
 		OrgDeletionGraceSeconds: int64(c.OrgDeletionGrace.D() / time.Second), UserDeletionGraceSeconds: int64(c.UserDeletionGrace.D() / time.Second),
-		EmailStorage: c.EmailStorage, QuotaCount: realmQuotaSettings(c.QuotaCount),
+		EmailStorage: c.EmailStorage, QuotaCount: realmQuotaSettings(c.QuotaCount), DeclaredContextClients: slices.Clone(c.DeclaredContextClients),
 	}
 }
 

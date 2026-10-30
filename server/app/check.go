@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/provider"
+	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
@@ -41,7 +44,7 @@ func orgTarget(orgID *string, res check.Resource) (*string, check.Resource, bool
 }
 
 func (s adminServer) CheckAuthz(ctx context.Context, req adminapi.CheckAuthzRequestObject) (adminapi.CheckAuthzResponseObject, error) {
-	_, d, err := s.a.authorizeWith(ctx, role.PermAuthzCheck, true)
+	p, d, err := s.a.authorizeWith(ctx, role.PermAuthzCheck, true)
 	switch {
 	case err != nil:
 		return nil, err
@@ -82,6 +85,9 @@ func (s adminServer) CheckAuthz(ctx context.Context, req adminapi.CheckAuthzRequ
 			return err
 		}
 		r = check.Request{Principal: check.Principal{Type: port.PrincipalUser, ID: u.ID}, Action: b.Action, Resource: res}
+		if r.Context, err = s.checkContext(ctx, tx, p, u.ID, b); err != nil {
+			return err
+		}
 		if orgID != nil && s.a.orgs != nil {
 			o, err := tx.Orgs().GetByPublicID(ctx, s.a.realm.ID, *orgID)
 			if err != nil {
@@ -159,6 +165,70 @@ func (s publicServer) CheckMyAuthz(ctx context.Context, req publicapi.CheckMyAut
 	out := publicapi.CheckMyAuthz200JSONResponse{Allowed: d.Allow}
 	if len(d.Unmet) > 0 {
 		out.Unmet = &d.Unmet
+	}
+	return out, nil
+}
+
+// checkContext は判定の問いの認証の文脈（ADR 0084）。アクセストークンか sid があれば IAM がそこから組み立て（attested）、申告は
+// 捨てる。どちらも無ければ、realm の設定 declared_context_clients に載せた呼び出し元の申告だけを使う（attested でない）。
+// トークン・系列が使えないか主体のものでなければ、文脈なし（条件は満たさない）。
+func (s adminServer) checkContext(ctx context.Context, tx port.Tx, caller adminPrincipal, userID string, b *adminapi.CheckRequest) (*check.AuthContext, error) {
+	switch {
+	case b.AccessToken != nil:
+		if s.a.tokens == nil {
+			return nil, nil
+		}
+		acc, err := s.a.tokens.Validate(ctx, tx, s.a.realm.ID, *b.AccessToken)
+		if errors.Is(err, provider.ErrInvalidToken) || (err == nil && acc.Grant.UserID != userID) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		risk, err := s.a.tokens.LineageRisk(ctx, tx, s.a.realm.ID, acc.Grant.SID)
+		if err != nil {
+			return nil, err
+		}
+		g := acc.Grant
+		return &check.AuthContext{AMR: g.AuthMethods, Factors: check.Factors(g.AuthMethods), AuthTime: g.AuthTime, Risk: risk, Attested: true}, nil
+	case b.Sid != nil:
+		ses, _, err := s.a.sessions.CheckLineage(ctx, tx, s.a.realm.ID, *b.Sid, s.a.deps.Clock.Now())
+		if errors.Is(err, session.ErrInvalid) || (err == nil && (ses.PrincipalType != port.PrincipalUser || ses.PrincipalID != userID)) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		risk, err := session.Risk(ctx, tx, ses)
+		if err != nil {
+			return nil, err
+		}
+		return &check.AuthContext{AMR: ses.AuthMethods, Factors: check.Factors(ses.AuthMethods), AuthTime: ses.AuthenticatedAt, Risk: risk, Attested: true}, nil
+	case b.Context != nil:
+		if caller.Type != port.PrincipalServiceAccount || !slices.Contains(s.a.settings.DeclaredContextClients, caller.Actor.ID) {
+			return nil, nil
+		}
+		return declaredContext(ctx, tx, s.a.realm.ID, *b.Context)
+	}
+	return nil, nil
+}
+
+// declaredContext は申告の文脈。リスクは一覧で有効な種類・範囲内の値だけを残す。
+func declaredContext(ctx context.Context, tx port.Tx, realmID string, in adminapi.DeclaredContext) (*check.AuthContext, error) {
+	out := &check.AuthContext{}
+	if in.Amr != nil {
+		out.AMR = slices.Clone(*in.Amr)
+		out.Factors = check.Factors(out.AMR)
+	}
+	if in.AuthTime != nil {
+		out.AuthTime = *in.AuthTime
+	}
+	if in.Risk != nil && len(*in.Risk) > 0 {
+		cat, err := session.Catalog(ctx, tx, realmID)
+		if err != nil {
+			return nil, err
+		}
+		out.Risk, _ = cat.Keep(*in.Risk)
 	}
 	return out, nil
 }

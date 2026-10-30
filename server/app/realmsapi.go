@@ -70,6 +70,10 @@ func (s adminServer) realmView(r port.Realm) (adminapi.Realm, error) {
 	if v.Settings.VerifiedVia == nil {
 		v.Settings.VerifiedVia = []string{}
 	}
+	v.Settings.DeclaredContextClients = slices.Clone(rs.DeclaredContextClients)
+	if v.Settings.DeclaredContextClients == nil {
+		v.Settings.DeclaredContextClients = []string{}
+	}
 	return v, nil
 }
 
@@ -98,6 +102,9 @@ func applySettings(rs realmSettings, in *adminapi.RealmSettings) realmSettings {
 	}
 	if in.EmailStorage != nil {
 		rs.EmailStorage = string(*in.EmailStorage)
+	}
+	if in.DeclaredContextClients != nil {
+		rs.DeclaredContextClients = slices.Clone(*in.DeclaredContextClients)
 	}
 	if q := in.QuotaCount; q != nil {
 		if q.Invited != nil {

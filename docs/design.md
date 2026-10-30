@@ -335,6 +335,7 @@ check(principal, action, resource, context) -> allow / deny
 - 直接のロール + 所属 Group（ネスト有効時は祖先も）のロールのうち、範囲（Org 全体 / リソース / Org 階層有効時は親 Org）が合うものを合算する
 - Org オフなら realm 全体の RBAC。実装は有効なフィーチャーに応じて起動時に組み立てる
 - 付与には条件（ADR 0084 の条件の言語）を付けられる。条件付きの付与は、主体の認証の文脈（amr・要素数・認証時刻・リスク）が条件を満たすときだけ効く。文脈はセッションかサービスアカウントの認証から組み立て、無ければ満たさない。条件だけで拒んだときは理由のコード（`unmet`）を返す。権限の引き上げの検査も、今の文脈で条件を満たす付与だけを数える
+- 管理 API の判定（`/v1/admin/authz:check`）は、主体の `sid` かアクセストークンを渡せば、IAM がその今のセッションから文脈を組み立てる（`attested`）。どちらも無ければ、realm の設定 `declared_context_clients` に載せたサービスアカウントの申告（`context`）だけを使い、申告は `attested` でない（付与の条件の `attested` と、名前空間・Org の要件を満たさない）。イントロスペクションは `amr`・`auth_time` に加えて、系列の今のセッションのリスクの点数（`risk`）を返す
 - 付与で許した操作には、名前空間の要件（realm の設定。`/v1/admin/action-namespaces/{name}`、権限 `requirements:manage` は `resource_type = action_namespace` で名前空間に限れる）と Org の要件（Org の設定の `requirements`。階層がオンなら祖先の要件も）をすべて AND で求める。要件は `attested` を暗黙に AND し、名前空間の段階の境界は realm より厳しくする向きだけ。変えた後に自分がその設定を変えられなくなる要件は 409 `requirement_lockout` で拒む。要件は realm・Org ごとにキャッシュし、変更で捨てる。見ている条件（付与・名前空間・Org の要件）が残るリスクの種類は止められない（409 `risk_type_in_use`）
 - 将来 OpenFGA / Cedar 等に同じシグネチャで差し替えられる
 

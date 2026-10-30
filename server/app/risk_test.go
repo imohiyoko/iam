@@ -231,3 +231,88 @@ func lastAudit(evs []audit.Event, typ string) *audit.Event {
 	}
 	return nil
 }
+
+// 判定の問いの認証の文脈（ADR 0084）：sid・アクセストークンから IAM が組み立てるか、載せた呼び出し元の申告。
+// イントロスペクションはリスクの点数を返す。
+func TestCheckContext(t *testing.T) {
+	post := &fakeHook{decide: func(port.HookInput) (port.HookResult, error) {
+		return port.HookResult{Allow: true, Risk: map[string]int{"account": 10}}, nil
+	}}
+	l := riskEnv(t, post)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	code, _ := p.login(t, "alice@example.com", nil)
+	_, tok := p.exchange(t, code, nil)
+	at := tok["access_token"].(string)
+	sid := l.idClaims(t, tok["id_token"].(string), port.AlgES256)["sid"].(string)
+	if in := p.introspect(t, at); in["active"] != true || !reflect.DeepEqual(in["risk"], map[string]any{"account": float64(10)}) || in["amr"] == nil || in["auth_time"] == nil {
+		t.Fatalf("introspect: %v", in)
+	}
+	aliceID := l.userID(t, "alice@example.com")
+	l.login(t, "bob@example.com")
+	bobID := l.userID(t, "bob@example.com")
+
+	code2, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "payment-approver", "permissions": []string{"payment:approve"}})
+	if code2 != 201 {
+		t.Fatalf("create role: %d %v", code2, out)
+	}
+	approver := out["id"].(string)
+	cond := map[string]any{"all": []any{map[string]any{"attested": true}, map[string]any{"risk_below": map[string]any{"type": "account", "score": 30}}}}
+	for _, u := range []string{aliceID, bobID} {
+		if code, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": approver, "principal_type": "user", "principal_id": u, "condition": cond}); code != 201 {
+			t.Fatalf("bind: %d %v", code, out)
+		}
+	}
+	code2, out = l.admin(t, "/v1/admin/service-accounts", owner, map[string]any{"name": "checker"})
+	if code2 != 201 {
+		t.Fatalf("create sa: %d %v", code2, out)
+	}
+	sa := out["id"].(string)
+	if code, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": role.RealmAdmin, "principal_type": "service_account", "principal_id": sa}); code != 201 {
+		t.Fatalf("bind sa: %d %v", code, out)
+	}
+	_, out = l.admin(t, "/v1/admin/service-accounts/"+sa+"/credentials", owner, map[string]any{"type": "api_key"})
+	key := out["secret"].(string)
+
+	chk := func(principal string, extra map[string]any) map[string]any {
+		t.Helper()
+		body := map[string]any{"principal_id": principal, "action": "payment:approve"}
+		maps.Copy(body, extra)
+		code, out := l.admin(t, "/v1/admin/authz:check", key, body)
+		if code != 200 {
+			t.Fatalf("check %v: %d %v", extra, code, out)
+		}
+		return out
+	}
+	none := []any{"condition.attested", "condition.risk.account"}
+	declared := map[string]any{"amr": []string{"hwk"}, "risk": map[string]any{"account": 5, "nope.x": 1}}
+	for _, c := range []struct {
+		name      string
+		principal string
+		extra     map[string]any
+		unmet     []any
+	}{
+		{"no context", aliceID, nil, none},
+		{"access token", aliceID, map[string]any{"access_token": at}, nil},
+		{"sid", aliceID, map[string]any{"sid": sid}, nil},
+		// 系列・トークンが使えないか、主体のものでなければ文脈なし。
+		{"unknown sid", aliceID, map[string]any{"sid": "nope"}, none},
+		{"another's sid", bobID, map[string]any{"sid": sid}, none},
+		{"another's token", bobID, map[string]any{"access_token": at}, none},
+		// 載せていない呼び出し元の申告は捨てる。
+		{"declared by unlisted", aliceID, map[string]any{"context": declared}, none},
+	} {
+		out := chk(c.principal, c.extra)
+		if c.unmet == nil && out["allowed"] != true || c.unmet != nil && (out["allowed"] != false || !reflect.DeepEqual(out["unmet"], c.unmet)) {
+			t.Fatalf("%s: %v", c.name, out)
+		}
+	}
+	// 載せた呼び出し元の申告は attested でない（リスクは一覧の種類だけ使う）。sid があれば申告は捨てる。
+	l.a.settings.DeclaredContextClients = []string{sa}
+	if out := chk(aliceID, map[string]any{"context": declared}); out["allowed"] != false || !reflect.DeepEqual(out["unmet"], []any{"condition.attested"}) {
+		t.Fatalf("declared: %v", out)
+	}
+	if out := chk(aliceID, map[string]any{"context": map[string]any{"risk": map[string]any{"account": 50}}, "sid": sid}); out["allowed"] != true {
+		t.Fatalf("declared with sid: %v", out)
+	}
+}

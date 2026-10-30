@@ -650,8 +650,16 @@ type AttributeDefUpdate struct {
 
 // CheckRequest defines model for CheckRequest.
 type CheckRequest struct {
+	// AccessToken 主体のアクセストークン。`sid` と同じく IAM が文脈を組み立てる（`sid` より優先）。使えないか主体のものでなければ文脈なし
+	AccessToken *string `json:"access_token,omitempty"`
+
 	// Action `<リソース>:<操作>`
 	Action string `json:"action"`
+
+	// Context 連携先が申告する認証の文脈（ADR 0084）。realm の設定 `declared_context_clients` に載せた呼び出し元のときだけ使い、
+	// それ以外は捨てる。`sid` か `access_token` があれば捨てる。申告の文脈は `attested` でなく、付与の条件の `attested` と、
+	// 名前空間・Org の要件を満たさない。リスクは一覧で有効な種類・範囲内の値だけを使う
+	Context *DeclaredContext `json:"context,omitempty"`
 
 	// OrgId 判定の文脈の Org の公開 ID
 	OrgId *string `json:"org_id,omitempty"`
@@ -663,6 +671,10 @@ type CheckRequest struct {
 
 	// ResourceType `org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`
 	ResourceType *string `json:"resource_type,omitempty"`
+
+	// Sid 主体のログインの系列（ID トークンの `sid`）。渡せば IAM がその今のセッションから認証の文脈を組み立てる（ADR 0084。
+	// `attested`）。系列が使えないか主体のものでなければ文脈なし（条件は満たさない）
+	Sid *string `json:"sid,omitempty"`
 }
 
 // CheckRequestPrincipalType defines model for CheckRequest.PrincipalType.
@@ -737,6 +749,15 @@ type ClientInputTokenEndpointAuthMethod string
 // Clients defines model for Clients.
 type Clients struct {
 	Clients []Client `json:"clients"`
+}
+
+// DeclaredContext 連携先が申告する認証の文脈（ADR 0084）。realm の設定 `declared_context_clients` に載せた呼び出し元のときだけ使い、
+// それ以外は捨てる。`sid` か `access_token` があれば捨てる。申告の文脈は `attested` でなく、付与の条件の `attested` と、
+// 名前空間・Org の要件を満たさない。リスクは一覧で有効な種類・範囲内の値だけを使う
+type DeclaredContext struct {
+	Amr      *[]string       `json:"amr,omitempty"`
+	AuthTime *time.Time      `json:"auth_time,omitempty"`
+	Risk     *map[string]int `json:"risk,omitempty"`
 }
 
 // Error defines model for Error.
@@ -1014,9 +1035,10 @@ type Realm struct {
 	// Issuer OIDC の iss（server.public_url が無ければ無い）
 	Issuer   *string `json:"issuer,omitempty"`
 	Settings struct {
-		EmailStorage            string `json:"email_storage"`
-		OrgCreation             string `json:"org_creation"`
-		OrgDeletionGraceSeconds int64  `json:"org_deletion_grace_seconds"`
+		DeclaredContextClients  []string `json:"declared_context_clients"`
+		EmailStorage            string   `json:"email_storage"`
+		OrgCreation             string   `json:"org_creation"`
+		OrgDeletionGraceSeconds int64    `json:"org_deletion_grace_seconds"`
 		QuotaCount              struct {
 			Future    bool `json:"future"`
 			Invited   bool `json:"invited"`
@@ -1044,6 +1066,8 @@ type RealmInput struct {
 
 // RealmSettings realm ごとの設定（ADR 0083）。省いた項目は設定ファイルの `realm` の値
 type RealmSettings struct {
+	// DeclaredContextClients 判定（authz:check）で認証の文脈を申告できるサービスアカウントの ID（ADR 0084）。申告は attested でない
+	DeclaredContextClients  *[]string                  `json:"declared_context_clients,omitempty"`
 	EmailStorage            *RealmSettingsEmailStorage `json:"email_storage,omitempty"`
 	OrgCreation             *RealmSettingsOrgCreation  `json:"org_creation,omitempty"`
 	OrgDeletionGraceSeconds *int64                     `json:"org_deletion_grace_seconds,omitempty"`
