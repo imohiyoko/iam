@@ -174,7 +174,7 @@ func (s publicServer) VerifyAddEmail(ctx context.Context, req publicapi.VerifyAd
 }
 
 // change は本人の認証手段を1つのトランザクションで変える。理由を返せる拒否は (code, true)。
-// stale は通常のセッションで直近の認証が切れていること。認証手段の追加・削除で使う（5.4）。
+// stale は通常のセッションで直近の認証が切れていること。認証手段の追加・削除と primary のメールの変更で使う（5.4）。
 // 登録待ち・復旧中の制限つきセッションは、それ自体が直前の本人確認なので対象にしない。
 func (s publicServer) stale(ctx context.Context, au auth) bool {
 	return au.Restriction == port.RestrictionNone && !s.recent(ctx, au, role.ActionMeMethods)
@@ -197,8 +197,13 @@ func (s publicServer) change(ctx context.Context, fn func(ctx context.Context, t
 }
 
 func (s publicServer) MakeMyEmailPrimary(ctx context.Context, req publicapi.MakeMyEmailPrimaryRequestObject) (publicapi.MakeMyEmailPrimaryResponseObject, error) {
-	if _, ok := authFrom(ctx); !ok {
+	au, ok := authFrom(ctx)
+	if !ok {
 		return publicapi.MakeMyEmailPrimary401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	}
+	// primary は連携先に渡す email クレームと Org の既定のメールになるので、追加・削除と同じく直近の認証を求める。
+	if s.stale(ctx, au) {
+		return publicapi.MakeMyEmailPrimary401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	nf, code, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
 		return s.a.accounts.SetPrimaryEmail(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Id, au.Actor(), requestID(ctx))
