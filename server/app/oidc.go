@@ -340,12 +340,12 @@ func (s *oidcServer) Authorize(ctx context.Context, r *op.ClientRequest[oidc.Aut
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
-	return op.NewRedirect(loginURL(rid)), nil
+	return op.NewRedirect(s.a.loginURL(rid)), nil
 }
 
-// loginURL はログイン画面の URL。ログインの後で oidcResume に戻る。
-func loginURL(rid string) string {
-	return "/login?" + url.Values{"return_to": {oidcResume + "?" + url.Values{"request": {rid}}.Encode()}}.Encode()
+// loginURL はログイン画面の URL。ログインの後で oidcResume に戻る。realm をパスで指すときは接頭辞を付ける。
+func (a *App) loginURL(rid string) string {
+	return a.base + "/login?" + url.Values{"return_to": {a.base + oidcResume + "?" + url.Values{"request": {rid}}.Encode()}}.Encode()
 }
 
 // complete はセッションで認可コードを発行し、連携先の戻り先への転送を返す。
@@ -395,7 +395,7 @@ func (s *oidcServer) resume(w http.ResponseWriter, r *http.Request) {
 	}
 	au, ok := authFrom(ctx)
 	if !ok || !req.Fresh(au.AuthenticatedAt, s.a.deps.Clock.Now()) {
-		http.Redirect(w, r, loginURL(rid), http.StatusFound)
+		http.Redirect(w, r, s.a.loginURL(rid), http.StatusFound)
 		return
 	}
 	// 待つ間に連携先の登録が変わっていないかを確かめ直す。

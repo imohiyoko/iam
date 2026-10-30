@@ -59,7 +59,7 @@ func (s publicServer) DeleteMyAccount(ctx context.Context, _ publicapi.DeleteMyA
 		return nil, err
 	}
 	s.a.sessions.ForgetIDs(ctx, s.a.realm.ID, revoked)
-	setCookie(ctx, clearSessionCookie())
+	setCookie(ctx, s.a.clearSessionCookie())
 	return out, nil
 }
 

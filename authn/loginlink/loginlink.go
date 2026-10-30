@@ -195,6 +195,14 @@ func (s *Service) logger() *slog.Logger {
 	return s.Log
 }
 
+// TTLSeconds は秒数の有効期間を、掛け算で溢れないように範囲を確かめてから time.Duration にする。
+func TTLSeconds(sec int64) (time.Duration, error) {
+	if sec <= 0 || sec > int64(MaxTTL/time.Second) {
+		return 0, fmt.Errorf("login link ttl must be within (0, %s]", MaxTTL)
+	}
+	return time.Duration(sec) * time.Second, nil
+}
+
 // ValidTTL はリンクの有効期間を確かめる。
 func ValidTTL(d time.Duration) error {
 	if d <= 0 || d > MaxTTL {

@@ -39,6 +39,7 @@ func Run(t *testing.T, h Harness) {
 		fn   func(*testing.T, Harness)
 	}{
 		{"Realms", testRealms},
+		{"RealmHosts", testRealmHosts},
 		{"RealmSlugUniqueConcurrent", testRealmSlugUniqueConcurrent},
 		{"Rollback", testRollback},
 		{"Features", testFeatures},

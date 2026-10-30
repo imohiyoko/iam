@@ -71,6 +71,8 @@ func TestQuotaAPI(t *testing.T) {
 	}
 
 	// 外部の付与は external_ref で上書きする。下回っても拒否せず、org.quota.exceeded を残す。
+	// 手動の付与と同じ時刻だと新しい方の判定が ID 順になるため、時刻をずらす。
+	l.advance(time.Second)
 	code, out = l.adminDo(t, "POST", op, base+"/grants", map[string]any{"kind": "base", "quantity": 1, "external_ref": "sub_1"})
 	if code != 201 || out["source"] != "external" {
 		t.Fatalf("external grant: %d %v", code, out)

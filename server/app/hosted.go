@@ -114,9 +114,11 @@ func newHosted(a *App, dir string) (*hosted, error) {
 
 type pageData struct {
 	Lang, Page, ReturnTo string
-	T                    texts
-	Messages             map[string]string
-	Connections          []string
+	// Base は realm を /realms/{slug} で指すときの接頭辞（ADR 0083）。
+	Base        string
+	T           texts
+	Messages    map[string]string
+	Connections []string
 }
 
 // lang は Accept-Language から対応する言語を選ぶ（品質値は見ず、書かれた順に最初に対応するもの）。
@@ -161,7 +163,7 @@ func (h *hosted) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l := lang(r)
-	d := pageData{Lang: l, Page: page, T: catalog[l], Messages: catalog[l].Messages, ReturnTo: safeReturnTo(r.URL.Query().Get("return_to"))}
+	d := pageData{Lang: l, Page: page, Base: h.a.base, T: catalog[l], Messages: catalog[l].Messages, ReturnTo: safeReturnTo(r.URL.Query().Get("return_to"))}
 	if page == "login" {
 		var err error
 		if d.Connections, err = h.connections(r.Context()); err != nil {

@@ -37,7 +37,7 @@ func (s publicServer) StartEmailLogin(ctx context.Context, req publicapi.StartEm
 		return nil, err
 	}
 	now := s.a.deps.Clock.Now()
-	setCookie(ctx, &http.Cookie{Name: flowCookie, Value: st.FlowID, Path: "/", Secure: true, HttpOnly: true,
+	setCookie(ctx, &http.Cookie{Name: s.a.cookie(flowCookie), Value: st.FlowID, Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: max(int(st.ExpiresAt.Sub(now)/time.Second), 1)})
 	return publicapi.StartEmailLogin200JSONResponse{FlowId: st.FlowID, ExpiresAt: st.ExpiresAt}, nil
 }
@@ -49,9 +49,9 @@ func (s publicServer) VerifyEmailLogin(ctx context.Context, req publicapi.Verify
 	}
 	in := emailflow.Verify{FlowID: deref(req.Body.FlowId), Code: deref(req.Body.Code), LinkToken: deref(req.Body.Token), Client: s.a.clientOf(ctx)}
 	if in.FlowID == "" {
-		in.FlowID = cookie(ctx, flowCookie)
+		in.FlowID = cookie(ctx, s.a.cookie(flowCookie))
 	}
-	if tok, viaCookie := sessionToken(httpFrom(ctx).r); viaCookie {
+	if tok, viaCookie := s.a.sessionToken(httpFrom(ctx).r); viaCookie {
 		in.ReplaceToken = tok
 	}
 	v, err := s.a.email.Verify(ctx, s.a.realm.ID, in)
@@ -64,7 +64,7 @@ func (s publicServer) VerifyEmailLogin(ctx context.Context, req publicapi.Verify
 	if err != nil {
 		return nil, err
 	}
-	setCookie(ctx, &http.Cookie{Name: flowCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	setCookie(ctx, &http.Cookie{Name: s.a.cookie(flowCookie), Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	return publicapi.VerifyEmailLogin200JSONResponse(s.loginResult(ctx, v.Session, v.UserID, v.Created, req.Body.ReturnToken)), nil
 }
 
@@ -83,7 +83,7 @@ func (s publicServer) RedeemLoginLink(ctx context.Context, req publicapi.RedeemL
 	}
 	c := s.a.clientOf(ctx)
 	var replace string
-	if tok, viaCookie := sessionToken(httpFrom(ctx).r); viaCookie {
+	if tok, viaCookie := s.a.sessionToken(httpFrom(ctx).r); viaCookie {
 		replace = tok
 	}
 	is, uid, err := s.a.links.Redeem(ctx, s.a.realm.ID, req.Body.Token, loginlink.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}, replace)

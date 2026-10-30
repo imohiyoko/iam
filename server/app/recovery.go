@@ -40,8 +40,8 @@ func (a *App) recoveryAllows(method string) bool {
 }
 
 // replaceToken はブラウザが Cookie で持っていたセッションのトークン（ログイン・復旧で ID を入れ替える）。
-func replaceToken(ctx context.Context) string {
-	if tok, viaCookie := sessionToken(httpFrom(ctx).r); viaCookie {
+func (a *App) replaceToken(ctx context.Context) string {
+	if tok, viaCookie := a.sessionToken(httpFrom(ctx).r); viaCookie {
 		return tok
 	}
 	return ""
@@ -70,7 +70,7 @@ func (s publicServer) RedeemRecoveryCode(ctx context.Context, req publicapi.Rede
 	}
 	c := s.a.clientOf(ctx)
 	is, uid, err := s.a.recovery.Redeem(ctx, s.a.realm.ID, req.Body.Email, req.Body.Code,
-		recovery.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}, replaceToken(ctx))
+		recovery.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}, s.a.replaceToken(ctx))
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.RedeemRecoveryCode429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
@@ -104,7 +104,7 @@ func (s publicServer) StartEmailRecovery(ctx context.Context, req publicapi.Star
 		return nil, err
 	}
 	now := s.a.deps.Clock.Now()
-	setCookie(ctx, &http.Cookie{Name: flowCookie, Value: st.FlowID, Path: "/", Secure: true, HttpOnly: true,
+	setCookie(ctx, &http.Cookie{Name: s.a.cookie(flowCookie), Value: st.FlowID, Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: max(int(st.ExpiresAt.Sub(now)/time.Second), 1)})
 	return publicapi.StartEmailRecovery200JSONResponse{FlowId: st.FlowID, ExpiresAt: st.ExpiresAt}, nil
 }
@@ -118,9 +118,9 @@ func (s publicServer) VerifyEmailRecovery(ctx context.Context, req publicapi.Ver
 		return fail, nil
 	}
 	in := emailflow.Verify{FlowID: deref(req.Body.FlowId), Code: deref(req.Body.Code), LinkToken: deref(req.Body.Token),
-		Client: s.a.clientOf(ctx), ReplaceToken: replaceToken(ctx)}
+		Client: s.a.clientOf(ctx), ReplaceToken: s.a.replaceToken(ctx)}
 	if in.FlowID == "" {
-		in.FlowID = cookie(ctx, flowCookie)
+		in.FlowID = cookie(ctx, s.a.cookie(flowCookie))
 	}
 	v, err := s.a.email.VerifyRecovery(ctx, s.a.realm.ID, in)
 	if errors.Is(err, errs.AuthenticationFailed) {
@@ -132,7 +132,7 @@ func (s publicServer) VerifyEmailRecovery(ctx context.Context, req publicapi.Ver
 	if err != nil {
 		return nil, err
 	}
-	setCookie(ctx, &http.Cookie{Name: flowCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	setCookie(ctx, &http.Cookie{Name: s.a.cookie(flowCookie), Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	return publicapi.VerifyEmailRecovery200JSONResponse(s.loginResult(ctx, v.Session, v.UserID, false, req.Body.ReturnToken)), nil
 }
 
@@ -146,7 +146,7 @@ func (s publicServer) RedeemRecoveryLink(ctx context.Context, req publicapi.Rede
 	}
 	c := s.a.clientOf(ctx)
 	is, uid, err := s.a.links.RedeemRecovery(ctx, s.a.realm.ID, req.Body.Token,
-		loginlink.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}, replaceToken(ctx))
+		loginlink.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}, s.a.replaceToken(ctx))
 	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.RedeemRecoveryLink403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
@@ -174,7 +174,7 @@ func (s publicServer) CompleteRecovery(ctx context.Context, _ publicapi.Complete
 	case err != nil:
 		return nil, err
 	}
-	setCookie(ctx, clearSessionCookie())
+	setCookie(ctx, s.a.clearSessionCookie())
 	return publicapi.CompleteRecovery200JSONResponse{RecoveryCodes: codes, SessionsRevoked: len(revoked)}, nil
 }
 
@@ -214,7 +214,7 @@ func (s adminServer) IssueRecoveryLink(ctx context.Context, req adminapi.IssueRe
 	}
 	ttl := loginLinkTTL
 	if req.Body.TtlSeconds != nil {
-		ttl = time.Duration(*req.Body.TtlSeconds) * time.Second
+		ttl, _ = loginlink.TTLSeconds(int64(*req.Body.TtlSeconds)) // 範囲の外は 0 で、次の ValidTTL が拒む
 	}
 	if err := loginlink.ValidTTL(ttl); err != nil {
 		return adminapi.IssueRecoveryLink400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_ttl", err.Error()))}, nil

@@ -76,9 +76,19 @@ type App struct {
 	binary []feature.Feature
 	// clientSealer は監査ログの IP と User-Agent の全文を暗号化する（ADR 0063）。
 	clientSealer *eventlog.ClientSealer
-	realm        port.Realm
-	relay        *eventlog.Relay
-	pii          *pii.Crypter
+	// hookSecrets はフローフックの Webhook の秘密（secret_env ごと。どの realm も使う）。
+	hookSecrets map[string][]byte
+	realm       port.Realm
+	// root は既定の realm の App（共有の部分と realm の表を持つ）。既定の realm では自分（ADR 0083）。
+	root *App
+	// base は realm を /realms/{slug} で指すときのパスの接頭辞。既定の realm とホスト名で指す realm では空。
+	base string
+	// settings は realm ごとの設定（ADR 0083）。
+	settings realmSettings
+	// realms は既定以外の realm の App。フィーチャー multi_realm が動いている root だけが持つ。
+	realms *realmTable
+	relay  *eventlog.Relay
+	pii    *pii.Crypter
 	// sessions はセッションの発行・検証（authn/session）。
 	sessions *session.Manager
 	accounts *account.Service
@@ -119,8 +129,9 @@ type App struct {
 	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
 	scheduler *eventlog.Scheduler
 	retention *eventlog.Retention
-	public    http.Handler
-	admin     http.Handler
+	// public と admin は待ち受けるハンドラ（複数 realm なら振り分け）。ownPublic と ownAdmin はこの realm のもの。
+	public, admin       http.Handler
+	ownPublic, ownAdmin http.Handler
 }
 
 // New は起動前の検査を行い、App を組み立てる。binary はこのバイナリに含まれるフィーチャー。
@@ -169,21 +180,94 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	crypter := pii.New(d.KeyStore)
 	clientSealer := &eventlog.ClientSealer{Crypter: crypter, Clock: d.Clock, Retention: cfg.Realm.ClientDataRetention.D()}
 	d.Storage = clientSealer.Storage(d.Storage)
-	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary, clientSealer: clientSealer}
+	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary, clientSealer: clientSealer, pii: crypter}
+	a.root = a
 	a.checkClockSkew(ctx)
-	if a.realm, err = a.ensureRealm(ctx); err != nil {
+	realm, err := a.ensureRealm(ctx)
+	if err != nil {
 		return nil, err
 	}
 	a.relay = &eventlog.Relay{
 		Storage: d.Storage, Sink: d.EventSink, Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
 	}
-	a.pii = crypter
+	if !slices.Contains(cfg.Realm.VerifiedVia, string(port.VerifiedViaCode)) {
+		d.Logger.Warn("realm.verified_via does not include code: email codes and links are disabled, and email recovery is unavailable")
+	}
+	if plan.IsActive(feature.FlowHooks) {
+		if a.hookSecrets, err = hookSecrets(cfg); err != nil {
+			return nil, err
+		}
+	}
+	if err := a.assemble(ctx, realm, defaultRealmSettings(cfg.Realm), endpointFor(cfg, realm, true)); err != nil {
+		return nil, err
+	}
+	if a.issuer == "" {
+		d.Logger.Info("the OIDC provider is disabled: set server.public_url")
+	}
+	if a.passkeys == nil {
+		d.Logger.Info("passkeys are disabled: set server.public_url or passkey.rp_id and passkey.origins")
+	}
+	if a.password != nil && d.BreachCheck == nil {
+		d.Logger.Warn("password breach check is disabled: set breach_check.driver")
+	}
+	if !plan.IsActive(feature.FlowHooks) && len(cfg.Hooks) > 0 {
+		d.Logger.Warn("hooks are configured but the flow_hooks feature is not active")
+	}
+
+	// ここから下は全 realm で共有する（ADR 0083）。realm ごとの処理は、出来事の realm の App で行う。
+	a.logout = &eventlog.Relay{
+		Storage: d.Storage, Topic: provider.LogoutTopic, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
+		Deliver: (&provider.LogoutDeliverer{Storage: d.Storage, Keys: a.keys, Clock: d.Clock, Issuer: a.issuer, IssuerOf: a.issuerOf, Log: d.Logger}).Deliver,
+	}
+	// 開発用の Notifier には、秘密の取り出し方を渡す（配信用のアプリ無しでメールのログインを試せるように）。
+	if dc, ok := d.Notifier.(devClaimer); ok && cfg.Dev {
+		dc.SetDevClaim(strings.TrimSuffix(cfg.Server.PublicURL, "/"), func(ctx context.Context, realmID, notificationID string) (string, string, string, error) {
+			sec, err := a.notify.Claim(ctx, realmID, notificationID)
+			return sec.To, sec.Code, sec.Token, err
+		})
+	}
+	a.scheduler = &eventlog.Scheduler{Storage: d.Storage, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
+		Prepare: a.refreshRealms}
+	a.scheduler.Handlers = map[string]eventlog.Handler{
+		account.EventUserDeleted:       a.realmHandler(func(r *App) eventlog.Handler { return r.accounts.PurgeDue }),
+		eventlog.EventClientKeyExpired: clientSealer.Expire,
+		account.EventSuspensionStarted: a.realmHandler(func(r *App) eventlog.Handler { return r.endOnSuspensionStart }),
+		account.EventValidityEnded:     a.realmHandler(func(r *App) eventlog.Handler { return r.endOnValidityEnd }),
+	}
+	if a.orgs != nil {
+		a.scheduler.Handlers[org.EventOrgDeleted] = a.realmHandler(func(r *App) eventlog.Handler { return r.orgs.PurgeDue })
+		a.scheduler.Handlers[org.EventInvitationExpired] = a.realmHandler(func(r *App) eventlog.Handler { return r.orgs.ExpireDue })
+	}
+	// 保持期間を過ぎたデータは1時間ごとに消す（design.md 6.5、9.6、ADR 0072）。
+	a.retention = &eventlog.Retention{Storage: d.Storage, Clock: d.Clock, RealmID: a.realm.ID, Audit: cfg.Realm.AuditRetention.D(),
+		Ended: cfg.Realm.EndedRetention.D(), Interval: time.Hour, Batch: cfg.Outbox.Batch, Log: d.Logger, IndexOnly: a.indexOnlyRealms}
+	a.notifier = &eventlog.Relay{
+		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Clock, d.Logger), Clock: d.Clock,
+		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
+	}
+	a.public, a.admin = a.ownPublic, a.ownAdmin
+	if plan.IsActive(feature.MultiRealm) {
+		a.realms = &realmTable{refresh: cfg.Security.Session.ValidityMaxDelay.D()}
+		if err := a.loadRealms(ctx); err != nil {
+			return nil, err
+		}
+		a.public, a.admin = a.dispatch(a.ownPublic, false), a.dispatch(a.ownAdmin, true)
+	}
+	return a, nil
+}
+
+// assemble は realm のサービスの組を作る（既定の realm は New から、他の realm は newRealmApp から）。共有の部分（アダプタ・
+// 暗号化・outbox の送出など）は a に入っているものを使う。
+func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, ep realmEndpoint) error {
+	cfg, d, plan := a.cfg, a.deps, a.plan
+	a.realm, a.settings, a.base = realm, rs, ep.base
 	ss := cfg.Security.Session
 	var warnings *warning.Evaluator
 	if plan.IsActive(feature.Warnings) {
+		var err error
 		if warnings, err = warning.New(cfg.WarningActions()); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	a.sessions = &session.Manager{
@@ -195,23 +279,20 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 			RecoveryTTL: cfg.Security.Recovery.TTL.D(),
 		},
 	}
-	via := make([]port.VerifiedVia, 0, len(cfg.Realm.VerifiedVia))
-	for _, v := range cfg.Realm.VerifiedVia {
+	via := make([]port.VerifiedVia, 0, len(rs.VerifiedVia))
+	for _, v := range rs.VerifiedVia {
 		via = append(via, port.VerifiedVia(v))
 	}
-	if !slices.Contains(via, port.VerifiedViaCode) {
-		d.Logger.Warn("realm.verified_via does not include code: email codes and links are disabled, and email recovery is unavailable")
-	}
 	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via, ExtraCategories: cfg.Security.SuspensionCategories,
-		DeletionGrace: cfg.Realm.UserDeletionGrace.D(), IndexOnly: cfg.Realm.EmailStorage == "index_only", Roles: authzRoles{}}
+		DeletionGrace: rs.userDeletionGrace(), IndexOnly: rs.EmailStorage == "index_only", Roles: authzRoles{}}
 	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
 	if plan.IsActive(feature.Org) {
-		a.orgs = &org.Service{Clock: d.Clock, Crypter: a.pii, Accounts: a.accounts, Notify: a.notify, Policy: org.CreationPolicy(cfg.Realm.OrgCreation),
-			DeletionGrace: cfg.Realm.OrgDeletionGrace.D(), Rules: org.Rules{
+		a.orgs = &org.Service{Clock: d.Clock, Crypter: a.pii, Accounts: a.accounts, Notify: a.notify, Policy: org.CreationPolicy(rs.OrgCreation),
+			DeletionGrace: rs.orgDeletionGrace(), Rules: org.Rules{
 				AbsoluteLifetime: ss.AbsoluteLifetime.Rule("session.absolute_lifetime"), IdleTimeout: ss.IdleTimeout.Rule("session.idle_timeout"),
 				MaxAuthAge: ss.MaxAuthAge.Rule("session.max_auth_age"), Warnings: warnings,
 			}, LoginPolicies: plan.IsActive(feature.OrgLoginPolicy), Quotas: plan.IsActive(feature.Quota),
-			QuotaCount: org.QuotaCount(cfg.Realm.QuotaCount), ManagedUsers: plan.IsActive(feature.OrgManagedUsers), Resolver: d.DNS,
+			QuotaCount: org.QuotaCount(rs.QuotaCount), ManagedUsers: plan.IsActive(feature.OrgManagedUsers), Resolver: d.DNS,
 			Hierarchy: plan.IsActive(feature.OrgHierarchy)}
 		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
 	}
@@ -223,14 +304,11 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
 	a.clients = &provider.Clients{Clock: d.Clock}
 	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D()}
-	// ID トークンの署名鍵は起動時に用意しておく（JWKS が空のまま公開されないように）。
-	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, a.realm.ID) }); err != nil {
-		return nil, err
+	// ID トークンの署名鍵は realm ごとに用意しておく（JWKS が空のまま公開されないように）。
+	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, realm.ID) }); err != nil {
+		return err
 	}
-	a.issuer = strings.TrimSuffix(cfg.Server.PublicURL, "/")
-	if a.issuer == "" {
-		d.Logger.Info("the OIDC provider is disabled: set server.public_url")
-	}
+	a.issuer = ep.issuer
 	a.serviceAccounts = &serviceaccount.Service{Clock: d.Clock, Replay: d.Ephemeral, Audience: a.issuer,
 		TokenTTL: cfg.ServiceAccounts.TokenTTL.D(), Authenticator: serviceaccount.Authenticator{Enabled: plan.IsActive(feature.ServiceAccounts), DeliveryOnly: deliveryOnly}}
 	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D()}
@@ -241,10 +319,6 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D()}
 	if a.issuer != "" {
 		a.sessions.Lineages = a.tokens
-	}
-	a.logout = &eventlog.Relay{
-		Storage: d.Storage, Topic: provider.LogoutTopic, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
-		Deliver: (&provider.LogoutDeliverer{Storage: d.Storage, Keys: a.keys, Clock: d.Clock, Issuer: a.issuer, Log: d.Logger}).Deliver,
 	}
 	a.email = &emailflow.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,
@@ -270,19 +344,19 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if a.orgs != nil && a.orgs.ManagedUsers {
 		a.oauth.OrgSSO = a.orgs
 	}
-	if rpID, rpName, origins, ok := cfg.PasskeyRP(); ok {
-		a.passkeys, err = passkey.New(passkey.Config{RPID: rpID, RPName: rpName, Origins: origins}, passkey.Service{
+	a.passkeys = nil
+	if ep.rpOK {
+		var err error
+		a.passkeys, err = passkey.New(passkey.Config{RPID: ep.rpID, RPName: ep.rpName, Origins: ep.origins}, passkey.Service{
 			Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Log: d.Logger,
 		})
 		if err != nil {
-			return nil, err
+			return err
 		}
-	} else {
-		d.Logger.Info("passkeys are disabled: set server.public_url or passkey.rp_id and passkey.origins")
 	}
 	issuer := cfg.Security.SecondFactor.Issuer
-	if issuer == "" {
-		_, issuer, _, _ = cfg.PasskeyRP()
+	if issuer == "" || a.root != a {
+		issuer = ep.rpName
 	}
 	a.totp = &totp.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Issuer: issuer,
@@ -299,57 +373,27 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 			Params:    password.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
 			MinLength: minLength, PerAccount: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
 		}
-		if d.BreachCheck == nil {
-			d.Logger.Warn("password breach check is disabled: set breach_check.driver")
-		}
-	}
-	// 開発用の Notifier には、秘密の取り出し方を渡す（配信用のアプリ無しでメールのログインを試せるように）。
-	if dc, ok := d.Notifier.(devClaimer); ok && cfg.Dev {
-		dc.SetDevClaim(strings.TrimSuffix(cfg.Server.PublicURL, "/"), func(ctx context.Context, realmID, notificationID string) (string, string, string, error) {
-			sec, err := a.notify.Claim(ctx, realmID, notificationID)
-			return sec.To, sec.Code, sec.Token, err
-		})
-	}
-	a.scheduler = &eventlog.Scheduler{Storage: d.Storage, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger}
-	a.scheduler.Handlers = map[string]eventlog.Handler{account.EventUserDeleted: a.accounts.PurgeDue,
-		eventlog.EventClientKeyExpired: clientSealer.Expire,
-		account.EventSuspensionStarted: a.endOnSuspensionStart, account.EventValidityEnded: a.endOnValidityEnd}
-	// 保持期間を過ぎたデータは1時間ごとに消す（design.md 6.5、9.6、ADR 0072）。
-	a.retention = &eventlog.Retention{Storage: d.Storage, Clock: d.Clock, RealmID: a.realm.ID, Audit: cfg.Realm.AuditRetention.D(),
-		Ended: cfg.Realm.EndedRetention.D(), Interval: time.Hour, Batch: cfg.Outbox.Batch, Log: d.Logger}
-	if a.accounts.IndexOnly {
-		a.retention.IndexOnlyRealms = []string{a.realm.ID}
-	}
-	if a.orgs != nil {
-		a.scheduler.Handlers[org.EventOrgDeleted] = a.orgs.PurgeDue
-		a.scheduler.Handlers[org.EventInvitationExpired] = a.orgs.ExpireDue
-	}
-	a.notifier = &eventlog.Relay{
-		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Clock, d.Logger), Clock: d.Clock,
-		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
 	}
 	if plan.IsActive(feature.AccountMerge) {
 		a.merge = &merge.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Sessions: a.sessions, Orgs: a.orgs}
 	}
 	if plan.IsActive(feature.FlowHooks) {
-		runner, err := flowHooks(cfg, d, a.realm.Slug)
+		runner, err := flowHooks(cfg, d, realm.Slug, a.hookSecrets)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		a.accounts.Hooks, a.sessions.Hooks, a.tokens.Hooks = runner, runner, runner
 		if a.orgs != nil {
 			a.orgs.Hooks = runner
 		}
-	} else if len(cfg.Hooks) > 0 {
-		d.Logger.Warn("hooks are configured but the flow_hooks feature is not active")
 	}
 	login, err := newHosted(a, cfg.Server.LoginTemplates)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	a.public = withCommon(newPublicHandler(a, login))
-	a.admin = withCommon(newAdminHandler(a))
-	return a, nil
+	a.ownPublic = withCommon(newPublicHandler(a, login))
+	a.ownAdmin = withCommon(newAdminHandler(a))
+	return nil
 }
 
 // devClaimer は開発用の Notifier（adapters/notifier/dev）が持つ。
@@ -512,6 +556,10 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	}
 	go func() { a.scheduler.Run(ctx); close(schedDone) }()
 	go func() { a.retention.Run(ctx); close(retDone) }()
+	if a.realms != nil {
+		// 他のインスタンスで作った・変えた realm を、要求が無くても読み直す（ADR 0083）。
+		go a.watchRealms(ctx)
+	}
 
 	a.deps.Logger.Info("iam started", "public", pubL.Addr().String(), "admin", admL.Addr().String(),
 		"realm", a.realm.Slug, "features", a.plan.Active)
@@ -556,16 +604,33 @@ func newHTTPServer(h http.Handler) *http.Server {
 	}
 }
 
-// flowHooks は設定の hooks からフロー フックの Runner を作る（11.8、ADR 0081）。url の無いフックは d.Hooks から取る。
-func flowHooks(cfg config.Config, d Deps, realm string) (*hook.Runner, error) {
-	r := &hook.Runner{Entries: map[string]hook.Entry{}, Realm: realm, Log: d.Logger}
-	// 同じ secret_env を共有するフックがあるので、秘密は名前ごとに一度読み、全部作ってから消す。
-	secrets := map[string]string{}
+// hookSecrets は Webhook のフローフックの署名の秘密を環境変数から一度だけ読み、読んだ環境変数を消す（11.8、ADR 0081）。
+// どの realm の Runner もこれを使う（realm は後から増えるので、環境変数は残せない）。
+func hookSecrets(cfg config.Config) (map[string][]byte, error) {
+	out := map[string][]byte{}
 	defer func() {
-		for env := range secrets {
+		for env := range out {
 			_ = os.Unsetenv(env)
 		}
 	}()
+	for name, h := range cfg.Hooks {
+		if h.URL == "" {
+			continue
+		}
+		if _, ok := out[h.SecretEnv]; !ok {
+			out[h.SecretEnv] = []byte(os.Getenv(h.SecretEnv)) // 同じ secret_env を共有するフックがある
+		}
+		if len(out[h.SecretEnv]) < 32 {
+			return nil, fmt.Errorf("app: hooks.%s: %s must hold a secret of at least 32 bytes", name, h.SecretEnv)
+		}
+	}
+	return out, nil
+}
+
+// flowHooks は設定の hooks からフロー フックの Runner を作る（11.8、ADR 0081）。url の無いフックは d.Hooks から取り、
+// Webhook の秘密は secrets（hookSecrets）から取る。
+func flowHooks(cfg config.Config, d Deps, realm string, secrets map[string][]byte) (*hook.Runner, error) {
+	r := &hook.Runner{Entries: map[string]hook.Entry{}, Realm: realm, Log: d.Logger}
 	for name, h := range cfg.Hooks {
 		e := hook.Entry{Timeout: h.Timeout.D(), FailOpen: h.FailOpen}
 		if h.URL == "" {
@@ -573,15 +638,11 @@ func flowHooks(cfg config.Config, d Deps, realm string) (*hook.Runner, error) {
 				return nil, fmt.Errorf("app: hooks.%s has no url and no Go implementation", name)
 			}
 		} else {
-			secret, ok := secrets[h.SecretEnv]
-			if !ok {
-				secret = os.Getenv(h.SecretEnv)
-				secrets[h.SecretEnv] = secret
-			}
+			secret := secrets[h.SecretEnv]
 			if len(secret) < 32 {
 				return nil, fmt.Errorf("app: hooks.%s: %s must hold a secret of at least 32 bytes", name, h.SecretEnv)
 			}
-			e.Hook = &hook.Webhook{URL: h.URL, Secret: []byte(secret), Clock: d.Clock}
+			e.Hook = &hook.Webhook{URL: h.URL, Secret: secret, Clock: d.Clock}
 		}
 		r.Entries[name] = e
 	}

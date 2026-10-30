@@ -31,6 +31,21 @@ func (q *Queries) AddOutbox(ctx context.Context, arg AddOutboxParams) error {
 	return err
 }
 
+const addRealmHost = `-- name: AddRealmHost :exec
+INSERT INTO authn_realm_hosts (host, realm_id, position) VALUES (?, ?, ?)
+`
+
+type AddRealmHostParams struct {
+	Host     string
+	RealmID  string
+	Position int64
+}
+
+func (q *Queries) AddRealmHost(ctx context.Context, arg AddRealmHostParams) error {
+	_, err := q.db.ExecContext(ctx, addRealmHost, arg.Host, arg.RealmID, arg.Position)
+	return err
+}
+
 const appendAuditEvent = `-- name: AppendAuditEvent :exec
 INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload) VALUES (?, ?, ?, ?, ?)
 `
@@ -97,7 +112,7 @@ func (q *Queries) CreateDataKey(ctx context.Context, arg CreateDataKeyParams) er
 }
 
 const createRealm = `-- name: CreateRealm :exec
-INSERT INTO authn_realms (id, slug, settings, created_at) VALUES (?, ?, ?, ?)
+INSERT INTO authn_realms (id, slug, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
 `
 
 type CreateRealmParams struct {
@@ -105,6 +120,7 @@ type CreateRealmParams struct {
 	Slug      string
 	Settings  []byte
 	CreatedAt string
+	UpdatedAt string
 }
 
 func (q *Queries) CreateRealm(ctx context.Context, arg CreateRealmParams) error {
@@ -113,6 +129,7 @@ func (q *Queries) CreateRealm(ctx context.Context, arg CreateRealmParams) error 
 		arg.Slug,
 		arg.Settings,
 		arg.CreatedAt,
+		arg.UpdatedAt,
 	)
 	return err
 }
@@ -159,6 +176,15 @@ DELETE FROM shared_installed_features WHERE feature = ?
 
 func (q *Queries) DeleteFeature(ctx context.Context, feature string) error {
 	_, err := q.db.ExecContext(ctx, deleteFeature, feature)
+	return err
+}
+
+const deleteRealmHosts = `-- name: DeleteRealmHosts :exec
+DELETE FROM authn_realm_hosts WHERE realm_id = ?
+`
+
+func (q *Queries) DeleteRealmHosts(ctx context.Context, realmID string) error {
+	_, err := q.db.ExecContext(ctx, deleteRealmHosts, realmID)
 	return err
 }
 
@@ -212,7 +238,7 @@ func (q *Queries) GetDataKey(ctx context.Context, userID string) (AuthnUserDataK
 }
 
 const getRealm = `-- name: GetRealm :one
-SELECT id, slug, settings, created_at FROM authn_realms WHERE id = ?
+SELECT id, slug, settings, created_at, updated_at FROM authn_realms WHERE id = ?
 `
 
 func (q *Queries) GetRealm(ctx context.Context, id string) (AuthnRealm, error) {
@@ -223,12 +249,31 @@ func (q *Queries) GetRealm(ctx context.Context, id string) (AuthnRealm, error) {
 		&i.Slug,
 		&i.Settings,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRealmByHost = `-- name: GetRealmByHost :one
+SELECT r.id, r.slug, r.settings, r.created_at, r.updated_at FROM authn_realms r
+JOIN authn_realm_hosts h ON h.realm_id = r.id WHERE h.host = ?
+`
+
+func (q *Queries) GetRealmByHost(ctx context.Context, host string) (AuthnRealm, error) {
+	row := q.db.QueryRowContext(ctx, getRealmByHost, host)
+	var i AuthnRealm
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Settings,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getRealmBySlug = `-- name: GetRealmBySlug :one
-SELECT id, slug, settings, created_at FROM authn_realms WHERE slug = ?
+SELECT id, slug, settings, created_at, updated_at FROM authn_realms WHERE slug = ?
 `
 
 func (q *Queries) GetRealmBySlug(ctx context.Context, slug string) (AuthnRealm, error) {
@@ -239,6 +284,7 @@ func (q *Queries) GetRealmBySlug(ctx context.Context, slug string) (AuthnRealm, 
 		&i.Slug,
 		&i.Settings,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -331,8 +377,67 @@ func (q *Queries) ListFeatures(ctx context.Context) ([]SharedInstalledFeature, e
 	return items, nil
 }
 
+const listHostsOfRealm = `-- name: ListHostsOfRealm :many
+SELECT host FROM authn_realm_hosts WHERE realm_id = ? ORDER BY position
+`
+
+func (q *Queries) ListHostsOfRealm(ctx context.Context, realmID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listHostsOfRealm, realmID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var host string
+		if err := rows.Scan(&host); err != nil {
+			return nil, err
+		}
+		items = append(items, host)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRealmHosts = `-- name: ListRealmHosts :many
+SELECT host, realm_id FROM authn_realm_hosts ORDER BY realm_id, position
+`
+
+type ListRealmHostsRow struct {
+	Host    string
+	RealmID string
+}
+
+func (q *Queries) ListRealmHosts(ctx context.Context) ([]ListRealmHostsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listRealmHosts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRealmHostsRow
+	for rows.Next() {
+		var i ListRealmHostsRow
+		if err := rows.Scan(&i.Host, &i.RealmID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRealms = `-- name: ListRealms :many
-SELECT id, slug, settings, created_at FROM authn_realms ORDER BY id
+SELECT id, slug, settings, created_at, updated_at FROM authn_realms ORDER BY id
 `
 
 func (q *Queries) ListRealms(ctx context.Context) ([]AuthnRealm, error) {
@@ -349,6 +454,7 @@ func (q *Queries) ListRealms(ctx context.Context) ([]AuthnRealm, error) {
 			&i.Slug,
 			&i.Settings,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -499,4 +605,22 @@ DELETE FROM shared_audit_events WHERE seq <= ?
 func (q *Queries) TruncateAuditEvents(ctx context.Context, seq int64) error {
 	_, err := q.db.ExecContext(ctx, truncateAuditEvents, seq)
 	return err
+}
+
+const updateRealm = `-- name: UpdateRealm :execrows
+UPDATE authn_realms SET settings = ?, updated_at = ? WHERE id = ?
+`
+
+type UpdateRealmParams struct {
+	Settings  []byte
+	UpdatedAt string
+	ID        string
+}
+
+func (q *Queries) UpdateRealm(ctx context.Context, arg UpdateRealmParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateRealm, arg.Settings, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

@@ -212,21 +212,28 @@ func TestFlowHooksPreToken(t *testing.T) {
 	}
 }
 
-// 同じ secret_env を共有する Webhook はどれも秘密を読め、作った後は環境変数が消える。
+// 同じ secret_env を共有する Webhook はどれも秘密を読め、読んだ後は環境変数が消え、どの realm の Runner も作れる。
 func TestFlowHooksSharedSecretEnv(t *testing.T) {
 	t.Setenv("IAM_TEST_HOOK_SECRET", strings.Repeat("s", 32))
 	cfg := config.Config{Hooks: map[string]config.Hook{
 		port.HookPreToken:        {URL: "https://hooks.example/token", SecretEnv: "IAM_TEST_HOOK_SECRET"},
 		port.HookPreRegistration: {URL: "https://hooks.example/signup", SecretEnv: "IAM_TEST_HOOK_SECRET"},
 	}}
-	r, err := flowHooks(cfg, Deps{}, "acme")
+	secrets, err := hookSecrets(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.Has(port.HookPreToken) || !r.Has(port.HookPreRegistration) {
-		t.Fatalf("hooks: %+v", r.Entries)
-	}
 	if _, ok := os.LookupEnv("IAM_TEST_HOOK_SECRET"); ok {
 		t.Fatal("secret left in the environment")
+	}
+	// 後から作る realm の Runner も同じ秘密を使える。
+	for _, realm := range []string{"acme", "globex"} {
+		r, err := flowHooks(cfg, Deps{}, realm, secrets)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Has(port.HookPreToken) || !r.Has(port.HookPreRegistration) {
+			t.Fatalf("hooks: %+v", r.Entries)
+		}
 	}
 }

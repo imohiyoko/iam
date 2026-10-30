@@ -23,7 +23,7 @@ func (s publicServer) PasswordLogin(ctx context.Context, req publicapi.PasswordL
 	}
 	c := s.a.clientOf(ctx)
 	in := password.Login{Email: req.Body.Email, Password: req.Body.Password, Client: password.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}}
-	if tok, viaCookie := sessionToken(httpFrom(ctx).r); viaCookie {
+	if tok, viaCookie := s.a.sessionToken(httpFrom(ctx).r); viaCookie {
 		in.ReplaceToken = tok
 	}
 	res, err := s.a.password.Login(ctx, s.a.realm.ID, in)

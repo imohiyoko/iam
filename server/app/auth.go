@@ -37,28 +37,28 @@ func authFrom(ctx context.Context) (auth, bool) {
 }
 
 // sessionToken は Cookie か Bearer のトークンを返す。Bearer を優先する（別ドメインのアプリ）。
-func sessionToken(r *http.Request) (token string, viaCookie bool) {
+func (a *App) sessionToken(r *http.Request) (token string, viaCookie bool) {
 	if h := r.Header.Get("Authorization"); h != "" {
 		if t, ok := strings.CutPrefix(h, "Bearer "); ok {
 			return strings.TrimSpace(t), false
 		}
 		return "", false
 	}
-	if c, err := r.Cookie(sessionCookie); err == nil {
+	if c, err := r.Cookie(a.cookie(sessionCookie)); err == nil {
 		return c.Value, true
 	}
 	return "", false
 }
 
-func sessionCookieFor(token string, expires time.Time, now time.Time) *http.Cookie {
+func (a *App) sessionCookieFor(token string, expires time.Time, now time.Time) *http.Cookie {
 	return &http.Cookie{
-		Name: sessionCookie, Value: token, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Name: a.cookie(sessionCookie), Value: token, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		MaxAge: max(int(expires.Sub(now).Seconds()), 1),
 	}
 }
 
-func clearSessionCookie() *http.Cookie {
-	return &http.Cookie{Name: sessionCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1}
+func (a *App) clearSessionCookie() *http.Cookie {
+	return &http.Cookie{Name: a.cookie(sessionCookie), Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1}
 }
 
 // withSession はセッションを検証し、リクエストの context に載せる。
@@ -66,7 +66,7 @@ func clearSessionCookie() *http.Cookie {
 // 無効なトークンは未ログインとして扱う（理由は返さない。4.9）。ストレージの障害は 503。
 func (a *App) withSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, viaCookie := sessionToken(r)
+		token, viaCookie := a.sessionToken(r)
 		if token == "" {
 			next.ServeHTTP(w, r)
 			return
@@ -80,7 +80,7 @@ func (a *App) withSession(next http.Handler) http.Handler {
 		}
 		if err != nil {
 			if viaCookie {
-				http.SetCookie(w, clearSessionCookie())
+				http.SetCookie(w, a.clearSessionCookie())
 			}
 			next.ServeHTTP(w, r)
 			return
@@ -92,7 +92,7 @@ func (a *App) withSession(next http.Handler) http.Handler {
 		}
 		if viaCookie && v.RotateDue {
 			if is, err := a.sessions.Rotate(ctx, a.realm.ID, v.SessionID, requestID(ctx)); err == nil {
-				http.SetCookie(w, sessionCookieFor(is.Token, is.Session.ExpiresAt, a.deps.Clock.Now()))
+				http.SetCookie(w, a.sessionCookieFor(is.Token, is.Session.ExpiresAt, a.deps.Clock.Now()))
 				v.SessionID, v.RotateDue = is.Session.ID, false
 			}
 		}

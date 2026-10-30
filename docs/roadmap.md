@@ -311,6 +311,16 @@ Group のネスト、Org 階層（M7）。
 - [x] 統合元の個人 Org は残し、統合先を owner にした新しい Org に中身（ロールの付与を除く）を移す
 - [x] 統合元は merged になり、セッションと連携先の認可を失効し、`user.merged` を出す
 - Org 管理ユーザーの統合（Org の許可）、運営者による統合
+
+### 複数 realm（ADR 0083）
+
+**ゴール**：1つのインスタンスで、互いに独立したユーザー集合を実行中に足せる。
+
+- [x] ホスト名か `/realms/{slug}` で realm を決め、realm ごとのサービスの組に渡す。既定の realm は今までどおり root で動く
+- [x] 管理 API で realm を作り・変え、最初の運営者を作れる。他のインスタンスにも反映する
+- [x] realm ごとの設定・issuer・署名鍵・passkey の RP・Cookie。同じメールでも realm ごとに別のユーザー
+- [x] 予約の処理・保持期間の掃除・Back-Channel Logout は全 realm で共有し、出来事の realm で動く
+- realm の削除、realm ごとのセキュリティの階層
 - SCIM、管理画面（design.md 1章では当面やらないとしている。必要になったら検討）
 
 ---

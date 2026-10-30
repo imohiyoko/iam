@@ -131,7 +131,7 @@ func (s publicServer) StartAddEmail(ctx context.Context, req publicapi.StartAddE
 		return nil, err
 	}
 	now := s.a.deps.Clock.Now()
-	setCookie(ctx, &http.Cookie{Name: flowCookie, Value: st.FlowID, Path: "/", Secure: true, HttpOnly: true,
+	setCookie(ctx, &http.Cookie{Name: s.a.cookie(flowCookie), Value: st.FlowID, Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: max(int(st.ExpiresAt.Sub(now)/time.Second), 1)})
 	return publicapi.StartAddEmail200JSONResponse{FlowId: st.FlowID, ExpiresAt: st.ExpiresAt}, nil
 }
@@ -147,13 +147,13 @@ func (s publicServer) VerifyAddEmail(ctx context.Context, req publicapi.VerifyAd
 	}
 	in := emailflow.Verify{FlowID: deref(req.Body.FlowId), Code: deref(req.Body.Code), LinkToken: deref(req.Body.Token), Client: s.a.clientOf(ctx)}
 	if in.FlowID == "" {
-		in.FlowID = cookie(ctx, flowCookie)
+		in.FlowID = cookie(ctx, s.a.cookie(flowCookie))
 	}
 	e, err := s.a.email.VerifyAdd(ctx, s.a.realm.ID, au.PrincipalID, in)
 	if errors.Is(err, errs.AuthenticationFailed) {
 		return fail, nil
 	}
-	setCookie(ctx, &http.Cookie{Name: flowCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	setCookie(ctx, &http.Cookie{Name: s.a.cookie(flowCookie), Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	if code, ok := stateCode(err); ok {
 		return publicapi.VerifyAddEmail409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
 	}
@@ -257,7 +257,7 @@ func (s publicServer) StartLinkIdentity(ctx context.Context, req publicapi.Start
 		return nil, err
 	}
 	now := s.a.deps.Clock.Now()
-	setCookie(ctx, &http.Cookie{Name: oauthCookie, Value: st.FlowID, Path: "/", Secure: true, HttpOnly: true,
+	setCookie(ctx, &http.Cookie{Name: s.a.cookie(oauthCookie), Value: st.FlowID, Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: max(int(st.ExpiresAt.Sub(now)/time.Second), 1)})
 	return publicapi.StartLinkIdentity200JSONResponse{FlowId: st.FlowID, AuthorizationUrl: st.AuthorizationURL, ExpiresAt: st.ExpiresAt}, nil
 }
@@ -275,10 +275,10 @@ func (s publicServer) CompleteLinkIdentity(ctx context.Context, req publicapi.Co
 	in := oauth.Complete{FlowID: deref(req.Body.FlowId), State: req.Body.State, Code: req.Body.Code,
 		Client: oauth.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}}
 	if in.FlowID == "" {
-		in.FlowID = cookie(ctx, oauthCookie)
+		in.FlowID = cookie(ctx, s.a.cookie(oauthCookie))
 	}
 	ident, err := s.a.oauth.CompleteLink(ctx, s.a.realm.ID, au.PrincipalID, in)
-	setCookie(ctx, &http.Cookie{Name: oauthCookie, Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	setCookie(ctx, &http.Cookie{Name: s.a.cookie(oauthCookie), Value: "", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	switch {
 	case errors.Is(err, oauth.ErrIdentityExists):
 		return publicapi.CompleteLinkIdentity409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: "identity_exists"}}, nil
