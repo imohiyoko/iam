@@ -387,8 +387,8 @@ func (q *Queries) CreateServiceAccountToken(ctx context.Context, arg CreateServi
 
 const createSession = `-- name: CreateSession :exec
 INSERT INTO authn_sessions (id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids,
-    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid, risk)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 `
 
 type CreateSessionParams struct {
@@ -411,6 +411,7 @@ type CreateSessionParams struct {
 	RevokeReason      string
 	Restriction       string
 	Sid               string
+	Risk              []byte
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
@@ -434,6 +435,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 		arg.RevokeReason,
 		arg.Restriction,
 		arg.Sid,
+		arg.Risk,
 	)
 	return err
 }
@@ -905,7 +907,7 @@ func (q *Queries) GetConnectionBySlug(ctx context.Context, arg GetConnectionBySl
 }
 
 const getCurrentSessionBySID = `-- name: GetCurrentSessionBySID :one
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid FROM authn_sessions WHERE realm_id = $1 AND sid = $2 ORDER BY created_at DESC, id DESC LIMIT 1
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid, risk FROM authn_sessions WHERE realm_id = $1 AND sid = $2 ORDER BY created_at DESC, id DESC LIMIT 1
 `
 
 type GetCurrentSessionBySIDParams struct {
@@ -936,6 +938,7 @@ func (q *Queries) GetCurrentSessionBySID(ctx context.Context, arg GetCurrentSess
 		&i.RevokeReason,
 		&i.Restriction,
 		&i.Sid,
+		&i.Risk,
 	)
 	return i, err
 }
@@ -1313,7 +1316,7 @@ func (q *Queries) GetServiceAccountToken(ctx context.Context, arg GetServiceAcco
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid FROM authn_sessions WHERE realm_id = $1 AND id = $2
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid, risk FROM authn_sessions WHERE realm_id = $1 AND id = $2
 `
 
 type GetSessionParams struct {
@@ -1344,6 +1347,7 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (AuthnSe
 		&i.RevokeReason,
 		&i.Restriction,
 		&i.Sid,
+		&i.Risk,
 	)
 	return i, err
 }
@@ -1899,7 +1903,7 @@ func (q *Queries) ListServiceAccounts(ctx context.Context, arg ListServiceAccoun
 }
 
 const listSessionsByPrincipal = `-- name: ListSessionsByPrincipal :many
-SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid FROM authn_sessions WHERE realm_id = $1 AND principal_type = $2 AND principal_id = $3 ORDER BY created_at DESC, id DESC
+SELECT id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids, warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid, risk FROM authn_sessions WHERE realm_id = $1 AND principal_type = $2 AND principal_id = $3 ORDER BY created_at DESC, id DESC
 `
 
 type ListSessionsByPrincipalParams struct {
@@ -1937,6 +1941,7 @@ func (q *Queries) ListSessionsByPrincipal(ctx context.Context, arg ListSessionsB
 			&i.RevokeReason,
 			&i.Restriction,
 			&i.Sid,
+			&i.Risk,
 		); err != nil {
 			return nil, err
 		}
@@ -2558,6 +2563,24 @@ type SetPrimaryEmailParams struct {
 func (q *Queries) SetPrimaryEmail(ctx context.Context, arg SetPrimaryEmailParams) error {
 	_, err := q.db.ExecContext(ctx, setPrimaryEmail, arg.ID, arg.RealmID, arg.UserID)
 	return err
+}
+
+const setSessionRisk = `-- name: SetSessionRisk :execrows
+UPDATE authn_sessions SET risk = $1 WHERE realm_id = $2 AND id = $3
+`
+
+type SetSessionRiskParams struct {
+	Risk    []byte
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) SetSessionRisk(ctx context.Context, arg SetSessionRiskParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionRisk, arg.Risk, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setUserDeletion = `-- name: SetUserDeletion :execrows

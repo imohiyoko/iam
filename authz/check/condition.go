@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/risk"
 )
 
 // 条件の言語（ADR 0084）。付与の条件・名前空間の要件・Org の要件に書く。任意のスクリプトは入れず、型付きの木で保存する。
@@ -52,17 +53,8 @@ func (l Level) rank() int {
 	return slices.Index([]Level{LevelLow, LevelMedium, LevelHigh}, l)
 }
 
-// Band はリスクの種類の段階の境界。点数が Medium 未満なら low、High 未満なら medium、それ以上なら high。
-type Band struct {
-	Medium int `json:"medium"`
-	High   int `json:"high"`
-}
-
-// DefaultBand は既定の境界（low < 30 ≦ medium < 70 ≦ high。design.md 2.8）。
-var DefaultBand = Band{Medium: 30, High: 70}
-
-// LevelOf は点数の段階。
-func (b Band) LevelOf(score int) Level {
+// levelOf は点数の段階。点数が境界の Medium 未満なら low、High 未満なら medium、それ以上なら high。
+func levelOf(b risk.Band, score int) Level {
 	switch {
 	case score < b.Medium:
 		return LevelLow
@@ -72,14 +64,14 @@ func (b Band) LevelOf(score int) Level {
 	return LevelHigh
 }
 
-// Bands は種類ごとの境界。無い種類は DefaultBand。
-type Bands map[string]Band
+// Bands は種類ごとの段階の境界（判定する名前空間・Org で決めたもの）。無い種類は risk.DefaultBand。
+type Bands map[string]risk.Band
 
-func (b Bands) of(typ string) Band {
+func (b Bands) of(typ string) risk.Band {
 	if v, ok := b[typ]; ok {
 		return v
 	}
-	return DefaultBand
+	return risk.DefaultBand
 }
 
 // 条件の大きさと値の範囲。
@@ -262,7 +254,7 @@ func (c Condition) leaf(ac *AuthContext, now time.Time, bands Bands) (string, bo
 		return UnmetRiskPrefix + c.RiskBelow.Type, ok && score < c.RiskBelow.Score
 	case c.RiskAtMost != nil:
 		score, ok := riskOf(ac, c.RiskAtMost.Type)
-		return UnmetRiskPrefix + c.RiskAtMost.Type, ok && bands.of(c.RiskAtMost.Type).LevelOf(score).rank() <= c.RiskAtMost.Level.rank()
+		return UnmetRiskPrefix + c.RiskAtMost.Type, ok && levelOf(bands.of(c.RiskAtMost.Type), score).rank() <= c.RiskAtMost.Level.rank()
 	case c.Attested:
 		return UnmetAttested, ac != nil && ac.Attested
 	}

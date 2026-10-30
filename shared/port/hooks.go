@@ -45,6 +45,9 @@ type HookInput struct {
 type HookResult struct {
 	Allow  bool   `json:"allow"`
 	Reason string `json:"reason,omitempty"`
+	// Risk は post_authentication でセッションに保存するリスクの点数（種類 → 0〜100。ADR 0084）。一覧に無い・止めた種類と
+	// 範囲外の値は捨てる。
+	Risk map[string]int `json:"risk,omitempty"`
 	// Claims は pre_token で ID トークンに足すクレーム（予約されたクレームは上書きできない）。
 	Claims map[string]any `json:"claims,omitempty"`
 }

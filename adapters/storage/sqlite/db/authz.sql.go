@@ -742,6 +742,41 @@ func (q *Queries) ListGroupsByOrg(ctx context.Context, arg ListGroupsByOrgParams
 	return items, nil
 }
 
+const listRiskTypes = `-- name: ListRiskTypes :many
+SELECT realm_id, name, enabled, band_medium, band_high, created_at, updated_at FROM authz_risk_types WHERE realm_id = ? ORDER BY name
+`
+
+func (q *Queries) ListRiskTypes(ctx context.Context, realmID string) ([]AuthzRiskType, error) {
+	rows, err := q.db.QueryContext(ctx, listRiskTypes, realmID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthzRiskType
+	for rows.Next() {
+		var i AuthzRiskType
+		if err := rows.Scan(
+			&i.RealmID,
+			&i.Name,
+			&i.Enabled,
+			&i.BandMedium,
+			&i.BandHigh,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRoleBindingsByOrg = `-- name: ListRoleBindingsByOrg :many
 SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id
 `
@@ -937,6 +972,35 @@ func (q *Queries) PurgeNestedGroupMembers(ctx context.Context, lim int64) (int64
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const putRiskType = `-- name: PutRiskType :exec
+INSERT INTO authz_risk_types (realm_id, name, enabled, band_medium, band_high, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (realm_id, name) DO UPDATE SET enabled = excluded.enabled, band_medium = excluded.band_medium, band_high = excluded.band_high,
+    updated_at = excluded.updated_at
+`
+
+type PutRiskTypeParams struct {
+	RealmID    string
+	Name       string
+	Enabled    int64
+	BandMedium int64
+	BandHigh   int64
+	CreatedAt  string
+	UpdatedAt  string
+}
+
+func (q *Queries) PutRiskType(ctx context.Context, arg PutRiskTypeParams) error {
+	_, err := q.db.ExecContext(ctx, putRiskType,
+		arg.RealmID,
+		arg.Name,
+		arg.Enabled,
+		arg.BandMedium,
+		arg.BandHigh,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }
 
 const removeGroupMember = `-- name: RemoveGroupMember :execrows

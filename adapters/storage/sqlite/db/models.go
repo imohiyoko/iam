@@ -191,6 +191,7 @@ type AuthnSession struct {
 	RevokeReason      string
 	Restriction       string
 	Sid               string
+	Risk              []byte
 }
 
 type AuthnSigningKey struct {
@@ -312,6 +313,16 @@ type AuthzGroupMember struct {
 	MemberType string
 	MemberID   string
 	CreatedAt  string
+}
+
+type AuthzRiskType struct {
+	RealmID    string
+	Name       string
+	Enabled    int64
+	BandMedium int64
+	BandHigh   int64
+	CreatedAt  string
+	UpdatedAt  string
 }
 
 type AuthzRole struct {

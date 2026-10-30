@@ -406,3 +406,35 @@ func testNestedGroups(t *testing.T, h Harness) {
 		return nil
 	})
 }
+
+// testRiskTypes は realm のリスクの種類の一覧（ADR 0084）。
+func testRiskTypes(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, other := id.New(id.Realm), id.New(id.Realm)
+	ip := port.RiskType{RealmID: r, Name: "ip", Enabled: false, BandMedium: 30, BandHigh: 70, CreatedAt: T0, UpdatedAt: T0}
+	fraud := port.RiskType{RealmID: r, Name: "payment.fraud", Enabled: true, BandMedium: 20, BandHigh: 50, CreatedAt: T0, UpdatedAt: T0}
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.RiskTypes()
+		for _, x := range []port.RiskType{fraud, ip, {RealmID: other, Name: "ip", Enabled: true, BandMedium: 1, BandHigh: 2, CreatedAt: T0, UpdatedAt: T0}} {
+			if err := repo.Put(ctx, x); err != nil {
+				return err
+			}
+		}
+		// 置き直しは作成時刻を保つ。
+		upd := fraud
+		upd.Enabled, upd.BandMedium, upd.BandHigh, upd.CreatedAt, upd.UpdatedAt = false, 10, 40, T0.Add(time.Hour), T0.Add(time.Hour)
+		if err := repo.Put(ctx, upd); err != nil {
+			return err
+		}
+		got, err := repo.List(ctx, r)
+		want := upd
+		want.CreatedAt = T0
+		if err != nil || !reflect.DeepEqual(got, []port.RiskType{ip, want}) {
+			return fmt.Errorf("riskTypes.List = %+v, %v", got, err)
+		}
+		if got, err := repo.List(ctx, id.New(id.Realm)); err != nil || len(got) != 0 {
+			return fmt.Errorf("riskTypes.List of another realm = %+v, %v", got, err)
+		}
+		return nil
+	})
+}

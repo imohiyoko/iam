@@ -268,7 +268,7 @@ type sessions struct{ q *db.Queries }
 func toSession(r db.AuthnSession) (port.Session, error) {
 	var p times
 	s := port.Session{ID: r.ID, RealmID: r.RealmID, PrincipalType: port.PrincipalType(r.PrincipalType), PrincipalID: r.PrincipalID,
-		ActiveOrgID: r.ActiveOrgID, TokenHash: r.TokenHash, Warnings: r.Warnings, IP: r.Ip, UserAgent: r.UserAgent,
+		ActiveOrgID: r.ActiveOrgID, TokenHash: r.TokenHash, Warnings: r.Warnings, Risk: emptyNil(r.Risk), IP: r.Ip, UserAgent: r.UserAgent,
 		AuthenticatedAt: p.at(r.AuthenticatedAt), CreatedAt: p.at(r.CreatedAt), LastSeenAt: p.at(r.LastSeenAt), ExpiresAt: p.at(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt),
 		RevokeReason: r.RevokeReason, Restriction: port.SessionRestriction(r.Restriction), SID: r.Sid}
 	if p.err != nil {
@@ -293,7 +293,20 @@ func (r sessions) Create(ctx context.Context, s port.Session) error {
 		PrincipalID: s.PrincipalID, ActiveOrgID: s.ActiveOrgID, TokenHash: nonNil(s.TokenHash), AuthMethods: jsonList(s.AuthMethods),
 		AuthCredentialIds: jsonList(s.AuthCredentialIDs), Warnings: nonNil(s.Warnings), Ip: nonNil(s.IP), UserAgent: nonNil(s.UserAgent),
 		AuthenticatedAt: formatTime(s.AuthenticatedAt), CreatedAt: formatTime(s.CreatedAt), LastSeenAt: formatTime(s.LastSeenAt), ExpiresAt: formatTime(s.ExpiresAt),
-		RevokedAt: nullTime(s.RevokedAt), RevokeReason: s.RevokeReason, Restriction: string(s.Restriction), Sid: s.SID}))
+		RevokedAt: nullTime(s.RevokedAt), RevokeReason: s.RevokeReason, Restriction: string(s.Restriction), Sid: s.SID, Risk: nonNil(s.Risk)}))
+}
+
+// emptyNil は空のバイト列を nil にする（列の既定値の空を「無し」として返す）。
+func emptyNil(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
+}
+
+func (r sessions) SetRisk(ctx context.Context, realmID, id string, risk []byte) error {
+	n, err := r.q.SetSessionRisk(ctx, db.SetSessionRiskParams{Risk: nonNil(risk), RealmID: realmID, ID: id})
+	return affected(n, err, "session")
 }
 
 func (r sessions) Get(ctx context.Context, realmID, id string) (port.Session, error) {

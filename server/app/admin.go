@@ -29,6 +29,8 @@ type adminPrincipal struct {
 	Actor audit.Actor
 	// AuthenticatedAt は運営者のセッションの認証の時刻（サービスアカウントでは空）。
 	AuthenticatedAt time.Time
+	// AccessToken はサービスアカウントがアクセストークンで呼んだか（API キーでは偽）。
+	AccessToken bool
 }
 
 // withAdminAuth は管理 API の認証。Bearer のトークンが運営者のセッションならそのユーザー、
@@ -69,7 +71,8 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			p = adminPrincipal{Type: port.PrincipalServiceAccount, ID: sa.ID, Actor: audit.Actor{Type: "service_account", ID: sa.ID}}
+			p = adminPrincipal{Type: port.PrincipalServiceAccount, ID: sa.ID, Actor: audit.Actor{Type: "service_account", ID: sa.ID},
+				AccessToken: serviceaccount.IsAccessToken(key)}
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), adminKey{}, p)))
 	})

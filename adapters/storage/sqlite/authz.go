@@ -275,3 +275,25 @@ func (r groups) PurgeNested(ctx context.Context, limit int) (int, error) {
 	m, err := r.q.PurgeNestedGroupMembers(ctx, int64(limit)-c)
 	return int(c + m), mapErr(err)
 }
+
+// ---------------------------------------------------------------------------
+// リスクの種類（ADR 0084）
+
+type riskTypes struct{ q *db.Queries }
+
+func toRiskType(r db.AuthzRiskType) (port.RiskType, error) {
+	var p times
+	t := port.RiskType{RealmID: r.RealmID, Name: r.Name, Enabled: r.Enabled != 0, BandMedium: int(r.BandMedium), BandHigh: int(r.BandHigh),
+		CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+	return t, p.err
+}
+
+func (r riskTypes) List(ctx context.Context, realmID string) ([]port.RiskType, error) {
+	rs, err := r.q.ListRiskTypes(ctx, realmID)
+	return rows(rs, err, toRiskType)
+}
+
+func (r riskTypes) Put(ctx context.Context, t port.RiskType) error {
+	return mapErr(r.q.PutRiskType(ctx, db.PutRiskTypeParams{RealmID: t.RealmID, Name: t.Name, Enabled: boolInt(t.Enabled), BandMedium: int64(t.BandMedium),
+		BandHigh: int64(t.BandHigh), CreatedAt: formatTime(t.CreatedAt), UpdatedAt: formatTime(t.UpdatedAt)}))
+}

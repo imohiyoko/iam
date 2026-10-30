@@ -134,3 +134,11 @@ DELETE FROM authz_group_closure WHERE (realm_id, group_id, ancestor_id) IN (
 -- name: PurgeNestedGroupMembers :execrows
 DELETE FROM authz_group_members WHERE member_type = 'group' AND (group_id, member_id) IN (
     SELECT m.group_id, m.member_id FROM authz_group_members m WHERE m.member_type = 'group' LIMIT sqlc.arg(lim)::bigint);
+
+-- name: ListRiskTypes :many
+SELECT * FROM authz_risk_types WHERE realm_id = $1 ORDER BY name;
+
+-- name: PutRiskType :exec
+INSERT INTO authz_risk_types (realm_id, name, enabled, band_medium, band_high, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (realm_id, name) DO UPDATE SET enabled = excluded.enabled, band_medium = excluded.band_medium, band_high = excluded.band_high,
+    updated_at = excluded.updated_at;

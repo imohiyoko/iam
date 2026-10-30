@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/errs"
@@ -424,4 +425,26 @@ func (r groups) PurgeNested(_ context.Context, limit int) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+type riskTypes struct{ t *tx }
+
+func (r riskTypes) List(_ context.Context, realmID string) ([]port.RiskType, error) {
+	var out []port.RiskType
+	for _, t := range r.t.s.riskTypes {
+		if t.RealmID == realmID {
+			out = append(out, t)
+		}
+	}
+	slices.SortFunc(out, func(a, b port.RiskType) int { return strings.Compare(a.Name, b.Name) })
+	return out, nil
+}
+
+func (r riskTypes) Put(_ context.Context, t port.RiskType) error {
+	k := attrKey(t.RealmID, t.Name)
+	if old, ok := r.t.s.riskTypes[k]; ok {
+		t.CreatedAt = old.CreatedAt
+	}
+	setKey(r.t, r.t.s.riskTypes, k, t)
+	return nil
 }
