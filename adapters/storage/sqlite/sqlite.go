@@ -216,7 +216,24 @@ func (t *tx) OIDCTokens() port.OIDCTokenRepo           { return oidcTokens{t.q} 
 type realms struct{ q *db.Queries }
 
 func (r realms) Create(ctx context.Context, v port.Realm) error {
-	return mapErr(r.q.CreateRealm(ctx, db.CreateRealmParams{ID: v.ID, Slug: v.Slug, Settings: nonNil(v.Settings), CreatedAt: formatTime(v.CreatedAt)}))
+	updated := v.UpdatedAt
+	if updated.IsZero() {
+		updated = v.CreatedAt
+	}
+	if err := r.q.CreateRealm(ctx, db.CreateRealmParams{ID: v.ID, Slug: v.Slug, Settings: nonNil(v.Settings), CreatedAt: formatTime(v.CreatedAt),
+		UpdatedAt: formatTime(updated)}); err != nil {
+		return mapErr(err)
+	}
+	return r.addHosts(ctx, v.ID, v.Hosts)
+}
+
+func (r realms) addHosts(ctx context.Context, realmID string, hosts []string) error {
+	for i, h := range hosts {
+		if err := r.q.AddRealmHost(ctx, db.AddRealmHostParams{Host: h, RealmID: realmID, Position: int64(i)}); err != nil {
+			return mapErr(err)
+		}
+	}
+	return nil
 }
 
 func (r realms) Get(ctx context.Context, id string) (port.Realm, error) {
@@ -224,7 +241,7 @@ func (r realms) Get(ctx context.Context, id string) (port.Realm, error) {
 	if err != nil {
 		return port.Realm{}, mapErr(err)
 	}
-	return toRealm(row)
+	return r.withHosts(ctx, row)
 }
 
 func (r realms) GetBySlug(ctx context.Context, slug string) (port.Realm, error) {
@@ -232,7 +249,30 @@ func (r realms) GetBySlug(ctx context.Context, slug string) (port.Realm, error) 
 	if err != nil {
 		return port.Realm{}, mapErr(err)
 	}
-	return toRealm(row)
+	return r.withHosts(ctx, row)
+}
+
+func (r realms) GetByHost(ctx context.Context, host string) (port.Realm, error) {
+	row, err := r.q.GetRealmByHost(ctx, host)
+	if err != nil {
+		return port.Realm{}, mapErr(err)
+	}
+	return r.withHosts(ctx, row)
+}
+
+func (r realms) withHosts(ctx context.Context, row db.AuthnRealm) (port.Realm, error) {
+	v, err := toRealm(row)
+	if err != nil {
+		return port.Realm{}, err
+	}
+	hosts, err := r.q.ListHostsOfRealm(ctx, v.ID)
+	if err != nil {
+		return port.Realm{}, mapErr(err)
+	}
+	if len(hosts) > 0 {
+		v.Hosts = hosts
+	}
+	return v, nil
 }
 
 func (r realms) List(ctx context.Context) ([]port.Realm, error) {
@@ -240,20 +280,53 @@ func (r realms) List(ctx context.Context) ([]port.Realm, error) {
 	if err != nil {
 		return nil, mapErr(err)
 	}
+	hosts, err := r.q.ListRealmHosts(ctx)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	byRealm := map[string][]string{}
+	for _, h := range hosts {
+		byRealm[h.RealmID] = append(byRealm[h.RealmID], h.Host)
+	}
 	out := make([]port.Realm, 0, len(rows))
 	for _, row := range rows {
 		v, err := toRealm(row)
 		if err != nil {
 			return nil, err
 		}
+		v.Hosts = byRealm[v.ID]
 		out = append(out, v)
 	}
 	return out, nil
 }
 
+func (r realms) Update(ctx context.Context, v port.Realm) error {
+	n, err := r.q.UpdateRealm(ctx, db.UpdateRealmParams{Settings: nonNil(v.Settings), UpdatedAt: formatTime(v.UpdatedAt), ID: v.ID})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return errs.New(errs.KindNotFound, "realm %s", v.ID)
+	}
+	if err := r.q.DeleteRealmHosts(ctx, v.ID); err != nil {
+		return mapErr(err)
+	}
+	return r.addHosts(ctx, v.ID, v.Hosts)
+}
+
+// toRealm は行を realm にする。更新時刻の無い行（複数 realm の前に作った realm）は作成時刻を使う。
 func toRealm(row db.AuthnRealm) (port.Realm, error) {
 	t, err := parseTime(row.CreatedAt)
-	return port.Realm{ID: row.ID, Slug: row.Slug, Settings: row.Settings, CreatedAt: t}, err
+	if err != nil {
+		return port.Realm{}, err
+	}
+	u := t
+	if row.UpdatedAt != "" {
+		if u, err = parseTime(row.UpdatedAt); err != nil {
+			return port.Realm{}, err
+		}
+	}
+	return port.Realm{ID: row.ID, Slug: row.Slug, Settings: row.Settings, CreatedAt: t, UpdatedAt: u}, nil
 }
 
 // ---------------------------------------------------------------------------

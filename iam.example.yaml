@@ -47,6 +47,9 @@ notifier:
 
 # features: [org, warnings]  # 省略すると各フィーチャーの既定に従う
 
+# realm は既定の realm（root で動く）。フィーチャー multi_realm を有効にすると、他の realm を管理 API（/v1/admin/realms）で
+# 実行中に作れる（ADR 0083）。timezone・verified_via・org_creation・*_deletion_grace・quota_count・email_storage は
+# realm ごとに変えられ、ここの値が新しい realm の既定値になる。
 realm:
   slug: default
   timezone: UTC

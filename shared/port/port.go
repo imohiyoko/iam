@@ -70,18 +70,24 @@ type Tx interface {
 
 // Realm はユーザー集合の単位（design.md 3.1）。
 type Realm struct {
-	ID        string
-	Slug      string
-	Settings  []byte // JSON。タイムゾーン、寿命、メールの保持モードなど
+	ID       string
+	Slug     string
+	Settings []byte // JSON。タイムゾーン、寿命、メールの保持モードなど
+	// Hosts はこの realm を指すホスト名（複数 realm。design.md 11.1、ADR 0083）。小文字で、realm をまたいで重複しない。
+	Hosts     []string
 	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // RealmRepo は realms の Repository。
 type RealmRepo interface {
-	Create(ctx context.Context, r Realm) error // slug が重複すれば errs.Conflict
+	Create(ctx context.Context, r Realm) error // slug かホスト名が重複すれば errs.Conflict
 	Get(ctx context.Context, id string) (Realm, error)
 	GetBySlug(ctx context.Context, slug string) (Realm, error)
+	GetByHost(ctx context.Context, host string) (Realm, error)
 	List(ctx context.Context) ([]Realm, error)
+	// Update は設定とホスト名（置き換え）と更新時刻を書く。ホスト名が他の realm と重複すれば errs.Conflict。
+	Update(ctx context.Context, r Realm) error
 }
 
 // FeatureState はフィーチャー台帳の状態（design.md 11.12）。

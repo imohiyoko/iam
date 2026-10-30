@@ -69,7 +69,7 @@ func (s publicServer) Logout(ctx context.Context, _ publicapi.LogoutRequestObjec
 			return nil, err
 		}
 	}
-	setCookie(ctx, clearSessionCookie())
+	setCookie(ctx, s.a.clearSessionCookie())
 	return publicapi.Logout204Response{}, nil
 }
 

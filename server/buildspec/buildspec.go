@@ -25,6 +25,7 @@ import (
 	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/plugin"
+	"github.com/imohiyoko/iam/shared/realm"
 )
 
 const module = "github.com/imohiyoko/iam"
@@ -46,6 +47,7 @@ var featureCatalog = map[string]struct {
 	feature.CustomAttributes: {attribute.Feature, module + "/features/customattributes"},
 	feature.FlowHooks:        {hook.Feature, module + "/features/flowhooks"},
 	feature.AccountMerge:     {merge.Feature, module + "/features/accountmerge"},
+	feature.MultiRealm:       {realm.Feature, module + "/features/multirealm"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

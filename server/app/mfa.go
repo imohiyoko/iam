@@ -66,7 +66,7 @@ func (s publicServer) loginResult(ctx context.Context, is session.Issued, userID
 		out.Token = &is.Token
 	}
 	// return_token でも Cookie は差し替える。送られてきた Cookie のセッションは入れ替えで失効しているため。
-	setCookie(ctx, sessionCookieFor(is.Token, is.Session.ExpiresAt, s.a.deps.Clock.Now()))
+	setCookie(ctx, s.a.sessionCookieFor(is.Token, is.Session.ExpiresAt, s.a.deps.Clock.Now()))
 	return out
 }
 
@@ -121,7 +121,7 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 			if err != nil {
 				return passkey.ErrAuthFailed
 			}
-			p, err := s.a.passkeys.Verify(ctx, tx, s.a.realm.ID, au.PrincipalID, passkeyFlowID(ctx, req.Body.FlowId), resp)
+			p, err := s.a.passkeys.Verify(ctx, tx, s.a.realm.ID, au.PrincipalID, s.passkeyFlowID(ctx, req.Body.FlowId), resp)
 			if err != nil {
 				return err
 			}
@@ -135,7 +135,7 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 	})
 	if usePasskey {
 		// 失敗でもフローは使い終わったので Cookie を消す。
-		setPasskeyCookie(ctx, "", -1)
+		s.setPasskeyCookie(ctx, "", -1)
 	}
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.VerifySecondFactor429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil

@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>{{.T.Title}}</title>
-<link rel="stylesheet" href="/login/assets/login.css">
-<script src="/login/assets/login.js" defer></script>
+<link rel="stylesheet" href="{{.Base}}/login/assets/login.css">
+<script src="{{.Base}}/login/assets/login.js" defer></script>
 </head>
 <body>
-<main id="app" data-page="{{.Page}}" data-return-to="{{.ReturnTo}}">
+<main id="app" data-page="{{.Page}}" data-return-to="{{.ReturnTo}}" data-base="{{.Base}}">
   <h1>{{.T.Title}}</h1>
   <p id="message" role="status" aria-live="polite"></p>
 

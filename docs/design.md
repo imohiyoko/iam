@@ -698,6 +698,17 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 
 互いに独立したユーザー集合を1インスタンスで持つ。realm はホスト名かパス（`/realms/{slug}/…`）で決める。
 
+実装（ADR 0083）：
+
+- フィーチャー `multi_realm`。1つの App のまま、入口でホスト名かパスから realm を決め、realm ごとのサービスの組（設定・issuer・
+  passkey の RP・Cookie の名前）に渡す。どちらにも当たらなければ既定の realm（設定ファイルの `realm`。root で動く）
+- realm は既定の realm の管理 API の `/v1/admin/realms`（権限 `realms:manage`）で実行中に作り・変える。最初の運営者は
+  `…/operators` か `iam operator create -realm <slug>` で作る
+- realm ごとの設定（タイムゾーン・`verified_via`・`org_creation`・削除の猶予・`email_storage`・`quota_count`）は realm に置き、
+  設定ファイルの値を既定にする。接続・キャッシュ・outbox の送出・予約の処理・保持期間の掃除は全 realm で共有する
+- ホスト名で指す realm は issuer と passkey の RP がそのホスト名。パスで指す realm は issuer が `<public_url>/realms/{slug}` で、
+  Cookie の名前に `.{slug}` を付ける
+
 ### 11.2 サービスアカウント
 
 Org に属する機械の主体。ロール付与・Group 所属はユーザーと同じ principal として扱う。認証は client credentials（`client_secret` / `private_key_jwt`。鍵は ES256 / EdDSA / ML-DSA）と API キー。
