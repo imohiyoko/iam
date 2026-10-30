@@ -9849,6 +9849,20 @@ func (response UpdateUser404JSONResponse) VisitUpdateUserResponse(w http.Respons
 	return err
 }
 
+type UpdateUser409JSONResponse Error
+
+func (response UpdateUser409JSONResponse) VisitUpdateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetUserAttributesRequestObject struct {
 	Id string `json:"id"`
 }
@@ -10390,6 +10404,20 @@ func (response SuspendUser404JSONResponse) VisitSuspendUserResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SuspendUser409JSONResponse Error
+
+func (response SuspendUser409JSONResponse) VisitSuspendUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }

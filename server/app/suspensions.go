@@ -152,6 +152,8 @@ func outcomeOf(d *denial, err error) (outcome, bool, error) {
 		return failed(http.StatusBadRequest, errCode(err)), false, nil
 	case errors.Is(err, errs.PermissionDenied):
 		return failed(http.StatusForbidden, errCodeOr(err, errs.CodePermissionDenied)), false, nil
+	case errors.Is(err, errOutranked):
+		return failed(http.StatusForbidden, errs.CodePermissionDenied), false, nil
 	case err != nil:
 		return outcome{}, false, err
 	}
@@ -164,6 +166,15 @@ func (s adminServer) orgsOff(needOrg bool) (outcome, bool) {
 		return failed(http.StatusNotFound, "org_disabled"), true
 	}
 	return outcome{}, false
+}
+
+// outranksUser は、対象がユーザーなら、呼び出し側が対象のロールの権限をすべて持つかを確かめる（上位のロールの運営者を
+// 下位の運営者が止めない。ADR 0053）。Membership・Org・サービスアカウントは見ない。
+func (s adminServer) outranksUser(ctx context.Context, tx port.Tx, p adminPrincipal, sub subject) error {
+	if sub.target.Type != port.SuspensionTargetUser {
+		return nil
+	}
+	return s.a.outranks(ctx, tx, p, sub.userID)
 }
 
 // suspend は運営者による停止（4.7）。成功なら 201（同じ external_ref の停止があれば 200）。
@@ -188,6 +199,9 @@ func (s adminServer) suspend(ctx context.Context, body *adminapi.SuspendRequest,
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
 		if sub, err = resolve(ctx, tx); err != nil {
+			return err
+		}
+		if err := s.outranksUser(ctx, tx, p, sub); err != nil {
 			return err
 		}
 		var sp port.Suspension
@@ -259,6 +273,8 @@ func (s adminServer) SuspendUser(ctx context.Context, req adminapi.SuspendUserRe
 		return adminapi.SuspendUser403JSONResponse(o.body), nil
 	case o.status == http.StatusNotFound:
 		return adminapi.SuspendUser404JSONResponse(o.body), nil
+	case o.status == http.StatusConflict:
+		return adminapi.SuspendUser409JSONResponse(o.body), nil
 	}
 	return nil, errUnexpected(o)
 }
@@ -409,6 +425,9 @@ func (s adminServer) LiftSuspension(ctx context.Context, req adminapi.LiftSuspen
 		if err != nil {
 			return err
 		}
+		if err := s.outranksUser(ctx, tx, p, sub); err != nil {
+			return err
+		}
 		if cur, err = s.a.accounts.LiftSuspension(ctx, tx, s.a.realm.ID, cur, req.Body.Reason, p.Actor, requestID(ctx)); err != nil {
 			return err
 		}
@@ -418,6 +437,8 @@ func (s adminServer) LiftSuspension(ctx context.Context, req adminapi.LiftSuspen
 	switch {
 	case errors.Is(err, errs.NotFound):
 		return adminapi.LiftSuspension404JSONResponse(adminError("not_found", "")), nil
+	case errors.Is(err, errOutranked):
+		return adminapi.LiftSuspension403JSONResponse(adminError(errs.CodePermissionDenied, "")), nil
 	case errors.Is(err, errs.Invalid):
 		return adminapi.LiftSuspension400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError(errCode(err), ""))}, nil
 	case err != nil:
@@ -447,6 +468,9 @@ func (s adminServer) UpdateUser(ctx context.Context, req adminapi.UpdateUserRequ
 		if u, err = tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id); err != nil {
 			return err
 		}
+		if err := s.a.outranks(ctx, tx, p, u.ID); err != nil {
+			return err
+		}
 		if u, err = s.a.accounts.SetValidity(ctx, tx, s.a.realm.ID, u, req.Body.ValidFrom, req.Body.ValidUntil, p.Actor, requestID(ctx)); err != nil {
 			return err
 		}
@@ -458,6 +482,10 @@ func (s adminServer) UpdateUser(ctx context.Context, req adminapi.UpdateUserRequ
 	switch {
 	case errors.Is(err, errs.NotFound):
 		return adminapi.UpdateUser404JSONResponse(adminError("not_found", "")), nil
+	case errors.Is(err, errOutranked):
+		return adminapi.UpdateUser403JSONResponse(adminError(errs.CodePermissionDenied, "")), nil
+	case errors.Is(err, account.ErrLastRealmOwner):
+		return adminapi.UpdateUser409JSONResponse(adminError(errCode(err), "")), nil
 	case errors.Is(err, errs.Invalid):
 		return adminapi.UpdateUser400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError(errCode(err), ""))}, nil
 	case err != nil:
