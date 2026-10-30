@@ -1,6 +1,6 @@
 -- name: CreateRoleBinding :exec
-INSERT INTO authz_role_bindings (id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authz_role_bindings (id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at, condition)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetRoleBindingByPublicID :one
 SELECT * FROM authz_role_bindings WHERE realm_id = ? AND public_id = ?;
@@ -18,7 +18,7 @@ SELECT * FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY creat
 SELECT * FROM authz_role_bindings WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id;
 
 -- name: ListEffectiveRoleBindings :many
-SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at,
+SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at, b.condition,
        COALESCE(g.org_id, '') AS group_org_id, r.public_id AS custom_public_id, r.org_id AS custom_org_id, r.name AS custom_name,
        r.permissions AS custom_permissions, r.created_at AS custom_created_at, r.updated_at AS custom_updated_at
 FROM authz_role_bindings b
@@ -32,7 +32,7 @@ WHERE b.realm_id = @realm_id AND b.id IN (
 ORDER BY b.created_at, b.id;
 
 -- name: ListEffectiveRoleBindingsNested :many
-SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at,
+SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at, b.condition,
        COALESCE(g.org_id, '') AS group_org_id, r.public_id AS custom_public_id, r.org_id AS custom_org_id, r.name AS custom_name,
        r.permissions AS custom_permissions, r.created_at AS custom_created_at, r.updated_at AS custom_updated_at
 FROM authz_role_bindings b

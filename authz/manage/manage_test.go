@@ -135,7 +135,7 @@ func TestRealmRolesAndEscalation(t *testing.T) {
 	var b port.RoleBinding
 	if err := e.run(func(ctx context.Context, tx port.Tx) error {
 		var err error
-		b, err = e.s.Bind(ctx, tx, e.realm(), actor("owner"), r.PublicID, target("admin"), check.Resource{})
+		b, err = e.s.Bind(ctx, tx, e.realm(), actor("owner"), r.PublicID, target("admin"), check.Resource{}, nil)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ func TestRealmRolesAndEscalation(t *testing.T) {
 	// 組み込みの Org・システムのロールは付与できない。
 	for _, ref := range []string{role.OrgOwner, role.NotificationDelivery, "rol_none"} {
 		err = e.run(func(ctx context.Context, tx port.Tx) error {
-			_, err := e.s.Bind(ctx, tx, e.realm(), actor("owner"), ref, target("admin"), check.Resource{})
+			_, err := e.s.Bind(ctx, tx, e.realm(), actor("owner"), ref, target("admin"), check.Resource{}, nil)
 			return err
 		})
 		wantCode(t, err, "unknown_role")
@@ -251,31 +251,31 @@ func TestOrgScope(t *testing.T) {
 	}
 	// 所属の無い主体には付与できない。member は管理できない。別の Org のオーナーも。
 	err = e.run(func(ctx context.Context, tx port.Tx) error {
-		_, err := e.s.Bind(ctx, tx, sc, actor("alice"), inviter.PublicID, target("carol"), check.Resource{})
+		_, err := e.s.Bind(ctx, tx, sc, actor("alice"), inviter.PublicID, target("carol"), check.Resource{}, nil)
 		return err
 	})
 	wantCode(t, err, "not_member")
 	for _, who := range []string{"bob", "carol"} {
 		err = e.run(func(ctx context.Context, tx port.Tx) error {
-			_, err := e.s.Bind(ctx, tx, sc, actor(who), inviter.PublicID, target("bob"), check.Resource{})
+			_, err := e.s.Bind(ctx, tx, sc, actor(who), inviter.PublicID, target("bob"), check.Resource{}, nil)
 			return err
 		})
 		wantCode(t, err, errs.CodePermissionDenied)
 	}
 	// 運営者ロールは Org の範囲で付与できない。別の Org のロールも。
 	err = e.run(func(ctx context.Context, tx port.Tx) error {
-		_, err := e.s.Bind(ctx, tx, sc, actor("alice"), role.RealmAdmin, target("bob"), check.Resource{})
+		_, err := e.s.Bind(ctx, tx, sc, actor("alice"), role.RealmAdmin, target("bob"), check.Resource{}, nil)
 		return err
 	})
 	wantCode(t, err, "unknown_role")
 	err = e.run(func(ctx context.Context, tx port.Tx) error {
-		_, err := e.s.Bind(ctx, tx, e.org("o2"), actor("carol"), inviter.PublicID, target("carol"), check.Resource{})
+		_, err := e.s.Bind(ctx, tx, e.org("o2"), actor("carol"), inviter.PublicID, target("carol"), check.Resource{}, nil)
 		return err
 	})
 	wantCode(t, err, "unknown_role")
 
 	if err := e.run(func(ctx context.Context, tx port.Tx) error {
-		_, err := e.s.Bind(ctx, tx, sc, actor("alice"), inviter.PublicID, target("bob"), check.Resource{})
+		_, err := e.s.Bind(ctx, tx, sc, actor("alice"), inviter.PublicID, target("bob"), check.Resource{}, nil)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -303,7 +303,7 @@ func TestGroups(t *testing.T) {
 	}
 	gp := manage.Target{Principal: check.Principal{Type: port.PrincipalGroup, ID: g.ID}, PublicID: g.PublicID}
 	if err := e.run(func(ctx context.Context, tx port.Tx) error {
-		_, err := e.s.Bind(ctx, tx, sc, actor("alice"), role.RealmAdmin, gp, check.Resource{})
+		_, err := e.s.Bind(ctx, tx, sc, actor("alice"), role.RealmAdmin, gp, check.Resource{}, nil)
 		return err
 	}); err == nil {
 		t.Fatal("operator role bound to org group")
@@ -334,7 +334,7 @@ func TestGroups(t *testing.T) {
 			return err
 		}
 		_, err = e.s.Bind(ctx, tx, e.realm(), actor("owner"), role.RealmOwner,
-			manage.Target{Principal: check.Principal{Type: port.PrincipalGroup, ID: rg.ID}, PublicID: rg.PublicID}, check.Resource{})
+			manage.Target{Principal: check.Principal{Type: port.PrincipalGroup, ID: rg.ID}, PublicID: rg.PublicID}, check.Resource{}, nil)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -346,7 +346,7 @@ func TestGroups(t *testing.T) {
 			return err
 		}
 		_, err = e.s.Bind(ctx, tx, sc, actor("alice"), inviter.PublicID,
-			manage.Target{Principal: check.Principal{Type: port.PrincipalGroup, ID: rg.ID}, PublicID: rg.PublicID}, check.Resource{})
+			manage.Target{Principal: check.Principal{Type: port.PrincipalGroup, ID: rg.ID}, PublicID: rg.PublicID}, check.Resource{}, nil)
 		return err
 	})
 	wantCode(t, err, "invalid_principal")
@@ -413,7 +413,7 @@ func TestNestedGroups(t *testing.T) {
 			}
 			gs[n] = g
 		}
-		_, err := e.s.Bind(ctx, tx, sc, actor("owner"), role.RealmOwner, asTarget(gs["owners"]), check.Resource{})
+		_, err := e.s.Bind(ctx, tx, sc, actor("owner"), role.RealmOwner, asTarget(gs["owners"]), check.Resource{}, nil)
 		return err
 	})
 	// a ⊃ b ⊃ d、a ⊃ c ⊃ d、b ⊃ c（d まで最も長い経路は a→b→c→d の 3）。

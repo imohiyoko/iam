@@ -43,6 +43,7 @@ func testRoleBindings(t *testing.T, h Harness) {
 		onResource := inOrg
 		onResource.ID, onResource.PublicID, onResource.ResourceType, onResource.ResourceID = id.New(id.RoleBinding), id.NewExternal(id.RoleBinding), "project", "p1"
 		onResource.CreatedAt = T0.Add(2 * time.Minute)
+		onResource.Condition = []byte(`{"amr_has":["hwk"]}`)
 		for _, x := range []port.RoleBinding{inOrg, onResource} {
 			if err := repo.Create(ctx, x); err != nil {
 				return err
@@ -239,6 +240,7 @@ func testEffectiveBindings(t *testing.T, h Harness) {
 	og := port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r, OrgID: org, Name: "team", CreatedAt: T0, UpdatedAt: T0}
 	rg := port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r, Name: "all", CreatedAt: T0, UpdatedAt: T0}
 	direct := newBinding(r, "realm:support", port.PrincipalUser, u, "", T0)
+	direct.Condition = []byte(`{"factors_at_least":2}`)
 	viaOrg := newBinding(r, custom.ID, port.PrincipalGroup, og.ID, org, T0.Add(time.Second))
 	viaRealm := newBinding(r, "gone-role", port.PrincipalGroup, rg.ID, "", T0.Add(2*time.Second))
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {

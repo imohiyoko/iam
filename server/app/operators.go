@@ -290,7 +290,7 @@ func (a *App) outranksPrincipal(ctx context.Context, tx port.Tx, p adminPrincipa
 		}
 		for _, perm := range g.Permissions {
 			ok, err := a.authz.CheckTx(ctx, tx, a.realm.ID, check.Request{Principal: caller, Action: perm, OrgID: orgID,
-				Resource: check.Resource{Type: g.ResourceType, ID: g.ResourceID}})
+				Resource: check.Resource{Type: g.ResourceType, ID: g.ResourceID}, Context: p.Context})
 			if err != nil {
 				return err
 			}
@@ -299,7 +299,7 @@ func (a *App) outranksPrincipal(ctx context.Context, tx port.Tx, p adminPrincipa
 			}
 		}
 	}
-	ok, err := a.authz.Holds(ctx, tx, a.realm.ID, caller, orgID, need)
+	ok, err := a.authz.Holds(ctx, tx, a.realm.ID, caller, orgID, need, p.Context)
 	if err != nil {
 		return err
 	}

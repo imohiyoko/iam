@@ -198,7 +198,8 @@ func (a *App) bindingOut(ctx context.Context, tx port.Tx, b port.RoleBinding) (p
 	if err != nil {
 		return publicapi.RoleBinding{}, err
 	}
-	out := publicapi.RoleBinding{Id: b.PublicID, Role: name, PrincipalType: string(b.PrincipalType), PrincipalId: pid, CreatedAt: b.CreatedAt}
+	out := publicapi.RoleBinding{Id: b.PublicID, Role: name, PrincipalType: string(b.PrincipalType), PrincipalId: pid, CreatedAt: b.CreatedAt,
+		Condition: conditionOut(b.Condition)}
 	if b.ResourceType != "" {
 		out.ResourceType, out.ResourceId = &b.ResourceType, &b.ResourceID
 	}
@@ -233,7 +234,11 @@ func (a *App) createBinding(ctx context.Context, tx port.Tx, c authzCall, in pub
 	if in.ResourceId != nil {
 		res.ID = *in.ResourceId
 	}
-	b, err := a.manage.Bind(ctx, tx, c.sc, c.ac, in.Role, t, res)
+	cond, err := conditionIn(in.Condition)
+	if err != nil {
+		return publicapi.RoleBinding{}, err
+	}
+	b, err := a.manage.Bind(ctx, tx, c.sc, c.ac, in.Role, t, res, cond)
 	if err != nil {
 		return publicapi.RoleBinding{}, conflictAs(err, errBindingExists)
 	}
@@ -380,7 +385,8 @@ func (s publicServer) orgAuthz(ctx context.Context, orgPublicID, perm string, no
 		}
 		return fn(ctx, tx, authzCall{
 			sc: manage.Scope{RealmID: s.a.realm.ID, OrgID: o.ID, OrgPublicID: o.PublicID},
-			ac: manage.Actor{Principal: check.Principal{Type: port.PrincipalUser, ID: au.PrincipalID}, Audit: au.Actor(), RequestID: requestID(ctx)},
+			ac: manage.Actor{Principal: check.Principal{Type: port.PrincipalUser, ID: au.PrincipalID}, Audit: au.Actor(), RequestID: requestID(ctx),
+				Context: sessionContext(au.Validated)},
 		})
 	})
 	if code, ok := stateCode(err); ok {
@@ -411,7 +417,7 @@ func (s adminServer) adminAuthz(ctx context.Context, perm string, noBody bool, f
 	err = s.a.authzTx(ctx, func(ctx context.Context, tx port.Tx) error {
 		return fn(ctx, tx, authzCall{
 			sc: manage.Scope{RealmID: s.a.realm.ID},
-			ac: manage.Actor{Principal: check.Principal{Type: p.Type, ID: p.ID}, Audit: p.Actor, RequestID: requestID(ctx)},
+			ac: manage.Actor{Principal: check.Principal{Type: p.Type, ID: p.ID}, Audit: p.Actor, RequestID: requestID(ctx), Context: p.Context},
 		})
 	})
 	if o, ok, err := outcomeOf(nil, err); !ok {

@@ -2,6 +2,7 @@ package check_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -131,7 +132,7 @@ func TestResourceScope(t *testing.T) {
 	e.check(false, check.Request{Principal: alice, Action: "project:write"})
 	// リソースを限った付与は Holds（範囲全体の権限）には数えない。
 	e.tx(func(ctx context.Context, tx port.Tx) error {
-		ok, err := e.c.Holds(ctx, tx, realm, alice, "", []string{"project:read"})
+		ok, err := e.c.Holds(ctx, tx, realm, alice, "", []string{"project:read"}, nil)
 		if err != nil || ok {
 			t.Errorf("Holds = %v, %v", ok, err)
 		}
@@ -291,4 +292,85 @@ func TestOrgHierarchy(t *testing.T) {
 	e.c.Invalidate(realm)
 	e.check(false, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_leaf"})
 	e.check(true, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_mid"})
+}
+
+// bindIf は条件付きの付与を作る。
+func (e *env) bindIf(roleKey string, p check.Principal, cond string) port.RoleBinding {
+	b := port.RoleBinding{ID: e.next("rb_"), PublicID: e.next("rbd_"), RealmID: realm, Role: roleKey, PrincipalType: p.Type, PrincipalID: p.ID,
+		Condition: []byte(cond), CreatedAt: e.clk.Now()}
+	e.tx(func(ctx context.Context, tx port.Tx) error { return tx.RoleBindings().Create(ctx, b) })
+	return b
+}
+
+func (e *env) decide(r check.Request) check.Decision {
+	e.t.Helper()
+	d, err := e.c.Decide(context.Background(), realm, r)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var tx check.Decision
+	e.tx(func(ctx context.Context, t port.Tx) error {
+		tx, err = e.c.DecideTx(ctx, t, realm, r)
+		return err
+	})
+	if !reflect.DeepEqual(d, tx) {
+		e.t.Errorf("Decide = %+v, DecideTx = %+v", d, tx)
+	}
+	return d
+}
+
+// 付与の条件（ADR 0084）：条件を満たすときだけ効き、条件だけで拒んだときは理由を返す。
+func TestConditionalGrants(t *testing.T) {
+	e := newEnv(t, nil)
+	approver := e.role("", "payment:approve", "payment:read")
+	e.bindIf(approver.ID, alice, `{"all":[{"amr_has":["hwk"]},{"risk_at_most":{"type":"account","level":"low"}}]}`)
+	reader := e.role("", "payment:read")
+	e.bindIf(reader.ID, bob, `{"factors_at_least":2}`)
+	e.bind(e.role("", "payment:read").ID, bob, "", "", "") // 条件なしの付与があれば、条件付きの付与は見ない
+	e.bindIf(approver.ID, robot, `not json`)
+
+	now := e.clk.Now()
+	pwd := &check.AuthContext{AMR: []string{"pwd"}, Factors: 1, AuthTime: now, Attested: true}
+	hwk := &check.AuthContext{AMR: []string{"hwk", "user"}, Factors: 2, AuthTime: now, Risk: map[string]int{"account": 10}, Attested: true}
+	risky := &check.AuthContext{AMR: []string{"hwk", "user"}, Factors: 2, AuthTime: now, Risk: map[string]int{"account": 40}, Attested: true}
+	for _, c := range []struct {
+		name string
+		r    check.Request
+		want check.Decision
+	}{
+		{"no context", check.Request{Principal: alice, Action: "payment:approve"}, check.Decision{Unmet: []string{"condition.amr", "condition.risk.account"}}},
+		{"password", check.Request{Principal: alice, Action: "payment:approve", Context: pwd}, check.Decision{Unmet: []string{"condition.amr", "condition.risk.account"}}},
+		{"passkey", check.Request{Principal: alice, Action: "payment:approve", Context: hwk}, check.Decision{Allow: true}},
+		{"risky", check.Request{Principal: alice, Action: "payment:approve", Context: risky}, check.Decision{Unmet: []string{"condition.risk.account"}}},
+		// 境界を厳しくしなければ（既定の low < 30）通る。明示の境界は realm の一覧の境界に代わる。
+		{"bands", check.Request{Principal: alice, Action: "payment:approve", Context: risky, Bands: check.Bands{"account": {Medium: 50, High: 80}}}, check.Decision{Allow: true}},
+		// 付与の無い操作の拒否は理由なし。
+		{"no grant", check.Request{Principal: alice, Action: "payment:send", Context: pwd}, check.Decision{}},
+		{"unconditional", check.Request{Principal: bob, Action: "payment:read"}, check.Decision{Allow: true}},
+		// 読めない条件の付与は効かない（理由も返さない）。
+		{"broken", check.Request{Principal: robot, Action: "payment:approve", Context: hwk}, check.Decision{}},
+	} {
+		if got := e.decide(c.r); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: Decide = %+v, want %+v", c.name, got, c.want)
+		}
+	}
+	// realm の一覧の境界を使う。
+	e.tx(func(ctx context.Context, tx port.Tx) error {
+		return tx.RiskTypes().Put(ctx, port.RiskType{RealmID: realm, Name: "account", Enabled: true, BandMedium: 50, BandHigh: 80, CreatedAt: now, UpdatedAt: now})
+	})
+	if got := e.decide(check.Request{Principal: alice, Action: "payment:approve", Context: risky}); !got.Allow {
+		t.Errorf("realm bands: %+v", got)
+	}
+	// Holds は今の文脈で条件を満たす付与だけを数える。
+	e.tx(func(ctx context.Context, tx port.Tx) error {
+		for _, c := range []struct {
+			ac   *check.AuthContext
+			want bool
+		}{{nil, false}, {pwd, false}, {hwk, true}} {
+			if ok, err := e.c.Holds(ctx, tx, realm, alice, "", []string{"payment:approve"}, c.ac); err != nil || ok != c.want {
+				t.Errorf("Holds(%+v) = %v, %v", c.ac, ok, err)
+			}
+		}
+		return nil
+	})
 }

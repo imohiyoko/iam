@@ -408,7 +408,7 @@ func (s publicServer) orgMember(ctx context.Context, tx port.Tx, au auth, orgPub
 	if perm != "" {
 		// org_role の組み込みのロールと、Org の範囲の付与（Group を含む）から判定する（ADR 0064）。
 		ok, err := s.a.authz.CheckTx(ctx, tx, s.a.realm.ID, check.Request{Principal: check.Principal{Type: port.PrincipalUser, ID: au.PrincipalID},
-			Action: perm, OrgID: o.ID})
+			Action: perm, OrgID: o.ID, Context: sessionContext(au.Validated)})
 		if err != nil {
 			return port.Org{}, port.Membership{}, err
 		}

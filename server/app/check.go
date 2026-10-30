@@ -99,11 +99,15 @@ func (s adminServer) CheckAuthz(ctx context.Context, req adminapi.CheckAuthzRequ
 	case reasons != nil:
 		return adminapi.CheckAuthz200JSONResponse{Allowed: false, Reasons: &reasons}, nil
 	}
-	allowed, err := s.a.authz.Check(ctx, s.a.realm.ID, r)
+	dec, err := s.a.authz.Decide(ctx, s.a.realm.ID, r)
 	if err != nil {
 		return nil, err
 	}
-	return adminapi.CheckAuthz200JSONResponse{Allowed: allowed}, nil
+	out := adminapi.CheckAuthz200JSONResponse{Allowed: dec.Allow}
+	if len(dec.Unmet) > 0 {
+		out.Unmet = &dec.Unmet
+	}
+	return out, nil
 }
 
 func (s publicServer) CheckMyAuthz(ctx context.Context, req publicapi.CheckMyAuthzRequestObject) (publicapi.CheckMyAuthzResponseObject, error) {
@@ -123,7 +127,8 @@ func (s publicServer) CheckMyAuthz(ctx context.Context, req publicapi.CheckMyAut
 	if !ok || !role.ValidPermission(b.Action) {
 		return publicapi.CheckMyAuthz400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
-	r := check.Request{Principal: check.Principal{Type: au.PrincipalType, ID: au.PrincipalID}, Action: b.Action, Resource: res, OrgID: au.ActiveOrgID}
+	r := check.Request{Principal: check.Principal{Type: au.PrincipalType, ID: au.PrincipalID}, Action: b.Action, Resource: res, OrgID: au.ActiveOrgID,
+		Context: sessionContext(au.Validated)}
 	// realm の範囲の付与は所属を見ないので、判定の文脈の Org（指定したか、active な Org）に使える所属があるかを確かめる。
 	if s.a.orgs != nil && (orgID != nil || r.OrgID != "") {
 		member := false
@@ -147,9 +152,13 @@ func (s publicServer) CheckMyAuthz(ctx context.Context, req publicapi.CheckMyAut
 			return nil, err
 		}
 	}
-	allowed, err := s.a.authz.Check(ctx, s.a.realm.ID, r)
+	d, err := s.a.authz.Decide(ctx, s.a.realm.ID, r)
 	if err != nil {
 		return nil, err
 	}
-	return publicapi.CheckMyAuthz200JSONResponse{Allowed: allowed}, nil
+	out := publicapi.CheckMyAuthz200JSONResponse{Allowed: d.Allow}
+	if len(d.Unmet) > 0 {
+		out.Unmet = &d.Unmet
+	}
+	return out, nil
 }

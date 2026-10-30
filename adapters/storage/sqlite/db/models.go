@@ -347,6 +347,7 @@ type AuthzRoleBinding struct {
 	ResourceType  string
 	ResourceID    string
 	CreatedAt     string
+	Condition     []byte
 }
 
 type Invitation struct {

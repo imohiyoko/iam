@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"slices"
 	"sort"
@@ -31,6 +32,7 @@ func (r roleBindings) Create(_ context.Context, b port.RoleBinding) error {
 			return errs.New(errs.KindConflict, "role binding exists")
 		}
 	}
+	b.Condition = bytes.Clone(b.Condition)
 	setKey(r.t, r.t.s.roleBindings, b.ID, b)
 	return nil
 }

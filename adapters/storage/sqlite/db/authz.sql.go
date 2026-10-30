@@ -110,8 +110,8 @@ func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) error {
 }
 
 const createRoleBinding = `-- name: CreateRoleBinding :exec
-INSERT INTO authz_role_bindings (id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authz_role_bindings (id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at, condition)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateRoleBindingParams struct {
@@ -125,6 +125,7 @@ type CreateRoleBindingParams struct {
 	ResourceType  string
 	ResourceID    string
 	CreatedAt     string
+	Condition     []byte
 }
 
 func (q *Queries) CreateRoleBinding(ctx context.Context, arg CreateRoleBindingParams) error {
@@ -139,6 +140,7 @@ func (q *Queries) CreateRoleBinding(ctx context.Context, arg CreateRoleBindingPa
 		arg.ResourceType,
 		arg.ResourceID,
 		arg.CreatedAt,
+		arg.Condition,
 	)
 	return err
 }
@@ -314,7 +316,7 @@ func (q *Queries) GetRole(ctx context.Context, arg GetRoleParams) (AuthzRole, er
 }
 
 const getRoleBindingByPublicID = `-- name: GetRoleBindingByPublicID :one
-SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at, condition FROM authz_role_bindings WHERE realm_id = ? AND public_id = ?
 `
 
 type GetRoleBindingByPublicIDParams struct {
@@ -336,6 +338,7 @@ func (q *Queries) GetRoleBindingByPublicID(ctx context.Context, arg GetRoleBindi
 		&i.ResourceType,
 		&i.ResourceID,
 		&i.CreatedAt,
+		&i.Condition,
 	)
 	return i, err
 }
@@ -387,7 +390,7 @@ func (q *Queries) InsertGroupAncestor(ctx context.Context, arg InsertGroupAncest
 }
 
 const listEffectiveRoleBindings = `-- name: ListEffectiveRoleBindings :many
-SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at,
+SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at, b.condition,
        COALESCE(g.org_id, '') AS group_org_id, r.public_id AS custom_public_id, r.org_id AS custom_org_id, r.name AS custom_name,
        r.permissions AS custom_permissions, r.created_at AS custom_created_at, r.updated_at AS custom_updated_at
 FROM authz_role_bindings b
@@ -418,6 +421,7 @@ type ListEffectiveRoleBindingsRow struct {
 	ResourceType      string
 	ResourceID        string
 	CreatedAt         string
+	Condition         []byte
 	GroupOrgID        string
 	CustomPublicID    sql.NullString
 	CustomOrgID       sql.NullString
@@ -447,6 +451,7 @@ func (q *Queries) ListEffectiveRoleBindings(ctx context.Context, arg ListEffecti
 			&i.ResourceType,
 			&i.ResourceID,
 			&i.CreatedAt,
+			&i.Condition,
 			&i.GroupOrgID,
 			&i.CustomPublicID,
 			&i.CustomOrgID,
@@ -469,7 +474,7 @@ func (q *Queries) ListEffectiveRoleBindings(ctx context.Context, arg ListEffecti
 }
 
 const listEffectiveRoleBindingsNested = `-- name: ListEffectiveRoleBindingsNested :many
-SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at,
+SELECT b.id, b.public_id, b.realm_id, b.role, b.principal_type, b.principal_id, b.org_id, b.resource_type, b.resource_id, b.created_at, b.condition,
        COALESCE(g.org_id, '') AS group_org_id, r.public_id AS custom_public_id, r.org_id AS custom_org_id, r.name AS custom_name,
        r.permissions AS custom_permissions, r.created_at AS custom_created_at, r.updated_at AS custom_updated_at
 FROM authz_role_bindings b
@@ -504,6 +509,7 @@ type ListEffectiveRoleBindingsNestedRow struct {
 	ResourceType      string
 	ResourceID        string
 	CreatedAt         string
+	Condition         []byte
 	GroupOrgID        string
 	CustomPublicID    sql.NullString
 	CustomOrgID       sql.NullString
@@ -533,6 +539,7 @@ func (q *Queries) ListEffectiveRoleBindingsNested(ctx context.Context, arg ListE
 			&i.ResourceType,
 			&i.ResourceID,
 			&i.CreatedAt,
+			&i.Condition,
 			&i.GroupOrgID,
 			&i.CustomPublicID,
 			&i.CustomOrgID,
@@ -778,7 +785,7 @@ func (q *Queries) ListRiskTypes(ctx context.Context, realmID string) ([]AuthzRis
 }
 
 const listRoleBindingsByOrg = `-- name: ListRoleBindingsByOrg :many
-SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at, condition FROM authz_role_bindings WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id
 `
 
 type ListRoleBindingsByOrgParams struct {
@@ -806,6 +813,7 @@ func (q *Queries) ListRoleBindingsByOrg(ctx context.Context, arg ListRoleBinding
 			&i.ResourceType,
 			&i.ResourceID,
 			&i.CreatedAt,
+			&i.Condition,
 		); err != nil {
 			return nil, err
 		}
@@ -821,7 +829,7 @@ func (q *Queries) ListRoleBindingsByOrg(ctx context.Context, arg ListRoleBinding
 }
 
 const listRoleBindingsByPrincipal = `-- name: ListRoleBindingsByPrincipal :many
-SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at, condition FROM authz_role_bindings WHERE realm_id = ? AND principal_type = ? AND principal_id = ? ORDER BY created_at, id
 `
 
 type ListRoleBindingsByPrincipalParams struct {
@@ -850,6 +858,7 @@ func (q *Queries) ListRoleBindingsByPrincipal(ctx context.Context, arg ListRoleB
 			&i.ResourceType,
 			&i.ResourceID,
 			&i.CreatedAt,
+			&i.Condition,
 		); err != nil {
 			return nil, err
 		}
@@ -865,7 +874,7 @@ func (q *Queries) ListRoleBindingsByPrincipal(ctx context.Context, arg ListRoleB
 }
 
 const listRoleBindingsByRole = `-- name: ListRoleBindingsByRole :many
-SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, role, principal_type, principal_id, org_id, resource_type, resource_id, created_at, condition FROM authz_role_bindings WHERE realm_id = ? AND role = ? ORDER BY created_at, id
 `
 
 type ListRoleBindingsByRoleParams struct {
@@ -893,6 +902,7 @@ func (q *Queries) ListRoleBindingsByRole(ctx context.Context, arg ListRoleBindin
 			&i.ResourceType,
 			&i.ResourceID,
 			&i.CreatedAt,
+			&i.Condition,
 		); err != nil {
 			return nil, err
 		}

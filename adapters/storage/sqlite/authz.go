@@ -16,13 +16,13 @@ type roleBindings struct{ q *db.Queries }
 func toRoleBinding(r db.AuthzRoleBinding) (port.RoleBinding, error) {
 	t, err := parseTime(r.CreatedAt)
 	return port.RoleBinding{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Role: r.Role, PrincipalType: port.PrincipalType(r.PrincipalType),
-		PrincipalID: r.PrincipalID, OrgID: r.OrgID, ResourceType: r.ResourceType, ResourceID: r.ResourceID, CreatedAt: t}, err
+		PrincipalID: r.PrincipalID, OrgID: r.OrgID, ResourceType: r.ResourceType, ResourceID: r.ResourceID, CreatedAt: t, Condition: emptyNil(r.Condition)}, err
 }
 
 func (r roleBindings) Create(ctx context.Context, b port.RoleBinding) error {
 	return mapErr(r.q.CreateRoleBinding(ctx, db.CreateRoleBindingParams{ID: b.ID, PublicID: b.PublicID, RealmID: b.RealmID, Role: b.Role,
 		PrincipalType: string(b.PrincipalType), PrincipalID: b.PrincipalID, OrgID: b.OrgID, ResourceType: b.ResourceType,
-		ResourceID: b.ResourceID, CreatedAt: formatTime(b.CreatedAt)}))
+		ResourceID: b.ResourceID, CreatedAt: formatTime(b.CreatedAt), Condition: nonNil(b.Condition)}))
 }
 
 func (r roleBindings) GetByPublicID(ctx context.Context, realmID, publicID string) (port.RoleBinding, error) {
@@ -66,7 +66,7 @@ func (r roleBindings) ListEffective(ctx context.Context, realmID string, t port.
 
 func toEffective(x db.ListEffectiveRoleBindingsRow) (port.EffectiveBinding, error) {
 	b, err := toRoleBinding(db.AuthzRoleBinding{ID: x.ID, PublicID: x.PublicID, RealmID: x.RealmID, Role: x.Role, PrincipalType: x.PrincipalType,
-		PrincipalID: x.PrincipalID, OrgID: x.OrgID, ResourceType: x.ResourceType, ResourceID: x.ResourceID, CreatedAt: x.CreatedAt})
+		PrincipalID: x.PrincipalID, OrgID: x.OrgID, ResourceType: x.ResourceType, ResourceID: x.ResourceID, CreatedAt: x.CreatedAt, Condition: x.Condition})
 	if err != nil {
 		return port.EffectiveBinding{}, err
 	}

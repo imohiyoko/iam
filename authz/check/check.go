@@ -12,6 +12,7 @@ package check
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/port"
+	"github.com/imohiyoko/iam/shared/risk"
 )
 
 // Principal は判定の主体（内部 ID）。
@@ -43,6 +45,10 @@ type Request struct {
 	// OrgID は判定の文脈の Org（内部 ID）。空なら realm の範囲。
 	OrgID    string
 	Resource Resource
+	// Context は主体の認証の文脈（ADR 0084）。nil なら文脈が無く、条件付きの付与は効かない（fail-closed）。
+	Context *AuthContext
+	// Bands はリスクの段階の境界。nil なら realm の一覧の境界を使う（条件付きの付与があるときだけ読む）。
+	Bands Bands
 }
 
 // Members は authn 側の所属の問い合わせ（authz は authn を import しない。server が組み立てる）。
@@ -94,6 +100,8 @@ type Grant struct {
 	Permissions  []string
 	// Role はもとになったロール（組み込みは名前、独自は内部 ID）。
 	Role string
+	// Condition は付与の条件（ADR 0084）。nil なら条件なし。
+	Condition *Condition
 }
 
 func (g Grant) covers(r Resource, action string) bool {
@@ -112,40 +120,113 @@ func normalize(r Request) Request {
 
 // Check は判定する。判定の材料はキャッシュから使い、無ければ1つのトランザクションで集める。
 func (c *Checker) Check(ctx context.Context, realmID string, r Request) (bool, error) {
-	r = normalize(r)
-	gs, err := c.cached(ctx, realmID, r.Principal, r.OrgID)
-	if err != nil {
-		return false, err
-	}
-	return allowed(gs, r), nil
+	d, err := c.Decide(ctx, realmID, r)
+	return d.Allow, err
 }
 
 // CheckTx は呼び出し側のトランザクションで判定する（キャッシュを使わない。同じトランザクションの変更を見る）。
 func (c *Checker) CheckTx(ctx context.Context, tx port.Tx, realmID string, r Request) (bool, error) {
+	d, err := c.DecideTx(ctx, tx, realmID, r)
+	return d.Allow, err
+}
+
+// Decide は判定し、条件で拒んだときは満たさなかった条件の理由を返す（ADR 0084）。材料は Check と同じくキャッシュから使う。
+// 条件はキャッシュの外で、判定のたびに文脈と突き合わせる。
+func (c *Checker) Decide(ctx context.Context, realmID string, r Request) (Decision, error) {
+	r = normalize(r)
+	gs, err := c.cached(ctx, realmID, r.Principal, r.OrgID)
+	if err != nil {
+		return Decision{}, err
+	}
+	return c.decide(gs, r, func() (Bands, error) {
+		var b Bands
+		err := c.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			var err error
+			b, err = RealmBands(ctx, tx, realmID)
+			return err
+		})
+		return b, err
+	})
+}
+
+// DecideTx は呼び出し側のトランザクションで Decide を行う。
+func (c *Checker) DecideTx(ctx context.Context, tx port.Tx, realmID string, r Request) (Decision, error) {
 	r = normalize(r)
 	gs, err := c.Grants(ctx, tx, realmID, r.Principal, r.OrgID)
 	if err != nil {
-		return false, err
+		return Decision{}, err
 	}
-	return allowed(gs, r), nil
+	return c.decide(gs, r, func() (Bands, error) { return RealmBands(ctx, tx, realmID) })
 }
 
-func allowed(gs []Grant, r Request) bool {
-	if r.Action == "" {
-		return false
+// RealmBands は realm の一覧のリスクの段階の境界（有効な種類だけ）。
+func RealmBands(ctx context.Context, tx port.Tx, realmID string) (Bands, error) {
+	rows, err := tx.RiskTypes().List(ctx, realmID)
+	if err != nil {
+		return nil, err
 	}
-	return slices.ContainsFunc(gs, func(g Grant) bool { return g.covers(r.Resource, r.Action) })
+	return Bands(risk.CatalogOf(rows).Bands()), nil
+}
+
+// decide は操作を許す付与があるかを見る。条件なしの付与か、条件を満たす付与があれば許す。条件付きの付与だけが操作を
+// 許すなら、それらの満たさなかった条件の理由を返す（付与が無い拒否は理由なし。権限の有無を条件の理由で漏らさない）。
+// 境界は r.Bands が無ければ、条件付きの付与に当たったときに bands で読む。
+func (c *Checker) decide(gs []Grant, r Request, bands func() (Bands, error)) (Decision, error) {
+	if r.Action == "" {
+		return Decision{}, nil
+	}
+	now := c.Clock.Now()
+	var unmet []string
+	conditional := false
+	for _, g := range gs {
+		if !g.covers(r.Resource, r.Action) {
+			continue
+		}
+		if g.Condition == nil {
+			return Decision{Allow: true}, nil
+		}
+		if r.Bands == nil {
+			b, err := bands()
+			if err != nil {
+				return Decision{}, err
+			}
+			r.Bands = b
+		}
+		ok, u := g.Condition.Eval(r.Context, now, r.Bands)
+		if ok {
+			return Decision{Allow: true}, nil
+		}
+		conditional, unmet = true, append(unmet, u...)
+	}
+	if !conditional {
+		return Decision{}, nil
+	}
+	slices.Sort(unmet)
+	return Decision{Unmet: slices.Compact(unmet)}, nil
 }
 
 // Holds は主体が範囲全体（リソースを限らない付与）で perms をすべて持つかを返す。ロールの付与や作成で、
-// 持っていない権限を人に渡せないようにするために使う。
-func (c *Checker) Holds(ctx context.Context, tx port.Tx, realmID string, p Principal, orgID string, perms []string) (bool, error) {
+// 持っていない権限を人に渡せないようにするために使う。条件付きの付与は、主体の今の文脈 ac で条件を満たすものだけを数える
+// （ADR 0084。ac が nil なら数えない。境界は realm の一覧のもの）。
+func (c *Checker) Holds(ctx context.Context, tx port.Tx, realmID string, p Principal, orgID string, perms []string, ac *AuthContext) (bool, error) {
 	gs, err := c.Grants(ctx, tx, realmID, p, orgID)
 	if err != nil {
 		return false, err
 	}
+	now := c.Clock.Now()
+	var bands Bands
 	var have []string
 	for _, g := range gs {
+		if g.Condition != nil {
+			if bands == nil {
+				if bands, err = RealmBands(ctx, tx, realmID); err != nil {
+					return false, err
+				}
+			}
+			if ok, _ := g.Condition.Eval(ac, now, bands); !ok {
+				continue
+			}
+		}
 		if g.ResourceType == "" {
 			have = append(have, g.Permissions...)
 		}
@@ -299,7 +380,11 @@ func (c *Checker) Grants(ctx context.Context, tx port.Tx, realmID string, p Prin
 			return nil, err
 		}
 		if perms := permissionsOf(b); ok && len(perms) > 0 {
-			out = append(out, Grant{ResourceType: b.ResourceType, ResourceID: b.ResourceID, Permissions: perms, Role: b.Role})
+			cond, valid := conditionOf(b)
+			if !valid {
+				continue
+			}
+			out = append(out, Grant{ResourceType: b.ResourceType, ResourceID: b.ResourceID, Permissions: perms, Role: b.Role, Condition: cond})
 		}
 	}
 	for _, sc := range scopes {
@@ -330,4 +415,16 @@ func permissionsOf(b port.EffectiveBinding) []string {
 		return nil
 	}
 	return b.Custom.Permissions
+}
+
+// conditionOf は付与の条件を読む。読めない条件の付与は効かせない（fail-closed）。保存のときに検査しているので、通常は起きない。
+func conditionOf(b port.EffectiveBinding) (*Condition, bool) {
+	if len(b.Condition) == 0 {
+		return nil, true
+	}
+	var c Condition
+	if err := json.Unmarshal(b.Condition, &c); err != nil {
+		return nil, false
+	}
+	return &c, true
 }

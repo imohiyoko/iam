@@ -29,6 +29,8 @@ type adminPrincipal struct {
 	Actor audit.Actor
 	// AuthenticatedAt は運営者のセッションの認証の時刻（サービスアカウントでは空）。
 	AuthenticatedAt time.Time
+	// Context は呼び出し元の認証の文脈（ADR 0084）。付与の条件と権限の検査に使う。
+	Context *check.AuthContext
 	// AccessToken はサービスアカウントがアクセストークンで呼んだか（API キーでは偽）。
 	AccessToken bool
 }
@@ -55,9 +57,9 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			p = adminPrincipal{Type: port.PrincipalUser, ID: v.PrincipalID, Actor: v.Actor(), AuthenticatedAt: v.AuthenticatedAt}
+			p = adminPrincipal{Type: port.PrincipalUser, ID: v.PrincipalID, Actor: v.Actor(), AuthenticatedAt: v.AuthenticatedAt, Context: sessionContext(v)}
 		} else {
-			var sa port.ServiceAccount
+			var sa serviceaccount.Authenticated
 			err := a.deps.Storage.Tx(r.Context(), func(ctx context.Context, tx port.Tx) error {
 				var err error
 				sa, err = a.serviceAccounts.Authenticate(ctx, tx, a.realm.ID, key, a.deps.Clock.Now())
@@ -71,8 +73,8 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			p = adminPrincipal{Type: port.PrincipalServiceAccount, ID: sa.ID, Actor: audit.Actor{Type: "service_account", ID: sa.ID},
-				AccessToken: serviceaccount.IsAccessToken(key)}
+			p = adminPrincipal{Type: port.PrincipalServiceAccount, ID: sa.Account.ID, Actor: audit.Actor{Type: "service_account", ID: sa.Account.ID},
+				Context: serviceAccountContext(sa.Method, sa.AuthTime), AccessToken: serviceaccount.IsAccessToken(key)}
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), adminKey{}, p)))
 	})
@@ -104,12 +106,12 @@ func (a *App) authorizeWith(ctx context.Context, perm string, cached bool) (admi
 	var allowed bool
 	var err error
 	if cached {
-		allowed, err = a.authz.Check(ctx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm})
+		allowed, err = a.authz.Check(ctx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm, Context: p.Context})
 	} else {
 		err = a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 			var err error
 			// 運営者の操作は数が少なく、取り消しをすぐに効かせたいので、キャッシュを使わずに判定する。
-			allowed, err = a.authz.CheckTx(ctx, tx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm})
+			allowed, err = a.authz.CheckTx(ctx, tx, a.realm.ID, check.Request{Principal: check.Principal{Type: p.Type, ID: p.ID}, Action: perm, Context: p.Context})
 			return err
 		})
 	}
