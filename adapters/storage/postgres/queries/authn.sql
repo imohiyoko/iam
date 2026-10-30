@@ -79,8 +79,8 @@ DELETE FROM authn_connections WHERE realm_id = $1 AND id = $2;
 
 -- name: CreateSession :exec
 INSERT INTO authn_sessions (id, realm_id, principal_type, principal_id, active_org_id, token_hash, auth_methods, auth_credential_ids,
-    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19);
+    warnings, ip, user_agent, authenticated_at, created_at, last_seen_at, expires_at, revoked_at, revoke_reason, restriction, sid, risk)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20);
 
 -- name: GetSession :one
 SELECT * FROM authn_sessions WHERE realm_id = $1 AND id = $2;
@@ -93,6 +93,9 @@ SELECT * FROM authn_sessions WHERE realm_id = $1 AND principal_type = $2 AND pri
 
 -- name: TouchSession :execrows
 UPDATE authn_sessions SET last_seen_at = GREATEST(last_seen_at, sqlc.arg(at)) WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
+
+-- name: SetSessionRisk :execrows
+UPDATE authn_sessions SET risk = $1 WHERE realm_id = $2 AND id = $3;
 
 -- name: RevokeSession :execrows
 UPDATE authn_sessions SET

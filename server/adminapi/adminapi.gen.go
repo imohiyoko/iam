@@ -1058,6 +1058,46 @@ type RevokedCredentials struct {
 	Totp     int `json:"totp"`
 }
 
+// RiskBand defines model for RiskBand.
+type RiskBand struct {
+	// High この点数以上が high
+	High int `json:"high"`
+
+	// Medium この点数以上が medium
+	Medium int `json:"medium"`
+}
+
+// RiskType defines model for RiskType.
+type RiskType struct {
+	Band RiskBand `json:"band"`
+
+	// Builtin 組み込みの種類か
+	Builtin bool   `json:"builtin"`
+	Enabled bool   `json:"enabled"`
+	Name    string `json:"name"`
+
+	// UpdatedAt 一覧で変えた時刻（組み込みの種類を変えていなければ無い）
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// RiskTypeInput defines model for RiskTypeInput.
+type RiskTypeInput struct {
+	Band    *RiskBand `json:"band,omitempty"`
+	Enabled bool      `json:"enabled"`
+}
+
+// RiskUpdate defines model for RiskUpdate.
+type RiskUpdate struct {
+	// Risk 種類 → 点数（0〜100、高いほど危うい）。null はその種類を「評価していない」に戻す
+	Risk map[string]*int `json:"risk"`
+}
+
+// RiskUpdated defines model for RiskUpdated.
+type RiskUpdated struct {
+	// Sessions 更新したセッションの数
+	Sessions int `json:"sessions"`
+}
+
 // Role defines model for Role.
 type Role struct {
 	// Assignable 付与の API で付与できるか（組み込みの Org のロールは org_role から効くので false）
@@ -1458,6 +1498,9 @@ type UpdateRealmJSONRequestBody = RealmUpdate
 // CreateRealmOperatorJSONRequestBody defines body for CreateRealmOperator for application/json ContentType.
 type CreateRealmOperatorJSONRequestBody CreateRealmOperatorJSONBody
 
+// PutRiskTypeJSONRequestBody defines body for PutRiskType for application/json ContentType.
+type PutRiskTypeJSONRequestBody = RiskTypeInput
+
 // CreateRoleBindingJSONRequestBody defines body for CreateRoleBinding for application/json ContentType.
 type CreateRoleBindingJSONRequestBody = RoleBindingInput
 
@@ -1475,6 +1518,9 @@ type CreateServiceAccountCredentialJSONRequestBody = ServiceAccountCredentialInp
 
 // SuspendServiceAccountJSONRequestBody defines body for SuspendServiceAccount for application/json ContentType.
 type SuspendServiceAccountJSONRequestBody = SuspendRequest
+
+// SetSessionRiskJSONRequestBody defines body for SetSessionRisk for application/json ContentType.
+type SetSessionRiskJSONRequestBody = RiskUpdate
 
 // RotateSigningKeyJSONRequestBody defines body for RotateSigningKey for application/json ContentType.
 type RotateSigningKeyJSONRequestBody RotateSigningKeyJSONBody
@@ -1508,6 +1554,9 @@ type IssueLoginLinkJSONRequestBody IssueLoginLinkJSONBody
 
 // IssueRecoveryLinkJSONRequestBody defines body for IssueRecoveryLink for application/json ContentType.
 type IssueRecoveryLinkJSONRequestBody IssueRecoveryLinkJSONBody
+
+// SetUserRiskJSONRequestBody defines body for SetUserRisk for application/json ContentType.
+type SetUserRiskJSONRequestBody = RiskUpdate
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -1658,6 +1707,12 @@ type ServerInterface interface {
 	// CreateRealmOperator realm の運営者を作る（最初の運営者を置く）
 	// (POST /v1/admin/realms/{realm_id}/operators)
 	CreateRealmOperator(w http.ResponseWriter, r *http.Request, realmId string)
+	// ListRiskTypes realm のリスクの種類の一覧（ADR 0084）
+	// (GET /v1/admin/risk-types)
+	ListRiskTypes(w http.ResponseWriter, r *http.Request)
+	// PutRiskType リスクの種類を一覧に載せる・変える（ADR 0084）
+	// (PUT /v1/admin/risk-types/{name})
+	PutRiskType(w http.ResponseWriter, r *http.Request, name string)
 	// ListRoleBindings realm の範囲のロールの付与の一覧
 	// (GET /v1/admin/role-bindings)
 	ListRoleBindings(w http.ResponseWriter, r *http.Request)
@@ -1709,6 +1764,9 @@ type ServerInterface interface {
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(w http.ResponseWriter, r *http.Request, id string)
+	// SetSessionRisk セッションのリスクの点数を更新する（ADR 0084）
+	// (POST /v1/admin/sessions/{id}:risk)
+	SetSessionRisk(w http.ResponseWriter, r *http.Request, id string)
 	// RotateSigningKey ID トークンの署名鍵を新しくする（9.3）
 	// (POST /v1/admin/signing-keys:rotate)
 	RotateSigningKey(w http.ResponseWriter, r *http.Request)
@@ -1763,6 +1821,9 @@ type ServerInterface interface {
 	// IssueRecoveryLink 1回限りの復旧用リンクのトークンを発行する（4.12）
 	// (POST /v1/admin/users/{id}:recovery_link)
 	IssueRecoveryLink(w http.ResponseWriter, r *http.Request, id string)
+	// SetUserRisk ユーザーのすべてのセッションのリスクの点数を更新する（ADR 0084）
+	// (POST /v1/admin/users/{id}:risk)
+	SetUserRisk(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -2969,6 +3030,46 @@ func (siw *ServerInterfaceWrapper) CreateRealmOperator(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// ListRiskTypes operation middleware
+func (siw *ServerInterfaceWrapper) ListRiskTypes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRiskTypes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutRiskType operation middleware
+func (siw *ServerInterfaceWrapper) PutRiskType(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutRiskType(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListRoleBindings operation middleware
 func (siw *ServerInterfaceWrapper) ListRoleBindings(w http.ResponseWriter, r *http.Request) {
 
@@ -3371,6 +3472,32 @@ func (siw *ServerInterfaceWrapper) RevokeSession(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeSession(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetSessionRisk operation middleware
+func (siw *ServerInterfaceWrapper) SetSessionRisk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetSessionRisk(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3848,6 +3975,32 @@ func (siw *ServerInterfaceWrapper) IssueRecoveryLink(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// SetUserRisk operation middleware
+func (siw *ServerInterfaceWrapper) SetUserRisk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetUserRisk(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -3985,6 +4138,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/suspensions", wrapper.SuspendUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/suspensions/{id}:lift", wrapper.LiftSuspension)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/sessions/{id}:revoke", wrapper.RevokeSession)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/sessions/{id}:risk", wrapper.SetSessionRisk)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:risk", wrapper.SetUserRisk)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/risk-types", wrapper.ListRiskTypes)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/risk-types/{name}", wrapper.PutRiskType)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs", wrapper.CreateOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.GetOrg)
@@ -7825,6 +7982,122 @@ func (response CreateRealmOperator404JSONResponse) VisitCreateRealmOperatorRespo
 	return err
 }
 
+type ListRiskTypesRequestObject struct {
+}
+
+type ListRiskTypesResponseObject interface {
+	VisitListRiskTypesResponse(w http.ResponseWriter) error
+}
+
+type ListRiskTypes200JSONResponse struct {
+	RiskTypes []RiskType `json:"risk_types"`
+}
+
+func (response ListRiskTypes200JSONResponse) VisitListRiskTypesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRiskTypes401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListRiskTypes401JSONResponse) VisitListRiskTypesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRiskTypes403JSONResponse Error
+
+func (response ListRiskTypes403JSONResponse) VisitListRiskTypesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutRiskTypeRequestObject struct {
+	Name string `json:"name"`
+	Body *PutRiskTypeJSONRequestBody
+}
+
+type PutRiskTypeResponseObject interface {
+	VisitPutRiskTypeResponse(w http.ResponseWriter) error
+}
+
+type PutRiskType200JSONResponse RiskType
+
+func (response PutRiskType200JSONResponse) VisitPutRiskTypeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutRiskType400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PutRiskType400JSONResponse) VisitPutRiskTypeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutRiskType401JSONResponse Error
+
+func (response PutRiskType401JSONResponse) VisitPutRiskTypeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutRiskType403JSONResponse Error
+
+func (response PutRiskType403JSONResponse) VisitPutRiskTypeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListRoleBindingsRequestObject struct {
 }
 
@@ -9088,6 +9361,85 @@ func (response RevokeSession403JSONResponse) VisitRevokeSessionResponse(w http.R
 type RevokeSession404JSONResponse Error
 
 func (response RevokeSession404JSONResponse) VisitRevokeSessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSessionRiskRequestObject struct {
+	Id   string `json:"id"`
+	Body *SetSessionRiskJSONRequestBody
+}
+
+type SetSessionRiskResponseObject interface {
+	VisitSetSessionRiskResponse(w http.ResponseWriter) error
+}
+
+type SetSessionRisk200JSONResponse RiskUpdated
+
+func (response SetSessionRisk200JSONResponse) VisitSetSessionRiskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSessionRisk400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SetSessionRisk400JSONResponse) VisitSetSessionRiskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSessionRisk401JSONResponse Error
+
+func (response SetSessionRisk401JSONResponse) VisitSetSessionRiskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSessionRisk403JSONResponse Error
+
+func (response SetSessionRisk403JSONResponse) VisitSetSessionRiskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSessionRisk404JSONResponse Error
+
+func (response SetSessionRisk404JSONResponse) VisitSetSessionRiskResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -10423,6 +10775,85 @@ func (response IssueRecoveryLink404JSONResponse) VisitIssueRecoveryLinkResponse(
 	return err
 }
 
+type SetUserRiskRequestObject struct {
+	Id   string `json:"id"`
+	Body *SetUserRiskJSONRequestBody
+}
+
+type SetUserRiskResponseObject interface {
+	VisitSetUserRiskResponse(w http.ResponseWriter) error
+}
+
+type SetUserRisk200JSONResponse RiskUpdated
+
+func (response SetUserRisk200JSONResponse) VisitSetUserRiskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserRisk400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SetUserRisk400JSONResponse) VisitSetUserRiskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserRisk401JSONResponse Error
+
+func (response SetUserRisk401JSONResponse) VisitSetUserRiskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserRisk403JSONResponse Error
+
+func (response SetUserRisk403JSONResponse) VisitSetUserRiskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetUserRisk404JSONResponse Error
+
+func (response SetUserRisk404JSONResponse) VisitSetUserRiskResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealth ヘルスチェック
@@ -10572,6 +11003,12 @@ type StrictServerInterface interface {
 	// CreateRealmOperator realm の運営者を作る（最初の運営者を置く）
 	// (POST /v1/admin/realms/{realm_id}/operators)
 	CreateRealmOperator(ctx context.Context, request CreateRealmOperatorRequestObject) (CreateRealmOperatorResponseObject, error)
+	// ListRiskTypes realm のリスクの種類の一覧（ADR 0084）
+	// (GET /v1/admin/risk-types)
+	ListRiskTypes(ctx context.Context, request ListRiskTypesRequestObject) (ListRiskTypesResponseObject, error)
+	// PutRiskType リスクの種類を一覧に載せる・変える（ADR 0084）
+	// (PUT /v1/admin/risk-types/{name})
+	PutRiskType(ctx context.Context, request PutRiskTypeRequestObject) (PutRiskTypeResponseObject, error)
 	// ListRoleBindings realm の範囲のロールの付与の一覧
 	// (GET /v1/admin/role-bindings)
 	ListRoleBindings(ctx context.Context, request ListRoleBindingsRequestObject) (ListRoleBindingsResponseObject, error)
@@ -10623,6 +11060,9 @@ type StrictServerInterface interface {
 	// RevokeSession セッションを失効させる
 	// (POST /v1/admin/sessions/{id}:revoke)
 	RevokeSession(ctx context.Context, request RevokeSessionRequestObject) (RevokeSessionResponseObject, error)
+	// SetSessionRisk セッションのリスクの点数を更新する（ADR 0084）
+	// (POST /v1/admin/sessions/{id}:risk)
+	SetSessionRisk(ctx context.Context, request SetSessionRiskRequestObject) (SetSessionRiskResponseObject, error)
 	// RotateSigningKey ID トークンの署名鍵を新しくする（9.3）
 	// (POST /v1/admin/signing-keys:rotate)
 	RotateSigningKey(ctx context.Context, request RotateSigningKeyRequestObject) (RotateSigningKeyResponseObject, error)
@@ -10677,6 +11117,9 @@ type StrictServerInterface interface {
 	// IssueRecoveryLink 1回限りの復旧用リンクのトークンを発行する（4.12）
 	// (POST /v1/admin/users/{id}:recovery_link)
 	IssueRecoveryLink(ctx context.Context, request IssueRecoveryLinkRequestObject) (IssueRecoveryLinkResponseObject, error)
+	// SetUserRisk ユーザーのすべてのセッションのリスクの点数を更新する（ADR 0084）
+	// (POST /v1/admin/users/{id}:risk)
+	SetUserRisk(ctx context.Context, request SetUserRiskRequestObject) (SetUserRiskResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -12144,6 +12587,63 @@ func (sh *strictHandler) CreateRealmOperator(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// ListRiskTypes operation middleware
+func (sh *strictHandler) ListRiskTypes(w http.ResponseWriter, r *http.Request) {
+	var request ListRiskTypesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRiskTypes(ctx, request.(ListRiskTypesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRiskTypes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRiskTypesResponseObject); ok {
+		if err := validResponse.VisitListRiskTypesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutRiskType operation middleware
+func (sh *strictHandler) PutRiskType(w http.ResponseWriter, r *http.Request, name string) {
+	var request PutRiskTypeRequestObject
+
+	request.Name = name
+
+	var body PutRiskTypeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutRiskType(ctx, request.(PutRiskTypeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutRiskType")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutRiskTypeResponseObject); ok {
+		if err := validResponse.VisitPutRiskTypeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListRoleBindings operation middleware
 func (sh *strictHandler) ListRoleBindings(w http.ResponseWriter, r *http.Request) {
 	var request ListRoleBindingsRequestObject
@@ -12612,6 +13112,39 @@ func (sh *strictHandler) RevokeSession(w http.ResponseWriter, r *http.Request, i
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeSessionResponseObject); ok {
 		if err := validResponse.VisitRevokeSessionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetSessionRisk operation middleware
+func (sh *strictHandler) SetSessionRisk(w http.ResponseWriter, r *http.Request, id string) {
+	var request SetSessionRiskRequestObject
+
+	request.Id = id
+
+	var body SetSessionRiskJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetSessionRisk(ctx, request.(SetSessionRiskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetSessionRisk")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetSessionRiskResponseObject); ok {
+		if err := validResponse.VisitSetSessionRiskResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -13164,6 +13697,39 @@ func (sh *strictHandler) IssueRecoveryLink(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(IssueRecoveryLinkResponseObject); ok {
 		if err := validResponse.VisitIssueRecoveryLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetUserRisk operation middleware
+func (sh *strictHandler) SetUserRisk(w http.ResponseWriter, r *http.Request, id string) {
+	var request SetUserRiskRequestObject
+
+	request.Id = id
+
+	var body SetUserRiskJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetUserRisk(ctx, request.(SetUserRiskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetUserRisk")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetUserRiskResponseObject); ok {
+		if err := validResponse.VisitSetUserRiskResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

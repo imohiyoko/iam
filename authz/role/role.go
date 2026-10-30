@@ -71,6 +71,11 @@ const (
 	PermAttributesManage = "attributes:manage"
 	PermAttributesRead   = "attributes:read"
 	PermAttributesWrite  = "attributes:write"
+	// PermRiskTypesManage は realm のリスクの種類の一覧と境界（ADR 0084）。
+	PermRiskTypesManage = "risk_types:manage"
+	// PermRiskWrite は評価器によるセッションのリスクの点数の更新（ADR 0084）。サービスアカウントにだけ効く（人が持っても使えない）。
+	// realm:owner が持つのは、評価器のサービスアカウントに独自のロールで渡すため（渡すには自分が持っていなければならない）。
+	PermRiskWrite = "risk:write"
 )
 
 // SuspensionPerm は停止の種別ごとの停止・解除の権限（`suspensions:<category>`。4.11）。
@@ -86,7 +91,7 @@ func suspend(categories ...string) []string {
 }
 
 var builtin = map[string][]string{
-	RealmOwner: append([]string{PermRealmsManage, PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
+	RealmOwner: append([]string{PermRealmsManage, PermRiskTypesManage, PermRiskWrite, PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
 		PermCredentialsRevoke, PermSuspensionsAny}, suspend("tos_violation", "customer_request", "security_risk", "billing")...),
 	RealmAdmin: append([]string{PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke},
 		suspend("tos_violation", "customer_request")...),

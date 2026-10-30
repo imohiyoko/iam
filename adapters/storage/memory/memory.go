@@ -74,8 +74,10 @@ type state struct {
 	// groupClosure のキーは realm_id + group_id + ancestor_id。値は depth。
 	groupClosure map[string]groupLink
 	// attrDefs のキーは realm_id + key、attrValues のキーは realm_id + user_id + key。
-	attrDefs    map[string]port.AttributeDef
-	attrValues  map[string]port.UserAttribute
+	attrDefs   map[string]port.AttributeDef
+	attrValues map[string]port.UserAttribute
+	// riskTypes のキーは realm_id + name。
+	riskTypes   map[string]port.RiskType
 	orgs        map[string]port.Org
 	memberships map[string]port.Membership
 	invitations map[string]port.Invitation
@@ -110,7 +112,7 @@ func New(clk clock.Clock) *Storage {
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
 		saTokens:     map[string]port.ServiceAccountToken{},
 		roleBindings: map[string]port.RoleBinding{}, roles: map[string]port.Role{}, groups: map[string]port.Group{},
-		groupMembers: map[string]port.GroupMember{}, groupClosure: map[string]groupLink{}, attrDefs: map[string]port.AttributeDef{}, attrValues: map[string]port.UserAttribute{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
+		groupMembers: map[string]port.GroupMember{}, groupClosure: map[string]groupLink{}, attrDefs: map[string]port.AttributeDef{}, attrValues: map[string]port.UserAttribute{}, riskTypes: map[string]port.RiskType{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 		invitations: map[string]port.Invitation{}, quotaGrants: map[string]port.QuotaGrant{}, orgDomains: map[string]port.OrgDomain{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
 		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{},
 	}}
@@ -179,6 +181,7 @@ func (t *tx) RoleBindings() port.RoleBindingRepo       { return roleBindings{t} 
 func (t *tx) Roles() port.RoleRepo                     { return roles{t} }
 func (t *tx) Groups() port.GroupRepo                   { return groups{t} }
 func (t *tx) Attributes() port.AttributeRepo           { return attributes{t} }
+func (t *tx) RiskTypes() port.RiskTypeRepo             { return riskTypes{t} }
 func (t *tx) Clients() port.ClientRepo                 { return clients{t} }
 func (t *tx) SigningKeys() port.SigningKeyRepo         { return signingKeys{t} }
 func (t *tx) Grants() port.GrantRepo                   { return grants{t} }

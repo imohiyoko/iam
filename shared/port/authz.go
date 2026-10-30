@@ -137,3 +137,24 @@ type GroupRepo interface {
 	// PurgeNested は閉包の行を、その後に Group としての所属を、合わせて最大 limit 件消し、消した件数を返す。
 	PurgeNested(ctx context.Context, limit int) (int, error)
 }
+
+// RiskType は risk_types の1行（realm のリスクの種類の一覧。ADR 0084）。組み込みの種類（ip・device・account）は行が無くても
+// 有効で既定の境界を持ち、行があればそれに従う。
+type RiskType struct {
+	RealmID string
+	Name    string // 組み込みか `<名前空間>.<名前>`
+	Enabled bool
+	// BandMedium・BandHigh は段階の境界（shared/risk の Band）。
+	BandMedium int
+	BandHigh   int
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// RiskTypeRepo は risk_types の Repository。
+type RiskTypeRepo interface {
+	// List は realm の行を名前の順に返す。
+	List(ctx context.Context, realmID string) ([]RiskType, error)
+	// Put は行を置く（あれば Enabled・境界・UpdatedAt を置き換え、CreatedAt は保つ）。
+	Put(ctx context.Context, t RiskType) error
+}

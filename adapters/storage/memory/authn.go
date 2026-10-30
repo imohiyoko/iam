@@ -329,6 +329,7 @@ type sessions struct{ t *tx }
 
 func cloneSession(s port.Session) port.Session {
 	s.TokenHash, s.Warnings, s.IP, s.UserAgent = bytes.Clone(s.TokenHash), bytes.Clone(s.Warnings), bytes.Clone(s.IP), bytes.Clone(s.UserAgent)
+	s.Risk = bytes.Clone(s.Risk)
 	s.AuthMethods, s.AuthCredentialIDs = slices.Clone(s.AuthMethods), slices.Clone(s.AuthCredentialIDs)
 	s.RevokedAt = cloneTime(s.RevokedAt)
 	return s
@@ -397,6 +398,10 @@ func (r sessions) Touch(_ context.Context, realmID, id string, at time.Time) err
 			s.LastSeenAt = at
 		}
 	})
+}
+
+func (r sessions) SetRisk(_ context.Context, realmID, id string, risk []byte) error {
+	return r.update(realmID, id, func(s *port.Session) { s.Risk = bytes.Clone(risk) })
 }
 
 func (r sessions) Revoke(_ context.Context, realmID, id string, at time.Time, reason string) error {

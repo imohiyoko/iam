@@ -294,10 +294,22 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	}
 	// post_authentication は本人確認を終えた（制限の無いセッションになる）ときだけ呼ぶ。2要素目の後は CompleteSecondFactor が
 	// Issue を呼び直すので、そこで呼ばれる。
+	// フックの応答のリスクの点数をセッションに保存する（ADR 0084）。一覧に無い・止めた種類と範囲外の値は捨てて監査ログに残す。
+	// フックの失敗（fail_open で通したときを含む）では点数は無い（評価していない）。
+	var scores map[string]int
+	var dropped []string
 	if restriction == port.RestrictionNone && m.Hooks.Has(port.HookPostAuthentication) {
-		if _, err := m.Hooks.Run(ctx, port.HookInput{Hook: port.HookPostAuthentication, UserID: u.PublicID, AuthMethods: in.AuthMethods}); err != nil {
+		res, err := m.Hooks.Run(ctx, port.HookInput{Hook: port.HookPostAuthentication, UserID: u.PublicID, AuthMethods: in.AuthMethods})
+		if err != nil {
 			return Issued{}, err
 		}
+		if scores, dropped, err = hookRisk(ctx, tx, in.RealmID, res.Risk); err != nil {
+			return Issued{}, err
+		}
+	}
+	riskJSON, err := encodeRisk(scores)
+	if err != nil {
+		return Issued{}, err
 	}
 	warningsJSON, err := json.Marshal(nonNilWarnings(hits))
 	if err != nil {
@@ -317,7 +329,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	}
 	s := port.Session{
 		ID: id.NewExternal(id.Session), RealmID: in.RealmID, PrincipalType: port.PrincipalUser, PrincipalID: in.UserID,
-		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: warningsJSON, IP: ip, UserAgent: ua,
+		AuthMethods: in.AuthMethods, AuthCredentialIDs: in.Credentials, Warnings: warningsJSON, Risk: riskJSON, IP: ip, UserAgent: ua,
 		AuthenticatedAt: authAt, CreatedAt: now, LastSeenAt: now, Restriction: restriction,
 	}
 	token, hash, err := newToken(s.ID)
@@ -431,6 +443,16 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		Actor: actor, SessionID: s.ID, IP: in.IP, UserAgent: in.UserAgent,
 		RequestID: in.RequestID, Details: details,
 	})
+	if err == nil && (len(scores) > 0 || len(dropped) > 0) {
+		rd := map[string]any{"source": riskSourceHook, "risk": nonNilScores(scores)}
+		if len(dropped) > 0 {
+			rd["dropped"] = dropped
+		}
+		_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
+			Type: "session.risk_updated", Result: audit.ResultSuccess, RealmID: in.RealmID, OrgID: orgPublicID,
+			Actor: actor, SessionID: s.ID, RequestID: in.RequestID, Details: rd,
+		})
+	}
 	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced, SecondFactorMethods: methods, OrgChoices: choices,
 		OrgPublicID: orgPublicID, current: retired}, err
 }
@@ -680,6 +702,8 @@ type Validated struct {
 	MaxAuthAge      time.Duration
 	AuthMethods     []string
 	AuthenticatedAt time.Time
+	// Risk はリスクの種類ごとの点数（一覧で有効なものだけ。ADR 0084）。評価していない種類は無い。
+	Risk map[string]int
 	// Restriction は使える操作の制限（2要素目の確認待ちなど）。空なら制限なし。
 	Restriction port.SessionRestriction
 	// RotateDue は ID の入れ替えの時期を過ぎていることを表す（Cookie のセッションで入れ替える）。
@@ -698,6 +722,7 @@ type cached struct {
 	MaxAuthAge      time.Duration           `json:"ma,omitempty"`
 	AuthMethods     []string                `json:"amr"`
 	AuthenticatedAt time.Time               `json:"at"`
+	Risk            map[string]int          `json:"rk,omitempty"`
 	CreatedAt       time.Time               `json:"c"`
 	NextCheck       time.Time               `json:"n"`
 	Restriction     port.SessionRestriction `json:"r,omitempty"`
@@ -766,7 +791,11 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 			}
 		}
 		slices.Sort(orgUnavailable)
-		c = cached{Hash: s.TokenHash, SID: s.SID, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
+		scores, err := sessionRisk(ctx, tx, s)
+		if err != nil {
+			return err
+		}
+		c = cached{Risk: scores, Hash: s.TokenHash, SID: s.SID, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
 			ActiveOrgID: s.ActiveOrgID, OrgUnavailable: slices.Compact(orgUnavailable), MaxAuthAge: lim.MaxAuthAge, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
 		return nil
 	})
@@ -794,7 +823,7 @@ func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Valida
 	}
 	v := Validated{SessionID: sid, SID: lineage, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
 		PublicID: c.PublicID, ActiveOrgID: c.ActiveOrgID, OrgUnavailable: c.OrgUnavailable, MaxAuthAge: c.MaxAuthAge, AuthMethods: c.AuthMethods,
-		AuthenticatedAt: c.AuthenticatedAt, Restriction: c.Restriction}
+		AuthenticatedAt: c.AuthenticatedAt, Risk: c.Risk, Restriction: c.Restriction}
 	if m.Config.RotationInterval > 0 && !now.Before(c.CreatedAt.Add(m.Config.RotationInterval)) {
 		v.RotateDue = true
 	}

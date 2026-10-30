@@ -391,6 +391,106 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/sessions/{id}:risk:
+    post:
+      operationId: setSessionRisk
+      summary: セッションのリスクの点数を更新する（ADR 0084）
+      description: |
+        評価器の認証情報（権限 `risk:write` を持つサービスアカウント）だけが呼べる。人のセッションやアクセストークンは
+        `risk:write` を持っても `403 forbidden`。自分のセッションは更新できない（`403 forbidden`）。セッションのログインの系列
+        （入れ替えの後の新しいセッションを含む）の、終わっていないセッションを更新する。`risk` の値が null の種類は
+        「評価していない」に戻す。一覧に無い・止めた種類や 0〜100 の外の点数は `400 invalid_risk`。反映は
+        `validity_max_delay` 以内。更新したセッションごとに `session.risk_updated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RiskUpdate" }
+      responses:
+        "200":
+          description: 更新した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiskUpdated" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}:risk:
+    post:
+      operationId: setUserRisk
+      summary: ユーザーのすべてのセッションのリスクの点数を更新する（ADR 0084）
+      description: |
+        `setSessionRisk` と同じ規則で、ユーザーの終わっていないすべてのセッションを更新する。セッションが無くても 200
+        （`sessions` は 0）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RiskUpdate" }
+      responses:
+        "200":
+          description: 更新した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiskUpdated" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/risk-types:
+    get:
+      operationId: listRiskTypes
+      summary: realm のリスクの種類の一覧（ADR 0084）
+      description: |
+        権限 `risk_types:manage`。名前の順。組み込みの種類（`ip`・`device`・`account`）は変えていなくても載る（有効、既定の境界）。
+      responses:
+        "200":
+          description: 名前の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [risk_types]
+                properties:
+                  risk_types:
+                    type: array
+                    items: { $ref: "#/components/schemas/RiskType" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/risk-types/{name}:
+    put:
+      operationId: putRiskType
+      summary: リスクの種類を一覧に載せる・変える（ADR 0084）
+      description: |
+        権限 `risk_types:manage`。`name` は組み込みの種類か `<名前空間>.<名前>`（各部が `[a-z0-9_]{1,32}`）。外れれば
+        `400 invalid_risk_type`。`band` は段階の境界（1 ≦ `medium` < `high` ≦ 100。省けば今の値、新しい種類なら既定の 30・70）。
+        外れれば `400 invalid_band`。止めた種類の点数はセッションから捨てる（判定に使わない）。種類の数には上限を置かない。
+        変わったときだけ `realm.risk_types_changed` を監査ログに残す。
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RiskTypeInput" }
+      responses:
+        "200":
+          description: 載せた・変えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiskType" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
   /v1/admin/connections:
     post:
       operationId: createConnection
@@ -1927,6 +2027,40 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    RiskBand:
+      type: object
+      required: [medium, high]
+      properties:
+        medium: { type: integer, description: この点数以上が medium }
+        high: { type: integer, description: この点数以上が high }
+    RiskType:
+      type: object
+      required: [name, enabled, builtin, band]
+      properties:
+        name: { type: string }
+        enabled: { type: boolean }
+        builtin: { type: boolean, description: 組み込みの種類か }
+        band: { $ref: "#/components/schemas/RiskBand" }
+        updated_at: { type: string, format: date-time, description: 一覧で変えた時刻（組み込みの種類を変えていなければ無い） }
+    RiskTypeInput:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+        band: { $ref: "#/components/schemas/RiskBand" }
+    RiskUpdate:
+      type: object
+      required: [risk]
+      properties:
+        risk:
+          type: object
+          description: 種類 → 点数（0〜100、高いほど危うい）。null はその種類を「評価していない」に戻す
+          additionalProperties: { type: integer, nullable: true }
+    RiskUpdated:
+      type: object
+      required: [sessions]
+      properties:
+        sessions: { type: integer, description: 更新したセッションの数 }
     AttributeDef:
       type: object
       required: [key, type, values, user_editable, in_token, encrypted, created_at, updated_at]

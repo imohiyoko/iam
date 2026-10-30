@@ -400,8 +400,10 @@ type Session struct {
 	// Restriction は使える操作の制限。空なら制限なし（SessionRestriction を参照）。
 	Restriction SessionRestriction
 	Warnings    []byte // JSON
-	IP          []byte // ユーザーのデータ鍵で暗号化したもの
-	UserAgent   []byte // 同上
+	// Risk はリスクの種類ごとの点数（JSON の object。ADR 0084）。評価していない種類は無い。空なら無し。
+	Risk      []byte
+	IP        []byte // ユーザーのデータ鍵で暗号化したもの
+	UserAgent []byte // 同上
 	// AuthenticatedAt は最後に本人確認した時刻（max_auth_age の判定に使う）。ID を入れ替えても引き継ぐ。
 	AuthenticatedAt time.Time
 	CreatedAt       time.Time // この ID を発行した時刻（ID の入れ替えの判定に使う）
@@ -445,6 +447,8 @@ type SessionRepo interface {
 	RevokeByPrincipal(ctx context.Context, realmID string, t PrincipalType, principalID, exceptID string, at time.Time, reason string) ([]string, error)
 	// MoveOrg はユーザーの、active な Org が fromOrgID のセッションを toOrgID に移し、その ID を返す（退会。4.10）。
 	MoveOrg(ctx context.Context, realmID, userID, fromOrgID, toOrgID string) ([]string, error)
+	// SetRisk はリスクの点数（JSON）を置き換える。無ければ errs.NotFound。
+	SetRisk(ctx context.Context, realmID, id string, risk []byte) error
 	// DeleteEnded は before より前に失効したか期限が切れたセッションを全 realm から最大 limit 件消し、消した件数を返す（9.6）。
 	DeleteEnded(ctx context.Context, before time.Time, limit int) (int, error)
 }

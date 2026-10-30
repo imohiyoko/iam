@@ -53,6 +53,7 @@ var authnTests = []struct {
 	{"EffectiveBindings", testEffectiveBindings},
 	{"NestedGroups", testNestedGroups},
 	{"Attributes", testAttributes},
+	{"RiskTypes", testRiskTypes},
 	{"Orgs", testOrgs},
 	{"PersonalOrgUniqueConcurrent", testPersonalOrgUniqueConcurrent},
 	{"Memberships", testMemberships},
@@ -474,7 +475,7 @@ func testSessions(t *testing.T, h Harness) {
 	s, _ := open(t, h)
 	r, u := id.New(id.Realm), id.New(id.User)
 	a := newSession(r, u, T0)
-	a.Restriction = port.RestrictionSecondFactor
+	a.Restriction, a.Risk = port.RestrictionSecondFactor, []byte(`{"ip":10}`)
 	b := newSession(r, u, T0.Add(time.Minute))
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Sessions()
@@ -520,11 +521,29 @@ func testSessions(t *testing.T, h Harness) {
 			return fmt.Errorf("after updates: %+v", got)
 		}
 
+		// SetRisk は点数を置き換え、空なら無しに戻す。
+		if err := repo.SetRisk(ctx, r, b.ID, []byte(`{"account":80}`)); err != nil {
+			return err
+		}
+		if got, err := repo.Get(ctx, r, b.ID); err != nil || string(got.Risk) != `{"account":80}` {
+			return fmt.Errorf("after SetRisk: %q, %v", got.Risk, err)
+		}
+		if err := repo.SetRisk(ctx, r, a.ID, nil); err != nil {
+			return err
+		}
+		if got, err := repo.Get(ctx, r, a.ID); err != nil || got.Risk != nil {
+			return fmt.Errorf("after clearing the risk: %q, %v", got.Risk, err)
+		}
+		if err := notFound("SetRisk missing", repo.SetRisk(ctx, r, id.NewExternal(id.Session), nil)); err != nil {
+			return err
+		}
+
 		other := id.New(id.Realm)
 		for name, err := range map[string]error{
-			"Get":    func() error { _, err := repo.Get(ctx, other, a.ID); return err }(),
-			"Touch":  repo.Touch(ctx, other, b.ID, T0.Add(time.Hour)),
-			"Revoke": repo.Revoke(ctx, other, b.ID, T0, "x"),
+			"Get":     func() error { _, err := repo.Get(ctx, other, a.ID); return err }(),
+			"Touch":   repo.Touch(ctx, other, b.ID, T0.Add(time.Hour)),
+			"Revoke":  repo.Revoke(ctx, other, b.ID, T0, "x"),
+			"SetRisk": repo.SetRisk(ctx, other, b.ID, []byte(`{}`)),
 		} {
 			if err := notFound("sessions."+name+" from another realm", err); err != nil {
 				return err

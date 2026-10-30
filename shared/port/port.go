@@ -62,6 +62,7 @@ type Tx interface {
 	Roles() RoleRepo
 	Groups() GroupRepo
 	Attributes() AttributeRepo
+	RiskTypes() RiskTypeRepo
 	Clients() ClientRepo
 	SigningKeys() SigningKeyRepo
 	Grants() GrantRepo
