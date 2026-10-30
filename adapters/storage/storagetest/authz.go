@@ -477,6 +477,13 @@ func testActionNamespaces(t *testing.T, h Harness) {
 		if got, err := repo.List(ctx, id.New(id.Realm)); err != nil || len(got) != 0 {
 			return fmt.Errorf("actionNamespaces.List of another realm = %+v, %v", got, err)
 		}
+		// 設定が nil でも置ける（空の設定として読める）。
+		if err := repo.Put(ctx, port.ActionNamespace{RealmID: other, Name: "empty", CreatedAt: T0, UpdatedAt: T0}); err != nil {
+			return fmt.Errorf("actionNamespaces.Put with nil settings: %w", err)
+		}
+		if got, err := repo.Get(ctx, other, "empty"); err != nil || len(got.Settings) != 0 {
+			return fmt.Errorf("actionNamespaces.Get with nil settings = %+v, %v", got, err)
+		}
 		return nil
 	})
 }

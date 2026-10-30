@@ -31,6 +31,8 @@ type adminPrincipal struct {
 	AuthenticatedAt time.Time
 	// Context は呼び出し元の認証の文脈（ADR 0084）。付与の条件と権限の検査に使う。
 	Context *check.AuthContext
+	// AccessToken はサービスアカウントがアクセストークンで呼んだか（API キーでは偽）。
+	AccessToken bool
 }
 
 // withAdminAuth は管理 API の認証。Bearer のトークンが運営者のセッションならそのユーザー、
@@ -72,7 +74,7 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 				return
 			}
 			p = adminPrincipal{Type: port.PrincipalServiceAccount, ID: sa.Account.ID, Actor: audit.Actor{Type: "service_account", ID: sa.Account.ID},
-				Context: serviceAccountContext(sa.Method, sa.AuthTime)}
+				Context: serviceAccountContext(sa.Method, sa.AuthTime), AccessToken: serviceaccount.IsAccessToken(key)}
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), adminKey{}, p)))
 	})
