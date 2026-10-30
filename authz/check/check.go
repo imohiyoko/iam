@@ -160,7 +160,9 @@ func (c *Checker) source(ctx context.Context, realmID string, r Request) source 
 			})
 			return b, err
 		},
-		requirements: func() (requirements, error) { return c.cachedRequirements(ctx, realmID, NamespaceOf(r.Action), r.OrgID) },
+		requirements: func() (requirements, error) {
+			return c.cachedRequirements(ctx, realmID, NamespaceOf(r.Action), r.OrgID)
+		},
 	}
 }
 
