@@ -32,6 +32,7 @@ KeyStore（`file` または `env`）には次の鍵がある。**鍵を失うと
 |---|---|---|
 | マスター鍵（`master_keys`） | ユーザーごとのデータ鍵を包む | 暗号化した個人情報（メール、TOTP、IP など）を読めない |
 | インデックス鍵（`index_keys`） | メールのブラインドインデックス | メールでユーザーを引けない（ログインできない） |
+| 監査の鍵（`audit_keys`。省ける） | 監査ログのハッシュチェーンの HMAC（ADR 0086） | その鍵で作った監査ログの改ざんを確かめられない（`storage import` の検証が通らない） |
 
 OIDC の署名鍵と、監査ログの日ごとの鍵は Storage にあり、マスター鍵で包まれている。
 
@@ -41,6 +42,7 @@ OIDC の署名鍵と、監査ログの日ごとの鍵は Storage にあり、マ
 2. `env` の KeyStore では、同じ JSON を秘密の管理サービスに置き、環境変数 `IAM_KEYS` で渡す（読み込んだ後に環境変数から消す）
 3. DB のバックアップと鍵のバックアップは別々に保管する（片方だけが漏れても読めないように）。DB だけを戻すときは、そのバックアップを取った時点の鍵が要る
 4. マスター鍵を入れ替えるときは、新しい鍵を `master_keys` に足して `current_master_key` を変える。古い鍵は消さない（既存のデータ鍵の復号に要る）。インデックス鍵の入れ替え（全件の再計算）はまだ無い
+5. 監査の鍵は `iam keys generate` で作る鍵の組に入る。前からある keys.json には、32 バイトの乱数（base64）を `audit_keys` に足して `current_audit_key` にその ID（`ak_…`）を書けば、その後の監査ログから鍵付きになる。入れ替えも同じ手順で、古い鍵は監査ログの保持期間（`realm.audit_retention`）が過ぎるまで消さない。一度鍵付きにしたら `current_audit_key` を外さない（鍵なしに戻ったレコードは改ざんとみなされる）。鍵を足す前からの監査ログがあれば、鍵を足す前の最後の seq を `audit_unkeyed_until` に書く（書くまで `storage import` の検証は鍵なしのレコードで止まる。新しく `iam keys generate` で作った構成では要らない）
 
 削除したユーザーのデータ鍵は消える（crypto-shredding）が、DB のバックアップには残る。バックアップの保持期間を決め、期間を過ぎたものは消す。
 
@@ -74,7 +76,7 @@ SQLite から PostgreSQL へ（逆も）：
 
 1. 書き込みを止める（インスタンスを止める）
 2. `iam storage export -config from.yaml -out dump.jsonl`
-3. 移行先の KeyStore に、移行元と同じ鍵（`master_keys` と `index_keys`）を置く。新しい鍵を作らない（書き出しは鍵を含まず、`storage import` は鍵が合うかを確かめないので、違う鍵では個人情報を復号できず、メールの検索もできない）
+3. 移行先の KeyStore に、移行元と同じ鍵（`master_keys` と `index_keys`、監査の鍵を使っていれば `audit_keys` と `current_audit_key`、`audit_unkeyed_until`）を置く。新しい鍵を作らない（書き出しは鍵を含まず、`storage import` は鍵が合うかを確かめないので、違う鍵では個人情報を復号できず、メールの検索もできない）
 4. 移行先で `iam migrate -config to.yaml`、続けて `iam storage import -config to.yaml -in dump.jsonl`（空の Storage にだけ入る。監査ログのチェーンを検証する）
 5. 設定を移行先に変えて起動する
 
@@ -96,7 +98,7 @@ dump.jsonl には暗号化した個人情報が入る。移行が終わったら
 | 通知が届かない | Notifier の送り先の障害 | 同上（outbox から再送する） |
 | 起動を拒否する（ledger does not match binary） | 台帳とバイナリの構成が合わない | 前のバイナリに戻すか、`iam features plan` で手順を確かめる |
 | 起動を拒否する（鍵） | KeyStore を読めない | 鍵のファイルの権限（0600）と環境変数を確かめ、バックアップから戻す |
-| `storage import` が監査ログの検証で失敗する | 監査ログの改ざん、または書き出しの破損 | 書き出しをやり直す。改ざんならインシデントとして扱い、SIEM の記録と照らし合わせる |
+| `storage import` が監査ログの検証で失敗する | 監査ログの改ざん、書き出しの破損、または移行先の KeyStore に監査の鍵（`audit_keys`）が無い | 書き出しをやり直す。改ざんならインシデントとして扱い、SIEM の記録と照らし合わせる |
 | 運営者のアカウントの乗っ取りが疑われる | ― | 別の owner が管理 API で停止（`security_risk`）し、全認証情報と全セッションを無効化する（`POST /v1/admin/users/{id}/credentials:revoke-all`）。運営者がいなければ `iam operator create` で作り直す |
 | 署名鍵の漏洩が疑われる | ― | 運営者のトークンで `POST /v1/admin/signing-keys:rotate`（`Authorization: Bearer …`、`Content-Type: application/json`、本文 `{"alg": "ES256"}` か `{"alg": "ML-DSA-65"}`）を実行し、漏れた鍵のアルゴリズムを新しい鍵に切り替える。古い鍵は `oidc.retired_key_ttl`（既定 7 日）の間 JWKS に残り、その間は漏れた鍵で署名した ID トークンが RP の検証を通りうる。個別に失効させる API は無いので、`oidc.retired_key_ttl` を `oidc.id_token_ttl` を少し超える値に一時的に下げて全台を再起動し、残る期間を縮める。影響の範囲を記録し、RP に古い `kid` を信頼しないよう伝える |
 | マスター鍵の漏洩が疑われる | ― | DB の漏洩と合わせて評価する。新しいマスター鍵に切り替え（2章）、データ鍵の包み直しは今は無いため、影響を記録する |

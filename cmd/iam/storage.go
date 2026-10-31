@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/plugin"
@@ -73,6 +74,11 @@ func storageCmd(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		if *in == "" {
 			return errors.New("-in is required")
 		}
+		// 監査ログのチェーンは取り込んだ後に KeyStore の監査の鍵で確かめる（ADR 0086）。KeyStore の誤りで取り込んだ後に止まらないよう、先に読む。
+		keys, err := auditKeys(ctx, cfg)
+		if err != nil {
+			return err
+		}
 		f, err := os.Open(*in) // #nosec G304 G703 -- 運営者が指定するファイル
 		if err != nil {
 			return err
@@ -81,8 +87,7 @@ func storageCmd(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		if stats, err = d.Import(ctx, f); err != nil {
 			return err
 		}
-		// 監査ログのチェーンが移行先でもつながっていることを確かめる。
-		_, n, err := eventlog.Verify(ctx, s)
+		_, n, err := eventlog.VerifyWith(ctx, s, keys)
 		if err != nil {
 			return fmt.Errorf("imported, but the audit chain does not verify: %w", err)
 		}
@@ -100,4 +105,18 @@ func storageCmd(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	}
 	fmt.Fprintf(stdout, "%sed %d rows\n", args[0], total)
 	return nil
+}
+
+// auditKeys は設定の KeyStore の監査の鍵を返す。KeyStore が監査の鍵を持たなければ nil（鍵なしのレコードだけ確かめる）。
+func auditKeys(ctx context.Context, cfg config.Config) (port.AuditKeyStore, error) {
+	kf, err := plugin.KeyStore(cfg.KeyStore.Driver)
+	if err != nil {
+		return nil, err
+	}
+	ks, err := kf(ctx, plugin.Config{Clock: clock.System{}, Options: cfg.KeyStore.Options, Dev: cfg.Dev})
+	if err != nil {
+		return nil, err
+	}
+	aks, _ := ks.(port.AuditKeyStore)
+	return aks, nil
 }

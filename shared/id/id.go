@@ -113,6 +113,7 @@ const (
 	Request        Prefix = "req"
 	MasterKey      Prefix = "mk"
 	IndexKey       Prefix = "ik"
+	AuditKey       Prefix = "ak"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。

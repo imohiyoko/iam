@@ -411,11 +411,12 @@ func (a auditRepo) Last(ctx context.Context) (*audit.Record, error) {
 	if err != nil {
 		return nil, mapErr(err)
 	}
-	return &audit.Record{Seq: row.Seq, RealmID: row.RealmID, PrevHash: row.PrevHash, Hash: row.Hash, Payload: row.Payload}, nil
+	return &audit.Record{Seq: row.Seq, RealmID: row.RealmID, PrevHash: row.PrevHash, Hash: row.Hash, Payload: row.Payload, KeyID: row.KeyID}, nil
 }
 
 func (a auditRepo) Append(ctx context.Context, r audit.Record) error {
-	return mapErr(a.q.AppendAuditEvent(ctx, db.AppendAuditEventParams{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload}))
+	return mapErr(a.q.AppendAuditEvent(ctx, db.AppendAuditEventParams{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload,
+		KeyID: r.KeyID}))
 }
 
 func (a auditRepo) Scan(ctx context.Context, fromSeq int64, limit int) ([]audit.Record, error) {
@@ -425,7 +426,7 @@ func (a auditRepo) Scan(ctx context.Context, fromSeq int64, limit int) ([]audit.
 	}
 	out := make([]audit.Record, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, audit.Record{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload})
+		out = append(out, audit.Record{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload, KeyID: r.KeyID})
 	}
 	return out, nil
 }
@@ -437,7 +438,7 @@ func (a auditRepo) ListByRealm(ctx context.Context, realmID string, fromSeq int6
 	}
 	out := make([]audit.Record, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, audit.Record{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload})
+		out = append(out, audit.Record{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload, KeyID: r.KeyID})
 	}
 	return out, nil
 }
@@ -451,14 +452,14 @@ func (a auditRepo) Checkpoint(ctx context.Context) (*audit.Checkpoint, error) {
 		return nil, mapErr(err)
 	}
 	t, err := parseTime(row.CreatedAt)
-	return &audit.Checkpoint{Seq: row.Seq, Hash: row.Hash, At: t}, err
+	return &audit.Checkpoint{Seq: row.Seq, Hash: row.Hash, At: t, KeyID: row.KeyID}, err
 }
 
 func (a auditRepo) Truncate(ctx context.Context, cp audit.Checkpoint) error {
 	if err := a.q.TruncateAuditEvents(ctx, cp.Seq); err != nil {
 		return mapErr(err)
 	}
-	return mapErr(a.q.PutAuditCheckpoint(ctx, db.PutAuditCheckpointParams{Seq: cp.Seq, Hash: cp.Hash, CreatedAt: formatTime(cp.At)}))
+	return mapErr(a.q.PutAuditCheckpoint(ctx, db.PutAuditCheckpointParams{Seq: cp.Seq, Hash: cp.Hash, CreatedAt: formatTime(cp.At), KeyID: cp.KeyID}))
 }
 
 // ---------------------------------------------------------------------------

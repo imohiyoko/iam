@@ -47,7 +47,7 @@ func (q *Queries) AddRealmHost(ctx context.Context, arg AddRealmHostParams) erro
 }
 
 const appendAuditEvent = `-- name: AppendAuditEvent :exec
-INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload) VALUES (?, ?, ?, ?, ?)
+INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload, key_id) VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type AppendAuditEventParams struct {
@@ -56,6 +56,7 @@ type AppendAuditEventParams struct {
 	PrevHash []byte
 	Hash     []byte
 	Payload  []byte
+	KeyID    string
 }
 
 func (q *Queries) AppendAuditEvent(ctx context.Context, arg AppendAuditEventParams) error {
@@ -65,6 +66,7 @@ func (q *Queries) AppendAuditEvent(ctx context.Context, arg AppendAuditEventPara
 		arg.PrevHash,
 		arg.Hash,
 		arg.Payload,
+		arg.KeyID,
 	)
 	return err
 }
@@ -189,19 +191,25 @@ func (q *Queries) DeleteRealmHosts(ctx context.Context, realmID string) error {
 }
 
 const getAuditCheckpoint = `-- name: GetAuditCheckpoint :one
-SELECT seq, hash, created_at FROM shared_audit_checkpoint WHERE id = 1
+SELECT seq, hash, created_at, key_id FROM shared_audit_checkpoint WHERE id = 1
 `
 
 type GetAuditCheckpointRow struct {
 	Seq       int64
 	Hash      []byte
 	CreatedAt string
+	KeyID     string
 }
 
 func (q *Queries) GetAuditCheckpoint(ctx context.Context) (GetAuditCheckpointRow, error) {
 	row := q.db.QueryRowContext(ctx, getAuditCheckpoint)
 	var i GetAuditCheckpointRow
-	err := row.Scan(&i.Seq, &i.Hash, &i.CreatedAt)
+	err := row.Scan(
+		&i.Seq,
+		&i.Hash,
+		&i.CreatedAt,
+		&i.KeyID,
+	)
 	return i, err
 }
 
@@ -290,7 +298,7 @@ func (q *Queries) GetRealmBySlug(ctx context.Context, slug string) (AuthnRealm, 
 }
 
 const lastAuditEvent = `-- name: LastAuditEvent :one
-SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events ORDER BY seq DESC LIMIT 1
+SELECT seq, realm_id, prev_hash, hash, payload, key_id FROM shared_audit_events ORDER BY seq DESC LIMIT 1
 `
 
 func (q *Queries) LastAuditEvent(ctx context.Context) (SharedAuditEvent, error) {
@@ -302,12 +310,13 @@ func (q *Queries) LastAuditEvent(ctx context.Context) (SharedAuditEvent, error) 
 		&i.PrevHash,
 		&i.Hash,
 		&i.Payload,
+		&i.KeyID,
 	)
 	return i, err
 }
 
 const listAuditEventsByRealm = `-- name: ListAuditEventsByRealm :many
-SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE realm_id = ? AND seq >= ? ORDER BY seq LIMIT ?
+SELECT seq, realm_id, prev_hash, hash, payload, key_id FROM shared_audit_events WHERE realm_id = ? AND seq >= ? ORDER BY seq LIMIT ?
 `
 
 type ListAuditEventsByRealmParams struct {
@@ -331,6 +340,7 @@ func (q *Queries) ListAuditEventsByRealm(ctx context.Context, arg ListAuditEvent
 			&i.PrevHash,
 			&i.Hash,
 			&i.Payload,
+			&i.KeyID,
 		); err != nil {
 			return nil, err
 		}
@@ -523,18 +533,24 @@ func (q *Queries) PendingOutbox(ctx context.Context, arg PendingOutboxParams) ([
 }
 
 const putAuditCheckpoint = `-- name: PutAuditCheckpoint :exec
-INSERT INTO shared_audit_checkpoint (id, seq, hash, created_at) VALUES (1, ?, ?, ?)
-ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, hash = excluded.hash, created_at = excluded.created_at
+INSERT INTO shared_audit_checkpoint (id, seq, hash, created_at, key_id) VALUES (1, ?, ?, ?, ?)
+ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, hash = excluded.hash, created_at = excluded.created_at, key_id = excluded.key_id
 `
 
 type PutAuditCheckpointParams struct {
 	Seq       int64
 	Hash      []byte
 	CreatedAt string
+	KeyID     string
 }
 
 func (q *Queries) PutAuditCheckpoint(ctx context.Context, arg PutAuditCheckpointParams) error {
-	_, err := q.db.ExecContext(ctx, putAuditCheckpoint, arg.Seq, arg.Hash, arg.CreatedAt)
+	_, err := q.db.ExecContext(ctx, putAuditCheckpoint,
+		arg.Seq,
+		arg.Hash,
+		arg.CreatedAt,
+		arg.KeyID,
+	)
 	return err
 }
 
@@ -561,7 +577,7 @@ func (q *Queries) PutFeature(ctx context.Context, arg PutFeatureParams) error {
 }
 
 const scanAuditEvents = `-- name: ScanAuditEvents :many
-SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE seq >= ? ORDER BY seq LIMIT ?
+SELECT seq, realm_id, prev_hash, hash, payload, key_id FROM shared_audit_events WHERE seq >= ? ORDER BY seq LIMIT ?
 `
 
 type ScanAuditEventsParams struct {
@@ -584,6 +600,7 @@ func (q *Queries) ScanAuditEvents(ctx context.Context, arg ScanAuditEventsParams
 			&i.PrevHash,
 			&i.Hash,
 			&i.Payload,
+			&i.KeyID,
 		); err != nil {
 			return nil, err
 		}
