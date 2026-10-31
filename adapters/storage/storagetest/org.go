@@ -571,7 +571,7 @@ func testOrgDomains(t *testing.T, h Harness) {
 		if got, err := repo.GetVerified(ctx, r, "example.com"); err != nil || !reflect.DeepEqual(got, a) {
 			return fmt.Errorf("GetVerified = %+v, %v", got, err)
 		}
-		// 確かめ直すのは証明済みで、確かめた時刻が before 以前（または無い）もの。確かめていないものが先（ADR 0085）。
+		// 確かめ直すのは証明済みで、確かめた時刻が before 以前（または無い）もの。確かめていないものが先（ADR 0087）。
 		c.VerifiedAt = ptr(T0)
 		if err := repo.Update(ctx, c); err != nil {
 			return err

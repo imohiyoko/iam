@@ -2252,12 +2252,35 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /v1/me/orgs/{id}/my-groups:
+    get:
+      operationId: listMyGroupsInOrg
+      summary: この Org の範囲で本人が所属する Group の一覧（ADR 0085）
+      description: |
+        権限は要らない（この Org の使える所属が要る）。名前の順。
+        フィーチャー `nested_groups` が有効なら、所属する Group を含む Group も返す（`direct` が false。その付与も本人に効くため）。
+        Org が無いか所属していなければ `404`、所属が使えなければ `403`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyGroups" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/me/orgs/{id}/groups:
     get:
       operationId: listMyOrgGroups
       summary: この Org の範囲の Group の一覧（3.2）
       description: |
-        権限 `org:groups`。名前の順。
+        権限 `org:groups` か、Org 全体の `org:groups.read`。名前の順。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -2352,7 +2375,9 @@ paths:
       operationId: listMyOrgGroupMembers
       summary: Group の所属の一覧
       description: |
-        権限 `org:groups`。作成の順。
+        権限 `org:groups` か `org:groups.read`。`org:groups.read` は Org 全体か、この Group に限った付与
+        （`resource_type` が `group`、`resource_id` が Group の公開 ID。ADR 0085）で効く。作成の順。
+        直接の所属だけを返す（ネストした Group は `principal_type` が `group` の1行）。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -2906,6 +2931,21 @@ components:
         groups:
           type: array
           items: { $ref: "#/components/schemas/Group" }
+    MyGroup:
+      type: object
+      required: [id, name, created_at, direct]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        direct: { type: boolean, description: 直接の所属なら true。所属する Group を含む Group（nested_groups）なら false }
+    MyGroups:
+      type: object
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items: { $ref: "#/components/schemas/MyGroup" }
     GroupInput:
       type: object
       required: [name]

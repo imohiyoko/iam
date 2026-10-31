@@ -174,7 +174,7 @@ func TestOrgDomainsAPI(t *testing.T) {
 	}
 }
 
-// 証明済みのドメインは定期的に確かめ直し、TXT が猶予の間ずっと無ければ証明を外す（ADR 0085）。
+// 証明済みのドメインは定期的に確かめ直し、TXT が猶予の間ずっと無ければ証明を外す（ADR 0087）。
 func TestOrgDomainRecheck(t *testing.T) {
 	l, dns := newDomainEnv(t, true)
 	_, owner := l.login(t, "boss@acme.example")

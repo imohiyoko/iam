@@ -129,7 +129,7 @@ type App struct {
 	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
 	scheduler *eventlog.Scheduler
 	retention *eventlog.Retention
-	// domainRecheck は証明済みのドメインを確かめ直す（ADR 0085）。フィーチャー org_managed_users が無いか、間隔が 0 なら nil。
+	// domainRecheck は証明済みのドメインを確かめ直す（ADR 0087）。フィーチャー org_managed_users が無いか、間隔が 0 なら nil。
 	domainRecheck *org.DomainRechecker
 	// public と admin は待ち受けるハンドラ（複数 realm なら振り分け）。ownPublic と ownAdmin はこの realm のもの。
 	public, admin       http.Handler

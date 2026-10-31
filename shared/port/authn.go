@@ -701,7 +701,7 @@ type OrgDomain struct {
 	Token      string // TXT に置く値の一部。秘密ではない
 	VerifiedAt *time.Time
 	CheckedAt  *time.Time // 最後に TXT を確かめた時刻
-	// MissingSince は証明済みのドメインを確かめ直して、TXT が続けて見つからなくなった最初の時刻（見つかれば nil。ADR 0085）。
+	// MissingSince は証明済みのドメインを確かめ直して、TXT が続けて見つからなくなった最初の時刻（見つかれば nil。ADR 0087）。
 	MissingSince *time.Time
 	CreatedBy    string // 登録した主体の公開 ID
 	CreatedAt    time.Time
@@ -716,7 +716,7 @@ type OrgDomainRepo interface {
 	GetVerified(ctx context.Context, realmID, domain string) (OrgDomain, error)
 	// ListByOrg は Org のドメインを作成時刻の順（同時刻は ID の順）に返す。
 	ListByOrg(ctx context.Context, realmID, orgID string) ([]OrgDomain, error)
-	// ListToRecheck は証明済みで、CheckedAt が before 以前（または無い）の行を全 realm から CheckedAt の順に最大 limit 件返す（ADR 0085）。
+	// ListToRecheck は証明済みで、CheckedAt が before 以前（または無い）の行を全 realm から CheckedAt の順に最大 limit 件返す（ADR 0087）。
 	ListToRecheck(ctx context.Context, before time.Time, limit int) ([]OrgDomain, error)
 	// Update は ID の行の VerifiedAt・CheckedAt・MissingSince を d の値に置き換える。無ければ errs.NotFound。
 	// 同じ realm で同じドメインを別の行が証明済みなら errs.Conflict。

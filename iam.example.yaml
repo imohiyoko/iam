@@ -78,7 +78,7 @@ outbox:
   interval: 1s
   batch: 100
 
-# 証明済みのドメインの確かめ直し（フィーチャー org_managed_users。ADR 0085）。
+# 証明済みのドメインの確かめ直し（フィーチャー org_managed_users。ADR 0087）。
 org_domains:
   recheck: 1d  # 1つのドメインの TXT を確かめ直す間隔（0 で確かめ直さない）
   grace: 7d    # TXT が見つからなくなってから証明を外すまでの猶予
