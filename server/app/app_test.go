@@ -19,6 +19,7 @@ import (
 	"github.com/imohiyoko/iam/adapters/notifier/dev"
 	"github.com/imohiyoko/iam/adapters/storage/memory"
 	"github.com/imohiyoko/iam/server/config"
+	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/feature"
@@ -86,8 +87,12 @@ func TestStartupCreatesRealmOnce(t *testing.T) {
 	if a.Realm().ID != b.Realm().ID || a.Realm().Slug != "default" {
 		t.Fatalf("realm %v vs %v", a.Realm(), b.Realm())
 	}
-	if _, n, err := eventlog.Verify(context.Background(), e.deps.Storage); err != nil || n != 1 {
+	// 監査ログは監査の鍵で作る（ADR 0086）。鍵が無ければ確かめられない。
+	if _, n, err := eventlog.VerifyWith(context.Background(), e.deps.Storage, e.deps.KeyStore.(port.AuditKeyStore)); err != nil || n != 1 {
 		t.Fatalf("audit: n=%d err=%v", n, err)
+	}
+	if _, _, err := eventlog.Verify(context.Background(), e.deps.Storage); !errors.Is(err, audit.ErrChainBroken) {
+		t.Fatalf("verify without audit keys: %v", err)
 	}
 }
 

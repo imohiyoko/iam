@@ -177,7 +177,7 @@ func (r *Retention) truncateAudit(ctx context.Context, cutoff time.Time) (int, e
 		if through == nil {
 			return nil
 		}
-		next := audit.Checkpoint{Seq: through.Seq, Hash: through.Hash, At: r.Clock.Now()}
+		next := audit.Checkpoint{Seq: through.Seq, Hash: through.Hash, At: r.Clock.Now(), KeyID: through.KeyID}
 		if err := tx.Audit().Truncate(ctx, next); err != nil {
 			return err
 		}

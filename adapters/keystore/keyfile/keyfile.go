@@ -5,8 +5,11 @@
 //
 //	{
 //	  "current_master_key": "mk_…", "master_keys": {"mk_…": "…"},
-//	  "current_index_key":  "ik_…", "index_keys":  {"ik_…": "…"}
+//	  "current_index_key":  "ik_…", "index_keys":  {"ik_…": "…"},
+//	  "current_audit_key":  "ak_…", "audit_keys":  {"ak_…": "…"}
 //	}
+//
+// 監査の鍵（監査ログのハッシュチェーン。ADR 0086）は省ける。省けばチェーンは鍵なし。
 //
 // ファイルは所有者だけが読める権限（0600 など）でなければ読み込みを拒否する。
 // 鍵を失うと暗号化データは復元できないため、バックアップの手順を運用文書に含める（design.md 9.5）。
@@ -36,15 +39,20 @@ type Keys struct {
 	MasterKeys       map[string]string `json:"master_keys"`
 	CurrentIndexKey  string            `json:"current_index_key"`
 	IndexKeys        map[string]string `json:"index_keys"`
+	CurrentAuditKey  string            `json:"current_audit_key,omitempty"`
+	AuditKeys        map[string]string `json:"audit_keys,omitempty"`
 }
 
 // Store はメモリに読み込んだ鍵。
 type Store struct {
-	masterID, indexID string
-	master, index     map[string][]byte
+	masterID, indexID, auditID string
+	master, index, audit       map[string][]byte
 }
 
-var _ port.KeyStore = (*Store)(nil)
+var (
+	_ port.KeyStore      = (*Store)(nil)
+	_ port.AuditKeyStore = (*Store)(nil)
+)
 
 // Load は path から鍵を読み込む。
 func Load(path string) (*Store, error) {
@@ -77,12 +85,15 @@ func Load(path string) (*Store, error) {
 
 // FromKeys は Keys を検証して Store にする（環境変数のアダプタも使う）。
 func FromKeys(k Keys) (*Store, error) {
-	s := &Store{masterID: k.CurrentMasterKey, indexID: k.CurrentIndexKey}
+	s := &Store{masterID: k.CurrentMasterKey, indexID: k.CurrentIndexKey, auditID: k.CurrentAuditKey}
 	var err error
 	if s.master, err = decodeAll("master", k.MasterKeys); err != nil {
 		return nil, err
 	}
 	if s.index, err = decodeAll("index", k.IndexKeys); err != nil {
+		return nil, err
+	}
+	if s.audit, err = decodeAll("audit", k.AuditKeys); err != nil {
 		return nil, err
 	}
 	if _, ok := s.master[s.masterID]; !ok {
@@ -91,9 +102,17 @@ func FromKeys(k Keys) (*Store, error) {
 	if _, ok := s.index[s.indexID]; !ok {
 		return nil, fmt.Errorf("keystore: current index key %q not found", s.indexID)
 	}
-	for kid := range s.master {
-		if _, dup := s.index[kid]; dup {
-			return nil, fmt.Errorf("keystore: key id %q is used for both master and index keys", kid)
+	// 監査の鍵は省けるが、古い鍵だけを残して current を外すと、チェーンが鍵なしに戻って検証できなくなる。
+	if _, ok := s.audit[s.auditID]; !ok && (s.auditID != "" || len(s.audit) > 0) {
+		return nil, fmt.Errorf("keystore: current audit key %q not found", s.auditID)
+	}
+	seen := map[string]string{}
+	for kind, keys := range map[string]map[string][]byte{"master": s.master, "index": s.index, "audit": s.audit} {
+		for kid := range keys {
+			if other, dup := seen[kid]; dup {
+				return nil, fmt.Errorf("keystore: key id %q is used for both %s and %s keys", kid, other, kind)
+			}
+			seen[kid] = kind
 		}
 	}
 	return s, nil
@@ -129,19 +148,29 @@ func (s *Store) IndexKey(_ context.Context, kid string) ([]byte, error) {
 
 func (s *Store) CurrentIndexKeyID(context.Context) (string, error) { return s.indexID, nil }
 
-// Generate は新しい鍵の組を作る（`iam keys generate`）。
+func (s *Store) AuditKey(_ context.Context, kid string) ([]byte, error) {
+	if k, ok := s.audit[kid]; ok {
+		return k, nil
+	}
+	return nil, errs.New(errs.KindNotFound, "audit key %q", kid)
+}
+
+// CurrentAuditKeyID は監査の鍵を置いていなければ空を返す。
+func (s *Store) CurrentAuditKeyID(context.Context) (string, error) { return s.auditID, nil }
+
+// Generate は新しい鍵の組（マスター・インデックス・監査）を作る（`iam keys generate`）。
 func Generate() (Keys, error) {
-	mk, ik := make([]byte, KeySize), make([]byte, KeySize)
-	if _, err := rand.Read(mk); err != nil {
-		return Keys{}, err
+	mk, ik, ak := make([]byte, KeySize), make([]byte, KeySize), make([]byte, KeySize)
+	for _, b := range [][]byte{mk, ik, ak} {
+		if _, err := rand.Read(b); err != nil {
+			return Keys{}, err
+		}
 	}
-	if _, err := rand.Read(ik); err != nil {
-		return Keys{}, err
-	}
-	mid, iid := id.NewExternal(id.MasterKey), id.NewExternal(id.IndexKey)
+	mid, iid, aid := id.NewExternal(id.MasterKey), id.NewExternal(id.IndexKey), id.NewExternal(id.AuditKey)
 	return Keys{
 		CurrentMasterKey: mid, MasterKeys: map[string]string{mid: base64.StdEncoding.EncodeToString(mk)},
 		CurrentIndexKey: iid, IndexKeys: map[string]string{iid: base64.StdEncoding.EncodeToString(ik)},
+		CurrentAuditKey: aid, AuditKeys: map[string]string{aid: base64.StdEncoding.EncodeToString(ak)},
 	}, nil
 }
 

@@ -228,6 +228,13 @@ type KeyStore interface {
 	CurrentIndexKeyID(ctx context.Context) (string, error)
 }
 
+// AuditKeyStore は監査ログのハッシュチェーンの鍵（ADR 0086）も持つ KeyStore。持たない KeyStore、または鍵を置いていない
+// （CurrentAuditKeyID が空を返す）なら、チェーンは鍵なし（SHA-256）のまま。古い鍵は監査ログの保持期間が過ぎるまで消さない。
+type AuditKeyStore interface {
+	AuditKey(ctx context.Context, keyID string) ([]byte, error)
+	CurrentAuditKeyID(ctx context.Context) (string, error)
+}
+
 // ---------------------------------------------------------------------------
 // EventSink
 

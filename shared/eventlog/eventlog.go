@@ -38,7 +38,11 @@ func Record(ctx context.Context, tx port.Tx, clk clock.Clock, e audit.Event) (au
 	if err != nil {
 		return e, err
 	}
-	rec, err := audit.Next(last, e)
+	keyID, key, err := chainKey(ctx, tx)
+	if err != nil {
+		return e, err
+	}
+	rec, err := audit.NextKeyed(last, e, keyID, key)
 	if err != nil {
 		return e, err
 	}
@@ -55,15 +59,41 @@ func Record(ctx context.Context, tx port.Tx, clk clock.Clock, e audit.Event) (au
 	return e, err
 }
 
+// chainKey は tx で書くレコードの監査の鍵を返す（ADR 0086）。ClientSealer を通した Storage で、鍵を置いていれば鍵付き。
+func chainKey(ctx context.Context, tx port.Tx) (string, []byte, error) {
+	st, ok := tx.(sealingTx)
+	if !ok || st.c.AuditKeys == nil {
+		return "", nil, nil
+	}
+	kid, err := st.c.AuditKeys.CurrentAuditKeyID(ctx)
+	if err != nil || kid == "" {
+		return "", nil, err
+	}
+	key, err := st.c.AuditKeys.AuditKey(ctx, kid)
+	return kid, key, err
+}
+
 // Verify はチェーンを先頭（保持期間で切り詰めた後はチェックポイント。design.md 6.5）から検証する。
-// 最後のハッシュと最後の seq を返す。
+// 最後のハッシュと最後の seq を返す。s が ClientSealer を通した Storage なら、その監査の鍵で鍵付きのレコードも確かめる。
 func Verify(ctx context.Context, s port.Storage) (last []byte, n int64, err error) {
+	var keys port.AuditKeyStore
+	if ss, ok := s.(sealingStorage); ok {
+		keys = ss.c.AuditKeys
+	}
+	return VerifyWith(ctx, s, keys)
+}
+
+// VerifyWith は監査の鍵 keys（nil なら鍵なしのレコードだけ）でチェーンを検証する。
+func VerifyWith(ctx context.Context, s port.Storage, keys port.AuditKeyStore) (last []byte, n int64, err error) {
 	const page = 500
-	prev, next := audit.Genesis, int64(1)
+	c := audit.Chain{Prev: audit.Genesis, Next: 1}
+	if keys != nil {
+		c.Keys = func(kid string) ([]byte, error) { return keys.AuditKey(ctx, kid) }
+	}
 	if err := s.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cp, err := tx.Audit().Checkpoint(ctx)
 		if cp != nil {
-			prev, next = cp.Hash, cp.Seq+1
+			c.Prev, c.Next, c.Keyed = cp.Hash, cp.Seq+1, cp.KeyID != ""
 		}
 		return err
 	}); err != nil {
@@ -73,18 +103,17 @@ func Verify(ctx context.Context, s port.Storage) (last []byte, n int64, err erro
 		var rs []audit.Record
 		err := s.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 			var err error
-			rs, err = tx.Audit().Scan(ctx, next, page)
+			rs, err = tx.Audit().Scan(ctx, c.Next, page)
 			return err
 		})
 		if err != nil {
 			return nil, 0, err
 		}
-		if prev, err = audit.Verify(prev, next, rs); err != nil {
+		if err := c.Verify(rs); err != nil {
 			return nil, 0, err
 		}
-		next += int64(len(rs))
 		if len(rs) < page {
-			return prev, next - 1, nil
+			return c.Prev, c.Next - 1, nil
 		}
 	}
 }

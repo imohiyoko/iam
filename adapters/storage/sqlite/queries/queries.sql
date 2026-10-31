@@ -58,23 +58,23 @@ SELECT owner, wrapped_key, key_id, created_at FROM shared_audit_client_keys WHER
 DELETE FROM shared_audit_client_keys WHERE owner = ?;
 
 -- name: LastAuditEvent :one
-SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events ORDER BY seq DESC LIMIT 1;
+SELECT seq, realm_id, prev_hash, hash, payload, key_id FROM shared_audit_events ORDER BY seq DESC LIMIT 1;
 
 -- name: AppendAuditEvent :exec
-INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload) VALUES (?, ?, ?, ?, ?);
+INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload, key_id) VALUES (?, ?, ?, ?, ?, ?);
 
 -- name: ScanAuditEvents :many
-SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE seq >= ? ORDER BY seq LIMIT ?;
+SELECT seq, realm_id, prev_hash, hash, payload, key_id FROM shared_audit_events WHERE seq >= ? ORDER BY seq LIMIT ?;
 
 -- name: ListAuditEventsByRealm :many
-SELECT seq, realm_id, prev_hash, hash, payload FROM shared_audit_events WHERE realm_id = ? AND seq >= ? ORDER BY seq LIMIT ?;
+SELECT seq, realm_id, prev_hash, hash, payload, key_id FROM shared_audit_events WHERE realm_id = ? AND seq >= ? ORDER BY seq LIMIT ?;
 
 -- name: GetAuditCheckpoint :one
-SELECT seq, hash, created_at FROM shared_audit_checkpoint WHERE id = 1;
+SELECT seq, hash, created_at, key_id FROM shared_audit_checkpoint WHERE id = 1;
 
 -- name: PutAuditCheckpoint :exec
-INSERT INTO shared_audit_checkpoint (id, seq, hash, created_at) VALUES (1, ?, ?, ?)
-ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, hash = excluded.hash, created_at = excluded.created_at;
+INSERT INTO shared_audit_checkpoint (id, seq, hash, created_at, key_id) VALUES (1, ?, ?, ?, ?)
+ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, hash = excluded.hash, created_at = excluded.created_at, key_id = excluded.key_id;
 
 -- name: TruncateAuditEvents :exec
 DELETE FROM shared_audit_events WHERE seq <= ?;

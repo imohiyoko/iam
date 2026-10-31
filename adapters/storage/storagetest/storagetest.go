@@ -47,6 +47,7 @@ func Run(t *testing.T, h Harness) {
 		{"AuditKeys", testAuditKeys},
 		{"DataKeysUniqueConcurrent", testDataKeysUniqueConcurrent},
 		{"AuditChain", testAuditChain},
+		{"AuditKeyedChain", testAuditKeyedChain},
 		{"AuditTamperDetected", testAuditTamperDetected},
 		{"AuditConcurrentAppend", testAuditConcurrentAppend},
 		{"Outbox", testOutbox},
@@ -325,6 +326,62 @@ func testAuditChain(t *testing.T, h Harness) {
 		}
 		return nil
 	})
+}
+
+// auditKeys は監査の鍵を1つ持つ AuditKeyStore（テスト用）。
+type auditKeys struct{ id string }
+
+func (k auditKeys) CurrentAuditKeyID(context.Context) (string, error) { return k.id, nil }
+
+func (k auditKeys) AuditKey(_ context.Context, kid string) ([]byte, error) {
+	if kid != k.id {
+		return nil, errs.New(errs.KindNotFound, "audit key %q", kid)
+	}
+	return bytes.Repeat([]byte{7}, 32), nil
+}
+
+// 監査の鍵（ADR 0086）の ID がレコードとチェックポイントに残り、鍵なしのレコードに鍵付きのレコードが続けられる。
+func testAuditKeyedChain(t *testing.T, h Harness) {
+	s, clk := open(t, h)
+	r := id.New(id.Realm)
+	record(t, s, clk, r, 2)
+	keyed := (&eventlog.ClientSealer{Clock: clk, AuditKeys: auditKeys{"ak_1"}}).Storage(s)
+	for range 3 {
+		tx(t, keyed, func(ctx context.Context, tx port.Tx) error {
+			_, err := eventlog.Record(ctx, tx, clk, audit.Event{Type: "test.keyed", Result: audit.ResultSuccess, RealmID: r, Actor: audit.Actor{Type: "system"}})
+			return err
+		})
+	}
+	if _, n, err := eventlog.Verify(context.Background(), keyed); err != nil || n != 5 {
+		t.Fatalf("Verify keyed: n=%d, %v", n, err)
+	}
+	if _, _, err := eventlog.Verify(context.Background(), s); !errors.Is(err, audit.ErrChainBroken) {
+		t.Fatalf("Verify without keys: %v", err)
+	}
+	var third audit.Record
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		rs, err := tx.Audit().Scan(ctx, 1, 10)
+		if err != nil || len(rs) != 5 || rs[1].KeyID != "" || rs[2].KeyID != "ak_1" {
+			return fmt.Errorf("audit.Scan = %+v, %v", rs, err)
+		}
+		if l, err := tx.Audit().Last(ctx); err != nil || l.KeyID != "ak_1" {
+			return fmt.Errorf("audit.Last = %+v, %v", l, err)
+		}
+		if rs, err := tx.Audit().ListByRealm(ctx, r, 3, 1); err != nil || len(rs) != 1 || rs[0].KeyID != "ak_1" {
+			return fmt.Errorf("audit.ListByRealm = %+v, %v", rs, err)
+		}
+		third = rs[2]
+		return tx.Audit().Truncate(ctx, audit.Checkpoint{Seq: 3, Hash: third.Hash, At: T0, KeyID: third.KeyID})
+	})
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		if cp, err := tx.Audit().Checkpoint(ctx); err != nil || cp == nil || cp.KeyID != "ak_1" {
+			return fmt.Errorf("audit.Checkpoint = %+v, %v", cp, err)
+		}
+		return nil
+	})
+	if _, n, err := eventlog.Verify(context.Background(), keyed); err != nil || n != 5 {
+		t.Fatalf("Verify after truncate: n=%d, %v", n, err)
+	}
 }
 
 // 監査ログの1件を書き換えると、チェーンの検証で検出できる（roadmap M0 の完了条件）。
