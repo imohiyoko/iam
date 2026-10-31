@@ -100,6 +100,10 @@ func FromKeys(k Keys) (*Store, error) {
 	if s.audit, err = decodeAll("audit", k.AuditKeys); err != nil {
 		return nil, err
 	}
+	// 空の ID は current が空（鍵なし）と見分けられない。
+	if _, ok := s.audit[""]; ok {
+		return nil, fmt.Errorf("keystore: audit key id must not be empty")
+	}
 	if _, ok := s.master[s.masterID]; !ok {
 		return nil, fmt.Errorf("keystore: current master key %q not found", s.masterID)
 	}

@@ -98,7 +98,7 @@ dump.jsonl には暗号化した個人情報が入る。移行が終わったら
 | 通知が届かない | Notifier の送り先の障害 | 同上（outbox から再送する） |
 | 起動を拒否する（ledger does not match binary） | 台帳とバイナリの構成が合わない | 前のバイナリに戻すか、`iam features plan` で手順を確かめる |
 | 起動を拒否する（鍵） | KeyStore を読めない | 鍵のファイルの権限（0600）と環境変数を確かめ、バックアップから戻す |
-| `storage import` が監査ログの検証で失敗する | 監査ログの改ざん、書き出しの破損、または移行先の KeyStore に監査の鍵（`audit_keys`）が無い | 書き出しをやり直す。改ざんならインシデントとして扱い、SIEM の記録と照らし合わせる |
+| `storage import` が監査ログの検証で失敗する | 監査ログの改ざん、書き出しの破損、または移行先の KeyStore に監査の鍵（`audit_keys`）・`audit_unkeyed_until` が無い | 監査の鍵が無いなら、移行元と同じ `audit_keys`・`current_audit_key`・`audit_unkeyed_until` を移行先に置き、移行先の Storage を空に戻して `storage import` をやり直す（取り込みは空の Storage にしかできない）。破損なら書き出しをやり直す。改ざんならインシデントとして扱い、SIEM の記録と照らし合わせる |
 | 運営者のアカウントの乗っ取りが疑われる | ― | 別の owner が管理 API で停止（`security_risk`）し、全認証情報と全セッションを無効化する（`POST /v1/admin/users/{id}/credentials:revoke-all`）。運営者がいなければ `iam operator create` で作り直す |
 | 署名鍵の漏洩が疑われる | ― | 運営者のトークンで `POST /v1/admin/signing-keys:rotate`（`Authorization: Bearer …`、`Content-Type: application/json`、本文 `{"alg": "ES256"}` か `{"alg": "ML-DSA-65"}`）を実行し、漏れた鍵のアルゴリズムを新しい鍵に切り替える。古い鍵は `oidc.retired_key_ttl`（既定 7 日）の間 JWKS に残り、その間は漏れた鍵で署名した ID トークンが RP の検証を通りうる。個別に失効させる API は無いので、`oidc.retired_key_ttl` を `oidc.id_token_ttl` を少し超える値に一時的に下げて全台を再起動し、残る期間を縮める。影響の範囲を記録し、RP に古い `kid` を信頼しないよう伝える |
 | マスター鍵の漏洩が疑われる | ― | DB の漏洩と合わせて評価する。新しいマスター鍵に切り替え（2章）、データ鍵の包み直しは今は無いため、影響を記録する |

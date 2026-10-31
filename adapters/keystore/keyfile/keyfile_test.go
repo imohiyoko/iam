@@ -65,6 +65,10 @@ func TestAuditKeyOptional(t *testing.T) {
 	if _, err := FromKeys(k); err == nil {
 		t.Fatal("audit key id shared with a master key must be rejected")
 	}
+	k.CurrentAuditKey, k.AuditKeys = "", map[string]string{"": ak}
+	if _, err := FromKeys(k); err == nil {
+		t.Fatal("empty audit key id must be rejected")
+	}
 }
 
 // audit_unkeyed_until は監査の鍵があるときだけ書ける（ADR 0086）。
