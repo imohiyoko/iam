@@ -111,7 +111,8 @@ func (a *App) verifyDomain(ctx context.Context, load func(ctx context.Context, t
 		return d, false, err
 	}
 	found := false
-	if d.VerifiedAt == nil {
+	// 証明済みなら、確かめ直しで TXT が見つからなくなっている（猶予の間）ときだけ引く（ADR 0085）。
+	if d.VerifiedAt == nil || d.MissingSince != nil {
 		var lerr error
 		if found, lerr = a.orgs.LookupDomain(ctx, d); lerr != nil {
 			return d, errors.Is(lerr, errs.Unavailable), lerr

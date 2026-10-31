@@ -323,7 +323,8 @@ type orgDomains struct{ q *db.Queries }
 func toOrgDomain(r db.OrgDomain) (port.OrgDomain, error) {
 	var p times
 	d := port.OrgDomain{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, OrgID: r.OrgID, Domain: r.Domain, Token: r.Token,
-		VerifiedAt: p.null(r.VerifiedAt), CheckedAt: p.null(r.CheckedAt), CreatedBy: r.CreatedBy, CreatedAt: p.at(r.CreatedAt)}
+		VerifiedAt: p.null(r.VerifiedAt), CheckedAt: p.null(r.CheckedAt), MissingSince: p.null(r.MissingSince), CreatedBy: r.CreatedBy,
+		CreatedAt: p.at(r.CreatedAt)}
 	return d, p.err
 }
 
@@ -348,9 +349,14 @@ func (r orgDomains) ListByOrg(ctx context.Context, realmID, orgID string) ([]por
 	return rows(rs, err, toOrgDomain)
 }
 
+func (r orgDomains) ListToRecheck(ctx context.Context, before time.Time, limit int) ([]port.OrgDomain, error) {
+	rs, err := r.q.ListOrgDomainsToRecheck(ctx, db.ListOrgDomainsToRecheckParams{Before: nullTime(&before), Lim: int64(limit)})
+	return rows(rs, err, toOrgDomain)
+}
+
 func (r orgDomains) Update(ctx context.Context, d port.OrgDomain) error {
 	n, err := r.q.UpdateOrgDomain(ctx, db.UpdateOrgDomainParams{VerifiedAt: nullTime(d.VerifiedAt), CheckedAt: nullTime(d.CheckedAt),
-		RealmID: d.RealmID, ID: d.ID})
+		MissingSince: nullTime(d.MissingSince), RealmID: d.RealmID, ID: d.ID})
 	if err == nil && n == 0 {
 		return errs.New(errs.KindNotFound, "org domain %s", d.ID)
 	}

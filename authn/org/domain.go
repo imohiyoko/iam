@@ -24,6 +24,7 @@ import (
 // TXT `iam-domain-verification=<token>` を置き、確認を求めると、IAM が DNS を引いて証明済みにする。
 // 証明済みのドメインは realm で1つの Org だけが持てる（後から証明しようとした Org は domain_taken）。
 // DNS はトランザクションの外で引く（LookupDomain）。結果を書くのは MarkDomainChecked。
+// 証明済みのドメインは DomainRechecker が定期的に確かめ直し、TXT が猶予の間ずっと無ければ証明を外す（RecheckDomain。ADR 0085）。
 
 // ManagedUsersFeature は Org 管理ユーザー（ドメインの所有証明を含む）の宣言（features/orgmanagedusers が登録する）。
 var ManagedUsersFeature = feature.Feature{Name: feature.OrgManagedUsers, DataVersion: 1, Requires: []string{feature.Org}}
@@ -41,6 +42,9 @@ const (
 	EventDomainAdded    = "org.domain.added"
 	EventDomainVerified = "org.domain.verified"
 	EventDomainRemoved  = "org.domain.removed"
+	// EventDomainMissing は確かめ直して TXT が見つからなくなったこと（猶予の始まり）。EventDomainUnverified は猶予を過ぎて証明を外したこと。
+	EventDomainMissing    = "org.domain.missing"
+	EventDomainUnverified = "org.domain.unverified"
 )
 
 var (
@@ -168,7 +172,7 @@ func (s *Service) LookupDomain(ctx context.Context, d port.OrgDomain) (bool, err
 	return slices.ContainsFunc(txts, func(t string) bool { return strings.TrimSpace(t) == want }), nil
 }
 
-// MarkDomainChecked は LookupDomain の結果を書く。found なら証明済みにする（既に証明済みなら何もしない）。
+// MarkDomainChecked は LookupDomain の結果を書く。found なら証明済みにする（既に証明済みなら、確かめ直しの猶予を消すだけ）。
 // 見つからなければ確かめた時刻だけを書き、ErrDomainNotProven を返す。token は LookupDomain に渡した行のトークンで、
 // 間に消されて登録し直されたら errs.NotFound。別の Org が先に証明していれば ErrDomainTaken。
 func (s *Service) MarkDomainChecked(ctx context.Context, tx port.Tx, o port.Org, publicID, token string, found bool, actor audit.Actor, requestID string) (port.OrgDomain, error) {
@@ -179,10 +183,15 @@ func (s *Service) MarkDomainChecked(ctx context.Context, tx port.Tx, o port.Org,
 	if d.Token != token {
 		return port.OrgDomain{}, errs.New(errs.KindNotFound, "org domain")
 	}
+	now := s.Clock.Now()
 	if d.VerifiedAt != nil {
+		// 確かめ直しで TXT が見つからなくなった後に置き直したなら、猶予を消す（ADR 0085）。
+		if found && d.MissingSince != nil {
+			d.CheckedAt, d.MissingSince = &now, nil
+			return d, tx.OrgDomains().Update(ctx, d)
+		}
 		return d, nil
 	}
-	now := s.Clock.Now()
 	d.CheckedAt = &now
 	if !found {
 		if err := tx.OrgDomains().Update(ctx, d); err != nil {
@@ -198,6 +207,62 @@ func (s *Service) MarkDomainChecked(ctx context.Context, tx port.Tx, o port.Org,
 		return port.OrgDomain{}, err
 	}
 	return d, s.recordDomain(ctx, tx, o, EventDomainVerified, d, actor, requestID)
+}
+
+// RecheckDomain は証明済みのドメイン d を LookupDomain で確かめ直した結果を書く（ADR 0085）。見つかれば MissingSince を消す。
+// 見つからなければ、初めてなら MissingSince を付けて org.domain.missing を出し、MissingSince から grace を過ぎていれば
+// 証明を外して org.domain.unverified を出す（外したら true）。d の後に消された・登録し直された・証明を外されたなら何もしない。
+func (s *Service) RecheckDomain(ctx context.Context, tx port.Tx, d port.OrgDomain, found bool, grace time.Duration) (bool, error) {
+	cur, err := tx.OrgDomains().GetByPublicID(ctx, d.RealmID, d.PublicID)
+	if errors.Is(err, errs.NotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if cur.ID != d.ID || cur.Token != d.Token || cur.VerifiedAt == nil {
+		return false, nil
+	}
+	now := s.Clock.Now()
+	cur.CheckedAt = &now
+	event := ""
+	switch {
+	case found:
+		cur.MissingSince = nil
+	case cur.MissingSince == nil:
+		cur.MissingSince, event = &now, EventDomainMissing
+	case now.Sub(*cur.MissingSince) >= grace:
+		cur.VerifiedAt, cur.MissingSince, event = nil, nil, EventDomainUnverified
+	}
+	if err := tx.OrgDomains().Update(ctx, cur); err != nil {
+		return false, err
+	}
+	if event == "" {
+		return false, nil
+	}
+	o, err := tx.Orgs().Get(ctx, cur.RealmID, cur.OrgID)
+	if err != nil {
+		return false, err
+	}
+	return event == EventDomainUnverified, s.recordDomain(ctx, tx, o, event, cur, audit.Actor{Type: "system"}, "")
+}
+
+// DeferRecheck は DNS の障害で確かめられなかったドメインの CheckedAt だけを進める（猶予には数えない）。障害の続くドメインが
+// 確かめ直しの1回分を占めて、他のドメインを待たせないため。
+func (s *Service) DeferRecheck(ctx context.Context, tx port.Tx, d port.OrgDomain) error {
+	cur, err := tx.OrgDomains().GetByPublicID(ctx, d.RealmID, d.PublicID)
+	if errors.Is(err, errs.NotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if cur.ID != d.ID || cur.Token != d.Token || cur.VerifiedAt == nil {
+		return nil
+	}
+	now := s.Clock.Now()
+	cur.CheckedAt = &now
+	return tx.OrgDomains().Update(ctx, cur)
 }
 
 // RemoveDomain はドメインを消す。

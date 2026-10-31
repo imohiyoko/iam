@@ -5,13 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
+	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/feature"
+	"github.com/imohiyoko/iam/shared/port"
 )
 
 // Org のドメインの所有証明（design.md 11.3、ADR 0075）を HTTP で確かめる。
@@ -166,6 +171,129 @@ func TestOrgDomainsAPI(t *testing.T) {
 		if !seen {
 			t.Errorf("audit %s missing: %v", ty, types)
 		}
+	}
+}
+
+// 証明済みのドメインは定期的に確かめ直し、TXT が猶予の間ずっと無ければ証明を外す（ADR 0085）。
+func TestOrgDomainRecheck(t *testing.T) {
+	l, dns := newDomainEnv(t, true)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	l.verifiedDomain(t, dns, owner, acme, "acme.example")
+	rc := l.a.domainRecheck
+	if rc == nil {
+		t.Fatal("rechecker is off")
+	}
+	every, grace := l.e.cfg.OrgDomains.Recheck.D(), l.e.cfg.OrgDomains.Grace.D()
+	sweep := func(want org.Rechecked) {
+		t.Helper()
+		if n, err := rc.Sweep(context.Background()); err != nil || n != want {
+			t.Fatalf("sweep = %+v, %v; want %+v", n, err, want)
+		}
+	}
+	verified := func() bool {
+		t.Helper()
+		err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+			_, err := tx.OrgDomains().GetVerified(ctx, l.a.realm.ID, "acme.example")
+			return err
+		})
+		if err != nil && !errors.Is(err, errs.NotFound) {
+			t.Fatal(err)
+		}
+		return err == nil
+	}
+
+	// 間隔の前は確かめない。TXT があれば証明のまま。
+	sweep(org.Rechecked{})
+	l.advance(every)
+	sweep(org.Rechecked{Checked: 1})
+	sweep(org.Rechecked{})
+
+	// TXT が無くなっても、猶予の間は証明のまま。DNS の障害は猶予に数えない。
+	dns.mu.Lock()
+	delete(dns.txt, "_iam-challenge.acme.example")
+	dns.mu.Unlock()
+	l.advance(every)
+	sweep(org.Rechecked{Checked: 1})
+	dns.fail = true
+	l.advance(every)
+	sweep(org.Rechecked{Failed: 1})
+	dns.fail = false
+	if !verified() {
+		t.Fatal("unverified within grace")
+	}
+	// 猶予を過ぎても無ければ証明を外す。外れたドメインは確かめ直さない。
+	l.advance(grace)
+	sweep(org.Rechecked{Checked: 1, Unverified: 1})
+	if verified() {
+		t.Fatal("still verified after grace")
+	}
+	l.advance(every)
+	sweep(org.Rechecked{})
+
+	var types []string
+	for _, e := range l.auditTypes(t) {
+		if e.OrgID == acme && strings.HasPrefix(e.Type, "org.domain.") {
+			types = append(types, e.Type)
+		}
+	}
+	if want := []string{"org.domain.added", "org.domain.verified", "org.domain.missing", "org.domain.unverified"}; !slices.Equal(types, want) {
+		t.Fatalf("audit = %v; want %v", types, want)
+	}
+}
+
+// TXT が戻れば猶予は消え、また見つからなくなったときに猶予を数え直す。
+func TestOrgDomainRecheckRecovers(t *testing.T) {
+	l, dns := newDomainEnv(t, true)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	l.verifiedDomain(t, dns, owner, acme, "acme.example")
+	rc, every, grace := l.a.domainRecheck, l.e.cfg.OrgDomains.Recheck.D(), l.e.cfg.OrgDomains.Grace.D()
+	value := dns.txt["_iam-challenge.acme.example"]
+	for range 2 {
+		dns.mu.Lock()
+		delete(dns.txt, "_iam-challenge.acme.example")
+		dns.mu.Unlock()
+		l.advance(every)
+		if n, err := rc.Sweep(context.Background()); err != nil || n.Unverified != 0 {
+			t.Fatalf("missing: %+v, %v", n, err)
+		}
+		l.advance(grace - time.Minute)
+		dns.set("_iam-challenge.acme.example", value...)
+		if n, err := rc.Sweep(context.Background()); err != nil || n != (org.Rechecked{Checked: 1}) {
+			t.Fatalf("back: %+v, %v", n, err)
+		}
+	}
+	// owner が置き直して確かめれば、次の確かめ直しを待たずに猶予が消える。
+	dns.mu.Lock()
+	delete(dns.txt, "_iam-challenge.acme.example")
+	dns.mu.Unlock()
+	l.advance(every)
+	if n, err := rc.Sweep(context.Background()); err != nil || n != (org.Rechecked{Checked: 1}) {
+		t.Fatalf("missing again: %+v, %v", n, err)
+	}
+	l.advance(grace - time.Hour)
+	dns.set("_iam-challenge.acme.example", value...)
+	_, owner = l.login(t, "boss@acme.example")
+	code, out := l.meDo(t, "GET", owner, "/v1/me/orgs/"+acme+"/domains", nil)
+	if code != 200 {
+		t.Fatalf("list: %d %v", code, out)
+	}
+	dom := out["domains"].([]any)[0].(map[string]any)["id"].(string)
+	if code, out := l.mePost(t, owner, "/v1/me/orgs/"+acme+"/domains/"+dom+":verify", nil); code != 200 || out["status"] != "verified" {
+		t.Fatalf("verify again: %d %v", code, out)
+	}
+	dns.mu.Lock()
+	delete(dns.txt, "_iam-challenge.acme.example")
+	dns.mu.Unlock()
+	l.advance(2 * time.Hour)
+	if n, err := rc.Sweep(context.Background()); err != nil || n != (org.Rechecked{}) {
+		t.Fatalf("checked again too soon: %+v, %v", n, err)
+	}
+	l.advance(every)
+	// 猶予は数え直しなので、まだ外れない。
+	if n, err := rc.Sweep(context.Background()); err != nil || n != (org.Rechecked{Checked: 1}) {
+		t.Fatalf("after reverify: %+v, %v", n, err)
 	}
 }
 
