@@ -100,7 +100,7 @@ func TestKeyedChain(t *testing.T) {
 		return out
 	}
 	verify := func(rs []Record, page int) error {
-		c := Chain{Prev: Genesis, Next: 1, Keys: lookup}
+		c := Chain{Prev: Genesis, Next: 1, Keys: lookup, KeyedFrom: 3}
 		for len(rs) > 0 {
 			n := min(page, len(rs))
 			if err := c.Verify(rs[:n]); err != nil {
@@ -130,6 +130,18 @@ func TestKeyedChain(t *testing.T) {
 			for i := 3; i < len(rs); i++ {
 				e, _ := Unmarshal(rs[i].Payload)
 				e.Type = "forged"
+				r, _ := Next(last, e)
+				out = append(out, r)
+				last = &out[len(out)-1]
+			}
+			return out
+		},
+		// 最初の鍵付きのレコードから後ろを丸ごと鍵なしで作り直す（KeyedFrom が無ければ見分けられない）。
+		"rebuild from first keyed": func(rs []Record) []Record {
+			out := append([]Record(nil), rs[:2]...)
+			last := &out[1]
+			for i := 2; i < len(rs); i++ {
+				e, _ := Unmarshal(rs[i].Payload)
 				r, _ := Next(last, e)
 				out = append(out, r)
 				last = &out[len(out)-1]

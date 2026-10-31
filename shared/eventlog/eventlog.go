@@ -89,6 +89,18 @@ func VerifyWith(ctx context.Context, s port.Storage, keys port.AuditKeyStore) (l
 	c := audit.Chain{Prev: audit.Genesis, Next: 1}
 	if keys != nil {
 		c.Keys = func(kid string) ([]byte, error) { return keys.AuditKey(ctx, kid) }
+		// 鍵を置いていれば、鍵なしで許す範囲より後は鍵付きでなければならない（ADR 0086）。
+		kid, err := keys.CurrentAuditKeyID(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+		if kid != "" {
+			until, err := keys.AuditUnkeyedUntil(ctx)
+			if err != nil {
+				return nil, 0, err
+			}
+			c.KeyedFrom = until + 1
+		}
 	}
 	if err := s.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cp, err := tx.Audit().Checkpoint(ctx)

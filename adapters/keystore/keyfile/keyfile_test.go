@@ -67,6 +67,27 @@ func TestAuditKeyOptional(t *testing.T) {
 	}
 }
 
+// audit_unkeyed_until は監査の鍵があるときだけ書ける（ADR 0086）。
+func TestAuditUnkeyedUntil(t *testing.T) {
+	k, _ := Generate()
+	k.AuditUnkeyedUntil = 42
+	s, err := FromKeys(k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.AuditUnkeyedUntil(context.Background()); err != nil || n != 42 {
+		t.Fatalf("AuditUnkeyedUntil = %d, %v", n, err)
+	}
+	k.AuditUnkeyedUntil = -1
+	if _, err := FromKeys(k); err == nil {
+		t.Fatal("negative audit_unkeyed_until must be rejected")
+	}
+	k.AuditUnkeyedUntil, k.CurrentAuditKey, k.AuditKeys = 42, "", nil
+	if _, err := FromKeys(k); err == nil {
+		t.Fatal("audit_unkeyed_until without an audit key must be rejected")
+	}
+}
+
 func TestRejectLoosePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip()

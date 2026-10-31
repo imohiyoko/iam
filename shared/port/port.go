@@ -233,6 +233,9 @@ type KeyStore interface {
 type AuditKeyStore interface {
 	AuditKey(ctx context.Context, keyID string) ([]byte, error)
 	CurrentAuditKeyID(ctx context.Context) (string, error)
+	// AuditUnkeyedUntil は鍵なしで許す最後の seq（鍵を置く前からのレコード）。鍵を置いていれば、それより後のレコードは
+	// 鍵付きでなければ改ざんとみなす。DB の外に置くので、DB だけを書き換えられる人は鍵付きの範囲を縮められない。
+	AuditUnkeyedUntil(ctx context.Context) (int64, error)
 }
 
 // ---------------------------------------------------------------------------

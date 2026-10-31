@@ -42,7 +42,7 @@ OIDC の署名鍵と、監査ログの日ごとの鍵は Storage にあり、マ
 2. `env` の KeyStore では、同じ JSON を秘密の管理サービスに置き、環境変数 `IAM_KEYS` で渡す（読み込んだ後に環境変数から消す）
 3. DB のバックアップと鍵のバックアップは別々に保管する（片方だけが漏れても読めないように）。DB だけを戻すときは、そのバックアップを取った時点の鍵が要る
 4. マスター鍵を入れ替えるときは、新しい鍵を `master_keys` に足して `current_master_key` を変える。古い鍵は消さない（既存のデータ鍵の復号に要る）。インデックス鍵の入れ替え（全件の再計算）はまだ無い
-5. 監査の鍵は `iam keys generate` で作る鍵の組に入る。前からある keys.json には、32 バイトの乱数（base64）を `audit_keys` に足して `current_audit_key` にその ID（`ak_…`）を書けば、その後の監査ログから鍵付きになる。入れ替えも同じ手順で、古い鍵は監査ログの保持期間（`realm.audit_retention`）が過ぎるまで消さない。一度鍵付きにしたら `current_audit_key` を外さない（鍵なしに戻ったレコードは改ざんとみなされる）
+5. 監査の鍵は `iam keys generate` で作る鍵の組に入る。前からある keys.json には、32 バイトの乱数（base64）を `audit_keys` に足して `current_audit_key` にその ID（`ak_…`）を書けば、その後の監査ログから鍵付きになる。入れ替えも同じ手順で、古い鍵は監査ログの保持期間（`realm.audit_retention`）が過ぎるまで消さない。一度鍵付きにしたら `current_audit_key` を外さない（鍵なしに戻ったレコードは改ざんとみなされる）。鍵を足す前からの監査ログがあれば、鍵を足す前の最後の seq を `audit_unkeyed_until` に書く（書くまで `storage import` の検証は鍵なしのレコードで止まる。新しく `iam keys generate` で作った構成では要らない）
 
 削除したユーザーのデータ鍵は消える（crypto-shredding）が、DB のバックアップには残る。バックアップの保持期間を決め、期間を過ぎたものは消す。
 
@@ -76,7 +76,7 @@ SQLite から PostgreSQL へ（逆も）：
 
 1. 書き込みを止める（インスタンスを止める）
 2. `iam storage export -config from.yaml -out dump.jsonl`
-3. 移行先の KeyStore に、移行元と同じ鍵（`master_keys` と `index_keys`、監査の鍵を使っていれば `audit_keys` と `current_audit_key`）を置く。新しい鍵を作らない（書き出しは鍵を含まず、`storage import` は鍵が合うかを確かめないので、違う鍵では個人情報を復号できず、メールの検索もできない）
+3. 移行先の KeyStore に、移行元と同じ鍵（`master_keys` と `index_keys`、監査の鍵を使っていれば `audit_keys` と `current_audit_key`、`audit_unkeyed_until`）を置く。新しい鍵を作らない（書き出しは鍵を含まず、`storage import` は鍵が合うかを確かめないので、違う鍵では個人情報を復号できず、メールの検索もできない）
 4. 移行先で `iam migrate -config to.yaml`、続けて `iam storage import -config to.yaml -in dump.jsonl`（空の Storage にだけ入る。監査ログのチェーンを検証する）
 5. 設定を移行先に変えて起動する
 

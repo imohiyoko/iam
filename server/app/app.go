@@ -158,6 +158,15 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		return nil, err
 	}
 
+	// 監査ログの IP と User-Agent の全文は、本人のデータ鍵と日ごとの鍵で暗号化する（ADR 0063）。
+	// 監査ログは最初の1件（新しい DB のフィーチャーの記録）から監査の鍵で鍵付きにする（ADR 0086）。
+	crypter := pii.New(d.KeyStore)
+	clientSealer := &eventlog.ClientSealer{Crypter: crypter, Clock: d.Clock, Retention: cfg.Realm.ClientDataRetention.D()}
+	if ak, ok := d.KeyStore.(port.AuditKeyStore); ok {
+		clientSealer.AuditKeys = ak
+	}
+	d.Storage = clientSealer.Storage(d.Storage)
+
 	enabled := derefFeatures(cfg.Features)
 	var ledger []port.FeatureRecord
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
@@ -178,13 +187,6 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		d.Logger.Warn("feature", "message", w)
 	}
 
-	// 監査ログの IP と User-Agent の全文は、本人のデータ鍵と日ごとの鍵で暗号化する（ADR 0063）。
-	crypter := pii.New(d.KeyStore)
-	clientSealer := &eventlog.ClientSealer{Crypter: crypter, Clock: d.Clock, Retention: cfg.Realm.ClientDataRetention.D()}
-	if ak, ok := d.KeyStore.(port.AuditKeyStore); ok {
-		clientSealer.AuditKeys = ak
-	}
-	d.Storage = clientSealer.Storage(d.Storage)
 	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary, clientSealer: clientSealer, pii: crypter}
 	a.root = a
 	a.checkClockSkew(ctx)

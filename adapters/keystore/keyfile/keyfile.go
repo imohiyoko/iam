@@ -6,10 +6,12 @@
 //	{
 //	  "current_master_key": "mk_…", "master_keys": {"mk_…": "…"},
 //	  "current_index_key":  "ik_…", "index_keys":  {"ik_…": "…"},
-//	  "current_audit_key":  "ak_…", "audit_keys":  {"ak_…": "…"}
+//	  "current_audit_key":  "ak_…", "audit_keys":  {"ak_…": "…"},
+//	  "audit_unkeyed_until": 0
 //	}
 //
-// 監査の鍵（監査ログのハッシュチェーン。ADR 0086）は省ける。省けばチェーンは鍵なし。
+// 監査の鍵（監査ログのハッシュチェーン。ADR 0086）は省ける。省けばチェーンは鍵なし。audit_unkeyed_until は鍵なしで許す
+// 最後の seq（鍵を置く前からの監査ログがあるときだけ書く）。
 //
 // ファイルは所有者だけが読める権限（0600 など）でなければ読み込みを拒否する。
 // 鍵を失うと暗号化データは復元できないため、バックアップの手順を運用文書に含める（design.md 9.5）。
@@ -35,18 +37,20 @@ const KeySize = 32
 
 // Keys はファイルの中身。
 type Keys struct {
-	CurrentMasterKey string            `json:"current_master_key"`
-	MasterKeys       map[string]string `json:"master_keys"`
-	CurrentIndexKey  string            `json:"current_index_key"`
-	IndexKeys        map[string]string `json:"index_keys"`
-	CurrentAuditKey  string            `json:"current_audit_key,omitempty"`
-	AuditKeys        map[string]string `json:"audit_keys,omitempty"`
+	CurrentMasterKey  string            `json:"current_master_key"`
+	MasterKeys        map[string]string `json:"master_keys"`
+	CurrentIndexKey   string            `json:"current_index_key"`
+	IndexKeys         map[string]string `json:"index_keys"`
+	CurrentAuditKey   string            `json:"current_audit_key,omitempty"`
+	AuditKeys         map[string]string `json:"audit_keys,omitempty"`
+	AuditUnkeyedUntil int64             `json:"audit_unkeyed_until,omitempty"`
 }
 
 // Store はメモリに読み込んだ鍵。
 type Store struct {
 	masterID, indexID, auditID string
 	master, index, audit       map[string][]byte
+	auditUnkeyed               int64
 }
 
 var (
@@ -85,7 +89,7 @@ func Load(path string) (*Store, error) {
 
 // FromKeys は Keys を検証して Store にする（環境変数のアダプタも使う）。
 func FromKeys(k Keys) (*Store, error) {
-	s := &Store{masterID: k.CurrentMasterKey, indexID: k.CurrentIndexKey, auditID: k.CurrentAuditKey}
+	s := &Store{masterID: k.CurrentMasterKey, indexID: k.CurrentIndexKey, auditID: k.CurrentAuditKey, auditUnkeyed: k.AuditUnkeyedUntil}
 	var err error
 	if s.master, err = decodeAll("master", k.MasterKeys); err != nil {
 		return nil, err
@@ -105,6 +109,9 @@ func FromKeys(k Keys) (*Store, error) {
 	// 監査の鍵は省けるが、古い鍵だけを残して current を外すと、チェーンが鍵なしに戻って検証できなくなる。
 	if _, ok := s.audit[s.auditID]; !ok && (s.auditID != "" || len(s.audit) > 0) {
 		return nil, fmt.Errorf("keystore: current audit key %q not found", s.auditID)
+	}
+	if s.auditUnkeyed < 0 || (s.auditUnkeyed > 0 && s.auditID == "") {
+		return nil, fmt.Errorf("keystore: audit_unkeyed_until %d needs a current audit key and must not be negative", s.auditUnkeyed)
 	}
 	seen := map[string]string{}
 	for kind, keys := range map[string]map[string][]byte{"master": s.master, "index": s.index, "audit": s.audit} {
@@ -157,6 +164,9 @@ func (s *Store) AuditKey(_ context.Context, kid string) ([]byte, error) {
 
 // CurrentAuditKeyID は監査の鍵を置いていなければ空を返す。
 func (s *Store) CurrentAuditKeyID(context.Context) (string, error) { return s.auditID, nil }
+
+// AuditUnkeyedUntil は鍵なしで許す最後の seq を返す（書いていなければ 0。先頭から鍵付き）。
+func (s *Store) AuditUnkeyedUntil(context.Context) (int64, error) { return s.auditUnkeyed, nil }
 
 // Generate は新しい鍵の組（マスター・インデックス・監査）を作る（`iam keys generate`）。
 func Generate() (Keys, error) {

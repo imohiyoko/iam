@@ -172,10 +172,12 @@ type Chain struct {
 	Keys func(keyID string) ([]byte, error)
 	// Keyed は前のレコードが鍵付きだったこと（チェックポイントの KeyID から始める）。
 	Keyed bool
+	// KeyedFrom が 0 でなければ、この seq 以降のレコードは鍵付きでなければならない（鍵付きの範囲を DB の外で決める）。
+	KeyedFrom int64
 }
 
-// Verify は records が続きの正しいチェーンかを確かめ、状態を進める。鍵付きのレコードの後に鍵なしのレコードがあれば
-// 壊れているとみなす（鍵の無い人が後ろを作り直して、鍵なしに戻すことを防ぐ）。
+// Verify は records が続きの正しいチェーンかを確かめ、状態を進める。鍵付きのレコードの後、または KeyedFrom 以降に
+// 鍵なしのレコードがあれば壊れているとみなす（鍵の無い人が後ろを作り直して、鍵なしに戻すことを防ぐ）。
 func (c *Chain) Verify(records []Record) error {
 	for _, r := range records {
 		if r.Seq != c.Next {
@@ -188,6 +190,8 @@ func (c *Chain) Verify(records []Record) error {
 		switch {
 		case r.KeyID == "" && c.Keyed:
 			return fmt.Errorf("%w: seq %d: unkeyed record after keyed records", ErrChainBroken, r.Seq)
+		case r.KeyID == "" && c.KeyedFrom > 0 && r.Seq >= c.KeyedFrom:
+			return fmt.Errorf("%w: seq %d: unkeyed record after audit_unkeyed_until (%d)", ErrChainBroken, r.Seq, c.KeyedFrom-1)
 		case r.KeyID == "":
 			want = Hash(c.Prev, r.Payload)
 		case c.Keys == nil:

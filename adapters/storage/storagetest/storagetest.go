@@ -328,10 +328,15 @@ func testAuditChain(t *testing.T, h Harness) {
 	})
 }
 
-// auditKeys は監査の鍵を1つ持つ AuditKeyStore（テスト用）。
-type auditKeys struct{ id string }
+// auditKeys は監査の鍵を1つ持つ AuditKeyStore（テスト用）。unkeyed は鍵なしで許す最後の seq。
+type auditKeys struct {
+	id      string
+	unkeyed int64
+}
 
 func (k auditKeys) CurrentAuditKeyID(context.Context) (string, error) { return k.id, nil }
+
+func (k auditKeys) AuditUnkeyedUntil(context.Context) (int64, error) { return k.unkeyed, nil }
 
 func (k auditKeys) AuditKey(_ context.Context, kid string) ([]byte, error) {
 	if kid != k.id {
@@ -345,7 +350,7 @@ func testAuditKeyedChain(t *testing.T, h Harness) {
 	s, clk := open(t, h)
 	r := id.New(id.Realm)
 	record(t, s, clk, r, 2)
-	keyed := (&eventlog.ClientSealer{Clock: clk, AuditKeys: auditKeys{"ak_1"}}).Storage(s)
+	keyed := (&eventlog.ClientSealer{Clock: clk, AuditKeys: auditKeys{id: "ak_1", unkeyed: 2}}).Storage(s)
 	for range 3 {
 		tx(t, keyed, func(ctx context.Context, tx port.Tx) error {
 			_, err := eventlog.Record(ctx, tx, clk, audit.Event{Type: "test.keyed", Result: audit.ResultSuccess, RealmID: r, Actor: audit.Actor{Type: "system"}})
@@ -357,6 +362,11 @@ func testAuditKeyedChain(t *testing.T, h Harness) {
 	}
 	if _, _, err := eventlog.Verify(context.Background(), s); !errors.Is(err, audit.ErrChainBroken) {
 		t.Fatalf("Verify without keys: %v", err)
+	}
+	// 鍵なしで許す範囲を書いていなければ、鍵を置く前のレコードも鍵付きでなければならない。
+	strict := (&eventlog.ClientSealer{Clock: clk, AuditKeys: auditKeys{id: "ak_1"}}).Storage(s)
+	if _, _, err := eventlog.Verify(context.Background(), strict); !errors.Is(err, audit.ErrChainBroken) {
+		t.Fatalf("Verify with unkeyed records before the key: %v", err)
 	}
 	var third audit.Record
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
