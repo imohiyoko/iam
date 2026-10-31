@@ -129,6 +129,8 @@ type App struct {
 	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
 	scheduler *eventlog.Scheduler
 	retention *eventlog.Retention
+	// domainRecheck は証明済みのドメインを確かめ直す（ADR 0087）。フィーチャー org_managed_users が無いか、間隔が 0 なら nil。
+	domainRecheck *org.DomainRechecker
 	// public と admin は待ち受けるハンドラ（複数 realm なら振り分け）。ownPublic と ownAdmin はこの realm のもの。
 	public, admin       http.Handler
 	ownPublic, ownAdmin http.Handler
@@ -242,6 +244,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	// 保持期間を過ぎたデータは1時間ごとに消す（design.md 6.5、9.6、ADR 0072）。
 	a.retention = &eventlog.Retention{Storage: d.Storage, Clock: d.Clock, RealmID: a.realm.ID, Audit: cfg.Realm.AuditRetention.D(),
 		Ended: cfg.Realm.EndedRetention.D(), Interval: time.Hour, Batch: cfg.Outbox.Batch, Log: d.Logger, IndexOnly: a.indexOnlyRealms}
+	if a.orgs != nil && plan.IsActive(feature.OrgManagedUsers) && cfg.OrgDomains.Recheck.D() > 0 {
+		a.domainRecheck = &org.DomainRechecker{Storage: d.Storage, Clock: d.Clock, Service: a.orgs, Every: cfg.OrgDomains.Recheck.D(),
+			Grace: cfg.OrgDomains.Grace.D(), Interval: time.Hour, Batch: cfg.Outbox.Batch, Log: d.Logger}
+	}
 	a.notifier = &eventlog.Relay{
 		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Clock, d.Logger), Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
@@ -563,6 +569,12 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	}
 	go func() { a.scheduler.Run(ctx); close(schedDone) }()
 	go func() { a.retention.Run(ctx); close(retDone) }()
+	recheckDone := make(chan struct{})
+	if a.domainRecheck != nil {
+		go func() { a.domainRecheck.Run(ctx); close(recheckDone) }()
+	} else {
+		close(recheckDone)
+	}
 	if a.realms != nil {
 		// 他のインスタンスで作った・変えた realm を、要求が無くても読み直す（ADR 0083）。
 		go a.watchRealms(ctx)
@@ -590,6 +602,7 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	}
 	<-schedDone
 	<-retDone
+	<-recheckDone
 	// 止める前に残りを送る（届かなければ次の起動で送る）。
 	for _, r := range relays {
 		if _, err := r.Flush(shutdownCtx); err != nil {

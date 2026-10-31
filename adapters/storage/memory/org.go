@@ -5,6 +5,7 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/errs"
@@ -457,7 +458,7 @@ func (r quotaGrants) Delete(_ context.Context, realmID, id string) error {
 type orgDomains struct{ t *tx }
 
 func cloneOrgDomain(d port.OrgDomain) port.OrgDomain {
-	d.VerifiedAt, d.CheckedAt = cloneTime(d.VerifiedAt), cloneTime(d.CheckedAt)
+	d.VerifiedAt, d.CheckedAt, d.MissingSince = cloneTime(d.VerifiedAt), cloneTime(d.CheckedAt), cloneTime(d.MissingSince)
 	return d
 }
 
@@ -509,6 +510,28 @@ func (r orgDomains) ListByOrg(_ context.Context, realmID, orgID string) ([]port.
 	return out, nil
 }
 
+func (r orgDomains) ListToRecheck(_ context.Context, before time.Time, limit int) ([]port.OrgDomain, error) {
+	var out []port.OrgDomain
+	for _, x := range r.t.s.orgDomains {
+		if x.VerifiedAt != nil && (x.CheckedAt == nil || !x.CheckedAt.After(before)) {
+			out = append(out, cloneOrgDomain(x))
+		}
+	}
+	// 確かめていないものを先に、次は確かめた時刻の古い順（SQL の ORDER BY と同じ）。
+	slices.SortFunc(out, func(a, b port.OrgDomain) int {
+		switch {
+		case a.CheckedAt == nil && b.CheckedAt != nil:
+			return -1
+		case a.CheckedAt != nil && b.CheckedAt == nil:
+			return 1
+		case a.CheckedAt != nil && !a.CheckedAt.Equal(*b.CheckedAt):
+			return a.CheckedAt.Compare(*b.CheckedAt)
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out[:min(len(out), limit)], nil
+}
+
 func (r orgDomains) Update(_ context.Context, d port.OrgDomain) error {
 	x, err := get(r.t.s.orgDomains, d.RealmID, d.ID, func(d port.OrgDomain) string { return d.RealmID }, "org domain")
 	if err != nil {
@@ -521,7 +544,7 @@ func (r orgDomains) Update(_ context.Context, d port.OrgDomain) error {
 			}
 		}
 	}
-	x.VerifiedAt, x.CheckedAt = cloneTime(d.VerifiedAt), cloneTime(d.CheckedAt)
+	x.VerifiedAt, x.CheckedAt, x.MissingSince = cloneTime(d.VerifiedAt), cloneTime(d.CheckedAt), cloneTime(d.MissingSince)
 	setKey(r.t, r.t.s.orgDomains, x.ID, x)
 	return nil
 }

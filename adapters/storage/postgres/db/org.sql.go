@@ -558,7 +558,7 @@ func (q *Queries) GetOrgByPublicID(ctx context.Context, arg GetOrgByPublicIDPara
 }
 
 const getOrgDomainByPublicID = `-- name: GetOrgDomainByPublicID :one
-SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at FROM org_domains WHERE realm_id = $1 AND public_id = $2
+SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at, missing_since FROM org_domains WHERE realm_id = $1 AND public_id = $2
 `
 
 type GetOrgDomainByPublicIDParams struct {
@@ -580,6 +580,7 @@ func (q *Queries) GetOrgDomainByPublicID(ctx context.Context, arg GetOrgDomainBy
 		&i.CheckedAt,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.MissingSince,
 	)
 	return i, err
 }
@@ -685,7 +686,7 @@ func (q *Queries) GetQuotaGrantByPublicID(ctx context.Context, arg GetQuotaGrant
 }
 
 const getVerifiedOrgDomain = `-- name: GetVerifiedOrgDomain :one
-SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at FROM org_domains WHERE realm_id = $1 AND domain = $2 AND verified_at IS NOT NULL
+SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at, missing_since FROM org_domains WHERE realm_id = $1 AND domain = $2 AND verified_at IS NOT NULL
 `
 
 type GetVerifiedOrgDomainParams struct {
@@ -707,6 +708,7 @@ func (q *Queries) GetVerifiedOrgDomain(ctx context.Context, arg GetVerifiedOrgDo
 		&i.CheckedAt,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.MissingSince,
 	)
 	return i, err
 }
@@ -1006,7 +1008,7 @@ func (q *Queries) ListOrgDescendants(ctx context.Context, arg ListOrgDescendants
 }
 
 const listOrgDomainsByOrg = `-- name: ListOrgDomainsByOrg :many
-SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at FROM org_domains WHERE realm_id = $1 AND org_id = $2 ORDER BY created_at, id
+SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at, missing_since FROM org_domains WHERE realm_id = $1 AND org_id = $2 ORDER BY created_at, id
 `
 
 type ListOrgDomainsByOrgParams struct {
@@ -1034,6 +1036,52 @@ func (q *Queries) ListOrgDomainsByOrg(ctx context.Context, arg ListOrgDomainsByO
 			&i.CheckedAt,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.MissingSince,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgDomainsToRecheck = `-- name: ListOrgDomainsToRecheck :many
+SELECT id, public_id, realm_id, org_id, domain, token, verified_at, checked_at, created_by, created_at, missing_since FROM org_domains WHERE verified_at IS NOT NULL AND (checked_at IS NULL OR checked_at <= $1)
+ORDER BY checked_at IS NOT NULL, checked_at, id LIMIT $2::bigint
+`
+
+type ListOrgDomainsToRecheckParams struct {
+	Before sql.NullString
+	Lim    int64
+}
+
+func (q *Queries) ListOrgDomainsToRecheck(ctx context.Context, arg ListOrgDomainsToRecheckParams) ([]OrgDomain, error) {
+	rows, err := q.db.QueryContext(ctx, listOrgDomainsToRecheck, arg.Before, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrgDomain
+	for rows.Next() {
+		var i OrgDomain
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.OrgID,
+			&i.Domain,
+			&i.Token,
+			&i.VerifiedAt,
+			&i.CheckedAt,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.MissingSince,
 		); err != nil {
 			return nil, err
 		}
@@ -1382,20 +1430,22 @@ func (q *Queries) UpdateMembership(ctx context.Context, arg UpdateMembershipPara
 }
 
 const updateOrgDomain = `-- name: UpdateOrgDomain :execrows
-UPDATE org_domains SET verified_at = $1, checked_at = $2 WHERE realm_id = $3 AND id = $4
+UPDATE org_domains SET verified_at = $1, checked_at = $2, missing_since = $3 WHERE realm_id = $4 AND id = $5
 `
 
 type UpdateOrgDomainParams struct {
-	VerifiedAt sql.NullString
-	CheckedAt  sql.NullString
-	RealmID    string
-	ID         string
+	VerifiedAt   sql.NullString
+	CheckedAt    sql.NullString
+	MissingSince sql.NullString
+	RealmID      string
+	ID           string
 }
 
 func (q *Queries) UpdateOrgDomain(ctx context.Context, arg UpdateOrgDomainParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateOrgDomain,
 		arg.VerifiedAt,
 		arg.CheckedAt,
+		arg.MissingSince,
 		arg.RealmID,
 		arg.ID,
 	)

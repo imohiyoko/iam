@@ -97,3 +97,4 @@
 | [0083](0083-multi-realm.md) | 複数 realm は1つの App のまま要求ごとに realm を決め、realm ごとのサービスの組に渡す | 承認 |
 | [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |
 | [0085](0085-my-groups-and-group-scoped-read.md) | 本人の Group の一覧と、Group に限った所属の参照 | 承認 |
+| [0087](0087-org-domain-recheck.md) | 証明済みのドメインは定期的に TXT を確かめ直し、猶予の間ずっと無ければ証明を外す | 承認 |
