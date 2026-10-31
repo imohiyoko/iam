@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/server/publicapi"
+	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -357,7 +359,10 @@ func (s adminServer) DeleteRoleBinding(ctx context.Context, req adminapi.DeleteR
 
 func (s publicServer) ListMyOrgGroups(ctx context.Context, req publicapi.ListMyOrgGroupsRequestObject) (publicapi.ListMyOrgGroupsResponseObject, error) {
 	var out []publicapi.Group
-	st, e, err := s.orgAuthz(ctx, req.Id, role.PermOrgGroups, false, func(ctx context.Context, tx port.Tx, c authzCall) (err error) {
+	st, e, err := s.orgAuthz(ctx, req.Id, "", false, func(ctx context.Context, tx port.Tx, c authzCall) (err error) {
+		if err := s.a.readGroups(ctx, tx, c, ""); err != nil {
+			return err
+		}
 		out, err = s.a.listGroups(ctx, tx, c)
 		return err
 	})
@@ -375,6 +380,34 @@ func (s publicServer) ListMyOrgGroups(ctx context.Context, req publicapi.ListMyO
 		return nil, err
 	}
 	return nil, errStatus(st)
+}
+
+func (s publicServer) ListMyGroupsInOrg(ctx context.Context, req publicapi.ListMyGroupsInOrgRequestObject) (publicapi.ListMyGroupsInOrgResponseObject, error) {
+	au, ok := authFrom(ctx)
+	switch {
+	case !ok:
+		return publicapi.ListMyGroupsInOrg401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	case s.a.orgs == nil:
+		return publicapi.ListMyGroupsInOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	var out []publicapi.MyGroup
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		o, _, err := s.orgMember(ctx, tx, au, req.Id, "")
+		if err != nil {
+			return err
+		}
+		out, err = s.a.myGroups(ctx, tx, s.a.realm.ID, au.PrincipalID, o.ID)
+		return err
+	})
+	switch {
+	case err == nil:
+		return publicapi.ListMyGroupsInOrg200JSONResponse{Groups: out}, nil
+	case errors.Is(err, errs.NotFound):
+		return publicapi.ListMyGroupsInOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	case errors.Is(err, errs.PermissionDenied):
+		return publicapi.ListMyGroupsInOrg403JSONResponse{DeniedJSONResponse: orgDenied(err)}, nil
+	}
+	return nil, err
 }
 
 func (s adminServer) ListGroups(ctx context.Context, req adminapi.ListGroupsRequestObject) (adminapi.ListGroupsResponseObject, error) {
@@ -553,7 +586,10 @@ func (s adminServer) DeleteGroup(ctx context.Context, req adminapi.DeleteGroupRe
 
 func (s publicServer) ListMyOrgGroupMembers(ctx context.Context, req publicapi.ListMyOrgGroupMembersRequestObject) (publicapi.ListMyOrgGroupMembersResponseObject, error) {
 	var out []publicapi.GroupMember
-	st, e, err := s.orgAuthz(ctx, req.Id, role.PermOrgGroups, false, func(ctx context.Context, tx port.Tx, c authzCall) (err error) {
+	st, e, err := s.orgAuthz(ctx, req.Id, "", false, func(ctx context.Context, tx port.Tx, c authzCall) (err error) {
+		if err := s.a.readGroups(ctx, tx, c, req.GroupId); err != nil {
+			return err
+		}
 		out, err = s.a.listGroupMembers(ctx, tx, c, req.GroupId)
 		return err
 	})

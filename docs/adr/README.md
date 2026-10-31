@@ -96,3 +96,4 @@
 | [0082](0082-account-merge.md) | アカウント統合は両方のログインで証明し、統合元の個人 Org は残して中身を新しい Org に移す | 承認 |
 | [0083](0083-multi-realm.md) | 複数 realm は1つの App のまま要求ごとに realm を決め、realm ごとのサービスの組に渡す | 承認 |
 | [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |
+| [0085](0085-my-groups-and-group-scoped-read.md) | 本人の Group の一覧と、Group に限った所属の参照 | 承認 |
