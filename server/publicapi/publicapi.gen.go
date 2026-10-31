@@ -431,6 +431,41 @@ type LoginResult struct {
 // 決まった API にしか使えない（他は未ログインの扱い）。
 type LoginResultNext string
 
+// Me defines model for Me.
+type Me struct {
+	// ActiveOrg このセッションの active な Org（フィーチャー org が動いていなければ無い）
+	ActiveOrg *struct {
+		// Id Org の公開 ID
+		Id string `json:"id"`
+
+		// Unavailable Org の操作が使えない理由のコード（停止・有効期間の外など。4.7）。空なら使える
+		Unavailable []string `json:"unavailable"`
+	} `json:"active_org,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeletionScheduledAt アカウントの削除の予定（4.10）。予定が無ければ無い
+	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
+
+	// Id ユーザーの公開 ID（usr_…）
+	Id string `json:"id"`
+
+	// ManagedByOrgId 管理する Org の公開 ID（Org 管理ユーザーのときだけ。ADR 0076）
+	ManagedByOrgId *string  `json:"managed_by_org_id,omitempty"`
+	PrimaryEmail   *MyEmail `json:"primary_email,omitempty"`
+
+	// Session このリクエストのセッション
+	Session struct {
+		// AuthMethods 使った認証手段（amr）
+		AuthMethods []string `json:"auth_methods"`
+
+		// AuthenticatedAt 最後に認証した時刻（auth_time）
+		AuthenticatedAt time.Time `json:"authenticated_at"`
+
+		// Id 公開のセッション ID（ses_…）
+		Id string `json:"id"`
+	} `json:"session"`
+}
+
 // MyAttributes defines model for MyAttributes.
 type MyAttributes struct {
 	Attributes map[string]interface{} `json:"attributes"`
@@ -1276,6 +1311,9 @@ type ServerInterface interface {
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// GetMe 本人の情報（公開 ID、primary のメール、active な Org、このセッション）
+	// (GET /v1/me)
+	GetMe(w http.ResponseWriter, r *http.Request)
 	// CancelMyAccountDeletion アカウントの削除の予定を取り消す
 	// (POST /v1/me/account:cancel-deletion)
 	CancelMyAccountDeletion(w http.ResponseWriter, r *http.Request)
@@ -1734,6 +1772,20 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMe operation middleware
+func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMe(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3810,6 +3862,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/logout", wrapper.Logout)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/account:delete", wrapper.DeleteMyAccount)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/account:cancel-deletion", wrapper.CancelMyAccountDeletion)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me", wrapper.GetMe)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/sessions", wrapper.ListMySessions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/sessions/{id}:revoke", wrapper.RevokeMySession)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/methods", wrapper.ListMyMethods)
@@ -4786,6 +4839,41 @@ func (response Logout204Response) VisitLogoutResponse(w http.ResponseWriter) err
 	}
 	w.WriteHeader(204)
 	return nil
+}
+
+type GetMeRequestObject struct {
+}
+
+type GetMeResponseObject interface {
+	VisitGetMeResponse(w http.ResponseWriter) error
+}
+
+type GetMe200JSONResponse Me
+
+func (response GetMe200JSONResponse) VisitGetMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMe401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetMe401JSONResponse) VisitGetMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type CancelMyAccountDeletionRequestObject struct {
@@ -10238,6 +10326,9 @@ type StrictServerInterface interface {
 	// Logout 今のセッションを失効させる
 	// (POST /v1/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
+	// GetMe 本人の情報（公開 ID、primary のメール、active な Org、このセッション）
+	// (GET /v1/me)
+	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
 	// CancelMyAccountDeletion アカウントの削除の予定を取り消す
 	// (POST /v1/me/account:cancel-deletion)
 	CancelMyAccountDeletion(ctx context.Context, request CancelMyAccountDeletionRequestObject) (CancelMyAccountDeletionResponseObject, error)
@@ -10941,6 +11032,30 @@ func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(LogoutResponseObject); ok {
 		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMe operation middleware
+func (sh *strictHandler) GetMe(w http.ResponseWriter, r *http.Request) {
+	var request GetMeRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMe(ctx, request.(GetMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMe")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMeResponseObject); ok {
+		if err := validResponse.VisitGetMeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -593,6 +593,24 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /v1/me:
+    get:
+      operationId: getMe
+      summary: 本人の情報（公開 ID、primary のメール、active な Org、このセッション）
+      description: |
+        画面の初期表示などに使う。ID は公開 ID だけを返す（ADR 0045）。認証手段の一覧は `GET /v1/me/methods`、所属する Org の
+        一覧は `GET /v1/me/orgs`。制限つきのセッション（2要素目の確認待ちなど）では、ほかの API と同じく `401`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 本人の情報
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
   /v1/me/sessions:
     get:
       operationId: listMySessions
@@ -2562,6 +2580,38 @@ components:
           type: array
           items: { type: string }
         current: { type: boolean, description: このリクエストのセッションか }
+    Me:
+      type: object
+      required: [id, created_at, session]
+      properties:
+        id: { type: string, description: ユーザーの公開 ID（usr_…） }
+        created_at: { type: string, format: date-time }
+        primary_email:
+          $ref: "#/components/schemas/MyEmail"
+          description: primary のメール。メールを持たないユーザーには無い
+        managed_by_org_id: { type: string, description: 管理する Org の公開 ID（Org 管理ユーザーのときだけ。ADR 0076） }
+        deletion_scheduled_at: { type: string, format: date-time, description: アカウントの削除の予定（4.10）。予定が無ければ無い }
+        active_org:
+          type: object
+          description: このセッションの active な Org（フィーチャー org が動いていなければ無い）
+          required: [id, unavailable]
+          properties:
+            id: { type: string, description: Org の公開 ID }
+            unavailable:
+              type: array
+              items: { type: string }
+              description: Org の操作が使えない理由のコード（停止・有効期間の外など。4.7）。空なら使える
+        session:
+          type: object
+          description: このリクエストのセッション
+          required: [id, authenticated_at, auth_methods]
+          properties:
+            id: { type: string, description: 公開のセッション ID（ses_…） }
+            authenticated_at: { type: string, format: date-time, description: 最後に認証した時刻（auth_time） }
+            auth_methods:
+              type: array
+              items: { type: string }
+              description: 使った認証手段（amr）
     MyOrg:
       type: object
       required: [id, kind, role, membership_id, active]
