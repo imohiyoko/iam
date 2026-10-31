@@ -93,6 +93,9 @@ func TestTOTPSecondFactor(t *testing.T) {
 	if status, _ := l.me(t, restricted); status != 401 {
 		t.Fatalf("restricted session used for me: %d", status)
 	}
+	if w := l.do(t, l.a.PublicHandler(), "GET", "/v1/me", nil, "Cookie", sessionCookie+"="+restricted); w.Code != 401 {
+		t.Fatalf("restricted session used for GET /v1/me: %d %s", w.Code, w.Body)
+	}
 	if status, _ := l.mePost(t, restricted, "/v1/me/totp:start", nil); status != 401 {
 		t.Fatalf("restricted session enrolls: %d", status)
 	}

@@ -60,18 +60,57 @@ func (e LoginResultNext) Valid() bool {
 	}
 }
 
+// Defines values for MeActiveOrgKind.
+const (
+	MeActiveOrgKindPersonal MeActiveOrgKind = "personal"
+	MeActiveOrgKindShared   MeActiveOrgKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the MeActiveOrgKind enum.
+func (e MeActiveOrgKind) Valid() bool {
+	switch e {
+	case MeActiveOrgKindPersonal:
+		return true
+	case MeActiveOrgKindShared:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MeActiveOrgRole.
+const (
+	MeActiveOrgRoleAdmin  MeActiveOrgRole = "admin"
+	MeActiveOrgRoleMember MeActiveOrgRole = "member"
+	MeActiveOrgRoleOwner  MeActiveOrgRole = "owner"
+)
+
+// Valid indicates whether the value is a known member of the MeActiveOrgRole enum.
+func (e MeActiveOrgRole) Valid() bool {
+	switch e {
+	case MeActiveOrgRoleAdmin:
+		return true
+	case MeActiveOrgRoleMember:
+		return true
+	case MeActiveOrgRoleOwner:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MyOrgKind.
 const (
-	Personal MyOrgKind = "personal"
-	Shared   MyOrgKind = "shared"
+	MyOrgKindPersonal MyOrgKind = "personal"
+	MyOrgKindShared   MyOrgKind = "shared"
 )
 
 // Valid indicates whether the value is a known member of the MyOrgKind enum.
 func (e MyOrgKind) Valid() bool {
 	switch e {
-	case Personal:
+	case MyOrgKindPersonal:
 		return true
-	case Shared:
+	case MyOrgKindShared:
 		return true
 	default:
 		return false
@@ -433,15 +472,8 @@ type LoginResultNext string
 
 // Me defines model for Me.
 type Me struct {
-	// ActiveOrg このセッションの active な Org（フィーチャー org が動いていなければ無い）
-	ActiveOrg *struct {
-		// Id Org の公開 ID
-		Id string `json:"id"`
-
-		// Unavailable Org の操作が使えない理由のコード（停止・有効期間の外など。4.7）。空なら使える
-		Unavailable []string `json:"unavailable"`
-	} `json:"active_org,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ActiveOrg *MeActiveOrg `json:"active_org,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
 
 	// DeletionScheduledAt アカウントの削除の予定（4.10）。予定が無ければ無い
 	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
@@ -464,6 +496,41 @@ type Me struct {
 		// Id 公開のセッション ID（ses_…）
 		Id string `json:"id"`
 	} `json:"session"`
+}
+
+// MeActiveOrg defines model for MeActiveOrg.
+type MeActiveOrg struct {
+	// Groups この Org の中で本人が入っている Group（入れ子で上の Group から受け継ぐものも含む。名前の順）
+	Groups []MeGroup `json:"groups"`
+
+	// Id Org の公開 ID
+	Id   string          `json:"id"`
+	Kind MeActiveOrgKind `json:"kind"`
+
+	// Name 共有 Org の名前（個人 Org には無い）
+	Name *string `json:"name,omitempty"`
+
+	// Role この Org での本人のロール
+	Role MeActiveOrgRole `json:"role"`
+
+	// Unavailable Org の操作が使えない理由のコード（Org・所属の停止 `suspended.<category>`、有効期間の外 `outside_validity`、所属の終わり。4.7）。空なら使える
+	Unavailable []string `json:"unavailable"`
+}
+
+// MeActiveOrgKind defines model for MeActiveOrg.Kind.
+type MeActiveOrgKind string
+
+// MeActiveOrgRole この Org での本人のロール
+type MeActiveOrgRole string
+
+// MeGroup defines model for MeGroup.
+type MeGroup struct {
+	// Direct 本人が直接入っているか（false なら入れ子で上の Group から受け継ぐ）
+	Direct bool `json:"direct"`
+
+	// Id Group の公開 ID
+	Id   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // MyAttributes defines model for MyAttributes.
