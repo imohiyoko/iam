@@ -336,7 +336,7 @@ check(principal, action, resource, context) -> allow / deny
 - Org オフなら realm 全体の RBAC。実装は有効なフィーチャーに応じて起動時に組み立てる
 - 付与には条件（ADR 0084 の条件の言語）を付けられる。条件付きの付与は、主体の認証の文脈（amr・要素数・認証時刻・リスク）が条件を満たすときだけ効く。文脈はセッションかサービスアカウントの認証から組み立て、無ければ満たさない。条件だけで拒んだときは理由のコード（`unmet`）を返す。権限の引き上げの検査も、今の文脈で条件を満たす付与だけを数える
 - 管理 API の判定（`/v1/admin/authz:check`）は、主体の `sid` かアクセストークンを渡せば、IAM がその今のセッションから文脈を組み立てる（`attested`）。どちらも無ければ、realm の設定 `declared_context_clients` に載せたサービスアカウントの申告（`context`）だけを使い、申告は `attested` でない（付与の条件の `attested` と、名前空間・Org の要件を満たさない）。イントロスペクションは `amr`・`auth_time` に加えて、系列の今のセッションのリスクの点数（`risk`）を返す
-- 本人の重要な操作（`me:methods`・`me:password`・`me:recovery_codes`・`me:delete`・`me:merge`・`me:accept_management`）は付与を問わず、直近の認証（max_auth_age。5.4）を既定として求め、加えて名前空間 `me` と active な Org の要件を求める（`auth_within` などで操作ごとに厳しくできる）。満たさなければ今までどおり 401 `reauthentication_required`。運営者の操作は管理 API の権限の判定で名前空間の要件が効く
+- 本人の重要な操作（`me:methods`・`me:password`・`me:recovery_codes`・`me:delete`・`me:merge`・`me:accept_management`・`me:delete_org`・`me:delete_managed`）は付与を問わず、直近の認証（max_auth_age。5.4）を既定として求め、加えて名前空間 `me` と active な Org の要件を求める（`auth_within` などで操作ごとに厳しくできる）。満たさなければ今までどおり 401 `reauthentication_required`。運営者の操作は管理 API の権限の判定で名前空間の要件が効く
 - 付与で許した操作には、名前空間の要件（realm の設定。`/v1/admin/action-namespaces/{name}`、権限 `requirements:manage` は `resource_type = action_namespace` で名前空間に限れる）と Org の要件（Org の設定の `requirements`。階層がオンなら祖先の要件も）をすべて AND で求める。要件は `attested` を暗黙に AND し、名前空間の段階の境界は realm より厳しくする向きだけ。変えた後に自分がその設定を変えられなくなる要件は 409 `requirement_lockout` で拒む。要件は realm・Org ごとにキャッシュし、変更で捨てる。見ている条件（付与・名前空間・Org の要件）が残るリスクの種類は止められない（409 `risk_type_in_use`）
 - 将来 OpenFGA / Cedar 等に同じシグネチャで差し替えられる
 
