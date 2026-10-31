@@ -1,10 +1,19 @@
-# 固定した（コミットの SHA で指す）actions を更新する PR を出す。
+# 固定した（コミットの SHA・イメージの digest で指す）actions とベースイメージを更新する PR を出す。
+# 出たばかりの版は 7 日待ってから提案する（乗っ取られた版を取り込まないため）。
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
