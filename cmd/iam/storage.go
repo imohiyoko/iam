@@ -74,17 +74,17 @@ func storageCmd(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		if *in == "" {
 			return errors.New("-in is required")
 		}
+		// 監査ログのチェーンは取り込んだ後に KeyStore の監査の鍵で確かめる（ADR 0086）。KeyStore の誤りで取り込んだ後に止まらないよう、先に読む。
+		keys, err := auditKeys(ctx, cfg)
+		if err != nil {
+			return err
+		}
 		f, err := os.Open(*in) // #nosec G304 G703 -- 運営者が指定するファイル
 		if err != nil {
 			return err
 		}
 		defer f.Close()
 		if stats, err = d.Import(ctx, f); err != nil {
-			return err
-		}
-		// 監査ログのチェーンが移行先でもつながっていることを確かめる。鍵付きのレコードは KeyStore の監査の鍵で確かめる（ADR 0086）。
-		keys, err := auditKeys(ctx, cfg)
-		if err != nil {
 			return err
 		}
 		_, n, err := eventlog.VerifyWith(ctx, s, keys)
