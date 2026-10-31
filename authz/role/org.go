@@ -19,11 +19,14 @@ const (
 	PermOrgRoles = "org:roles"
 	// PermOrgGroups は Org の Group と所属の管理（M4）。
 	PermOrgGroups = "org:groups"
+	// PermOrgGroupsRead は Org の Group と所属の参照だけ（ADR 0085）。Group をリソースに限って付与すると（resource_type が
+	// group）、その Group の所属だけを読める。
+	PermOrgGroupsRead = "org:groups.read"
 )
 
 var orgBuiltin = map[port.OrgRole][]string{
-	port.OrgOwner:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgSettings, PermOrgTransfer, PermOrgDelete, PermOrgRoles, PermOrgGroups},
-	port.OrgAdmin:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgRoles, PermOrgGroups},
+	port.OrgOwner:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgSettings, PermOrgTransfer, PermOrgDelete, PermOrgRoles, PermOrgGroups, PermOrgGroupsRead},
+	port.OrgAdmin:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgRoles, PermOrgGroups, PermOrgGroupsRead},
 	port.OrgMember: {PermOrgRead},
 }
 

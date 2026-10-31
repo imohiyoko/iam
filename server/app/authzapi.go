@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authz/check"
@@ -283,6 +285,70 @@ func (a *App) listGroups(ctx context.Context, tx port.Tx, c authzCall) ([]public
 		out = append(out, groupOut(g))
 	}
 	return out, nil
+}
+
+// myGroups は本人がこの Org の範囲で所属する Group を名前の順に返す（ADR 0085）。ネストなら、所属する Group を含む Group も
+// 返す（direct が false。その付与も本人に効くため）。
+func (a *App) myGroups(ctx context.Context, tx port.Tx, realmID, userID, orgID string) ([]publicapi.MyGroup, error) {
+	gs, err := tx.Groups().ListByMember(ctx, realmID, port.PrincipalUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	out := []publicapi.MyGroup{}
+	var direct []string
+	for _, g := range gs {
+		if g.OrgID != orgID || seen[g.ID] {
+			continue
+		}
+		seen[g.ID] = true
+		direct = append(direct, g.ID)
+		out = append(out, publicapi.MyGroup{Id: g.PublicID, Name: g.Name, CreatedAt: g.CreatedAt, Direct: true})
+	}
+	if a.authz.NestedGroups {
+		for _, id := range direct {
+			ls, err := tx.Groups().Ancestors(ctx, realmID, id)
+			if err != nil {
+				return nil, err
+			}
+			for _, l := range ls {
+				if seen[l.GroupID] {
+					continue
+				}
+				seen[l.GroupID] = true
+				g, err := tx.Groups().Get(ctx, realmID, l.GroupID)
+				if errors.Is(err, errs.NotFound) {
+					continue
+				}
+				if err != nil {
+					return nil, err
+				}
+				if g.OrgID == orgID {
+					out = append(out, publicapi.MyGroup{Id: g.PublicID, Name: g.Name, CreatedAt: g.CreatedAt})
+				}
+			}
+		}
+	}
+	slices.SortFunc(out, func(x, y publicapi.MyGroup) int { return strings.Compare(x.Name, y.Name) })
+	return out, nil
+}
+
+// readGroups は Org の Group を読めることを確かめる（ADR 0085）。`org:groups` か `org:groups.read` が要る。groupPublicID が
+// 空でなければ、その Group に限った `org:groups.read` の付与（resource_type が group）でもよい。
+func (a *App) readGroups(ctx context.Context, tx port.Tx, c authzCall, groupPublicID string) error {
+	r := check.Request{Principal: c.ac.Principal, Action: role.PermOrgGroups, OrgID: c.sc.OrgID, Context: c.ac.Context}
+	ok, err := a.authz.CheckTx(ctx, tx, c.sc.RealmID, r)
+	if err != nil || ok {
+		return err
+	}
+	r.Action = role.PermOrgGroupsRead
+	if groupPublicID != "" {
+		r.Resource = check.Resource{Type: check.ResourceGroup, ID: groupPublicID}
+	}
+	if ok, err = a.authz.CheckTx(ctx, tx, c.sc.RealmID, r); err != nil || ok {
+		return err
+	}
+	return errOrgPermission
 }
 
 func (a *App) createGroup(ctx context.Context, tx port.Tx, c authzCall, in publicapi.GroupInput) (publicapi.Group, error) {
