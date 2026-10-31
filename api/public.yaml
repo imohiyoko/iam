@@ -1338,6 +1338,7 @@ paths:
         realm の `org_deletion_grace`（既定30日）の後に削除する。その間はメンバーが入れず（`deletion_scheduled`）、
         `:cancel-deletion` で取り消せる。削除では全 Membership を `org_deleted` で終え、pending の招待を取り消す。
         個人 Org は `409 personal_org`、既に予定があれば `409 deletion_scheduled`。
+        直近の本人確認が要る（`max_auth_age` を過ぎていれば `401 reauthentication_required`）。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -1886,6 +1887,7 @@ paths:
       description: |
         本人の削除（`/v1/me/account:delete`）と同じく、realm の `user_deletion_grace` の後に消す。既存のセッションはすべて失効する。
         管理ユーザーは削除の予約を取り消せない。対象がこの Org の管理ユーザーでなければ `409 not_managed`。
+        直近の本人確認が要る（`max_auth_age` を過ぎていれば `401 reauthentication_required`）。
       security:
         - cookieAuth: []
         - bearerAuth: []

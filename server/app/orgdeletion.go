@@ -38,6 +38,9 @@ func (s publicServer) DeleteMyOrg(ctx context.Context, req publicapi.DeleteMyOrg
 		return publicapi.DeleteMyOrg401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	case s.a.orgs == nil:
 		return publicapi.DeleteMyOrg404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	case !s.recent(ctx, au, role.ActionMeDeleteOrg):
+		// メンバー全員が Org を使えなくなるので、直近の本人確認を求める（盗まれたセッションで削除させない）。
+		return publicapi.DeleteMyOrg401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	var out publicapi.DeleteMyOrg200JSONResponse
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
