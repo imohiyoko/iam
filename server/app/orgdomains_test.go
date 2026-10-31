@@ -242,6 +242,34 @@ func TestOrgDomainRecheck(t *testing.T) {
 	}
 }
 
+// TXT が無くなった後に猶予より長く DNS が障害でも、障害の間は猶予に数えない。
+func TestOrgDomainRecheckOutage(t *testing.T) {
+	l, dns := newDomainEnv(t, true)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	l.verifiedDomain(t, dns, owner, acme, "acme.example")
+	rc, every, grace := l.a.domainRecheck, l.e.cfg.OrgDomains.Recheck.D(), l.e.cfg.OrgDomains.Grace.D()
+	sweep := func(want org.Rechecked) {
+		t.Helper()
+		if n, err := rc.Sweep(context.Background()); err != nil || n != want {
+			t.Fatalf("sweep = %+v, %v; want %+v", n, err, want)
+		}
+	}
+	dns.mu.Lock()
+	delete(dns.txt, "_iam-challenge.acme.example")
+	dns.mu.Unlock()
+	l.advance(every)
+	sweep(org.Rechecked{Checked: 1})
+	dns.fail = true
+	l.advance(grace + every)
+	sweep(org.Rechecked{Failed: 1})
+	dns.fail = false
+	l.advance(every)
+	sweep(org.Rechecked{Checked: 1})
+	l.advance(grace - every)
+	sweep(org.Rechecked{Checked: 1, Unverified: 1})
+}
+
 // TXT が戻れば猶予は消え、また見つからなくなったときに猶予を数え直す。
 func TestOrgDomainRecheckRecovers(t *testing.T) {
 	l, dns := newDomainEnv(t, true)

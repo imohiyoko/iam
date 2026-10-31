@@ -247,8 +247,8 @@ func (s *Service) RecheckDomain(ctx context.Context, tx port.Tx, d port.OrgDomai
 	return event == EventDomainUnverified, s.recordDomain(ctx, tx, o, event, cur, audit.Actor{Type: "system"}, "")
 }
 
-// DeferRecheck は DNS の障害で確かめられなかったドメインの CheckedAt だけを進める（猶予には数えない）。障害の続くドメインが
-// 確かめ直しの1回分を占めて、他のドメインを待たせないため。
+// DeferRecheck は DNS の障害で確かめられなかったドメインの CheckedAt を進める。障害の続くドメインが確かめ直しの1回分を占めて、
+// 他のドメインを待たせないため。猶予には数えないので、MissingSince があれば前に確かめた時刻からの分だけ後ろへずらす。
 func (s *Service) DeferRecheck(ctx context.Context, tx port.Tx, d port.OrgDomain) error {
 	cur, err := tx.OrgDomains().GetByPublicID(ctx, d.RealmID, d.PublicID)
 	if errors.Is(err, errs.NotFound) {
@@ -261,6 +261,10 @@ func (s *Service) DeferRecheck(ctx context.Context, tx port.Tx, d port.OrgDomain
 		return nil
 	}
 	now := s.Clock.Now()
+	if cur.MissingSince != nil && cur.CheckedAt != nil && now.After(*cur.CheckedAt) {
+		since := cur.MissingSince.Add(now.Sub(*cur.CheckedAt))
+		cur.MissingSince = &since
+	}
 	cur.CheckedAt = &now
 	return tx.OrgDomains().Update(ctx, cur)
 }
