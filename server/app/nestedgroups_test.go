@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/imohiyoko/iam/authz/role"
@@ -77,6 +78,19 @@ func TestNestedGroups(t *testing.T) {
 	mustAdd(all, "group", eng)
 	if c := canInvite(); c != 201 {
 		t.Fatalf("invite via nested group: %d", c)
+	}
+	// 本人の Group の一覧には、所属する Group を含む Group も載る（ADR 0085）。
+	code, body = l.meDo(t, "GET", sam, base+"/my-groups", nil)
+	if code != 200 {
+		t.Fatalf("my groups: %d %v", code, body)
+	}
+	var mine []string
+	for _, g := range body["groups"].([]any) {
+		m := g.(map[string]any)
+		mine = append(mine, m["id"].(string)+"/"+map[bool]string{true: "direct", false: "nested"}[m["direct"].(bool)])
+	}
+	if want := []string{all + "/nested", backend + "/direct", eng + "/nested"}; !slices.Equal(mine, want) {
+		t.Fatalf("my groups: %v, want %v", mine, want)
 	}
 	code, body = l.meDo(t, "GET", owner, base+"/groups/"+eng+"/members", nil)
 	if ms := body["members"].([]any); code != 200 || len(ms) != 1 || ms[0].(map[string]any)["principal_type"] != "group" || ms[0].(map[string]any)["principal_id"] != backend {

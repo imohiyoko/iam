@@ -239,6 +239,8 @@ role_bindings  role_id, principal_type, principal_id
 
 Group に入れるのは、その Org の active な Membership を持つユーザーか、その Org のサービスアカウントのみ（authz は authn の公開 API で確認する）。
 
+本人は自分が所属する Org の Group を権限なしで読める（`GET /v1/me/orgs/{id}/my-groups`）。所属の参照だけの権限 `org:groups.read` は、Group に限って付与すると（`resource_type: group`）その Group の所属だけを読める（ADR 0085）。
+
 ## 4. 主要フロー
 
 ### 4.1 登録とログイン
@@ -459,7 +461,7 @@ check(principal, action, resource, context) -> allow / deny
 | `realm:billing` | Quota の付与、`billing` の停止・解除（課金連携用のサービスアカウント向け） |
 
 - 運営者ロールは `org_id` が NULL のロール付与で表し、ホスト先が独自のロールを追加できる。停止の種別ごとの解除権限は、これらのロールの permission として定義する
-- Org のロール：`org_role` を Org 範囲の既定ロールに対応させる。`owner`（削除・譲渡・全設定）、`admin`（招待・除名・Group とロール、`customer_request` の停止）、`member`
+- Org のロール：`org_role` を Org 範囲の既定ロールに対応させる。`owner`（削除・譲渡・全設定）、`admin`（招待・除名・Group とロール、`customer_request` の停止）、`member`。Group と所属の参照だけは `org:groups.read`（ADR 0085）
 - 個人情報の復号は独立した権限 `pii:read`
 - 管理操作には強い認証と直近の認証（`max_auth_age`）を求める。管理者のセッションは短くする
 - 緊急時は Storage と KeyStore に直接触れる CLI を使う（実行は重要イベントとして全運営者に通知）。常設の緊急用アカウントは作らない
@@ -735,7 +737,7 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 
 - フィーチャー `org_managed_users`。Org の owner が公開 API の `/v1/me/orgs/{id}/domains` でドメインを登録し、`_iam-challenge.<domain>` に TXT `iam-domain-verification=<token>` を置いて `:verify` で証明する
 - 証明済みのドメインは realm で1つの Org だけが持てる（`domain_taken`）。DNS はトランザクションの外で引く
-- 証明済みのドメインは `org_domains.recheck`（既定 1 日）ごとに TXT を確かめ直し、`org_domains.grace`（既定 7 日）の間ずっと無ければ証明を外す（ADR 0085）
+- 証明済みのドメインは `org_domains.recheck`（既定 1 日）ごとに TXT を確かめ直し、`org_domains.grace`（既定 7 日）の間ずっと無ければ証明を外す（ADR 0087）
 - 管理ユーザーは `users.managed_org_id`（ADR 0076）。Org の owner が求め（`:request-management`）、本人が受け入れる（`:accept-management`）。対象は、この Org で使う確認済みのメールが証明済みドメインのメンバー。管理ユーザーはその Org を抜けられず、自分でアカウントを消せない。Org が手放す・除名・削除すると個人ユーザーに戻る
 - 招待の `managed` で、新しく登録した人を最初から管理ユーザーにする。管理ユーザーは管理する Org に入れなければログインできず（停止・ログインポリシー）、Org の owner がアカウントを消せる
 - Org 専用 SSO（ADR 0077）：Org の owner が `/v1/me/orgs/{id}/connections` で OIDC の connection を登録する。その Org の管理ユーザーだけがログインでき、未登録なら証明済みドメインのアドレスで管理ユーザーとして作る。戻り先は固定、トークンエンドポイントは公開のアドレスに限る。ログインポリシー `require_sso`、`/v1/login/sso:discover` でドメインから探す。SAML は後に回す

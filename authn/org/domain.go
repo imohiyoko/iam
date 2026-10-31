@@ -24,7 +24,7 @@ import (
 // TXT `iam-domain-verification=<token>` を置き、確認を求めると、IAM が DNS を引いて証明済みにする。
 // 証明済みのドメインは realm で1つの Org だけが持てる（後から証明しようとした Org は domain_taken）。
 // DNS はトランザクションの外で引く（LookupDomain）。結果を書くのは MarkDomainChecked。
-// 証明済みのドメインは DomainRechecker が定期的に確かめ直し、TXT が猶予の間ずっと無ければ証明を外す（RecheckDomain。ADR 0085）。
+// 証明済みのドメインは DomainRechecker が定期的に確かめ直し、TXT が猶予の間ずっと無ければ証明を外す（RecheckDomain。ADR 0087）。
 
 // ManagedUsersFeature は Org 管理ユーザー（ドメインの所有証明を含む）の宣言（features/orgmanagedusers が登録する）。
 var ManagedUsersFeature = feature.Feature{Name: feature.OrgManagedUsers, DataVersion: 1, Requires: []string{feature.Org}}
@@ -185,7 +185,7 @@ func (s *Service) MarkDomainChecked(ctx context.Context, tx port.Tx, o port.Org,
 	}
 	now := s.Clock.Now()
 	if d.VerifiedAt != nil {
-		// 確かめ直しで TXT が見つからなくなった後に置き直したなら、猶予を消す（ADR 0085）。
+		// 確かめ直しで TXT が見つからなくなった後に置き直したなら、猶予を消す（ADR 0087）。
 		if found && d.MissingSince != nil {
 			d.CheckedAt, d.MissingSince = &now, nil
 			return d, tx.OrgDomains().Update(ctx, d)
@@ -209,7 +209,7 @@ func (s *Service) MarkDomainChecked(ctx context.Context, tx port.Tx, o port.Org,
 	return d, s.recordDomain(ctx, tx, o, EventDomainVerified, d, actor, requestID)
 }
 
-// RecheckDomain は証明済みのドメイン d を LookupDomain で確かめ直した結果を書く（ADR 0085）。見つかれば MissingSince を消す。
+// RecheckDomain は証明済みのドメイン d を LookupDomain で確かめ直した結果を書く（ADR 0087）。見つかれば MissingSince を消す。
 // 見つからなければ、初めてなら MissingSince を付けて org.domain.missing を出し、MissingSince から grace を過ぎていれば
 // 証明を外して org.domain.unverified を出す（外したら true）。d の後に消された・登録し直された・証明を外されたなら何もしない。
 func (s *Service) RecheckDomain(ctx context.Context, tx port.Tx, d port.OrgDomain, found bool, grace time.Duration) (bool, error) {

@@ -38,6 +38,9 @@ type Resource struct {
 // ResourceOrg は Org 全体を表すリソースの種類。
 const ResourceOrg = "org"
 
+// ResourceGroup は Group（公開 ID）を表すリソースの種類。Group に限った付与（ADR 0085）に使う。
+const ResourceGroup = "group"
+
 // Request は判定の問い。
 type Request struct {
 	Principal Principal

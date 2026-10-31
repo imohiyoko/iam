@@ -10,7 +10,7 @@ import (
 	"github.com/imohiyoko/iam/shared/port"
 )
 
-// DomainRechecker は証明済みのドメインの TXT を定期的に確かめ直す（ADR 0085）。TXT を消した、ドメインを手放したなどで
+// DomainRechecker は証明済みのドメインの TXT を定期的に確かめ直す（ADR 0087）。TXT を消した、ドメインを手放したなどで
 // 所有が続いていないドメインに、証明を残さない。DNS の障害（errs.KindUnavailable）は猶予に数えず、Every の後にやり直す。
 type DomainRechecker struct {
 	Storage port.Storage

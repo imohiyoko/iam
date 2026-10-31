@@ -49,7 +49,7 @@ type Config struct {
 
 	Outbox Outbox `yaml:"outbox"`
 
-	// OrgDomains は証明済みのドメインの確かめ直し（フィーチャー org_managed_users。ADR 0085）。
+	// OrgDomains は証明済みのドメインの確かめ直し（フィーチャー org_managed_users。ADR 0087）。
 	OrgDomains OrgDomains `yaml:"org_domains"`
 
 	// IDs は採番の方式（ADR 0045）。
@@ -324,7 +324,7 @@ type Outbox struct {
 	Batch    int      `yaml:"batch"`
 }
 
-// OrgDomains は証明済みのドメインの確かめ直しの設定（ADR 0085）。
+// OrgDomains は証明済みのドメインの確かめ直しの設定（ADR 0087）。
 type OrgDomains struct {
 	// Recheck は1つのドメインの TXT を確かめ直す間隔。0 なら確かめ直さない。
 	Recheck Duration `yaml:"recheck"`
