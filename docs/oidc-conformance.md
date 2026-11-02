@@ -20,6 +20,8 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 | リフレッシュ（ローテーションと再利用検知）、イントロスペクション、失効 | `TestOIDCRefreshIntrospectRevoke`、`TestOIDCE2EStandardRP`（rs で RFC 7662） |
 | Back-Channel Logout | `TestOIDCBackchannelLogout` |
 | Device Authorization Grant（RFC 8628。フィーチャー `device_flow`） | `TestDeviceFlow`、`TestDeviceFlowClients`、`TestDeviceFlowE2EStandardRP`（zitadel/oidc の rp で Discovery から）、`TestDeviceFlow`（authn/provider） |
+| RP-Initiated Logout（`oidcc-rp-initiated-logout-*`。フィーチャー `oidc_logout`）：Discovery の `end_session_endpoint`、`id_token_hint`（期限切れ・改ざん・別の連携先・別の realm）、登録と一致しない `post_logout_redirect_uri` の拒否、`state` の受け渡し、確認の画面 | `TestOIDCRPInitiatedLogout`、`TestOIDCE2ERPInitiatedLogout`（zitadel/oidc の rp で）、`TestOIDCRPInitiatedLogoutMultiRealm`、`TestEndSessionRequest` |
+| Front-Channel Logout（`oidcc-frontchannel-*`）：`frontchannel_logout_uri` の iframe、`iss` と `sid`、CSP の `frame-src` | `TestOIDCRPInitiatedLogout`、`TestFrontChannelURLsAndHold` |
 | `acr_values`・`claims` の `id_token.acr`、ID トークンの `acr`（フィーチャー acr。ADR 0093） | `TestACRIDTokenAndStepUp`、`TestACRFeatureOff` |
 
 ## 既知の差異
@@ -43,3 +45,11 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 - Device Authorization Grant（ADR 0095）は `openid` スコープを求め、認可コードフローと同じく ID トークンを返す（OAuth だけの
   device_authorization は受けない）。ID トークンに `nonce` は無い。`verification_uri_complete` で開いても確認の画面を省かない。
   zitadel/oidc の `op.Server` の `DeviceAuthorization`・`DeviceToken` で受け、状態は `authn/provider` が EphemeralStore に置く
+- RP-Initiated Logout と Front-Channel Logout はフィーチャー `oidc_logout`（既定オフ。ADR 0094）。試験ではこれを有効にする
+  - `id_token_hint` がブラウザのセッション（`sid` と `sub`）と合わない・無いときは確認の画面を出す。試験の「ログアウトの
+    画面が出たら押す」の手順で進める
+  - 正しくない要求（登録と一致しない `post_logout_redirect_uri`、検証できない `id_token_hint`、連携先が分からないのに
+    `post_logout_redirect_uri` があるなど）は、戻り先に戻さずエラーの画面（400）で止める
+  - `logout_hint` は受けるが使わない。`ui_locales` は画面の言語（en・ja）にだけ使う
+  - 退役から `oidc.retired_key_ttl`（既定 7 日）を過ぎた鍵で署名した `id_token_hint` は検証できないので拒む
+  - Session Management（`check_session_iframe`）は扱わない

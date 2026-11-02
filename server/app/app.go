@@ -125,6 +125,8 @@ type App struct {
 	// device は Device Authorization Grant（ADR 0095）。フィーチャー device_flow が動いていなければ nil。deviceTmpl はその画面。
 	device     *provider.Device
 	deviceTmpl *template.Template
+	// logoutTmpl はログアウトの画面（ADR 0094）。フィーチャー oidc_logout が動いていなければ nil。
+	logoutTmpl *template.Template
 	// authz は認可の判定（ADR 0064）。manage はロール・付与・Group の管理。
 	authz  *check.Checker
 	manage *manage.Service
@@ -317,7 +319,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.authz.Members, a.authz.Hierarchy = authzMembers{}, a.orgs.Hierarchy
 	}
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
-	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow)}
+	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout)}
 	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D()}
 	// ID トークンの署名鍵は realm ごとに用意しておく（JWKS が空のまま公開されないように）。
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, realm.ID) }); err != nil {
@@ -415,6 +417,11 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	login, err := newHosted(a, cfg.Server.LoginTemplates)
 	if err != nil {
 		return err
+	}
+	if plan.IsActive(feature.OIDCLogout) {
+		if a.logoutTmpl, err = newLogoutTemplate(cfg.Server.LoginTemplates); err != nil {
+			return err
+		}
 	}
 	trusted, err := cfg.Server.TrustedProxyPrefixes()
 	if err != nil {

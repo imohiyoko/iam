@@ -51,6 +51,7 @@ var featureCatalog = map[string]struct {
 	feature.AccountMerge:     {merge.Feature, module + "/features/accountmerge"},
 	feature.MultiRealm:       {realm.Feature, module + "/features/multirealm"},
 	feature.DeviceFlow:       {provider.DeviceFeature, module + "/features/deviceflow"},
+	feature.OIDCLogout:       {provider.LogoutFeature, module + "/features/oidclogout"},
 	feature.ACR:              {acr.Feature, module + "/features/acr"},
 }
 

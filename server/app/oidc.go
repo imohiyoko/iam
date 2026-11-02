@@ -12,6 +12,7 @@ import (
 
 	"github.com/zitadel/oidc/v3/pkg/oidc"
 	"github.com/zitadel/oidc/v3/pkg/op"
+	"golang.org/x/text/language"
 
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/shared/acr"
@@ -33,6 +34,7 @@ import (
 //	GET  /oauth2/userinfo                   UserInfo（POST も可）
 //	POST /oauth2/device_authorization       Device Authorization Grant の開始（RFC 8628。フィーチャー device_flow）
 //	GET  /oauth2/device                     user_code の入力と承認の画面（POST で承認・拒否）
+//	GET  /oauth2/end_session                RP-Initiated Logout（POST も可。フィーチャー oidc_logout。endsession.go）
 
 const (
 	oidcAuthorize  = "/oauth2/authorize"
@@ -82,6 +84,11 @@ func newOIDCHandler(a *App) http.Handler {
 		mux.Handle(oidcDeviceAuth, ops)
 		// 承認の画面はブラウザのセッションを見る。書き込み（POST）は別オリジンから受けない（CSRF。Cookie も SameSite=Lax）。
 		mux.Handle(oidcDevice, a.withSession(http.NewCrossOriginProtection().Handler(http.HandlerFunc(srv.deviceVerify))))
+	}
+	if a.logoutTmpl != nil {
+		// ログアウトの要求はトップレベルの遷移（別のオリジンの連携先から）。確認の答えは自分の画面のフォームからだけ受ける。
+		mux.Handle(oidcEndSession, a.withSession(http.HandlerFunc(srv.endSession)))
+		mux.Handle(oidcEndSessionConfirm, http.NewCrossOriginProtection().Handler(a.withSession(http.HandlerFunc(srv.confirmEndSession))))
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -215,8 +222,15 @@ func (s *oidcServer) acrValues() []string {
 // acrActive はフィーチャー acr（ADR 0093）が動いているか。
 func (a *App) acrActive() bool { return a.plan.IsActive(feature.ACR) }
 
+// discovery は Discovery の応答。zitadel/oidc の型に無い Front-Channel Logout の項目を足す。
+type discovery struct {
+	*oidc.DiscoveryConfiguration
+	FrontChannelLogoutSupported        bool `json:"frontchannel_logout_supported,omitempty"`
+	FrontChannelLogoutSessionSupported bool `json:"frontchannel_logout_session_supported,omitempty"`
+}
+
 func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Response, error) {
-	d := &oidc.DiscoveryConfiguration{
+	d := discovery{DiscoveryConfiguration: &oidc.DiscoveryConfiguration{
 		Issuer:                            s.a.issuer,
 		AuthorizationEndpoint:             s.endpoint(oidcAuthorize),
 		TokenEndpoint:                     s.endpoint(oidcToken),
@@ -241,8 +255,14 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		RevocationEndpointAuthSigningAlgValuesSupported:    assertionAlgs,
 		BackChannelLogoutSupported:                         true,
 		BackChannelLogoutSessionSupported:                  true,
-	}
+	}}
 	d.ACRValuesSupported = s.acrValues()
+	if s.a.logoutTmpl != nil {
+		// RP-Initiated Logout と Front-Channel Logout（フィーチャー oidc_logout。ADR 0094）。
+		d.EndSessionEndpoint = s.endpoint(oidcEndSession)
+		d.FrontChannelLogoutSupported, d.FrontChannelLogoutSessionSupported = true, true
+		d.UILocalesSupported = []language.Tag{language.English, language.Japanese}
+	}
 	// Device Authorization Grant（フィーチャー device_flow。オフなら出さない）。
 	if s.a.device != nil {
 		d.DeviceAuthorizationEndpoint, d.GrantTypesSupported = s.endpoint(oidcDeviceAuth), deviceGrantTypes

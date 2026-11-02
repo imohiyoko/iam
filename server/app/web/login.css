@@ -16,3 +16,5 @@ button.link { background: none; color: var(--accent); width: auto; padding: 0; }
 button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--muted); }
 .user-code { font-size: 1.5rem; letter-spacing: .1em; text-align: center; }
 .warning { color: var(--muted); font-size: .9rem; }
+.client { color: var(--muted); }
+p.error { color: var(--error); }

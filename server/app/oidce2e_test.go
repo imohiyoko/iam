@@ -37,28 +37,35 @@ type e2e struct {
 // newE2E は features（既定でオンのものに加えて有効にするフィーチャー）を有効にして起動する。
 func newE2E(t *testing.T, features ...string) *e2e {
 	t.Helper()
+	if len(features) == 0 {
+		return newE2EWith(t, nil, nil)
+	}
+	return newE2EWith(t, func(c *config.Config) {
+		names := slices.Clone(features)
+		for _, f := range feature.Registered() {
+			if f.DefaultEnabled {
+				names = append(names, f.Name)
+			}
+		}
+		c.Features = &names
+	}, feature.Registered())
+}
+
+// newE2EWith は設定を変え、binary のフィーチャーを含めて組み立てる。
+func newE2EWith(t *testing.T, edit func(*config.Config), binary []feature.Feature) *e2e {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	issuer := "https://" + ln.Addr().String()
 	// RP は ID トークンの iat・exp を実際の時刻で確かめるので、偽の時計を今に合わせる。
-	var binary []feature.Feature
-	if len(features) > 0 {
-		binary = feature.Registered()
-	}
 	l := newLoginEnvDeps(t, func(c *config.Config) {
 		c.Server.PublicURL = issuer
 		// passkey の RP ID に IP アドレスは使えない（この試験では passkey を使わない）。
 		c.Passkey.RPID, c.Passkey.Origins = "localhost", []string{"https://localhost"}
-		if len(features) > 0 {
-			names := slices.Clone(features)
-			for _, f := range feature.Registered() {
-				if f.DefaultEnabled {
-					names = append(names, f.Name)
-				}
-			}
-			c.Features = &names
+		if edit != nil {
+			edit(c)
 		}
 	}, binary, func(d *Deps) {
 		d.Clock.(*clock.Fake).Set(time.Now().UTC().Truncate(time.Second))

@@ -108,6 +108,18 @@ var cleaners = map[string]cleaner{
 		rs, err := tx.Realms().List(ctx)
 		return max(len(rs)-1, 0), err
 	}, Hint: "realms other than the default cannot be deleted yet: keep multi_realm enabled while they exist"},
+	// 連携先の Front-Channel Logout の登録を外す（ADR 0094。post_logout_redirect_uris は前からある項目なので残す）。
+	feature.OIDCLogout: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return hasFrontChannel(c), nil })
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
+			if !hasFrontChannel(c) {
+				return false, nil
+			}
+			c.FrontchannelLogoutURI, c.FrontchannelLogoutSessionRequired, c.UpdatedAt = "", false, now
+			return true, tx.Clients().Update(ctx, c)
+		})
+	}},
 	feature.Password: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.Passwords().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Passwords().Purge(ctx, limit)
@@ -152,6 +164,11 @@ func eachClient(ctx context.Context, tx port.Tx, limit int, fn func(port.Client)
 		}
 	}
 	return n, nil
+}
+
+// hasFrontChannel は連携先が Front-Channel Logout を登録しているか（フィーチャー oidc_logout のデータ）。
+func hasFrontChannel(c port.Client) bool {
+	return c.FrontchannelLogoutURI != "" || c.FrontchannelLogoutSessionRequired
 }
 
 // eachOwnedConnections は全 realm の Org 専用の connection を数える。purge なら limit（0 以上なら）まで消す。

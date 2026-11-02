@@ -44,8 +44,13 @@ type Client struct {
 	BackchannelLogoutURI string
 	// DeviceGrant は Device Authorization Grant（RFC 8628）を許す（フィーチャー device_flow。ADR 0095）。
 	DeviceGrant bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// FrontchannelLogoutURI は Front-Channel Logout の送り先（ログアウトの完了画面の iframe で開く。空なら開かない。
+	// フィーチャー oidc_logout。ADR 0094）。
+	FrontchannelLogoutURI string
+	// FrontchannelLogoutSessionRequired は FrontchannelLogoutURI に iss と sid を付けるか。
+	FrontchannelLogoutSessionRequired bool
+	CreatedAt                         time.Time
+	UpdatedAt                         time.Time
 }
 
 // ClientRepo は clients の Repository。

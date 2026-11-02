@@ -29,6 +29,10 @@ func clientOut(c port.Client, secret string, deviceFlow bool) (adminapi.Client, 
 	if c.BackchannelLogoutURI != "" {
 		out.BackchannelLogoutUri = &c.BackchannelLogoutURI
 	}
+	if c.FrontchannelLogoutURI != "" {
+		out.FrontchannelLogoutUri = &c.FrontchannelLogoutURI
+		out.FrontchannelLogoutSessionRequired = &c.FrontchannelLogoutSessionRequired
+	}
 	if len(c.JWKS) > 0 {
 		var m map[string]any
 		if err := json.Unmarshal(c.JWKS, &m); err != nil {
@@ -58,6 +62,12 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.DeviceAuthorizationGrant != nil {
 		in.DeviceGrant = *b.DeviceAuthorizationGrant
+	}
+	if b.FrontchannelLogoutUri != nil {
+		in.FrontchannelLogoutURI = *b.FrontchannelLogoutUri
+	}
+	if b.FrontchannelLogoutSessionRequired != nil {
+		in.FrontchannelLogoutSessionRequired = *b.FrontchannelLogoutSessionRequired
 	}
 	if b.Jwks != nil {
 		raw, err := json.Marshal(*b.Jwks)

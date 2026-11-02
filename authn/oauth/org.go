@@ -91,6 +91,8 @@ func (s *Service) NewOrgConnection(ctx context.Context, realmID, orgID string, i
 type ConnectionInfo struct {
 	Issuer, AuthURL, TokenURL, ClientID, RedirectURI string
 	Scopes                                           []string
+	// RedirectURIs は戻り先の許可リスト（先頭が RedirectURI）。
+	RedirectURIs []string
 }
 
 // Info は connection の設定のうち、公開してよいものを返す（クライアントシークレットは返さない）。
@@ -99,7 +101,7 @@ func Info(c port.Connection) (ConnectionInfo, error) {
 	if err := json.Unmarshal(c.Config, &cfg); err != nil {
 		return ConnectionInfo{}, fmt.Errorf("oauth: connection %s: %w", c.ID, err)
 	}
-	out := ConnectionInfo{AuthURL: cfg.AuthURL, TokenURL: cfg.TokenURL, ClientID: cfg.ClientID, Scopes: cfg.Scopes}
+	out := ConnectionInfo{AuthURL: cfg.AuthURL, TokenURL: cfg.TokenURL, ClientID: cfg.ClientID, Scopes: cfg.Scopes, RedirectURIs: cfg.RedirectURIs}
 	if len(cfg.Issuers) > 0 {
 		out.Issuer = cfg.Issuers[0]
 	}

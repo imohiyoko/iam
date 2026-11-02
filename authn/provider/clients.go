@@ -52,6 +52,8 @@ type Clients struct {
 	Clock clock.Clock
 	// DeviceFlow は Device Authorization Grant を許せるか（フィーチャー device_flow。ADR 0095）。
 	DeviceFlow bool
+	// FrontChannel はフィーチャー oidc_logout が動いているか（Front-Channel Logout の登録を受け付けるか。ADR 0094）。
+	FrontChannel bool
 }
 
 // ClientInput は登録・変更の内容。
@@ -66,6 +68,9 @@ type ClientInput struct {
 	BackchannelLogoutURI string
 	// DeviceGrant は Device Authorization Grant を許す（フィーチャー device_flow。ADR 0095）。
 	DeviceGrant bool
+	// FrontchannelLogoutURI と FrontchannelLogoutSessionRequired は Front-Channel Logout（フィーチャー oidc_logout）。
+	FrontchannelLogoutURI             string
+	FrontchannelLogoutSessionRequired bool
 }
 
 // ValidRedirectURI は連携先の URI に使えるか（絶対 URL、https か loopback の http、フラグメントと userinfo なし）を返す。
@@ -85,6 +90,35 @@ func ValidRedirectURI(s string) bool {
 		return h == "localhost" || h == "127.0.0.1" || h == "::1"
 	}
 	return false
+}
+
+// validFrontChannelURI は Front-Channel Logout の送り先に使えるかを返す。連携先の URI の条件に加え、scheme・ホスト・ポートが
+// 登録した戻り先のどれかと同じであること（OIDC Front-Channel Logout 2）。オリジンは完了画面の CSP（frame-src）に書くので、
+// CSP の区切りになる文字を含まないこと。
+func validFrontChannelURI(s string, redirectURIs []string) bool {
+	if !ValidRedirectURI(s) {
+		return false
+	}
+	o, ok := Origin(s)
+	if !ok {
+		return false
+	}
+	return slices.ContainsFunc(redirectURIs, func(r string) bool { ro, ok := Origin(r); return ok && ro == o })
+}
+
+// Origin は URI のオリジン（scheme://host[:port]）を返す。CSP のソースに書けない文字を含めば false。
+func Origin(s string) (string, bool) {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return "", false
+	}
+	o := strings.ToLower(u.Scheme + "://" + u.Host)
+	for _, r := range u.Host {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' || r == ':' || r == '[' || r == ']') {
+			return "", false
+		}
+	}
+	return o, true
 }
 
 func (in ClientInput) normalize(deviceFlow bool) (ClientInput, error) {
@@ -113,6 +147,11 @@ func (in ClientInput) normalize(deviceFlow bool) (ClientInput, error) {
 	}
 	if in.BackchannelLogoutURI != "" && !ValidRedirectURI(in.BackchannelLogoutURI) {
 		return in, invalidClient("backchannel_logout_uri")
+	}
+	if in.FrontchannelLogoutURI == "" {
+		in.FrontchannelLogoutSessionRequired = false
+	} else if !validFrontChannelURI(in.FrontchannelLogoutURI, in.RedirectURIs) {
+		return in, invalidClient("frontchannel_logout_uri")
 	}
 	if in.IDTokenAlg == "" {
 		// 既定は ES256（ML-DSA-65 を検証できる RP がまだ少ないため。9.3）。
@@ -186,16 +225,31 @@ func (c *Clients) record(ctx context.Context, tx port.Tx, realmID string, actor 
 	return err
 }
 
+// checkFrontChannel は、フィーチャー oidc_logout が動いていないときに Front-Channel Logout の登録を拒む。無効化の途中で
+// 残っている値は、変えなければそのまま受け付ける（ほかの項目を変えられるように）。外すのは受け付ける。
+func (c *Clients) checkFrontChannel(in ClientInput, prev port.Client) error {
+	if c.FrontChannel || in.FrontchannelLogoutURI == "" ||
+		(in.FrontchannelLogoutURI == prev.FrontchannelLogoutURI && in.FrontchannelLogoutSessionRequired == prev.FrontchannelLogoutSessionRequired) {
+		return nil
+	}
+	return invalidClient("frontchannel_logout_uri: the oidc_logout feature is not enabled")
+}
+
 // Create は連携先を登録する。client_secret なら秘密を1度だけ返す（保存するのはハッシュだけ）。
 func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
 	in, err := in.normalize(c.DeviceFlow)
 	if err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkFrontChannel(in, port.Client{}); err != nil {
+		return port.Client{}, "", err
+	}
 	now := c.Clock.Now()
 	cl := port.Client{ID: id.New(id.Client), PublicID: id.NewExternal(id.Client), RealmID: realmID, Name: in.Name, TrustLevel: port.TrustFirstParty,
 		RedirectURIs: in.RedirectURIs, PostLogoutRedirectURIs: in.PostLogoutRedirectURIs, AuthMethod: in.AuthMethod, JWKS: in.JWKS,
-		IDTokenAlg: in.IDTokenAlg, BackchannelLogoutURI: in.BackchannelLogoutURI, DeviceGrant: in.DeviceGrant, CreatedAt: now, UpdatedAt: now}
+		IDTokenAlg: in.IDTokenAlg, BackchannelLogoutURI: in.BackchannelLogoutURI, DeviceGrant: in.DeviceGrant,
+		FrontchannelLogoutURI: in.FrontchannelLogoutURI, FrontchannelLogoutSessionRequired: in.FrontchannelLogoutSessionRequired,
+		CreatedAt: now, UpdatedAt: now}
 	var secret string
 	if cl.AuthMethod == port.ClientAuthSecret {
 		if secret, cl.SecretHash, err = newSecret(); err != nil {
@@ -214,6 +268,9 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	if err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkFrontChannel(in, cl); err != nil {
+		return port.Client{}, "", err
+	}
 	var secret string
 	if in.AuthMethod != port.ClientAuthSecret {
 		cl.SecretHash = nil
@@ -225,6 +282,7 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	cl.Name, cl.RedirectURIs, cl.PostLogoutRedirectURIs, cl.AuthMethod = in.Name, in.RedirectURIs, in.PostLogoutRedirectURIs, in.AuthMethod
 	cl.JWKS, cl.IDTokenAlg, cl.BackchannelLogoutURI, cl.UpdatedAt = in.JWKS, in.IDTokenAlg, in.BackchannelLogoutURI, c.Clock.Now()
 	cl.DeviceGrant = in.DeviceGrant
+	cl.FrontchannelLogoutURI, cl.FrontchannelLogoutSessionRequired = in.FrontchannelLogoutURI, in.FrontchannelLogoutSessionRequired
 	if err := tx.Clients().Update(ctx, cl); err != nil {
 		return port.Client{}, "", err
 	}
