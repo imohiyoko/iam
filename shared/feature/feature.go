@@ -34,6 +34,7 @@ const (
 	FlowHooks           = "flow_hooks"
 	TokenExchange       = "token_exchange"
 	Impersonation       = "impersonation"
+	PasskeyAttestation  = "passkey_attestation"
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 )

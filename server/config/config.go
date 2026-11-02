@@ -19,6 +19,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/port"
@@ -38,6 +39,9 @@ type Config struct {
 	Notifier  Adapter `yaml:"notifier"`
 	// BreachCheck は漏洩済みパスワードの確認（フィーチャー password。design.md 4.1）。driver が空なら確認しない。
 	BreachCheck Adapter `yaml:"breach_check"`
+	// FIDOMDS は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation。ADR 0096）。driver が空なら
+	// MDS を読まない（設定した信頼の起点だけで確かめる）。
+	FIDOMDS Adapter `yaml:"fido_mds"`
 
 	// Features は有効にするフィーチャー名。省略すると各フィーチャーの既定に従う。
 	Features *[]string `yaml:"features"`
@@ -123,7 +127,33 @@ type Passkey struct {
 	// Origins は passkey を使う画面の origin。既定は public_url。rp_id のドメインの外の origin は
 	// Related Origin Requests（/.well-known/webauthn を rp_id のドメインで返す）で関連付ける。
 	Origins []string `yaml:"origins"`
+	// Attestation は attestation と認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。
+	Attestation PasskeyAttestation `yaml:"attestation"`
 }
+
+// PasskeyAttestation は passkey の attestation のホスト先の段の設定（ADR 0096）。フィーチャーが動いていなければ使わない。
+type PasskeyAttestation struct {
+	// Conveyance は登録で求める attestation：none（既定）/ indirect / direct / enterprise。enterprise は、ブラウザの
+	// 企業向けの設定で rp_id を許可した端末だけが個体を識別できる attestation を返す。
+	Conveyance string `yaml:"conveyance"`
+	// MetadataRootFile は MDS の BLOB の署名を確かめるルート証明書（PEM）。空なら FIDO Alliance の本番のルート。
+	MetadataRootFile string `yaml:"metadata_root_file"`
+	// MetadataRefresh は BLOB を読み直す間隔（fido_mds のアダプタを呼ぶ）。既定 24 時間。
+	MetadataRefresh Duration `yaml:"metadata_refresh"`
+	// TrustedAuthenticators は MDS に無い認証器（社内で配る鍵など）の信頼の起点。
+	TrustedAuthenticators []TrustedAuthenticator `yaml:"trusted_authenticators"`
+}
+
+// TrustedAuthenticator は設定した信頼の起点。
+type TrustedAuthenticator struct {
+	AAGUID string `yaml:"aaguid"`
+	Name   string `yaml:"name"`
+	// RootFiles は attestation の証明書の連なりのルート（PEM。1ファイルに複数でもよい）。
+	RootFiles []string `yaml:"root_files"`
+}
+
+// KnownConveyance は passkey.attestation.conveyance の値。
+var KnownConveyance = []string{"none", "indirect", "direct", "enterprise"}
 
 // PasskeyRP は passkey の Relying Party を既定値で補って返す。使えなければ ok=false。
 func (c Config) PasskeyRP() (rpID, rpName string, origins []string, ok bool) {
@@ -225,6 +255,8 @@ type Realm struct {
 	// DeclaredContextClients は判定（authz:check）で認証の文脈を申告できる呼び出し元（サービスアカウントの公開 ID。ADR 0084）。
 	// 申告の文脈は attested でなく、付与の条件にしか効かない。空なら誰も申告できない。
 	DeclaredContextClients []string `yaml:"declared_context_clients"`
+	// PasskeyPolicy は認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。登録とログインのたびに判定する。
+	PasskeyPolicy *attestation.Policy `yaml:"passkey_policy"`
 }
 
 // KnownEmailStorage は realm.email_storage の値。
@@ -512,6 +544,29 @@ func (c Config) validatePasskey() []string {
 	return problems
 }
 
+func (c Config) validateAttestation() []string {
+	var problems []string
+	a := c.Passkey.Attestation
+	if a.Conveyance != "" && !slices.Contains(KnownConveyance, a.Conveyance) {
+		problems = append(problems, fmt.Sprintf("passkey.attestation.conveyance: unknown value %q", a.Conveyance))
+	}
+	if a.MetadataRefresh < 0 || (a.MetadataRefresh > 0 && a.MetadataRefresh.D() < time.Minute) {
+		problems = append(problems, "passkey.attestation.metadata_refresh must be at least 1m")
+	}
+	for i, t := range a.TrustedAuthenticators {
+		if _, err := attestation.Normalize(&attestation.Policy{AllowedAAGUIDs: []string{t.AAGUID}}); err != nil || t.AAGUID == "" {
+			problems = append(problems, fmt.Sprintf("passkey.attestation.trusted_authenticators[%d].aaguid: invalid aaguid %q", i, t.AAGUID))
+		}
+		if len(t.RootFiles) == 0 {
+			problems = append(problems, fmt.Sprintf("passkey.attestation.trusted_authenticators[%d].root_files is required", i))
+		}
+	}
+	if _, err := attestation.Normalize(c.Realm.PasskeyPolicy); err != nil {
+		problems = append(problems, "realm.passkey_policy: "+err.Error())
+	}
+	return problems
+}
+
 func (c Config) validateHooks() []string {
 	var problems []string
 	for name, h := range c.Hooks {
@@ -687,6 +742,7 @@ func (c Config) Validate() error {
 		problems = append(problems, "org_domains.recheck and org_domains.grace must not be negative")
 	}
 	problems = append(problems, c.validatePasskey()...)
+	problems = append(problems, c.validateAttestation()...)
 	problems = append(problems, c.validateHooks()...)
 	if len(problems) > 0 {
 		return fmt.Errorf("config: %s", strings.Join(problems, "; "))

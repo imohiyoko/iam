@@ -2787,12 +2787,41 @@ components:
         require_sso:
           type: boolean
           description: この Org の connection（Org 専用 SSO。ADR 0077）で認証したセッションだけを入れる。フィーチャー org_managed_users も要る
+        passkey:
+          allOf: [{ $ref: "#/components/schemas/PasskeyPolicy" }]
+          description: >-
+            Org の段の認証器のポリシー（ADR 0096）。認証に使った passkey が realm の段に加えてこれも満たすこと（理由は
+            policy.passkey_authenticator）。passkey を使わない認証には効かない。フィーチャー passkey_attestation も要る
         min_aal:
           type: integer
           minimum: 1
           maximum: 3
           description: >-
             amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（理由は policy.min_aal）。フィーチャー acr も要る（ADR 0093）
+    PasskeyPolicy:
+      type: object
+      description: >-
+        認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。登録とログインのたびに判定し、外れれば
+        passkey_not_allowed（どの条件に外れたかは監査ログにだけ残す）。空の項目は判定しない。require_attestation が無ければ
+        AAGUID は認証器の自己申告
+      properties:
+        allowed_aaguids:
+          type: array
+          maxItems: 200
+          description: 許可する認証器の AAGUID。空でなければ、このどれかであること
+          items: { type: string, format: uuid }
+        denied_aaguids:
+          type: array
+          maxItems: 200
+          description: 拒否する認証器の AAGUID
+          items: { type: string, format: uuid }
+        min_certification_level:
+          type: string
+          enum: [L1, L1plus, L2, L2plus, L3, L3plus]
+          description: 求める FIDO の認定レベル（FIDO Metadata Service の status report）
+        require_attestation:
+          type: boolean
+          description: 登録のときに信頼の起点（MDS か設定）に連なる attestation を確かめた passkey だけを通す。既存の passkey は確かめていない
     OrgDomain:
       type: object
       required: [id, domain, status, txt_name, txt_value, created_at]
@@ -2928,12 +2957,18 @@ components:
         password: { $ref: "#/components/schemas/UserPassword" }
     UserPasskey:
       type: object
-      required: [id, name, created_at]
+      required: [id, name, created_at, attested]
       properties:
         id: { type: string }
         name: { type: string }
         created_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time }
+        aaguid: { type: string, format: uuid, description: 認証器のモデルの ID（attested でなければ認証器の自己申告） }
+        authenticator_name:
+          type: string
+          description: 認証器の名前（設定した信頼の起点か FIDO Metadata Service。フィーチャー passkey_attestation が動いていて分かるときだけ）
+        attestation_format: { type: string, description: 登録のときの attestation の形式（none、packed など。ADR 0096 の前に登録したものは無い） }
+        attested: { type: boolean, description: 登録のときに attestation を信頼の起点まで確かめたか }
     UserIdentity:
       type: object
       required: [id, connection, created_at]
@@ -3403,6 +3438,9 @@ components:
           maxItems: 100
           description: 判定（authz:check）で認証の文脈を申告できるサービスアカウントの ID（ADR 0084）。申告は attested でない
           items: { type: string }
+        passkey_policy:
+          allOf: [{ $ref: "#/components/schemas/PasskeyPolicy" }]
+          description: realm の段の認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。空のオブジェクトで外す
     Realm:
       type: object
       required: [id, slug, hosts, default, settings, created_at, updated_at]
@@ -3436,6 +3474,7 @@ components:
             declared_context_clients:
               type: array
               items: { type: string }
+            passkey_policy: { $ref: "#/components/schemas/PasskeyPolicy" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     RealmInput:

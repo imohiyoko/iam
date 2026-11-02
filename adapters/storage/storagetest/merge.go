@@ -58,6 +58,10 @@ func testAccountMerge(t *testing.T, h Harness) {
 			if !bytes.Equal(p.UserHandle, want) {
 				return fmt.Errorf("passkey %s handle = %q, want %q", p.Name, p.UserHandle, want)
 			}
+			// attestation の結果（ADR 0096）は移した後も残す。
+			if !p.Attested || p.AttestationFormat != "packed" || len(p.AAGUID) != 16 {
+				return fmt.Errorf("passkey %s attestation = %q %v %x", p.Name, p.AttestationFormat, p.Attested, p.AAGUID)
+			}
 		}
 		if rest, err := tx.Passkeys().ListByUser(ctx, r, b.ID); err != nil || len(rest) != 0 {
 			return fmt.Errorf("passkeys left on b = %d, %v", len(rest), err)

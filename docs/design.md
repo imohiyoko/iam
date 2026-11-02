@@ -139,7 +139,7 @@ IAM は**メールの文面も URL も作らない**。出来事を ID で外部
 ```
 
 - 効く値は、そのリクエストの realm と active な Org で決まる（個人 Org は realm に従う）
-- 対象：警告のアクション（10章）、セッションの寿命（5.4）、使える認証手段と登録方法、パスワードの要件、2段階認証の要否、bot 対策（`pre_registration` フックを求めるか）、リカバリーコードの発行、復旧の経路と待機期間（4.12）、ログインポリシー（4.4）
+- 対象：警告のアクション（10章）、セッションの寿命（5.4）、使える認証手段と登録方法、パスワードの要件、2段階認証の要否、bot 対策（`pre_registration` フックを求めるか）、リカバリーコードの発行、復旧の経路と待機期間（4.12）、ログインポリシー（4.4）、認証器のポリシー（9.4）
 - リスクの種類の一覧と段階の境界（ADR 0084）は realm の段に置く（管理 API `/v1/admin/risk-types`、権限 `risk_types:manage`）。点数は評価器（フック `post_authentication` と、`risk:write` を持つサービスアカウントだけが呼べる `/v1/admin/sessions/{id}:risk`・`/v1/admin/users/{id}:risk`）がセッションに入れる
 - 設定の変更は監査ログに残す
 - 13.5 の不変条件は設定で外せない
@@ -185,6 +185,7 @@ totp_credentials     id, user_id, secret_ciphertext, key_id, created_at, last_us
 recovery_codes       user_id, code_hash（argon2id）, used_at, created_at
 passkeys             id, user_id, credential_id, public_key, alg（ES256 / EdDSA / RS256）
                      sign_count, transports, name, preferred_org_id（4.4）, created_at, last_used_at, revoked_*
+                     aaguid, attestation_format, attested（ADR 0096。既存の行は '' と false）
                      UNIQUE (realm_id, credential_id)（realm_id は user から引く）
 revoked_passkey_credentials  realm_id, credential_id, revoked_at（再登録の拒否）, PK (realm_id, credential_id)
 
@@ -202,7 +203,7 @@ memberships          id, user_id, org_id, status（invited / active / ended）
 invitations          id, realm_id, org_id, email_index, email_ciphertext, org_role
                      valid_from, valid_until, invited_by, expires_at, status（pending / accepted / revoked / expired）, created_at
 org_domains          org_id, domain, token, verified_at, checked_at（11.3、ADR 0075）
-org_login_policies   （orgs.settings の login_policy に含める。ADR 0069）type（require_passkey / ip_allowlist / membership_email_domain / require_sso …）, config
+org_login_policies   （orgs.settings の login_policy に含める。ADR 0069）type（require_passkey / ip_allowlist / membership_email_domain / require_sso / passkey（ADR 0096）…）, config
 org_quota_grants     id, realm_id, org_id, quota_key, kind（base / addon / override）, quantity
                      starts_at, ends_at（NULL=無期限）, source（manual / external）, external_ref, created_by, created_at
                      UNIQUE (org_id, quota_key, external_ref)
@@ -404,6 +405,7 @@ check(principal, action, resource, context) -> allow / deny
 | `outside_validity` | 有効期間外 |
 | `quota_exceeded` | 上限超過（不足する期間と人数を添える） |
 | `policy.<type>` | ログインポリシーを満たさない |
+| `passkey_not_allowed` | 認証器が realm の段の認証器のポリシーで許されない（9.4。署名を確かめた後） |
 | `warning_denied.<code>` | 警告が deny |
 | `permission_denied` | 権限なし |
 | `no_available_org` | 入れる Org が無い（4.4） |
@@ -668,6 +670,8 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 
 - OAuth プロバイダの ID トークン：トークンエンドポイントから TLS で直接受け取り、署名検証は TLS で代替する（OIDC Core 3.1.3.7）
 - passkey：ES256 / EdDSA / RS256 を受け入れる（優先順もこの順）。RS256 は警告 `passkey_alg_rsa`。拒否は警告のアクション設定で行う。RS256 は ES256 / EdDSA の後から追加してもよい。ML-DSA の passkey は将来の候補
+- passkey の attestation（フィーチャー `passkey_attestation`。ADR 0096）：登録で attestation を求め（`passkey.attestation.conveyance`。既定 `none`）、形式（packed・tpm・android-key・apple・fido-u2f）の署名は go-webauthn で、信頼の起点までの連なりは FIDO MDS3 の BLOB と設定の `trusted_authenticators` で確かめる。BLOB はポート `FIDOMetadataSource`（アダプタ `fido_mds`：`file` / `http`）から起動時とバックグラウンドで読み、署名を確かめてメモリに持つ。登録・ログインは外部を呼ばない
+- 認証器のポリシー（許可・拒否の AAGUID、FIDO の認定レベルの下限、attestation の要否）は realm の段（`realm.passkey_policy` と realm の設定）と Org の段（ログインポリシーの `passkey`。4.4）に置き、両方を満たすこと。MDS の status report が望ましくない認証器は常に拒否する。外れたら登録は `409 passkey_not_allowed`、ログインと2要素目は署名を確かめた後に `403 passkey_not_allowed`、Org の段は `policy.passkey_authenticator`。どの条件かは監査ログにだけ残す（ADR 0022）。既存の passkey は `attested = false` で、AAGUID は自己申告として判定する
 
 ### 9.5 個人情報の暗号化
 
@@ -744,6 +748,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | パスワード（4.1） | オフ | ― | パスワードでの登録・ログインなし |
 | Quota（11.14） | オフ | Org | 数えない・判定しない（無制限） |
 | Org のログインポリシー（4.4） | オフ | Org | ポリシーの判定をしない |
+| passkey の attestation（9.4） | オフ | ― | attestation を求めず、認証器のポリシーを判定しない |
 | 複数 realm（11.1） | オフ | ― | realm は1つ固定。解決処理をしない |
 | サービスアカウント（11.2） | オフ | ― | 機械向け認証なし（配信用は別。2.4） |
 | Org 管理ユーザー・Org 専用 SSO（11.3） | オフ | Org | `owner_org_id` は常に NULL。ドメイン証明なし |
@@ -874,7 +879,7 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - バイナリは自分の構成を埋め込む（`iam version --manifest`）
 - 状態は CLI（または管理 API）で明示的に進める：enable → enabling（冪等な準備処理）→ active → disable → disabling（書き込み停止、データ 0 件で完了）
 - `iam features plan -build build.yaml` で事前に差分と影響を表示する
-- `iam features disable [-purge]`：依存するものが台帳にあれば拒否。データ（パスワード、Quota の付与、ログインポリシー、共有 Org）が 0 件になれば台帳から消す。共有 Org は管理 API で削除し、個人 Org は残す（ADR 0073）
+- `iam features disable [-purge]`：依存するものが台帳にあれば拒否。データ（パスワード、Quota の付与、ログインポリシー、認証器のポリシー（realm の設定と Org のログインポリシーの `passkey`）、共有 Org）が 0 件になれば台帳から消す。共有 Org は管理 API で削除し、個人 Org は残す（ADR 0073）
 - 本体の更新と構成の変更は別のデプロイで行うことを推奨する
 - データ形式は前進のみで移行する。互換性の保証は「1つ前のバージョンのバイナリが同じデータで動く」こと
 

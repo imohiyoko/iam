@@ -1,6 +1,6 @@
 // Package passkeytest は、テストで使う擬似の認証器（WebAuthn の authenticator）を提供する。
 //
-// ES256 の鍵を作り、attestation は "none"。ブラウザの navigator.credentials の応答と同じ JSON を返す。
+// ES256 の鍵を作り、attestation は既定で "none"（Attestation を設定すれば packed）。ブラウザの navigator.credentials の応答と同じ JSON を返す。
 package passkeytest
 
 import (
@@ -33,7 +33,11 @@ type Authenticator struct {
 	SignCount    uint32
 	CredentialID []byte
 	UserHandle   []byte
-	key          *ecdsa.PrivateKey
+	// AAGUID は認証器のモデルの ID（16 バイト。nil なら 0）。
+	AAGUID []byte
+	// Attestation は登録の応答に付ける attestation（nil なら none）。
+	Attestation *Packed
+	key         *ecdsa.PrivateKey
 }
 
 // New は origin の画面から使う認証器を作る。
@@ -91,11 +95,18 @@ func (a *Authenticator) Create(options []byte) ([]byte, error) {
 		return nil, err
 	}
 	auth := a.authData(o.PublicKey.RP.ID, a.Flags|FlagAT)
-	auth = append(auth, make([]byte, 16)...)                                // AAGUID
+	aaguid := make([]byte, 16)
+	copy(aaguid, a.AAGUID)
+	auth = append(auth, aaguid...)
 	auth = binary.BigEndian.AppendUint16(auth, uint16(len(a.CredentialID))) // #nosec G115 -- 16 バイト
 	auth = append(auth, a.CredentialID...)
 	auth = append(auth, cose...)
-	att, err := cbor.Marshal(map[string]any{"fmt": "none", "attStmt": map[string]any{}, "authData": auth})
+	format, stmt := "none", map[string]any{}
+	if a.Attestation != nil {
+		h := sha256.Sum256(clientData)
+		format, stmt = "packed", a.Attestation.statement(auth, h[:])
+	}
+	att, err := cbor.Marshal(map[string]any{"fmt": format, "attStmt": stmt, "authData": auth})
 	if err != nil {
 		return nil, err
 	}

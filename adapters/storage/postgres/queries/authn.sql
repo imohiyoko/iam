@@ -171,8 +171,8 @@ DELETE FROM authn_service_account_tokens WHERE id IN (
 
 -- name: CreatePasskey :exec
 INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,
-    transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id, user_handle)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);
+    transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id, user_handle, attestation_format, attested)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20);
 
 -- name: IsPasskeyCredentialRevoked :one
 SELECT COUNT(*) FROM authn_revoked_passkey_credentials WHERE realm_id = $1 AND credential_id = $2;
