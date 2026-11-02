@@ -3,11 +3,13 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"time"
 
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/feature"
 )
 
 // 認証の文脈（ADR 0084）。authz は authn を import しないので、server がセッションやサービスアカウントの認証から組み立てる。
@@ -53,4 +55,24 @@ func conditionOut(raw []byte) *map[string]any {
 		return nil
 	}
 	return &out
+}
+
+// errACRDisabled は、フィーチャー acr が止まっている間に aal_at_least を含む条件を保存しようとしたときのエラー。
+var errACRDisabled = errs.WithCode(errs.KindInvalid, "invalid_condition", "aal_at_least: the acr feature is not enabled")
+
+// aalAllowed は条件 next に aal_at_least を書けるかを確かめる（ADR 0093）。フィーチャー acr が止まっていれば、保存済みの
+// 条件 prev（操作 → 条件）とまったく同じものを残す場合だけ受ける（他の項目の変更を止めない）。
+func (a *App) aalAllowed(next, prev check.Requirements) error {
+	if a.plan.IsActive(feature.ACR) {
+		return nil
+	}
+	for k, c := range next {
+		if !c.UsesAAL() {
+			continue
+		}
+		if p, ok := prev[k]; !ok || !reflect.DeepEqual(p, c) {
+			return errACRDisabled
+		}
+	}
+	return nil
 }

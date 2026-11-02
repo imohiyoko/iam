@@ -19,6 +19,7 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 | state の受け渡し | `TestOIDCAuthorizationCodeFlow` |
 | リフレッシュ（ローテーションと再利用検知）、イントロスペクション、失効 | `TestOIDCRefreshIntrospectRevoke`、`TestOIDCE2EStandardRP`（rs で RFC 7662） |
 | Back-Channel Logout | `TestOIDCBackchannelLogout` |
+| `acr_values`・`claims` の `id_token.acr`、ID トークンの `acr`（フィーチャー acr。ADR 0093） | `TestACRIDTokenAndStepUp`、`TestACRFeatureOff` |
 
 ## 既知の差異
 
@@ -27,7 +28,10 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 - **PKCE を必ず求める。** 機密の連携先にも S256 を求める（OAuth 2.0 Security BCP）。PKCE を送らない試験は `invalid_request`
   で戻る。試験の設定で PKCE を有効にする
 - **`response_mode` は `query` だけ。** `form_post`・`fragment`、`response_type` の `code` 以外は扱わない
-- **`request` / `request_uri` パラメーター、`claims` パラメーターを受けない**（`oidcc-request-*`・`oidcc-claims-*` は対象外）
+- **`request` / `request_uri` パラメーター、`claims` パラメーターを受けない**（`oidcc-request-*`・`oidcc-claims-*` は対象外）。
+  フィーチャー acr がオンなら `claims` の `id_token.acr` だけを読む（`claims_parameter_supported` は出さない）
+- **満たせない `acr_values` は任意の要求でも断る。** フィーチャー acr がオンなら、ログインし直しても満たさないとき
+  `unmet_authentication_requirements` で戻る（ADR 0093）。`essential` の有無を区別しない
 - **スコープは `openid` と `email` だけ。** `profile`・`address`・`phone` は無視し、そのクレームを返さない
   （`oidcc-scope-profile` などは警告になる）
 - **同意画面を出さない。** 連携先はファーストパーティだけ（ADR 0026）。`prompt=consent` は無視する

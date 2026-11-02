@@ -104,3 +104,4 @@
 | [0090](0090-authenticator-plugins.md) | 認証方式を共通のポートを持つプラグインにし、1 方式 1 ディレクトリで持つ | 承認 |
 | [0091](0091-process-roles.md) | 同じバイナリを役割ごとに別のプロセスで動かせるようにする | 承認 |
 | [0092](0092-authenticator-port-implementation.md) | 認証方式のポートは汎用の認証情報のストアと封をしたフローで動かし、HOTP を最初の方式にする | 承認 |
+| [0093](0093-acr-aal-step-up.md) | 認証の強さは amr から AAL を求めて acr で出し、足りなければ step-up（RFC 9470）を求める | 承認 |

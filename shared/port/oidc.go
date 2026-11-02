@@ -105,6 +105,8 @@ type Grant struct {
 	ExpiresAt    time.Time
 	RevokedAt    *time.Time
 	RevokeReason string
+	// ACR は認可したときに決めた acr（フィーチャー acr。ADR 0093）。空ならフィーチャーがオフで、acr を返さない。
+	ACR string
 }
 
 // GrantRepo は oidc_grants の Repository。認可とそのトークンは、連携先の削除（ClientRepo.Delete）と

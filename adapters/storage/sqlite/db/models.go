@@ -77,6 +77,7 @@ type AuthnOidcGrant struct {
 	ExpiresAt    string
 	RevokedAt    sql.NullString
 	RevokeReason string
+	Acr          string
 }
 
 type AuthnOidcToken struct {

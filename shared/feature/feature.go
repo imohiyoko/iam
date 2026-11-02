@@ -33,6 +33,7 @@ const (
 	CustomAttributes    = "custom_attributes"
 	FlowHooks           = "flow_hooks"
 	HOTP                = "hotp"
+	ACR                 = "acr"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。
