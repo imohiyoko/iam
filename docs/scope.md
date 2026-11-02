@@ -74,7 +74,8 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | OIDC の認可コード + PKCE、Discovery、JWKS、UserInfo | S | ✅ | |
 | リフレッシュ、イントロスペクション、失効 | S（RFC 7662、7009） | ✅ | |
 | Back-Channel Logout | S | ✅ | |
-| RP-Initiated Logout、Front-Channel Logout、Session Management | S | ❌ | |
+| RP-Initiated Logout、Front-Channel Logout | S | ✅ | ADR 0094（`oidc_logout`） |
+| Session Management | S | ❌ | |
 | `profile`・`address`・`phone` スコープ、`claims` パラメーター | S | ⛔ | 適合性メモ |
 | `form_post`・`fragment`、JAR（RFC 9101） | S | ⛔ | 適合性メモ |
 | PAR（RFC 9126） | S | ❌ | |

@@ -1033,4 +1033,5 @@ var authnIsolationCases = []IsolationCase{
 	orgHierarchyIsolationCase,
 	managedUserIsolationCase,
 	exchangedGrantIsolationCase,
+	adminReadIsolationCase,
 }

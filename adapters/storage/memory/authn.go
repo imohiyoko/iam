@@ -81,6 +81,58 @@ func (r users) List(_ context.Context, realmID, afterID string, limit int) ([]po
 	return out, nil
 }
 
+func (r users) Search(_ context.Context, realmID string, f port.UserSearch) ([]port.User, error) {
+	var out []port.User
+	for _, u := range r.t.s.users {
+		if u.RealmID != realmID || u.PublicID <= f.After || (f.UserID != "" && u.ID != f.UserID) || (f.Status != "" && u.Status != f.Status) ||
+			(f.CreatedFrom != nil && u.CreatedAt.Before(*f.CreatedFrom)) || (f.CreatedBefore != nil && !u.CreatedAt.Before(*f.CreatedBefore)) {
+			continue
+		}
+		if f.OrgID != "" && !r.activeMember(u, f.OrgID) {
+			continue
+		}
+		if !matchTri(f.Suspended, suspendedAt(r.t.s.suspensions, realmID, port.SuspensionTargetUser, u.ID, f.Now)) {
+			continue
+		}
+		out = append(out, cloneUser(u))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PublicID < out[j].PublicID })
+	if len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
+	return out, nil
+}
+
+func (r users) activeMember(u port.User, orgID string) bool {
+	for _, m := range r.t.s.memberships {
+		if m.RealmID == u.RealmID && m.UserID == u.ID && m.OrgID == orgID && m.Status == port.MembershipActive {
+			return true
+		}
+	}
+	return false
+}
+
+// suspendedAt は対象に now の時点で効いている停止があるかを返す（StartsAt ≤ now < min(EndsAt, LiftedAt)）。
+func suspendedAt(ss map[string]port.Suspension, realmID string, t port.SuspensionTarget, targetID string, now time.Time) bool {
+	for _, s := range ss {
+		if s.RealmID == realmID && s.TargetType == t && s.TargetID == targetID && !s.StartsAt.After(now) &&
+			(s.EndsAt == nil || s.EndsAt.After(now)) && (s.LiftedAt == nil || s.LiftedAt.After(now)) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchTri(t port.Tristate, v bool) bool {
+	switch t {
+	case port.TriYes:
+		return v
+	case port.TriNo:
+		return !v
+	}
+	return true
+}
+
 // ---------------------------------------------------------------------------
 
 type emails struct{ t *tx }
@@ -250,6 +302,16 @@ func (r identities) ListByUser(_ context.Context, realmID, userID string) ([]por
 	return out, nil
 }
 
+func (r identities) CountActiveByConnection(_ context.Context, realmID, connectionID string) (int, error) {
+	n := 0
+	for _, x := range r.t.s.identities {
+		if x.RealmID == realmID && x.ConnectionID == connectionID && x.RevokedAt == nil {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // ---------------------------------------------------------------------------
 
 type connections struct{ t *tx }
@@ -313,6 +375,16 @@ func (r connections) CountOwned(_ context.Context, realmID string) (int, error) 
 		}
 	}
 	return n, nil
+}
+
+func (r connections) UpdateConfig(_ context.Context, realmID, id string, config []byte) error {
+	c, err := get(r.t.s.connections, realmID, id, func(c port.Connection) string { return c.RealmID }, "connection")
+	if err != nil {
+		return err
+	}
+	c.Config = bytes.Clone(config)
+	setKey(r.t, r.t.s.connections, id, c)
+	return nil
 }
 
 func (r connections) Delete(_ context.Context, realmID, id string) error {

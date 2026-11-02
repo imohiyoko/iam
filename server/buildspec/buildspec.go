@@ -52,6 +52,7 @@ var featureCatalog = map[string]struct {
 	feature.MultiRealm:       {realm.Feature, module + "/features/multirealm"},
 	feature.TokenExchange:    {provider.TokenExchangeFeature, module + "/features/tokenexchange"},
 	feature.Impersonation:    {provider.ImpersonationFeature, module + "/features/impersonation"},
+	feature.OIDCLogout:       {provider.LogoutFeature, module + "/features/oidclogout"},
 	feature.ACR:              {acr.Feature, module + "/features/acr"},
 }
 

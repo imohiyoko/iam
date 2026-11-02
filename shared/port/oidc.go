@@ -42,6 +42,11 @@ type Client struct {
 	IDTokenAlg string
 	// BackchannelLogoutURI は Back-Channel Logout の送り先（空なら送らない。5.2）。
 	BackchannelLogoutURI string
+	// FrontchannelLogoutURI は Front-Channel Logout の送り先（ログアウトの完了画面の iframe で開く。空なら開かない。
+	// フィーチャー oidc_logout。ADR 0094）。
+	FrontchannelLogoutURI string
+	// FrontchannelLogoutSessionRequired は FrontchannelLogoutURI に iss と sid を付けるか。
+	FrontchannelLogoutSessionRequired bool
 	// TokenExchange は Token Exchange（RFC 8693）で許す交換（JSON。形は authn/provider の ExchangePolicy）。nil なら何も許さない
 	// （フィーチャー token_exchange。ADR 0099）。
 	TokenExchange []byte

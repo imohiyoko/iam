@@ -230,15 +230,12 @@ func (k *Keys) Sign(ctx context.Context, tx port.Tx, realmID, alg, typ string, c
 
 // Verify は realm の鍵（JWKS に載っているもの）で JWS を検証し、ペイロードを返す。
 func (k *Keys) Verify(ctx context.Context, tx port.Tx, realmID, compact string) ([]byte, error) {
-	return k.verify(ctx, tx, realmID, compact, "")
+	return k.VerifyType(ctx, tx, realmID, compact, "")
 }
 
-// VerifyType は Verify に加えて、ヘッダーの typ が typ であることを確かめる（ID トークンと Logout Token を取り違えないように）。
+// VerifyType は Verify に加えて、ヘッダーの typ が typ であることを確かめる（空なら確かめない）。同じ鍵で署名する
+// ID トークン（JWT）と Logout Token（logout+jwt）を取り違えないように使う。
 func (k *Keys) VerifyType(ctx context.Context, tx port.Tx, realmID, compact, typ string) ([]byte, error) {
-	return k.verify(ctx, tx, realmID, compact, typ)
-}
-
-func (k *Keys) verify(ctx context.Context, tx port.Tx, realmID, compact, typ string) ([]byte, error) {
 	sig, err := jose.ParseSigned(compact, []jose.SignatureAlgorithm{jose.ES256, AlgMLDSA65})
 	if err != nil {
 		return nil, errs.WithCode(errs.KindInvalid, "invalid_token", "malformed jws")

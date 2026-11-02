@@ -26,6 +26,7 @@ func testClients(t *testing.T, h Harness) {
 	b.AuthMethod, b.SecretHash, b.JWKS, b.IDTokenAlg = port.ClientAuthPrivateKeyJWT, nil, []byte(`{"keys":[]}`), port.AlgES256
 	b.PostLogoutRedirectURIs, b.BackchannelLogoutURI = []string{"https://b.example.com/"}, "https://b.example.com/bcl"
 	b.TokenExchange = []byte(`{"audiences":["https://api.example.com"]}`)
+	b.FrontchannelLogoutURI, b.FrontchannelLogoutSessionRequired = "https://b.example.com/fcl?x=1", true
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Clients()
 		for _, c := range []port.Client{a, b} {
@@ -53,6 +54,7 @@ func testClients(t *testing.T, h Harness) {
 		}
 		a.Name, a.RedirectURIs, a.SecretHash, a.UpdatedAt = "A2", []string{"https://x.example.com/"}, []byte{9}, T0.Add(time.Hour)
 		a.TokenExchange = []byte(`{"impersonation":true}`)
+		a.FrontchannelLogoutURI, a.FrontchannelLogoutSessionRequired = "https://x.example.com/fcl", true
 		if err := repo.Update(ctx, a); err != nil {
 			return err
 		}

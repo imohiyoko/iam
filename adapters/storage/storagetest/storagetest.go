@@ -57,6 +57,7 @@ func Run(t *testing.T, h Harness) {
 	tests = append(tests, authnTests...)
 	tests = append(tests, retentionTests...)
 	tests = append(tests, featureDataTests...)
+	tests = append(tests, adminReadTests...)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
 	}

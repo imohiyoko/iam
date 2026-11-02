@@ -2,7 +2,7 @@
 
 - 状態: 承認
 - 日付: 2026-11-02
-- 関連: [design.md](../design.md) 5.6、11.0、[scope.md](../scope.md) 5・9 章、[0021](0021-opaque-access-tokens.md)、[0022](0022-deny-reason-disclosure.md)、
+- 関連: [design.md](../design.md) 5.7、11.0、[scope.md](../scope.md) 5・9 章、[0021](0021-opaque-access-tokens.md)、[0022](0022-deny-reason-disclosure.md)、
   [0031](0031-notifier-ids-only.md)、[0052](0052-admin-credential-revocation.md)、[0066](0066-oidc-authorization-code-flow.md)、
   [0084](0084-auth-context-and-risk-in-authz.md)、[0089](0089-enterprise-full-scope.md)
 

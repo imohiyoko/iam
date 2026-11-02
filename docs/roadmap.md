@@ -328,6 +328,20 @@ Group のネスト、Org 階層（M7）。
 - realm の削除、realm ごとのセキュリティの階層
 - SCIM、管理画面（design.md 1章では当面やらないとしている。必要になったら検討）
 
+### 管理 API の一覧・取得・検索（ADR 0097。M10 エンタープライズの運用）
+
+**ゴール**：運営者が管理 API だけでユーザー・Org・セッション・付与と所属・connection・署名鍵を調べ、メールを扱える。
+
+- [x] ユーザーの一覧と検索（メールの完全一致、外部 ID、状態、Org、作成の時刻）と詳細。カーソルのページング
+- [x] メールアドレスは `include_pii` と `pii:read` のときだけ復号し、`user.pii_read` を監査ログに残す
+- [x] Org の一覧と検索（名前の前方一致、親、種類、状態）
+- [x] ユーザーのセッションの一覧と全セッションの失効（認証情報は残す）
+- [x] ユーザーとサービスアカウントのロールの付与と Group の所属の逆引き、ユーザーの Membership の一覧
+- [x] IdP 接続の一覧・取得・変更・削除（使っている外部 ID があれば既定で断る）、署名鍵の一覧
+- [x] 運営者によるメールの追加（確認の経路 `admin`）・削除・primary の変更（outranks と、最後の確認済みメールの不変条件）
+- [x] 読み取りの権限を運営者ロールに足す。realm を越えない（契約テストの分離の検査）
+- 監査ログの照会 API、運営者による Org への追加
+
 ---
 
 ## M8〜M12 全部入り（ADR 0089）
@@ -340,7 +354,18 @@ Group のネスト、Org 階層（M7）。
 - 認証方式のプラグイン（ADR 0090）：`Authenticator` のポート、`authn_credentials`、汎用の HTTP、外部 Authenticator のアダプタ
 - 既存の方式（passkey・TOTP・パスワード・メール・ログインリンク・OAuth）を 1 方式ずつ移す
 - `acr` と AAL、step-up（RFC 9470）、Org のログインポリシーと `acr_values` を強さで書く
-- RP-Initiated Logout、Front-Channel Logout
+- RP-Initiated Logout、Front-Channel Logout（下）
+
+#### RP-Initiated Logout と Front-Channel Logout（ADR 0094）
+
+**ゴール**：連携先の画面でのログアウトで IAM のセッションも終わり、同じブラウザのほかの連携先にも知らせる。
+
+- [x] `end_session_endpoint`（GET と POST）。`id_token_hint`（期限切れも可。署名・`iss`・`aud` を確かめる）、`client_id`、
+  登録と完全一致の `post_logout_redirect_uri`、`state`、`ui_locales`、`logout_hint`
+- [x] `id_token_hint` がセッションと合わない・無いときはホスト型の確認の画面（1回限り・同じセッションだけ・同一オリジン）
+- [x] セッションの失効で Back-Channel Logout を送り、完了の画面で `frontchannel_logout_uri` を iframe で開く（`iss`・`sid`、CSP）
+- [x] 連携先の登録と Discovery、フィーチャーの無効化で登録を外す、複数 realm、標準の RP（zitadel/oidc）での E2E
+- OpenID Connect Session Management（`check_session_iframe`）
 
 #### acr・AAL と step-up（ADR 0093）
 
@@ -364,7 +389,8 @@ Group のネスト、Org 階層（M7）。
 
 ### M10 エンタープライズの運用
 
-- 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作と Org への追加
+- [x] 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作（ADR 0097）
+- 運営者による Org への追加
 - 監査ログの照会 API、イベントの Webhook の購読の API
 - 一括インポート（パスワードハッシュ付き）、運営者のなりすまし（記録付き）
 - 役割ごとのプロセス（ADR 0091）と、`org`・`authz`・`authz-manage` を分けるための依存の整理
