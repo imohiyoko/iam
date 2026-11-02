@@ -84,7 +84,7 @@ const (
 // 本人の重要な操作の名前（ADR 0084）。付与は要らず、直近の認証（max_auth_age）に加えて、名前空間 `me` と active な Org の
 // 要件を求める（要件 auth_within などで操作ごとに厳しくできる）。
 const (
-	ActionMeMethods          = "me:methods"  // 認証手段（メール・パスキー・TOTP など）の追加・削除
+	ActionMeMethods          = "me:methods"  // 認証手段（メール・パスキー・TOTP など）の追加・削除と primary のメールの変更
 	ActionMePassword         = "me:password" // パスワードの設定・変更
 	ActionMeRecoveryCodes    = "me:recovery_codes"
 	ActionMeDelete           = "me:delete"
