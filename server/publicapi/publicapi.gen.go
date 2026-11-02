@@ -6090,6 +6090,22 @@ func (response CompleteMethodLogin429JSONResponse) VisitCompleteMethodLoginRespo
 	return err
 }
 
+type CompleteMethodLogin503JSONResponse struct {
+	DirectoryUnavailableJSONResponse
+}
+
+func (response CompleteMethodLogin503JSONResponse) VisitCompleteMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartOAuthLoginRequestObject struct {
 	Connection string `json:"connection"`
 	Body       *StartOAuthLoginJSONRequestBody
