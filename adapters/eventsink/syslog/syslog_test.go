@@ -88,4 +88,12 @@ func TestSyslogOptions(t *testing.T) {
 	if _, err := f(context.Background(), plugin.Config{Options: map[string]string{"address": "x:514", "network": "udp", "format": "ocsf"}}); err != nil {
 		t.Fatal(err)
 	}
+	// 監査イベントには個人の情報が入るので、既定は TLS。
+	sink, err := f(context.Background(), plugin.Config{Options: map[string]string{"address": "x:6514"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := sink.(*Sink).Network; n != "tls" {
+		t.Fatalf("default network = %q", n)
+	}
 }

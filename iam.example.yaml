@@ -38,7 +38,7 @@ event_sink:
   #   format: iam                          # iam（独自の JSON）か ocsf
   #   pii: pseudonymize                    # IP と UA：raw / pseudonymize / omit（省けば、鍵があれば pseudonymize、無ければ omit）
   #   pseudonym_key_env: IAM_PSEUDONYM_KEY # 仮名化の鍵（32 バイト以上、16進か base64）を持つ環境変数
-  #   # syslog: address: siem.example:6514, network: tls（tcp / tls / udp）, facility: "13"
+  #   # syslog: address: siem.example:6514, network: tls（既定。tcp / udp は平文）, facility: "13"
   #   # otlp:   endpoint: https://collector:4318/v1/logs, headers_env: IAM_OTLP_HEADERS（"Name=value,..."）
   #   # webhook: url: https://siem.example/iam, secret_env: IAM_WEBHOOK_SECRET（X-IAM-Signature で署名）
 
