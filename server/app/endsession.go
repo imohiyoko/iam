@@ -248,6 +248,7 @@ func (s *oidcServer) finishLogout(w http.ResponseWriter, r *http.Request, l stri
 	}
 	redirect := e.RedirectURL()
 	if len(frames) == 0 && redirect != "" {
+		// #nosec G710 -- 戻り先は連携先に登録した post_logout_redirect_uri と完全一致したものだけ（provider.EndSession）
 		http.Redirect(w, r, redirect, http.StatusFound)
 		return
 	}
