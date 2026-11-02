@@ -506,6 +506,8 @@ paths:
       description: |
         プッシュの承認（`push`）の端末の応答や、端末の宛先の更新に使う（ADR 0104）。セッションを要さず、本人の確認は方式が行う
         （端末の鍵の署名など）。方式が応答を受けなければ 404。失敗の理由は返さない（4.9）。
+        HTTP の形を外部の仕様が決める相手（OpenID4VP のウォレットなど）は、このパスでなく、方式のエンドポイント
+        `GET`・`POST /v1/login/methods/{method}/endpoints/{endpoint}`（OpenAPI の外。形は方式の ADR が決める。ADR 0108）を呼ぶ。
       parameters:
         - { name: method, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -1685,6 +1687,11 @@ paths:
                     type: array
                     description: 最初の強い認証手段なら、リカバリーコード（表示は1回だけ。4.12）
                     items: { type: string }
+        "202":
+          description: 別の経路（ウォレットなど）からの応答を待っている（応答が別の経路から届く方式。ADR 0108）。呼び直す
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MethodPending" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }

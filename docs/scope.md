@@ -37,7 +37,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 外部 IdP（OAuth／OIDC） | S P | ✅ | |
 | 外部 IdP（SAML 2.0） | S P C | ✅ | ADR 0098。Single Logout・暗号化された Assertion は後続 |
 | 運営者が発行するログインリンク | P | ✅ | |
-| Verifiable Credentials（OpenID4VP、mdoc） | S | ❌ | |
+| Verifiable Credentials（OpenID4VP、mdoc） | S | △ | フィーチャー `openid4vp`（ADR 0108）。OpenID4VP 1.0 の検証者で、SD-JWT VC（key binding 必須）、同じ端末と別の端末、DCQL、realm ごとの信じる発行者。mdoc は後続 |
 | 外部の認証方式（プラグイン・Webhook） | P | △ | ADR 0090。Go のプラグインはある（ADR 0092）。外部 Authenticator のアダプタは未 |
 
 ## 2. 多要素・保証レベル・リスク

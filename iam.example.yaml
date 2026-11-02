@@ -156,7 +156,7 @@ personal_access_tokens:  # 本人の Personal Access Token（フィーチャー 
 #     timeout: 2s                          # 5 秒以下
 #     fail_open: false                     # 失敗のときに通すか（既定は止める）
 
-# methods:  # 認証方式のプラグインの設定（ADR 0103、0104。上の sms・push と同じ methods: の下に書く）
+# methods:  # 認証方式のプラグインの設定（ADR 0103、0104、0108。上の sms・push と同じ methods: の下に書く）
 #   x509:
 #     realms:
 #       default:                                   # realm の slug。書いていない realm では方式を動かさない
@@ -182,3 +182,23 @@ personal_access_tokens:  # 本人の Personal Access Token（フィーチャー 
 #           ldap: {connection: corp-ad, attribute: userPrincipalName, value: principal}
 #           # email_domains: {CORP.EXAMPLE.COM: example.com}   # rule: email のとき
 #         max_credentials: 5                       # rule: enrollment で 1 人が登録できる数
+#   openid4vp:                                     # OpenID4VP の検証者（フィーチャー openid4vp。ADR 0108）。server.public_url が要る
+#     realms:
+#       default:                                   # realm の slug。書いていない realm では方式を動かさない
+#         client_id_prefix: x509_hash              # redirect_uri（既定。要求に署名しない）・x509_san_dns・x509_hash
+#         signing_key: /etc/iam/vp/verifier.key    # x509_* で要求に署名する ECDSA P-256 の鍵（PEM）
+#         certificate_chain: /etc/iam/vp/verifier.pem
+#         authorization_endpoint: openid4vp://     # ウォレットを開く URL
+#         flows: [same_device, cross_device]       # 先頭が既定。別の端末は QR の中継を防げない（ADR 0108）
+#         same_device_redirect_uri: https://app.example.com/login/wallet  # #response_code=… を付けて戻す
+#         vct_values: [urn:eudi:pid:1]
+#         subject_claim: [personal_administrative_number]  # 結び付けの値の path
+#         attributes: {given_name: [given_name], family_name: [family_name], birthdate: [birthdate]}
+#         issuers:
+#           - iss: https://pid-issuer.example
+#             trust_anchors: [/etc/iam/vp/pid-root.pem]   # x5c の連鎖を確かめる。jwks: でも書ける
+#             link_by_email: false                        # 結び付けが無いとき、確認済みのメールの本人に結び付けるか
+#         status: reject                           # status（失効の参照）を持つ資格情報：reject（既定）・ignore
+#         request_ttl: 5m
+#         kb_max_age: 5m
+#         max_credentials: 5

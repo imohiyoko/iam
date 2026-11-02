@@ -268,6 +268,7 @@ Group に入れるのは、その Org の active な Membership を持つユー�
 | TOTP | 不要 | 2要素目。認証方式のプラグインのコアの方式（`totp`。フィーチャーに属さず、いつも動く。ADR 0101） |
 | HOTP（RFC 4226） | 不要 | 2要素目。フィーチャー（`hotp`。認証方式のプラグイン。ADR 0092） |
 | X.509 のクライアント証明書・スマートカード（PIV、CAC） | OCSP・CRL の取得 | 1要素目・2要素目。フィーチャー（`x509`。ADR 0103）。証明書は mTLS の専用の待ち受けか、設定で信じたプロキシのヘッダーで受ける |
+| Verifiable Credentials（OpenID4VP 1.0、SD-JWT VC） | 不要（発行者の鍵は設定） | 1要素目・2要素目。フィーチャー（`openid4vp`。ADR 0108）。ウォレットの応答は方式のエンドポイント（direct_post）で受け、本人が登録した結び付けで引く |
 | OAuth / SSO | 不要 | 識別は `(connection, provider_subject)` |
 | メールのコード・マジックリンク | 必要（Notifier） | 所有確認、パスワードなしのログイン、復旧 |
 | メール + パスワード | 不要 | フィーチャー（`password`。認証方式のプラグインの方式 `password`。ADR 0101） |
@@ -279,6 +280,11 @@ Group に入れるのは、その Org の active な Membership を持つユー�
 - SMS・音声の OTP は制限付きの認証器（SP 800-63B）として扱う。登録の応答で `restricted: true` を返し、realm の `disabled_methods` で止められ、
   Org のログインポリシーの `deny_restricted_authenticators` で Org に入れなくできる。SMS の事業者には宛先の番号とコードを、プッシュの中継には
   端末の宛先を渡す（0031 の例外。名前・メールアドレス・ユーザーの ID は渡さない。ADR 0104）
+- OpenID4VP の検証者（`openid4vp`）は、ウォレットの要求の取得（`request_uri`）と応答（`direct_post`）を、方式のエンドポイント
+  `GET`・`POST /v1/login/methods/{method}/endpoints/{endpoint}` で受ける。HTTP の形を外部の仕様が決める方式のための汎用の口で、
+  セッションを要さず CrossOriginProtection の外に置く（`POST` には接続元ごとのレートリミットと応答時間の下限が効く）。
+  提示（SD-JWT VC）は realm の信じる発行者の鍵と key binding で確かめ、失効（Token Status List）を確かめられない資格情報は既定で拒む。
+  確かめた値はフローの状態にだけある鍵で暗号化して EphemeralStore に置き、ブラウザの `complete` で受け取る（ADR 0108）
 
 #### メールアドレスは1つ以上必須
 
@@ -808,6 +814,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | SMS・音声の OTP（4.1、ADR 0104） | オフ | ― | 番号の登録・コードの送信なし。オンなら `sms_sender` が要る（無ければ起動しない）。無効化は認証情報が 0 件になって完了 |
 | プッシュの承認（4.1、ADR 0104） | オフ | ― | 端末の登録・プッシュなし。オンなら `push_sender` が要る（無ければ起動しない）。無効化は認証情報が 0 件になって完了 |
 | X.509 のクライアント証明書（4.1、ADR 0103） | オフ | ― | 証明書の登録・ログインなし（設定の無い realm でも）。無効化は認証情報が 0 件になって完了 |
+| OpenID4VP の検証者（4.1、ADR 0108） | オフ | ― | 提示の要求・方式のエンドポイントなし（設定の無い realm でも）。無効化は結び付け（認証情報）が 0 件になって完了 |
 | OIDC のログアウト（5.6） | オフ | ― | `end_session_endpoint` と Front-Channel Logout なし（Back-Channel Logout は動く） |
 | Token Exchange の委任（5.7） | オフ | ― | token-exchange の grant を受けない。交換のトークンは使えない |
 | なりすまし（5.7） | オフ | Token Exchange | `requested_subject` を受けない。なりすましのトークンは使えない |

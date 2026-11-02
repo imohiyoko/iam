@@ -10,7 +10,8 @@ import (
 
 // methodSetup は、設定を持つ認証方式（port.ConfigurableAuthenticator）に渡すものを作る（ADR 0104）。EphemeralStore は方式と
 // realm で前置きし、ブラインドインデックスは方式ごとの用途で作る。
-func (a *App) methodSetup(realmID, realmSlug string) func(port.MethodInfo) port.MethodSetup {
+// baseURL は realm の公開の URL（server.public_url。realm のパスの接頭辞を含む。ADR 0108）。
+func (a *App) methodSetup(realmID, realmSlug, baseURL string) func(port.MethodInfo) port.MethodSetup {
 	return func(i port.MethodInfo) port.MethodSetup {
 		purpose := "authn.method." + i.Name + ".key"
 		return port.MethodSetup{
@@ -22,7 +23,7 @@ func (a *App) methodSetup(realmID, realmSlug string) func(port.MethodInfo) port.
 				}
 				return base64.RawURLEncoding.EncodeToString(ix.Value), nil
 			},
-			SMS: a.deps.SMS, Push: a.deps.Push, Dev: a.cfg.Dev, Clock: a.deps.Clock, Log: a.deps.Logger,
+			SMS: a.deps.SMS, Push: a.deps.Push, BaseURL: baseURL, Dev: a.cfg.Dev, Clock: a.deps.Clock, Log: a.deps.Logger,
 		}
 	}
 }

@@ -7610,6 +7610,20 @@ func (response CompleteEnrollCredential200JSONResponse) VisitCompleteEnrollCrede
 	return err
 }
 
+type CompleteEnrollCredential202JSONResponse MethodPending
+
+func (response CompleteEnrollCredential202JSONResponse) VisitCompleteEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CompleteEnrollCredential400JSONResponse struct{ BadRequestJSONResponse }
 
 func (response CompleteEnrollCredential400JSONResponse) VisitCompleteEnrollCredentialResponse(w http.ResponseWriter) error {
