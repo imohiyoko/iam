@@ -37,8 +37,8 @@ var ImpersonationFeature = feature.Feature{Name: feature.Impersonation, DataVers
 
 // トークンの種類（RFC 8693 3）。
 const (
-	TokenTypeAccess  = "urn:ietf:params:oauth:token-type:access_token"
-	TokenTypeIDToken = "urn:ietf:params:oauth:token-type:id_token"
+	TokenTypeAccess  = "urn:ietf:params:oauth:token-type:access_token" // #nosec G101 -- RFC 8693 のトークンの種類の識別子で、秘密ではない
+	TokenTypeIDToken = "urn:ietf:params:oauth:token-type:id_token"     // #nosec G101 -- 同上
 )
 
 // 上限。
