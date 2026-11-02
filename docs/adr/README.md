@@ -112,12 +112,12 @@
 | [0098](0098-saml-sp.md) | 外部 IdP としての SAML 2.0 は goxmldsig で署名を確かめ、プロトコルの確認は自前の薄い層で行う | 承認 |
 | [0099](0099-token-exchange.md) | Token Exchange（RFC 8693）で委任となりすましを扱い、交換したトークンを元の認可とログインの系列に結び付ける | 承認 |
 | [0100](0100-audit-query-and-event-subscriptions.md) | 監査ログは索引の列で照会してペイロードで確かめ直し、Webhook の購読は監査ログを outbox にして購読ごとの位置で送る | 承認 |
-| [0101](0101-port-totp-and-password.md) | TOTP とパスワードを認証方式のポートに載せ、方式専用の表から authn_credentials へ起動時に移す | 承認 |
+| [0101](0101-port-totp-and-password.md) | TOTP とパスワードを認証方式のポートに載せ、方式専用の表から authn_credentials へ起動時に移す（移行は未公開のため外した） | 承認 |
 | [0102](0102-ldap.md) | LDAP / Active Directory は外部 ID の connection として扱い、サービスアカウントで探して本人で bind し、同期は止めることだけを自動にする | 承認 |
 | [0103](0103-x509-client-certificates.md) | X.509 のクライアント証明書（スマートカードを含む）は認証方式のプラグインにし、証明書はコアが mTLS かプロキシのヘッダーから渡す | 承認 |
 | [0104](0104-sms-voice-otp-and-push-approval.md) | SMS・音声の OTP とプッシュの承認は認証方式のプラグインにし、送信はポートの先のアダプタが行う | 承認 |
 | [0105](0105-risk-based-login-protection.md) | ログインの守りは、アカウント単位のロックアウト・端末の記憶・ログインのリスクの点数・ボット対策の 4 つのフィーチャーに分ける | 承認 |
-| [0106](0106-port-passkey.md) | passkey を認証方式のポートに載せ、無効化した credential ID は汎用の退役した検索キーで再登録を拒み、方式専用の表から authn_credentials へ起動時に移す | 承認 |
+| [0106](0106-port-passkey.md) | passkey を認証方式のポートに載せ、無効化した credential ID は汎用の退役した検索キーで再登録を拒み、方式専用の表から authn_credentials へ起動時に移す（移行は未公開のため外した） | 承認 |
 | [0107](0107-kerberos-spnego.md) | Kerberos / SPNEGO は realm ごとの keytab で AP-REQ を確かめる認証方式のプラグインにし、プリンシパルは登録・メール・LDAP の規則でユーザーに結び付ける | 承認 |
 | [0108](0108-openid4vp-verifier.md) | OpenID4VP の検証者は認証方式のプラグインにし、SD-JWT VC を信じる発行者の鍵だけで確かめて、本人の結び付けで利用者を引く | 承認 |
 | [0109](0109-personal-access-tokens.md) | 本人の Personal Access Token は権限の名前のスコープで本人の権限を絞り、ハッシュだけを持つ不透明なトークンにする | 承認 |

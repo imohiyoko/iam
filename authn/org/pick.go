@@ -141,8 +141,8 @@ func (s *Service) hinted(ctx context.Context, tx port.Tx, u port.User, candidate
 		switch {
 		case strings.HasPrefix(c, string(id.Email)+"_"):
 			emails[c] = true
-		// 認証に使った認証情報（passkey など。移す前の psk_ と汎用の crd_。ADR 0106）に、ログインで入る Org の指定があれば使う。
-		case strings.HasPrefix(c, string(id.Passkey)+"_"), strings.HasPrefix(c, string(id.Credential)+"_"):
+		// 認証に使った認証情報（passkey など。汎用の crd_。ADR 0106）に、ログインで入る Org の指定があれば使う。
+		case strings.HasPrefix(c, string(id.Credential)+"_"):
 			cr, err := tx.Credentials().Get(ctx, u.RealmID, c)
 			if errors.Is(err, errs.NotFound) {
 				continue

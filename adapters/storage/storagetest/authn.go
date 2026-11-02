@@ -27,11 +27,7 @@ var authnTests = []struct {
 	{"EmailUniqueConcurrent", testEmailUniqueConcurrent},
 	{"Identities", testIdentities},
 	{"IdentityUniqueConcurrent", testIdentityUniqueConcurrent},
-	{"LegacyPasskeys", testLegacyPasskeys},
 	{"RetiredLookups", testRetiredLookups},
-	{"TOTP", testTOTP},
-	{"TOTPUseConcurrent", testTOTPUseConcurrent},
-	{"LegacyCredentialsListAllDelete", testLegacyListAllDelete},
 	{"Credentials", testCredentials},
 	{"DirectoryGroups", testDirectoryGroups},
 	{"IdentitiesByConnection", testIdentitiesByConnection},
@@ -43,8 +39,6 @@ var authnTests = []struct {
 	{"KnownDeviceLookupConcurrent", testKnownDeviceLookupConcurrent},
 	{"PersonalAccessTokens", testPersonalAccessTokens},
 	{"PersonalAccessTokenPolicies", testPersonalAccessTokenPolicies},
-	{"Passwords", testPasswords},
-	{"PasswordCreateConcurrent", testPasswordCreateConcurrent},
 	{"RecoveryCodes", testRecoveryCodes},
 	{"RecoveryCodeUseConcurrent", testRecoveryCodeUseConcurrent},
 	{"UserValidity", testUserValidity},
@@ -656,7 +650,7 @@ func testUserDeletion(t *testing.T, h Harness) {
 	u, other := newUser(r), newUser(r)
 	e, oe := newEmail(r, u.ID, "u"), newEmail(r, other.ID, "o")
 	ses, os := newSession(r, u.ID, T0), newSession(r, other.ID, T0)
-	pk, pw, tp, rc := newPasskey(r, u.ID, "cred-u"), newPassword(r, u.ID), newTOTP(r, u.ID), newRecoveryCode(r, u.ID, "l1")
+	rc := newRecoveryCode(r, u.ID, "l1")
 	cr, ocr := newCredential(r, u.ID, "hotp", []byte("lk")), newCredential(r, other.ID, "hotp", nil)
 	dv, odv := newKnownDevice(r, u.ID, "lk"), newKnownDevice(r, other.ID, "lk")
 	pt, opt := newPAT(r, u.ID, T0), newPAT(r, other.ID, T0)
@@ -674,7 +668,7 @@ func testUserDeletion(t *testing.T, h Harness) {
 			}
 		}
 		for _, err := range []error{tx.Emails().Create(ctx, e), tx.Emails().Create(ctx, oe), tx.Sessions().Create(ctx, ses), tx.Sessions().Create(ctx, os),
-			tx.Passkeys().Create(ctx, pk), tx.Passwords().Create(ctx, pw), tx.TOTP().Create(ctx, tp), tx.Credentials().Create(ctx, cr), tx.Credentials().Create(ctx, ocr), tx.KnownDevices().Create(ctx, dv), tx.KnownDevices().Create(ctx, odv), tx.PersonalAccessTokens().Create(ctx, pt), tx.PersonalAccessTokens().Create(ctx, opt), tx.RecoveryCodes().Replace(ctx, r, u.ID, []port.RecoveryCode{rc}),
+			tx.Credentials().Create(ctx, cr), tx.Credentials().Create(ctx, ocr), tx.KnownDevices().Create(ctx, dv), tx.KnownDevices().Create(ctx, odv), tx.PersonalAccessTokens().Create(ctx, pt), tx.PersonalAccessTokens().Create(ctx, opt), tx.RecoveryCodes().Replace(ctx, r, u.ID, []port.RecoveryCode{rc}),
 			tx.RoleBindings().Create(ctx, rb), tx.Groups().Create(ctx, g), tx.Groups().Create(ctx, g2),
 			tx.Groups().AddMember(ctx, r, member(g.ID, u.ID)), tx.Groups().AddMember(ctx, r, member(g.ID, other.ID)),
 			tx.Groups().AddMember(ctx, r2, member(g2.ID, u.ID))} {
@@ -709,14 +703,7 @@ func testUserDeletion(t *testing.T, h Harness) {
 		if err := notFound("erased session", second(tx.Sessions().Get(ctx, r, ses.ID))); err != nil {
 			return err
 		}
-		if left, err := tx.Passkeys().ListAll(ctx, 10); err != nil || slices.ContainsFunc(left, func(p port.Passkey) bool { return p.ID == pk.ID }) {
-			return fmt.Errorf("erased legacy passkey = %+v, %v", left, err)
-		}
-		if err := notFound("erased password", second(tx.Passwords().Get(ctx, r, pw.ID))); err != nil {
-			return err
-		}
 		for name, n := range map[string]func() (int, error){
-			"totp":        func() (int, error) { return count(tx.TOTP().ListByUser(ctx, r, u.ID)) },
 			"credentials": func() (int, error) { return count(tx.Credentials().ListByUser(ctx, r, u.ID, "")) },
 			"devices":     func() (int, error) { return count(tx.KnownDevices().ListByUser(ctx, r, u.ID)) },
 			"pats":        func() (int, error) { return count(tx.PersonalAccessTokens().ListByUser(ctx, r, u.ID)) },
@@ -892,7 +879,6 @@ func testServiceAccountsM7(t *testing.T, h Harness) {
 const (
 	isoUser    = "usr_00000000000000000000000000"
 	isoPublic  = "usr_00000000000000000000000009"
-	isoTOTP    = "otp_00000000000000000000000009"
 	isoConn    = "con_00000000000000000000000000"
 	isoSubject = "iso-subject"
 	isoEmail   = "iso-email-index"
@@ -1048,11 +1034,9 @@ var authnIsolationCases = []IsolationCase{
 		},
 	},
 	passkeyIsolationCase,
-	totpIsolationCase,
 	credentialIsolationCase,
 	knownDeviceIsolationCase,
 	patIsolationCase,
-	passwordIsolationCase,
 	recoveryCodeIsolationCase,
 	suspensionIsolationCase,
 	orgIsolationCase,

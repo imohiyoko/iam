@@ -17,10 +17,6 @@ const Name = method.TOTP
 // AMR は TOTP の amr（RFC 8176）。
 const AMR = "otp"
 
-// LegacySecretAAD は、方式専用の表（authn_totp_credentials）にあった秘密の暗号文の AAD。authn_credentials への移行
-// （ADR 0101）でだけ使う。
-const LegacySecretAAD = "totp.secret"
-
 // ErrTOTPExists は、有効な TOTP を登録済みであること（1人に1つ）。
 var ErrTOTPExists = errs.WithCode(errs.KindConflict, "totp_exists", "totp already registered")
 
@@ -40,7 +36,7 @@ func (Method) Info() port.MethodInfo {
 		Usages: []port.MethodUsage{port.UsageSecondFactor}, DataVersion: 1}
 }
 
-// Data は方式固有のデータ（コアが暗号化して置く）。移行（ADR 0101）でも作る。
+// Data は方式固有のデータ（コアが暗号化して置く）。
 type Data struct {
 	Secret []byte `json:"secret"`
 	// LastStep は最後に受け入れた時間窓。同じか前の窓のコードは拒否する（再利用の防止）。

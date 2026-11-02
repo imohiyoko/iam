@@ -115,7 +115,7 @@ const (
 // Authenticator は判定の材料（登録の結果か、保存した passkey）。
 type Authenticator struct {
 	AAGUID []byte
-	// Format は attestation の形式（none、packed など）。空はフィーチャーの前に登録した passkey（確かめていない）。
+	// Format は attestation の形式（none、packed など）。空は形式が分からないもの（確かめていない）。
 	Format string
 	// Attested は登録のときに信頼の起点に連なる attestation を確かめたか。
 	Attested bool

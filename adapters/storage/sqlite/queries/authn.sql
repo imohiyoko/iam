@@ -174,81 +174,6 @@ DELETE FROM authn_service_account_tokens WHERE id IN (
 DELETE FROM authn_service_account_tokens WHERE id IN (
     SELECT t.id FROM authn_service_account_tokens t WHERE t.expires_at < sqlc.arg(before) LIMIT sqlc.arg(lim));
 
--- name: CreatePasskey :exec
-INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,
-    transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id, user_handle, attestation_format, attested)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-
--- name: ListAllPasskeys :many
-SELECT * FROM authn_passkeys ORDER BY id LIMIT sqlc.arg(lim);
-
--- name: DeletePasskey :exec
-DELETE FROM authn_passkeys WHERE realm_id = ? AND id = ?;
-
--- name: GetPasskey :one
-SELECT * FROM authn_passkeys WHERE realm_id = ? AND id = ?;
-
--- name: RevokePasskey :exec
-UPDATE authn_passkeys SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
-
--- name: AddRevokedPasskeyCredential :exec
-INSERT INTO authn_revoked_passkey_credentials (realm_id, credential_id, revoked_at) VALUES (?, ?, ?)
-ON CONFLICT (realm_id, credential_id) DO NOTHING;
-
--- name: ListRevokedPasskeyCredentials :many
-SELECT * FROM authn_revoked_passkey_credentials ORDER BY realm_id, credential_id LIMIT sqlc.arg(lim);
-
--- name: DeleteRevokedPasskeyCredential :exec
-DELETE FROM authn_revoked_passkey_credentials WHERE realm_id = ? AND credential_id = ?;
-
--- name: CreateTOTP :exec
-INSERT INTO authn_totp_credentials (id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-
--- name: GetTOTPByPublicID :one
-SELECT * FROM authn_totp_credentials WHERE realm_id = ? AND public_id = ?;
-
--- name: GetTOTP :one
-SELECT * FROM authn_totp_credentials WHERE realm_id = ? AND id = ?;
-
--- name: ListTOTPByUser :many
-SELECT * FROM authn_totp_credentials WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
-
--- name: UseTOTP :execrows
-UPDATE authn_totp_credentials SET last_used_step = sqlc.arg(step)
-WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id) AND last_used_step < sqlc.arg(step);
-
--- name: RevokeTOTP :exec
-UPDATE authn_totp_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
-
--- name: CreatePassword :exec
-INSERT INTO authn_password_credentials (id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?);
-
--- name: GetPassword :one
-SELECT * FROM authn_password_credentials WHERE realm_id = ? AND id = ?;
-
--- name: GetActivePassword :one
-SELECT * FROM authn_password_credentials WHERE realm_id = ? AND user_id = ? AND revoked_at IS NULL;
-
--- name: UpdatePasswordHash :execrows
-UPDATE authn_password_credentials SET hash = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
-
--- name: RevokePassword :exec
-UPDATE authn_password_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
-
--- name: ListAllTOTP :many
-SELECT * FROM authn_totp_credentials ORDER BY id LIMIT sqlc.arg(lim);
-
--- name: DeleteTOTP :exec
-DELETE FROM authn_totp_credentials WHERE realm_id = ? AND id = ?;
-
--- name: ListAllPasswords :many
-SELECT * FROM authn_password_credentials ORDER BY id LIMIT sqlc.arg(lim);
-
--- name: DeletePassword :exec
-DELETE FROM authn_password_credentials WHERE realm_id = ? AND id = ?;
-
 -- name: SetUserValidity :execrows
 UPDATE authn_users SET valid_from = ?, valid_until = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
 
@@ -266,15 +191,6 @@ DELETE FROM authn_user_emails WHERE realm_id = ? AND user_id = ?;
 
 -- name: EraseUserIdentities :exec
 DELETE FROM authn_user_identities WHERE realm_id = ? AND user_id = ?;
-
--- name: EraseUserPasskeys :exec
-DELETE FROM authn_passkeys WHERE realm_id = ? AND user_id = ?;
-
--- name: EraseUserTOTP :exec
-DELETE FROM authn_totp_credentials WHERE realm_id = ? AND user_id = ?;
-
--- name: EraseUserPasswords :exec
-DELETE FROM authn_password_credentials WHERE realm_id = ? AND user_id = ?;
 
 -- name: EraseUserRecoveryCodes :exec
 DELETE FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ?;
@@ -341,12 +257,6 @@ DELETE FROM authn_sessions WHERE id IN (
 -- name: DeleteFiredScheduledEvents :execrows
 DELETE FROM scheduled_events WHERE id IN (
     SELECT e.id FROM scheduled_events e WHERE e.fired_at IS NOT NULL AND e.fired_at < sqlc.arg(before) LIMIT sqlc.arg(lim));
-
--- name: CountPasswords :one
-SELECT count(*) FROM authn_password_credentials;
-
--- name: PurgePasswords :execrows
-DELETE FROM authn_password_credentials WHERE id IN (SELECT p.id FROM authn_password_credentials p LIMIT sqlc.arg(lim));
 
 -- name: SetUserManagedOrg :execrows
 UPDATE authn_users SET managed_org_id = ?, managed_at = ?, updated_at = ? WHERE realm_id = ? AND id = ?;

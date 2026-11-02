@@ -949,7 +949,7 @@ type MyPasskey struct {
 	BackupEligible bool      `json:"backup_eligible"`
 	CreatedAt      time.Time `json:"created_at"`
 
-	// Id 公開の passkey の ID（psk_…）
+	// Id 公開の passkey の ID（crd_…）
 	Id         string     `json:"id"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	Name       string     `json:"name"`
@@ -959,7 +959,7 @@ type MyPasskey struct {
 type MyTOTP struct {
 	CreatedAt time.Time `json:"created_at"`
 
-	// Id 公開の TOTP の ID（otp_…）
+	// Id 公開の TOTP の ID（crd_…）
 	Id string `json:"id"`
 }
 
@@ -1222,7 +1222,7 @@ type RegisteredPasskey struct {
 	BackupEligible bool      `json:"backup_eligible"`
 	CreatedAt      time.Time `json:"created_at"`
 
-	// Id 公開の passkey の ID（psk_…）
+	// Id 公開の passkey の ID（crd_…）
 	Id         string     `json:"id"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	Name       string     `json:"name"`

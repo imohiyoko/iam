@@ -47,13 +47,10 @@ type Tx interface {
 	Users() UserRepo
 	Emails() EmailRepo
 	Identities() IdentityRepo
-	Passkeys() PasskeyRepo
-	TOTP() TOTPRepo
 	// Credentials は認証方式のプラグインの汎用の認証情報（ADR 0090、0092）。
 	Credentials() CredentialRepo
 	// KnownDevices は本人がログインした端末（フィーチャー device_recognition。ADR 0105）。
 	KnownDevices() KnownDeviceRepo
-	Passwords() PasswordRepo
 	RecoveryCodes() RecoveryCodeRepo
 	Suspensions() SuspensionRepo
 	ScheduledEvents() ScheduledEventRepo

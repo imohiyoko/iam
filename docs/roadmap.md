@@ -377,7 +377,6 @@ Group のネスト、Org 階層（M7）。
 - [x] 汎用の認証情報を、本人と運営者の一覧・無効化、消去、統合、フィーチャーの無効化、書き出しと読み込みで扱う
 - [x] HOTP（RFC 4226。フィーチャー `hotp`）：look-ahead と再同期、同時の使用の拒否、RFC のテストベクタ
 - [ ] 外部 Authenticator のアダプタ（HTTP・gRPC）
-- [ ] 方式専用の古い表（`authn_totp_credentials`・`authn_password_credentials`）と、その Repository を消す（ADR 0101 の次のリリース）
 - [x] TOTP とパスワードを `authn/method/totp`・`authn/method/password` に移し、`authn_credentials` に置く（ADR 0101）。
   完了の条件：方式専用の表の行（無効化したものも）が起動で移り、台帳に記録され、移す前のバイナリが起動を拒む。汎用のパスと方式専用の
   パスが同じ処理で動き、amr・AAL・acr と既存のテストが変わらない。パスワードのハッシュを直列のトランザクションの外で計算する。
@@ -387,7 +386,10 @@ Group のネスト、Org 階層（M7）。
   無効化した credential ID はユーザーの消去の後も再登録できない。方式専用のパス（ログイン・2要素目・登録・名前の変更・既定の Org）と
   汎用のパスが同じ処理で動き、amr・AAL・attestation のポリシー（ADR 0096）と監査ログの種類、既存のテストが変わらない。チャレンジは
   1 回限り。保存したデータ・入力・フローの状態の読み取りにファジングのテストがある。メモリ・SQLite・PostgreSQL で契約テストが通る
-- [ ] 方式専用の古い表（`authn_passkeys`・`authn_revoked_passkey_credentials`）と、その Repository を消す（ADR 0106 の次のリリース）
+- [x] 方式専用の古い表（`authn_totp_credentials`・`authn_password_credentials`・`authn_passkeys`・`authn_revoked_passkey_credentials`）と、
+  その Repository・起動時の移行（`MigrateLegacy`・`MigratePasskeys`）・台帳の `migration:` の扱い・移す前の ID（`psk_`・`otp_`・`pwd_`）の分岐を消す
+  （ADR 0101・0106。未公開のため互換を持たない）。完了の条件：表を消すマイグレーション（SQLite 00060・00061、PostgreSQL 00043・00044）が
+  あり、Storage のポートとすべてのアダプタから古い Repository が無くなり、契約テストと既存のテストが通る
 - [ ] 方式のペイロードの JSON Schema と OpenAPI の `oneOf`、ホスト型のログイン画面への表示
 
 #### acr・AAL と step-up（ADR 0093）

@@ -3696,7 +3696,7 @@ components:
       type: object
       required: [id, name, created_at, backup_eligible]
       properties:
-        id: { type: string, description: 公開の passkey の ID（psk_…） }
+        id: { type: string, description: 公開の passkey の ID（crd_…） }
         name: { type: string }
         created_at: { type: string, format: date-time }
         last_used_at: { type: string, format: date-time }
@@ -3714,7 +3714,7 @@ components:
       type: object
       required: [id, created_at]
       properties:
-        id: { type: string, description: 公開の TOTP の ID（otp_…） }
+        id: { type: string, description: 公開の TOTP の ID（crd_…） }
         created_at: { type: string, format: date-time }
     MyCredential:
       type: object

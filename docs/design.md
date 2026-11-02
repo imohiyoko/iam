@@ -182,22 +182,12 @@ user_identities      id, realm_id, user_id, connection_id, provider_subject
 
 connections          id, realm_id, owner_org_id（NULL=realm 共通 / 値=Org 専用 SSO）, type（oauth2 / oidc / saml / ldap）, config
 
-password_credentials id, user_id, hash（argon2id）, created_at, revoked_*（ADR 0101 で authn_credentials の方式 password へ移す。
-                     起動時に移して空になる。次のリリースで消す）
-totp_credentials     id, user_id, secret_ciphertext, key_id, created_at, last_used_step, revoked_*（ADR 0101 で方式 totp へ移す。同上）
 recovery_codes       user_id, code_hash（argon2id）, used_at, created_at
-passkeys             id, user_id, credential_id, public_key, alg（ES256 / EdDSA / RS256）
-                     sign_count, transports, name, preferred_org_id（4.4）, created_at, last_used_at, revoked_*
-                     aaguid, attestation_format, attested（ADR 0096。既存の行は '' と false）
-                     UNIQUE (realm_id, credential_id)（realm_id は user から引く）
-                     （ADR 0106 で authn_credentials の方式 passkey へ移す。起動時に移して空になる。次のリリースで消す）
-revoked_passkey_credentials  realm_id, credential_id, revoked_at（再登録の拒否）, PK (realm_id, credential_id)
-                     （ADR 0106 で authn_retired_credential_lookups へ移す。同上）
 authn_credentials    id, realm_id, user_id, method, lookup（検索キーのブラインドインデックス。任意）, lookup_key_id（ADR 0103）
                      data（方式固有のデータ。ユーザーのデータ鍵で暗号化）, data_version, created_at, last_used_at, revoked_*
                      UNIQUE (realm_id, method, lookup)（無効化していないもの）。認証方式のプラグインの汎用の認証情報（ADR 0090、0092）。
-                     TOTP（method totp。otp_ の ID を保つ）とパスワード（method password）もここに置く（ADR 0101）
-                     passkey（method passkey。psk_ の ID を保つ）もここに置く。preferred_org_id（4.4）, reserve_lookup（ADR 0106）
+                     TOTP（method totp）とパスワード（method password）もここに置く（ADR 0101。方式専用の表は持たない）
+                     passkey（method passkey）もここに置く。preferred_org_id（4.4）, reserve_lookup（ADR 0106）
 authn_retired_credential_lookups  realm_id, method, lookup, lookup_key_id, retired_at, PK (realm_id, method, lookup)
                      無効化した認証情報の検索キー（reserve_lookup のもの。passkey の credential_id）。再登録を拒む。消去でも残す（ADR 0106）
 
@@ -989,9 +979,6 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - `iam features disable [-purge]`：依存するものが台帳にあれば拒否。データ（パスワード、Quota の付与、ログインポリシー、認証器のポリシー（realm の設定と Org のログインポリシーの `passkey`）、共有 Org）が 0 件になれば台帳から消す。共有 Org は管理 API で削除し、個人 Org は残す（ADR 0073）
 - 本体の更新と構成の変更は別のデプロイで行うことを推奨する
 - データ形式は前進のみで移行する。互換性の保証は「1つ前のバージョンのバイナリが同じデータで動く」こと
-- 例外：フィーチャーに属さないコアのデータの移行（名前は `migration:…`）は、台帳に記録し、知らないバイナリ（移す前のもの）の起動を拒む。
-  移す前のサーバーを止めてから移した後のサーバーを起動し、戻すときは移す前の `iam storage export` を読み込む
-  （TOTP とパスワードの `authn_credentials` への移行。ADR 0101。passkey の移行。ADR 0106）
 
 ### 11.13 Org と個人 Org
 
