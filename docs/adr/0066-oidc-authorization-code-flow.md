@@ -1,6 +1,6 @@
 # 0066. OIDC の認可コードフローと、トークンをログインの系列に結び付けること
 
-- 状態: 承認
+- 状態: 一部置き換え: 0089
 - 日付: 2026-10-27
 - 関連: [design.md](../design.md) 5.1、5.2、5.3、5.5、9.3、[0021](0021-opaque-access-tokens.md)、[0038](0038-library-selection.md)、[0040](0040-spike-mldsa-opaque-signer.md)、[0045](0045-internal-and-external-ids.md)、[0065](0065-oidc-clients-and-signing-keys.md)
 
