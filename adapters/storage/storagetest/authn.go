@@ -32,6 +32,8 @@ var authnTests = []struct {
 	{"TOTP", testTOTP},
 	{"TOTPUseConcurrent", testTOTPUseConcurrent},
 	{"Credentials", testCredentials},
+	{"DirectoryGroups", testDirectoryGroups},
+	{"IdentitiesByConnection", testIdentitiesByConnection},
 	{"CredentialUpdateConcurrent", testCredentialUpdateConcurrent},
 	{"CredentialLookupConcurrent", testCredentialLookupConcurrent},
 	{"CredentialCountPurge", testCredentialCountPurge},

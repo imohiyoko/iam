@@ -10,6 +10,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/method"
+	dirldap "github.com/imohiyoko/iam/authn/method/ldap"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/saml"
@@ -123,9 +124,9 @@ var cleaners = map[string]cleaner{
 		}},
 	// SAML の connection（realm 共通と Org 専用）を消し、紐付けた外部 ID を無効化する（ADR 0098）。
 	feature.SAML: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
-		return eachSAMLConnection(ctx, tx, -1, time.Time{}, false)
+		return eachTypedConnection(ctx, tx, saml.Type, -1, time.Time{}, false)
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
-		return eachSAMLConnection(ctx, tx, limit, now, true)
+		return eachTypedConnection(ctx, tx, saml.Type, limit, now, true)
 	}},
 	// Org のログインポリシーの passkey と、realm の設定の passkey_policy を外す（ADR 0096）。設定ファイルの realm.passkey_policy は
 	// 運用者が消す（フィーチャーが止まっていれば使わない）。登録済みの passkey の attestation の列は残す。
@@ -155,6 +156,23 @@ var cleaners = map[string]cleaner{
 			c.FrontchannelLogoutURI, c.FrontchannelLogoutSessionRequired, c.UpdatedAt = "", false, now
 			return true, tx.Clients().Update(ctx, c)
 		})
+	}},
+	// LDAP の connection（realm 共通と Org 専用）を消し、紐付けた外部 ID を無効化し、同期の Group の対応を外す（ADR 0102）。
+	// 同期が作った Group と所属は、ふつうの Group として残す。
+	feature.LDAP: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		n, err := eachTypedConnection(ctx, tx, dirldap.Type, -1, time.Time{}, false)
+		if err != nil {
+			return n, err
+		}
+		g, err := tx.DirectoryGroups().Count(ctx)
+		return n + g, err
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		n, err := eachTypedConnection(ctx, tx, dirldap.Type, limit, now, true)
+		if err != nil || n >= limit {
+			return n, err
+		}
+		g, err := tx.DirectoryGroups().Purge(ctx, limit-n)
+		return n + g, err
 	}},
 	feature.Password: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.Passwords().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
@@ -279,8 +297,9 @@ func eachOwnedConnections(ctx context.Context, tx port.Tx, limit int, now time.T
 	return n, nil
 }
 
-// eachSAMLConnection は全 realm の SAML の connection を数える。purge なら limit（0 以上なら）まで、外部 ID を無効化して消す。
-func eachSAMLConnection(ctx context.Context, tx port.Tx, limit int, now time.Time, purge bool) (int, error) {
+// eachTypedConnection は全 realm の、種類が typ の connection を数える。purge なら limit（0 以上なら）まで、外部 ID を無効化して消す
+// （ディレクトリの同期の Group の対応も外す。Group は残る）。
+func eachTypedConnection(ctx context.Context, tx port.Tx, typ string, limit int, now time.Time, purge bool) (int, error) {
 	realms, err := tx.Realms().List(ctx)
 	if err != nil {
 		return 0, err
@@ -292,7 +311,7 @@ func eachSAMLConnection(ctx context.Context, tx port.Tx, limit int, now time.Tim
 			return n, err
 		}
 		for _, c := range cs {
-			if c.Type != saml.Type {
+			if c.Type != typ {
 				continue
 			}
 			if limit >= 0 && n >= limit {
@@ -300,6 +319,9 @@ func eachSAMLConnection(ctx context.Context, tx port.Tx, limit int, now time.Tim
 			}
 			if purge {
 				if _, err := tx.Identities().RevokeByConnection(ctx, r.ID, c.ID, now, org.RevokeConnectionDeleted); err != nil {
+					return n, err
+				}
+				if _, err := tx.DirectoryGroups().DeleteByConnection(ctx, r.ID, c.ID); err != nil {
 					return n, err
 				}
 				if err := tx.Connections().Delete(ctx, r.ID, c.ID); err != nil {
