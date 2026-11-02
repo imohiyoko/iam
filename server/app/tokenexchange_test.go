@@ -311,7 +311,7 @@ func TestImpersonation(t *testing.T) {
 	_, _ = l.login(t, "alice@example.com")
 	alice := l.userID(t, "alice@example.com")
 	opID, _ := l.operator(t, "ops@example.com", role.RealmOwner)
-	opToken, opCookie := s.operatorToken(t, "ops@example.com")
+	opToken, _ := s.operatorToken(t, "ops@example.com")
 	before := l.notes.count()
 
 	status, out := s.impersonate(t, opToken, alice)
@@ -400,7 +400,7 @@ func TestImpersonation(t *testing.T) {
 	}
 
 	// 運営者のログアウトで、なりすましのトークンも使えなくなる。本人の停止でも同じ。
-	opToken, opCookie = s.operatorToken(t, "ops@example.com")
+	opToken, opCookie := s.operatorToken(t, "ops@example.com")
 	_, res2 := s.impersonate(t, opToken, alice)
 	imp2, _ := res2["access_token"].(string)
 	_, res3 := s.impersonate(t, opToken, alice)
