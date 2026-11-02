@@ -176,43 +176,70 @@ type Chain struct {
 	KeyedFrom int64
 }
 
+// 検証の失敗の理由（BrokenError.Reason。ADR 0100 の検証の API が返す）。
+const (
+	BrokenSeqGap         = "seq_gap"
+	BrokenPrevHash       = "prev_hash_mismatch"
+	BrokenHash           = "hash_mismatch"
+	BrokenPayload        = "payload_invalid"
+	BrokenRealmColumn    = "realm_mismatch"
+	BrokenUnkeyed        = "unkeyed_record"
+	BrokenKeyUnavailable = "key_unavailable"
+)
+
+// BrokenError はチェーンの検証の失敗の位置と理由。errors.Is(err, ErrChainBroken) が真になる。
+// Detail は運用者向けの補足（ログ用。API には出さない）。
+type BrokenError struct {
+	Seq    int64
+	Reason string
+	Detail string
+}
+
+func (e *BrokenError) Error() string {
+	if e.Detail != "" {
+		return fmt.Sprintf("%v: seq %d: %s: %s", ErrChainBroken, e.Seq, e.Reason, e.Detail)
+	}
+	return fmt.Sprintf("%v: seq %d: %s", ErrChainBroken, e.Seq, e.Reason)
+}
+func (e *BrokenError) Unwrap() error { return ErrChainBroken }
+
 // Verify は records が続きの正しいチェーンかを確かめ、状態を進める。鍵付きのレコードの後、または KeyedFrom 以降に
-// 鍵なしのレコードがあれば壊れているとみなす（鍵の無い人が後ろを作り直して、鍵なしに戻すことを防ぐ）。
+// 鍵なしのレコードがあれば壊れているとみなす（鍵の無い人が後ろを作り直して、鍵なしに戻すことを防ぐ）。失敗は *BrokenError。
 func (c *Chain) Verify(records []Record) error {
 	for _, r := range records {
 		if r.Seq != c.Next {
-			return fmt.Errorf("%w: seq %d: want %d", ErrChainBroken, r.Seq, c.Next)
+			return &BrokenError{Seq: c.Next, Reason: BrokenSeqGap, Detail: fmt.Sprintf("got seq %d", r.Seq)}
 		}
 		if !bytes.Equal(r.PrevHash, c.Prev) {
-			return fmt.Errorf("%w: seq %d: prev hash mismatch", ErrChainBroken, r.Seq)
+			return &BrokenError{Seq: r.Seq, Reason: BrokenPrevHash}
 		}
 		var want []byte
 		switch {
 		case r.KeyID == "" && c.Keyed:
-			return fmt.Errorf("%w: seq %d: unkeyed record after keyed records", ErrChainBroken, r.Seq)
+			return &BrokenError{Seq: r.Seq, Reason: BrokenUnkeyed, Detail: "unkeyed record after keyed records"}
 		case r.KeyID == "" && c.KeyedFrom > 0 && r.Seq >= c.KeyedFrom:
-			return fmt.Errorf("%w: seq %d: unkeyed record after audit_unkeyed_until (%d)", ErrChainBroken, r.Seq, c.KeyedFrom-1)
+			return &BrokenError{Seq: r.Seq, Reason: BrokenUnkeyed, Detail: fmt.Sprintf("unkeyed record after audit_unkeyed_until (%d)", c.KeyedFrom-1)}
 		case r.KeyID == "":
 			want = Hash(c.Prev, r.Payload)
 		case c.Keys == nil:
-			return fmt.Errorf("%w: seq %d: audit key %q is not available", ErrChainBroken, r.Seq, r.KeyID)
+			return &BrokenError{Seq: r.Seq, Reason: BrokenKeyUnavailable, Detail: fmt.Sprintf("audit key %q is not available", r.KeyID)}
 		default:
 			key, err := c.Keys(r.KeyID)
 			if err != nil {
-				return fmt.Errorf("%w: seq %d: audit key %q: %v", ErrChainBroken, r.Seq, r.KeyID, err)
+				return &BrokenError{Seq: r.Seq, Reason: BrokenKeyUnavailable, Detail: fmt.Sprintf("audit key %q: %v", r.KeyID, err)}
 			}
 			want, c.Keyed = MAC(key, c.Prev, r.Payload), true
 		}
 		if !hmac.Equal(r.Hash, want) {
-			return fmt.Errorf("%w: seq %d: hash mismatch", ErrChainBroken, r.Seq)
+			return &BrokenError{Seq: r.Seq, Reason: BrokenHash}
 		}
 		// 検索用の realm_id の列はハッシュの対象外なので、ペイロードと突き合わせる。
 		e, err := Unmarshal(r.Payload)
 		if err != nil {
-			return fmt.Errorf("%w: seq %d: %v", ErrChainBroken, r.Seq, err)
+			return &BrokenError{Seq: r.Seq, Reason: BrokenPayload, Detail: err.Error()}
 		}
 		if e.RealmID != r.RealmID {
-			return fmt.Errorf("%w: seq %d: realm_id column does not match payload", ErrChainBroken, r.Seq)
+			return &BrokenError{Seq: r.Seq, Reason: BrokenRealmColumn}
 		}
 		c.Prev, c.Next = r.Hash, c.Next+1
 	}

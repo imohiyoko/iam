@@ -34,6 +34,8 @@ const (
 	FlowHooks           = "flow_hooks"
 	PasskeyAttestation  = "passkey_attestation"
 	HOTP                = "hotp"
+	OrgAuditLog         = "org_audit_log"
+	EventSubscriptions  = "event_subscriptions"
 	DeviceFlow          = "device_flow"
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"

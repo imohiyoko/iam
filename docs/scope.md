@@ -153,9 +153,9 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 項目 | 出どころ | 状態 | メモ |
 | --- | --- | --- | --- |
 | 改ざん検知付きの監査ログ、SIEM への出力 | C | ✅ | |
-| 監査ログの照会 API | P C | ❌ | |
+| 監査ログの照会 API | P C | ✅ | ADR 0100。範囲の検証、Org の管理者向け（`org_audit_log`） |
 | 保持期間、crypto-shredding、legal hold、PII の暗号化 | C | ✅ | |
-| イベントの Webhook の購読を API で管理 | P | △ | 設定ファイル（要確認） |
+| イベントの Webhook の購読を API で管理 | P | ✅ | ADR 0100（`event_subscriptions`）。設定ファイルの EventSink も残る |
 | FIPS 140-3 | C | ❌ | |
 
 ## 11. 運用と基盤

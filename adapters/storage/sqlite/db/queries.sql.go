@@ -47,16 +47,24 @@ func (q *Queries) AddRealmHost(ctx context.Context, arg AddRealmHostParams) erro
 }
 
 const appendAuditEvent = `-- name: AppendAuditEvent :exec
-INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload, key_id) VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload, key_id, event_id, occurred_unix, event_type, result, actor_type, actor_id, org_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type AppendAuditEventParams struct {
-	Seq      int64
-	RealmID  string
-	PrevHash []byte
-	Hash     []byte
-	Payload  []byte
-	KeyID    string
+	Seq          int64
+	RealmID      string
+	PrevHash     []byte
+	Hash         []byte
+	Payload      []byte
+	KeyID        string
+	EventID      string
+	OccurredUnix int64
+	EventType    string
+	Result       string
+	ActorType    string
+	ActorID      string
+	OrgID        string
 }
 
 func (q *Queries) AppendAuditEvent(ctx context.Context, arg AppendAuditEventParams) error {
@@ -67,6 +75,13 @@ func (q *Queries) AppendAuditEvent(ctx context.Context, arg AppendAuditEventPara
 		arg.Hash,
 		arg.Payload,
 		arg.KeyID,
+		arg.EventID,
+		arg.OccurredUnix,
+		arg.EventType,
+		arg.Result,
+		arg.ActorType,
+		arg.ActorID,
+		arg.OrgID,
 	)
 	return err
 }
@@ -301,9 +316,18 @@ const lastAuditEvent = `-- name: LastAuditEvent :one
 SELECT seq, realm_id, prev_hash, hash, payload, key_id FROM shared_audit_events ORDER BY seq DESC LIMIT 1
 `
 
-func (q *Queries) LastAuditEvent(ctx context.Context) (SharedAuditEvent, error) {
+type LastAuditEventRow struct {
+	Seq      int64
+	RealmID  string
+	PrevHash []byte
+	Hash     []byte
+	Payload  []byte
+	KeyID    string
+}
+
+func (q *Queries) LastAuditEvent(ctx context.Context) (LastAuditEventRow, error) {
 	row := q.db.QueryRowContext(ctx, lastAuditEvent)
-	var i SharedAuditEvent
+	var i LastAuditEventRow
 	err := row.Scan(
 		&i.Seq,
 		&i.RealmID,
@@ -325,15 +349,24 @@ type ListAuditEventsByRealmParams struct {
 	Limit   int64
 }
 
-func (q *Queries) ListAuditEventsByRealm(ctx context.Context, arg ListAuditEventsByRealmParams) ([]SharedAuditEvent, error) {
+type ListAuditEventsByRealmRow struct {
+	Seq      int64
+	RealmID  string
+	PrevHash []byte
+	Hash     []byte
+	Payload  []byte
+	KeyID    string
+}
+
+func (q *Queries) ListAuditEventsByRealm(ctx context.Context, arg ListAuditEventsByRealmParams) ([]ListAuditEventsByRealmRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAuditEventsByRealm, arg.RealmID, arg.Seq, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []SharedAuditEvent
+	var items []ListAuditEventsByRealmRow
 	for rows.Next() {
-		var i SharedAuditEvent
+		var i ListAuditEventsByRealmRow
 		if err := rows.Scan(
 			&i.Seq,
 			&i.RealmID,
@@ -585,15 +618,24 @@ type ScanAuditEventsParams struct {
 	Limit int64
 }
 
-func (q *Queries) ScanAuditEvents(ctx context.Context, arg ScanAuditEventsParams) ([]SharedAuditEvent, error) {
+type ScanAuditEventsRow struct {
+	Seq      int64
+	RealmID  string
+	PrevHash []byte
+	Hash     []byte
+	Payload  []byte
+	KeyID    string
+}
+
+func (q *Queries) ScanAuditEvents(ctx context.Context, arg ScanAuditEventsParams) ([]ScanAuditEventsRow, error) {
 	rows, err := q.db.QueryContext(ctx, scanAuditEvents, arg.Seq, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []SharedAuditEvent
+	var items []ScanAuditEventsRow
 	for rows.Next() {
-		var i SharedAuditEvent
+		var i ScanAuditEventsRow
 		if err := rows.Scan(
 			&i.Seq,
 			&i.RealmID,
@@ -621,6 +663,15 @@ DELETE FROM shared_audit_events WHERE seq <= ?
 
 func (q *Queries) TruncateAuditEvents(ctx context.Context, seq int64) error {
 	_, err := q.db.ExecContext(ctx, truncateAuditEvents, seq)
+	return err
+}
+
+const truncateAuditRefs = `-- name: TruncateAuditRefs :exec
+DELETE FROM shared_audit_refs WHERE seq <= ?
+`
+
+func (q *Queries) TruncateAuditRefs(ctx context.Context, seq int64) error {
+	_, err := q.db.ExecContext(ctx, truncateAuditRefs, seq)
 	return err
 }
 

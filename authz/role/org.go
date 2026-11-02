@@ -22,11 +22,13 @@ const (
 	// PermOrgGroupsRead は Org の Group と所属の参照だけ（ADR 0085）。Group をリソースに限って付与すると（resource_type が
 	// group）、その Group の所属だけを読める。
 	PermOrgGroupsRead = "org:groups.read"
+	// PermOrgAuditRead は Org の監査ログの参照（フィーチャー org_audit_log。ADR 0100）。
+	PermOrgAuditRead = "org:audit.read"
 )
 
 var orgBuiltin = map[port.OrgRole][]string{
-	port.OrgOwner:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgSettings, PermOrgTransfer, PermOrgDelete, PermOrgRoles, PermOrgGroups, PermOrgGroupsRead},
-	port.OrgAdmin:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgRoles, PermOrgGroups, PermOrgGroupsRead},
+	port.OrgOwner:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgSettings, PermOrgTransfer, PermOrgDelete, PermOrgRoles, PermOrgGroups, PermOrgGroupsRead, PermOrgAuditRead},
+	port.OrgAdmin:  {PermOrgRead, PermOrgInvite, PermOrgRemove, PermOrgSuspend, PermOrgRoles, PermOrgGroups, PermOrgGroupsRead, PermOrgAuditRead},
 	port.OrgMember: {PermOrgRead},
 }
 
