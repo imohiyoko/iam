@@ -10,6 +10,14 @@ server:
   clock_skew_warn: 1s
   # リバースプロキシ・ロードバランサーの後ろに置くなら、その IP か CIDR を書く（X-Forwarded-For から接続元を求める。ADR 0088）
   # trusted_proxies: ["10.0.0.0/8"]
+  # クライアント証明書の受け取り（X.509 の認証方式。フィーチャー x509。ADR 0103）
+  # client_certificates:
+  #   mtls_addr: ":8443"              # 証明書を求める TLS の専用の待ち受け（方式のログインと登録のパスだけ）
+  #   cert_file: /etc/iam/tls.crt
+  #   key_file: /etc/iam/tls.key
+  #   header: X-SSL-Client-Cert       # TLS を終えるプロキシが証明書を渡すヘッダー
+  #   header_format: pem              # pem（URL エンコードした PEM）か der_base64
+  #   proxies: ["10.0.0.5"]           # ヘッダーを信じる直接の接続元（trusted_proxies とは別に書く）
 
 storage:
   driver: sqlite
@@ -126,3 +134,16 @@ service_accounts:  # 汎用サービスアカウント（フィーチャー serv
 #     secret_env: IAM_HOOK_SECRET          # 32 バイト以上。読んだ後に消す
 #     timeout: 2s                          # 5 秒以下
 #     fail_open: false                     # 失敗のときに通すか（既定は止める）
+
+# methods:  # 認証方式のプラグインの設定（ADR 0103）
+#   x509:
+#     realms:
+#       default:                                   # realm の slug。書いていない realm では方式を動かさない
+#         trust_anchors: [/etc/iam/x509/root.pem]  # PEM のファイルか PEM そのもの
+#         intermediates: []
+#         extended_key_usages: [client_auth]       # client_auth・smartcard_logon・OID
+#         mapping: san_upn                         # fingerprint（既定）・san_upn・san_email・subject_dn
+#         hardware_issuers:                        # ハードウェアの鍵にだけ発行する CA。AAL3 に届く
+#           - {certificate: /etc/iam/x509/piv-issuing.pem, pin_activation: true}
+#         revocation: {mode: ocsp_crl, fail_open: false, cache_max: 1h, timeout: 5s}
+#         max_credentials: 5

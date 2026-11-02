@@ -127,10 +127,51 @@ func (s *Service) Method(name string, u port.MethodUsage) (port.Authenticator, e
 	return a, nil
 }
 
-func (s *Service) env(tx port.Tx, realmID, userID string, a port.Authenticator, u port.MethodUsage) port.MethodEnv {
+type clientCertsKey struct{}
+
+// WithClientCertificates は要求で受け取ったクライアント証明書の連鎖（DER。先頭が本人の証明書）を ctx に載せる。HTTP の層が、
+// mTLS の専用の待ち受けか、信じたプロキシのヘッダーから取り出して呼ぶ（ADR 0103）。方式には MethodEnv.ClientCertificates で渡す。
+func WithClientCertificates(ctx context.Context, chain [][]byte) context.Context {
+	return context.WithValue(ctx, clientCertsKey{}, chain)
+}
+
+// ClientCertificates は WithClientCertificates で載せた連鎖を返す（無ければ nil）。
+func ClientCertificates(ctx context.Context) [][]byte {
+	c, _ := ctx.Value(clientCertsKey{}).([][]byte)
+	return c
+}
+
+func (s *Service) env(ctx context.Context, tx port.Tx, realmID, userID string, a port.Authenticator, u port.MethodUsage) port.MethodEnv {
 	now := s.Clock.Now()
-	return port.MethodEnv{RealmID: realmID, UserID: userID, Usage: u, Now: now, Issuer: s.Issuer,
-		Credentials: &method.Store{Tx: tx, Crypter: s.Crypter, RealmID: realmID, Info: a.Info(), Now: now}}
+	e := port.MethodEnv{RealmID: realmID, UserID: userID, Usage: u, Now: now, Issuer: s.Issuer, ClientCertificates: ClientCertificates(ctx)}
+	if tx != nil {
+		e.Credentials = &method.Store{Tx: tx, Crypter: s.Crypter, RealmID: realmID, Info: a.Info(), Now: now}
+	}
+	return e
+}
+
+// preflight は、方式が Preflighter なら、トランザクションの外で確かめを行う（ADR 0103）。そうでなければ nil。
+func (s *Service) preflight(ctx context.Context, realmID, userID string, a port.Authenticator, u port.MethodUsage, req port.MethodRequest) ([]byte, error) {
+	p, ok := a.(port.Preflighter)
+	if !ok {
+		return nil, nil
+	}
+	return p.Preflight(ctx, s.env(ctx, nil, realmID, userID, a, u), req)
+}
+
+// PreflightEnroll は登録の完了（EnrollComplete）の前に、トランザクションの外で方式の確かめを行う。結果を EnrollComplete に渡す。
+// 確かめに失敗すれば ErrAuthFailed。
+func (s *Service) PreflightEnroll(ctx context.Context, realmID, userID, name string, p json.RawMessage) ([]byte, error) {
+	a, err := s.Method(name, "")
+	if err != nil {
+		return nil, err
+	}
+	pre, err := s.preflight(ctx, realmID, userID, a, "", port.MethodRequest{Payload: p})
+	if errors.Is(err, errs.AuthenticationFailed) {
+		s.logger().DebugContext(ctx, "enrollment rejected", "method", name, "error", err)
+		return nil, ErrAuthFailed
+	}
+	return pre, err
 }
 
 // payload は方式の Payload を応答の形（nil なら {}）にする。
@@ -164,7 +205,7 @@ func (s *Service) Begin(ctx context.Context, realmID, userID, name string, usage
 	var ch port.MethodChallenge
 	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		ch, err = a.Begin(ctx, s.env(tx, realmID, userID, a, usage), port.MethodRequest{Payload: p})
+		ch, err = a.Begin(ctx, s.env(ctx, tx, realmID, userID, a, usage), port.MethodRequest{Payload: p})
 		return err
 	})
 	// 1要素目の前は、方式が本人の有無を返しても区別しない（4.9）。2要素目は本人確認の後なので、方式の認証情報が無ければ 404。
@@ -279,36 +320,13 @@ func (s *Service) Login(ctx context.Context, realmID, name, flowID string, p jso
 	}
 	var is session.Issued
 	var publicID string
-	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		r, err := a.Complete(ctx, s.env(tx, realmID, "", a, port.UsageFirstFactor), port.MethodRequest{Payload: p, State: f.State})
-		if err != nil {
-			return err
-		}
-		cred, err := s.used(ctx, tx, realmID, "", name, r)
-		if err != nil {
-			return err
-		}
-		u, err := tx.Users().Get(ctx, realmID, cred.UserID)
-		if err != nil {
-			return err
-		}
-		// 停止と有効期間は照合が通った後に見る（本人確認の後なので理由を返す。4.9）。
-		now := s.Clock.Now()
-		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
-			return err
-		}
-		if is, err = s.Sessions.Issue(ctx, tx, session.Issue{RealmID: realmID, UserID: u.ID, AuthMethods: amr(a, r), Credentials: []string{cred.ID},
-			IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, ReplaceToken: replaceToken}); err != nil {
-			return err
-		}
-		publicID = u.PublicID
-		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
-			Type: "login.succeeded", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
-			SessionID: is.Session.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
-			Details: map[string]any{"method": name, "credential_id": cred.PublicID},
+	req := port.MethodRequest{Payload: p, State: f.State}
+	req.Preflight, err = s.preflight(ctx, realmID, "", a, port.UsageFirstFactor, req)
+	if err == nil {
+		err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			return s.login(ctx, tx, a, realmID, name, req, c, replaceToken, &is, &publicID)
 		})
-		return err
-	})
+	}
 	if err != nil {
 		// 認証情報・ユーザーが無い、ログインできない状態（削除済みなど）は、照合の失敗と区別しない（4.9）。
 		if errors.Is(err, account.ErrInactive) || errors.Is(err, errs.NotFound) {
@@ -321,6 +339,39 @@ func (s *Service) Login(ctx context.Context, realmID, name, flowID string, p jso
 	}
 	s.Sessions.Committed(ctx, realmID, is)
 	return is, publicID, nil
+}
+
+// login は1要素目の照合とセッションの発行（Login のトランザクションの中）。
+func (s *Service) login(ctx context.Context, tx port.Tx, a port.Authenticator, realmID, name string, req port.MethodRequest, c Client, replaceToken string,
+	is *session.Issued, publicID *string) error {
+	r, err := a.Complete(ctx, s.env(ctx, tx, realmID, "", a, port.UsageFirstFactor), req)
+	if err != nil {
+		return err
+	}
+	cred, err := s.used(ctx, tx, realmID, "", name, r)
+	if err != nil {
+		return err
+	}
+	u, err := tx.Users().Get(ctx, realmID, cred.UserID)
+	if err != nil {
+		return err
+	}
+	// 停止と有効期間は照合が通った後に見る（本人確認の後なので理由を返す。4.9）。
+	now := s.Clock.Now()
+	if _, err := account.Check(ctx, tx, u, now, now); err != nil {
+		return err
+	}
+	if *is, err = s.Sessions.Issue(ctx, tx, session.Issue{RealmID: realmID, UserID: u.ID, AuthMethods: amr(a, r), Credentials: []string{cred.ID},
+		IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, ReplaceToken: replaceToken}); err != nil {
+		return err
+	}
+	*publicID = u.PublicID
+	_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
+		Type: "login.succeeded", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
+		SessionID: is.Session.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+		Details: map[string]any{"method": name, "credential_id": cred.PublicID},
+	})
+	return err
 }
 
 // fail は1要素目の失敗を監査ログに残し、利用者の入力による失敗を ErrAuthFailed にする。
@@ -360,20 +411,12 @@ func (s *Service) SecondFactor(ctx context.Context, realmID, userID, sessionID, 
 		return session.Issued{}, ErrAuthFailed
 	}
 	var is session.Issued
-	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		r, err := a.Complete(ctx, s.env(tx, realmID, userID, a, port.UsageSecondFactor), port.MethodRequest{Payload: p, State: f.State})
-		if err != nil {
-			return err
-		}
-		cred, err := s.used(ctx, tx, realmID, userID, name, r)
-		if err != nil {
-			return err
-		}
-		is, err = s.Sessions.CompleteSecondFactor(ctx, tx, realmID, sessionID, session.SecondFactor{
-			AMR: amr(a, r), CredentialID: cred.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+	req := port.MethodRequest{Payload: p, State: f.State}
+	if req.Preflight, err = s.preflight(ctx, realmID, userID, a, port.UsageSecondFactor, req); err == nil {
+		err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			return s.secondFactor(ctx, tx, a, realmID, userID, sessionID, name, req, c, &is)
 		})
-		return err
-	})
+	}
 	if err != nil {
 		if rejectedByUser(err) {
 			s.retry(ctx, flowID, f)
@@ -386,6 +429,23 @@ func (s *Service) SecondFactor(ctx context.Context, realmID, userID, sessionID, 
 	return is, nil
 }
 
+// secondFactor は2要素目の照合とセッションの切り替え（SecondFactor のトランザクションの中）。
+func (s *Service) secondFactor(ctx context.Context, tx port.Tx, a port.Authenticator, realmID, userID, sessionID, name string, req port.MethodRequest,
+	c Client, is *session.Issued) error {
+	r, err := a.Complete(ctx, s.env(ctx, tx, realmID, userID, a, port.UsageSecondFactor), req)
+	if err != nil {
+		return err
+	}
+	cred, err := s.used(ctx, tx, realmID, userID, name, r)
+	if err != nil {
+		return err
+	}
+	*is, err = s.Sessions.CompleteSecondFactor(ctx, tx, realmID, sessionID, session.SecondFactor{
+		AMR: amr(a, r), CredentialID: cred.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+	})
+	return err
+}
+
 // EnrollBegin は本人（内部 ID）の、方式 name の登録を始める。
 func (s *Service) EnrollBegin(ctx context.Context, realmID, userID, name string, p json.RawMessage) (Challenge, error) {
 	a, err := s.Method(name, "")
@@ -394,7 +454,7 @@ func (s *Service) EnrollBegin(ctx context.Context, realmID, userID, name string,
 	}
 	var ch port.MethodChallenge
 	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		e := s.env(tx, realmID, userID, a, "")
+		e := s.env(ctx, tx, realmID, userID, a, "")
 		if e.Account, err = s.accountName(ctx, tx, realmID, userID); err != nil {
 			return err
 		}
@@ -431,9 +491,9 @@ type Enrolled struct {
 	Payload    json.RawMessage
 }
 
-// EnrollComplete は登録を完了する。呼び出し側のトランザクションで呼ぶ。確認に失敗すれば ErrAuthFailed（回数の上限まではフローを
+// EnrollComplete は登録を完了する。呼び出し側のトランザクションで呼ぶ。pre は PreflightEnroll の結果（方式が Preflighter のとき）。確認に失敗すれば ErrAuthFailed（回数の上限まではフローを
 // 残す。ただしトランザクションの外のことなので、呼び出し側が失敗で終えたときにだけ意味を持つ）。
-func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, realmID, userID, name, flowID string, p json.RawMessage, actor audit.Actor, requestID string) (Enrolled, error) {
+func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, realmID, userID, name, flowID string, p, pre json.RawMessage, actor audit.Actor, requestID string) (Enrolled, error) {
 	a, err := s.Method(name, "")
 	if err != nil {
 		return Enrolled{}, err
@@ -446,8 +506,8 @@ func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, realmID, userI
 		s.logger().DebugContext(ctx, "enrollment rejected", "method", name, "error", err)
 		return Enrolled{}, ErrAuthFailed
 	}
-	e := s.env(tx, realmID, userID, a, "")
-	en, err := a.EnrollComplete(ctx, e, port.MethodRequest{Payload: p, State: f.State})
+	e := s.env(ctx, tx, realmID, userID, a, "")
+	en, err := a.EnrollComplete(ctx, e, port.MethodRequest{Payload: p, State: f.State, Preflight: pre})
 	if errors.Is(err, errs.AuthenticationFailed) {
 		s.retry(ctx, flowID, f)
 		s.logger().DebugContext(ctx, "enrollment rejected", "method", name, "error", err)

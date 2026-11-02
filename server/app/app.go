@@ -8,6 +8,7 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -133,6 +134,9 @@ type App struct {
 	notifier *eventlog.Relay
 	// logout は Back-Channel Logout を送る（ADR 0066）。
 	logout *eventlog.Relay
+	// mtls はクライアント証明書を求める専用の待ち受けのハンドラ、mtlsTLS はその TLS の設定（ADR 0103）。設定が無ければ nil。
+	mtls    http.Handler
+	mtlsTLS *tls.Config
 	// serviceAccounts はサービスアカウントの管理と client credentials（ADR 0074）。
 	serviceAccounts *serviceaccount.Service
 	// clients と keys は OIDC Provider の連携先と ID トークンの署名鍵（5.5、9.3）。
@@ -309,8 +313,31 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		}
 		a.public, a.admin = a.dispatch(a.ownPublic, false), a.dispatch(a.ownAdmin, true)
 	}
+	// クライアント証明書の受け取り（ADR 0103）。
+	cc := cfg.Server.ClientCertificates
+	if cc.Header != "" {
+		proxies, err := cc.ProxyPrefixes()
+		if err != nil {
+			return nil, err
+		}
+		a.public = withClientCertHeader(a.public, cc.Header, cc.HeaderFormat, proxies)
+	}
+	if cc.MTLSAddr != "" {
+		if a.mtlsTLS, err = mtlsConfig(cc); err != nil {
+			return nil, fmt.Errorf("app: server.client_certificates: %w", err)
+		}
+		a.mtls = mtlsHandler(a.public)
+	}
+	for name := range cfg.Methods {
+		if _, ok := a.methods.Get(name); !ok {
+			d.Logger.Warn("methods settings are configured but the method is not active in the default realm", "method", name)
+		}
+	}
 	return a, nil
 }
+
+// MTLSHandler は mTLS の専用の待ち受けのハンドラを返す（テスト用。設定が無ければ nil）。
+func (a *App) MTLSHandler() http.Handler { return a.mtls }
 
 // assemble は realm のサービスの組を作る（既定の realm は New から、他の realm は newRealmApp から）。共有の部分（アダプタ・
 // 暗号化・outbox の送出など）は a に入っているものを使う。
@@ -338,7 +365,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	for _, v := range rs.VerifiedVia {
 		via = append(via, port.VerifiedVia(v))
 	}
-	methods, err := method.Active(plan.IsActive, d.Methods...)
+	methods, err := method.ActiveIn(plan.IsActive, realm.Slug, cfg.MethodSettings(), d.Methods...)
 	if err != nil {
 		return err
 	}
@@ -651,11 +678,20 @@ func (a *App) Run(ctx context.Context) error {
 		_ = pubL.Close()
 		return err
 	}
-	return a.Serve(ctx, pubL, admL)
+	if a.mtls == nil {
+		return a.Serve(ctx, pubL, admL)
+	}
+	mL, err := net.Listen("tcp", a.cfg.Server.ClientCertificates.MTLSAddr)
+	if err != nil {
+		_ = pubL.Close()
+		_ = admL.Close()
+		return err
+	}
+	return a.Serve(ctx, pubL, admL, tls.NewListener(mL, a.mtlsTLS))
 }
 
-// Serve は与えられたリスナーで待ち受ける。
-func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
+// Serve は与えられたリスナーで待ち受ける。mtlsL は mTLS の専用の待ち受け（TLS のリスナー。ADR 0103）で、設定があるときだけ渡す。
+func (a *App) Serve(ctx context.Context, pubL, admL net.Listener, mtlsL ...net.Listener) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -670,8 +706,12 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	}
 
 	servers := []*http.Server{newHTTPServer(a.public), newHTTPServer(a.admin)}
-	errc := make(chan error, 3)
-	for i, l := range []net.Listener{pubL, admL} {
+	listeners := []net.Listener{pubL, admL}
+	if a.mtls != nil && len(mtlsL) > 0 {
+		servers, listeners = append(servers, newHTTPServer(a.mtls)), append(listeners, mtlsL[0])
+	}
+	errc := make(chan error, len(servers)+1)
+	for i, l := range listeners {
 		go func() { errc <- servers[i].Serve(l) }()
 	}
 	relays := []*eventlog.Relay{a.relay, a.notifier, a.logout}

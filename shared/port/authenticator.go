@@ -99,6 +99,10 @@ type MethodEnv struct {
 	Now time.Time
 	// Issuer と Account は登録のときに認証器に表示する名前（発行者と、本人のメールアドレスか公開 ID）。
 	Issuer, Account string
+	// ClientCertificates は要求で受け取ったクライアント証明書の連鎖（DER。先頭が本人の証明書。ADR 0103）。mTLS の専用の
+	// 待ち受け（秘密鍵の所持は TLS のハンドシェイクで確かめてある）か、設定で信じたプロキシのヘッダーから、コアが取り出す。
+	// 無ければ nil。連鎖・用途・失効は方式が確かめる。
+	ClientCertificates [][]byte
 }
 
 // MethodRequest はクライアントからの入力。
@@ -107,6 +111,15 @@ type MethodRequest struct {
 	Payload json.RawMessage
 	// State は Begin（EnrollBegin）が返した状態。Complete（EnrollComplete）でだけ渡す。
 	State []byte
+	// Preflight は Preflighter.Preflight の結果。方式が Preflighter のとき、Complete・EnrollComplete にだけ渡す。
+	Preflight []byte
+}
+
+// Preflighter は、Storage のトランザクションの外で行う確かめ（ネットワークを使う証明書の失効の確認など）を持つ方式が実装する
+// （任意。ADR 0103）。コアは Complete・EnrollComplete の前に、トランザクションを開かずに呼び、結果を MethodRequest.Preflight で渡す。
+// env.Credentials は nil。照合の失敗は Complete と同じく errs.AuthenticationFailed に一致するエラーで返す。
+type Preflighter interface {
+	Preflight(ctx context.Context, env MethodEnv, in MethodRequest) ([]byte, error)
 }
 
 // MethodChallenge は Begin・EnrollBegin の結果。
@@ -153,12 +166,14 @@ type Authenticator interface {
 // Lookup は方式が宣言した検索キーのブラインドインデックス（無ければ nil）。無効化は削除ではなく RevokedAt を記録する（4.6）。
 // ID は内部 ID で、API に出すのは PublicID（ADR 0045）。
 type Credential struct {
-	ID           string
-	PublicID     string
-	RealmID      string
-	UserID       string
-	Method       string
-	Lookup       []byte
+	ID       string
+	PublicID string
+	RealmID  string
+	UserID   string
+	Method   string
+	Lookup   []byte
+	// LookupKeyID は Lookup を作ったインデックス鍵の ID（Lookup が無ければ空）。鍵を切り替えた後も前の鍵で引くのに使う。
+	LookupKeyID  string
 	Data         []byte
 	DataVersion  int
 	CreatedAt    time.Time
@@ -177,6 +192,8 @@ type CredentialRepo interface {
 	GetByPublicID(ctx context.Context, realmID, publicID string) (Credential, error)
 	// GetByLookup は無効化していないものを返す。無ければ errs.NotFound。
 	GetByLookup(ctx context.Context, realmID, method string, lookup []byte) (Credential, error)
+	// LookupKeyIDs は方式の、無効化していない検索キーを持つ認証情報の LookupKeyID を、重複を除いて名前の順に返す。
+	LookupKeyIDs(ctx context.Context, realmID, method string) ([]string, error)
 	// ListByUser はユーザーの認証情報を作成時刻の順（同時刻は ID の順）に返す（無効化したものも含む）。method が空でなければ、その方式だけ。
 	ListByUser(ctx context.Context, realmID, userID, method string) ([]Credential, error)
 	// UpdateData は、今のデータが old と同じで無効化していなければ、データとその形のバージョンを置き換える。

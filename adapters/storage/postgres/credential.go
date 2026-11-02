@@ -16,7 +16,7 @@ type authnCredentials struct{ q *db.Queries }
 
 func toAuthnCredential(r db.AuthnCredential) (port.Credential, error) {
 	var p times
-	c := port.Credential{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, UserID: r.UserID, Method: r.Method, Lookup: lookupOrNil(r.Lookup),
+	c := port.Credential{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, UserID: r.UserID, Method: r.Method, Lookup: lookupOrNil(r.Lookup), LookupKeyID: r.LookupKeyID,
 		Data: r.Data, DataVersion: int(r.DataVersion), CreatedAt: p.at(r.CreatedAt), LastUsedAt: p.null(r.LastUsedAt),
 		RevokedAt: p.null(r.RevokedAt), RevokeReason: r.RevokeReason}
 	return c, p.err
@@ -32,7 +32,7 @@ func lookupOrNil(b []byte) []byte {
 
 func (r authnCredentials) Create(ctx context.Context, c port.Credential) error {
 	return mapErr(r.q.CreateCredential(ctx, db.CreateCredentialParams{ID: c.ID, PublicID: c.PublicID, RealmID: c.RealmID, UserID: c.UserID,
-		Method: c.Method, Lookup: lookupOrNil(c.Lookup), Data: nonNil(c.Data), DataVersion: int64(c.DataVersion), CreatedAt: formatTime(c.CreatedAt),
+		Method: c.Method, Lookup: lookupOrNil(c.Lookup), LookupKeyID: c.LookupKeyID, Data: nonNil(c.Data), DataVersion: int64(c.DataVersion), CreatedAt: formatTime(c.CreatedAt),
 		LastUsedAt: nullTime(c.LastUsedAt), RevokedAt: nullTime(c.RevokedAt), RevokeReason: c.RevokeReason}))
 }
 
@@ -52,6 +52,11 @@ func (r authnCredentials) GetByLookup(ctx context.Context, realmID, method strin
 	}
 	row, err := r.q.GetCredentialByLookup(ctx, db.GetCredentialByLookupParams{RealmID: realmID, Method: method, Lookup: lookup})
 	return one(row, err, toAuthnCredential)
+}
+
+func (r authnCredentials) LookupKeyIDs(ctx context.Context, realmID, method string) ([]string, error) {
+	ids, err := r.q.ListCredentialLookupKeys(ctx, db.ListCredentialLookupKeysParams{RealmID: realmID, Method: method})
+	return ids, mapErr(err)
 }
 
 func (r authnCredentials) ListByUser(ctx context.Context, realmID, userID, method string) ([]port.Credential, error) {

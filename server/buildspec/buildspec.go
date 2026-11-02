@@ -20,6 +20,7 @@ import (
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method/hotp"
+	x509method "github.com/imohiyoko/iam/authn/method/x509"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/password"
@@ -65,6 +66,7 @@ var featureCatalog = map[string]struct {
 	feature.OrgAuditLog:        {eventlog.OrgAuditLogFeature, module + "/features/orgauditlog"},
 	feature.EventSubscriptions: {eventsub.Feature, module + "/features/eventsubscriptions"},
 	feature.DeviceFlow:         {provider.DeviceFeature, module + "/features/deviceflow"},
+	feature.X509:               {x509method.Feature, module + "/features/x509"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

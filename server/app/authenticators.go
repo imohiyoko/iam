@@ -261,6 +261,14 @@ func (s publicServer) CompleteEnrollCredential(ctx context.Context, req publicap
 	if err != nil {
 		return publicapi.CompleteEnrollCredential400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
+	// 証明書の失効の確認のような、ネットワークを使う確かめはトランザクションの外で行う（ADR 0103）。
+	pre, err := s.a.credentials.PreflightEnroll(ctx, s.a.realm.ID, au.PrincipalID, req.Method, p)
+	switch {
+	case errors.Is(err, errs.AuthenticationFailed):
+		return fail, nil
+	case err != nil:
+		return nil, err
+	}
 	c := s.a.clientOf(ctx)
 	var en credential.Enrolled
 	var is session.Issued
@@ -268,7 +276,7 @@ func (s publicServer) CompleteEnrollCredential(ctx context.Context, req publicap
 	upgrade := au.Restriction == port.RestrictionEnroll
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		if en, err = s.a.credentials.EnrollComplete(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Method, req.Body.FlowId, p, au.Actor(), c.RequestID); err != nil {
+		if en, err = s.a.credentials.EnrollComplete(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Method, req.Body.FlowId, p, pre, au.Actor(), c.RequestID); err != nil {
 			return err
 		}
 		if codes, err = s.initialCodes(ctx, tx, au); err != nil || !upgrade {

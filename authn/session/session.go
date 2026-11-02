@@ -490,7 +490,7 @@ func (m *Manager) secondFactor(ctx context.Context, tx port.Tx, in Issue) (port.
 	if slices.Contains(in.AuthMethods, AMRMFA) || (slices.Contains(in.AuthMethods, "hwk") && slices.Contains(in.AuthMethods, "user")) {
 		return port.RestrictionNone, nil, nil
 	}
-	methods, err := SecondFactors(ctx, tx, in.RealmID, in.UserID, m.Methods)
+	methods, err := SecondFactors(ctx, tx, in.RealmID, in.UserID, m.Methods, in.Credentials...)
 	if err != nil {
 		return "", nil, err
 	}
@@ -504,8 +504,9 @@ func (m *Manager) secondFactor(ctx context.Context, tx port.Tx, in Issue) (port.
 }
 
 // SecondFactors はユーザーが登録している（無効化していない）2要素目の種類を返す。汎用の認証情報（ADR 0092）は、方式が
-// methods で動いていて2要素目に使えるものだけを、方式の名前で数える。
-func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string, methods *method.Set) ([]string, error) {
+// methods で動いていて2要素目に使えるものだけを、方式の名前で数える。used（1要素目に使った認証情報の内部 ID）は数えない
+// （同じ認証情報を2つの要素に数えない。X.509 の証明書で入った人に、同じ証明書を2要素目に出さない。ADR 0103）。
+func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string, methods *method.Set, used ...string) ([]string, error) {
 	var out []string
 	ps, err := tx.Passkeys().ListByUser(ctx, realmID, userID)
 	if err != nil {
@@ -526,7 +527,7 @@ func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string, meth
 		return nil, err
 	}
 	for _, c := range cs {
-		if c.RevokedAt == nil && methods.Supports(c.Method, port.UsageSecondFactor) && !slices.Contains(out, c.Method) {
+		if c.RevokedAt == nil && methods.Supports(c.Method, port.UsageSecondFactor) && !slices.Contains(out, c.Method) && !slices.Contains(used, c.ID) {
 			out = append(out, c.Method)
 		}
 	}
@@ -550,6 +551,9 @@ type SecondFactor struct {
 	RequestID    string
 }
 
+// ErrSameCredential は、1要素目に使った認証情報を2要素目にも使おうとしたこと（照合の失敗として扱う）。
+var ErrSameCredential = errs.WithCode(errs.KindUnauthenticated, errs.CodeAuthenticationFailed, "credential already used as the first factor")
+
 // CompleteSecondFactor は、2要素目を確認した制限つきのセッション（内部の確認待ちか登録だけのもの）を失効させ、
 // 通常のセッションを発行する。amr は1要素目と2要素目を合わせ、mfa を加える。呼び出し側のトランザクションで呼び、
 // 確定の後に Committed を呼ぶ。
@@ -561,6 +565,9 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 	}
 	if old.Restriction == port.RestrictionNone || (old.RevokedAt != nil && !now.Before(*old.RevokedAt)) || !now.Before(old.ExpiresAt) {
 		return Issued{}, ErrNotRestricted
+	}
+	if f.CredentialID != "" && slices.Contains(old.AuthCredentialIDs, f.CredentialID) {
+		return Issued{}, ErrSameCredential
 	}
 	actor, err := userActor(ctx, tx, realmID, old.PrincipalID)
 	if err != nil {

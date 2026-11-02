@@ -23,8 +23,8 @@ func (q *Queries) CountCredentials(ctx context.Context, method string) (int64, e
 
 const createCredential = `-- name: CreateCredential :exec
 
-INSERT INTO authn_credentials (id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+INSERT INTO authn_credentials (id, public_id, realm_id, user_id, method, lookup, lookup_key_id, data, data_version, created_at, last_used_at, revoked_at, revoke_reason)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 `
 
 type CreateCredentialParams struct {
@@ -34,6 +34,7 @@ type CreateCredentialParams struct {
 	UserID       string
 	Method       string
 	Lookup       []byte
+	LookupKeyID  string
 	Data         []byte
 	DataVersion  int64
 	CreatedAt    string
@@ -51,6 +52,7 @@ func (q *Queries) CreateCredential(ctx context.Context, arg CreateCredentialPara
 		arg.UserID,
 		arg.Method,
 		arg.Lookup,
+		arg.LookupKeyID,
 		arg.Data,
 		arg.DataVersion,
 		arg.CreatedAt,
@@ -76,7 +78,7 @@ func (q *Queries) EraseUserCredentials(ctx context.Context, arg EraseUserCredent
 }
 
 const getCredential = `-- name: GetCredential :one
-SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason FROM authn_credentials WHERE realm_id = $1 AND id = $2
+SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason, lookup_key_id FROM authn_credentials WHERE realm_id = $1 AND id = $2
 `
 
 type GetCredentialParams struct {
@@ -100,12 +102,13 @@ func (q *Queries) GetCredential(ctx context.Context, arg GetCredentialParams) (A
 		&i.LastUsedAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
+		&i.LookupKeyID,
 	)
 	return i, err
 }
 
 const getCredentialByLookup = `-- name: GetCredentialByLookup :one
-SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason FROM authn_credentials WHERE realm_id = $1 AND method = $2 AND lookup = $3 AND revoked_at IS NULL
+SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason, lookup_key_id FROM authn_credentials WHERE realm_id = $1 AND method = $2 AND lookup = $3 AND revoked_at IS NULL
 `
 
 type GetCredentialByLookupParams struct {
@@ -130,12 +133,13 @@ func (q *Queries) GetCredentialByLookup(ctx context.Context, arg GetCredentialBy
 		&i.LastUsedAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
+		&i.LookupKeyID,
 	)
 	return i, err
 }
 
 const getCredentialByPublicID = `-- name: GetCredentialByPublicID :one
-SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason FROM authn_credentials WHERE realm_id = $1 AND public_id = $2
+SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason, lookup_key_id FROM authn_credentials WHERE realm_id = $1 AND public_id = $2
 `
 
 type GetCredentialByPublicIDParams struct {
@@ -159,12 +163,46 @@ func (q *Queries) GetCredentialByPublicID(ctx context.Context, arg GetCredential
 		&i.LastUsedAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
+		&i.LookupKeyID,
 	)
 	return i, err
 }
 
+const listCredentialLookupKeys = `-- name: ListCredentialLookupKeys :many
+SELECT DISTINCT lookup_key_id FROM authn_credentials
+WHERE realm_id = $1 AND method = $2 AND lookup IS NOT NULL AND revoked_at IS NULL ORDER BY lookup_key_id
+`
+
+type ListCredentialLookupKeysParams struct {
+	RealmID string
+	Method  string
+}
+
+func (q *Queries) ListCredentialLookupKeys(ctx context.Context, arg ListCredentialLookupKeysParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listCredentialLookupKeys, arg.RealmID, arg.Method)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var lookup_key_id string
+		if err := rows.Scan(&lookup_key_id); err != nil {
+			return nil, err
+		}
+		items = append(items, lookup_key_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCredentialsByUser = `-- name: ListCredentialsByUser :many
-SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason FROM authn_credentials WHERE realm_id = $1 AND user_id = $2 ORDER BY created_at, id
+SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason, lookup_key_id FROM authn_credentials WHERE realm_id = $1 AND user_id = $2 ORDER BY created_at, id
 `
 
 type ListCredentialsByUserParams struct {
@@ -194,6 +232,7 @@ func (q *Queries) ListCredentialsByUser(ctx context.Context, arg ListCredentials
 			&i.LastUsedAt,
 			&i.RevokedAt,
 			&i.RevokeReason,
+			&i.LookupKeyID,
 		); err != nil {
 			return nil, err
 		}
@@ -209,7 +248,7 @@ func (q *Queries) ListCredentialsByUser(ctx context.Context, arg ListCredentials
 }
 
 const listCredentialsByUserMethod = `-- name: ListCredentialsByUserMethod :many
-SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason FROM authn_credentials WHERE realm_id = $1 AND user_id = $2 AND method = $3 ORDER BY created_at, id
+SELECT id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason, lookup_key_id FROM authn_credentials WHERE realm_id = $1 AND user_id = $2 AND method = $3 ORDER BY created_at, id
 `
 
 type ListCredentialsByUserMethodParams struct {
@@ -240,6 +279,7 @@ func (q *Queries) ListCredentialsByUserMethod(ctx context.Context, arg ListCrede
 			&i.LastUsedAt,
 			&i.RevokedAt,
 			&i.RevokeReason,
+			&i.LookupKeyID,
 		); err != nil {
 			return nil, err
 		}

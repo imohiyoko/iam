@@ -74,11 +74,29 @@ func TestParseRejects(t *testing.T) {
 		"hook secret without url": "dev: true\nhooks: {pre_token: {secret_env: S}}\n",
 		"bad trusted proxy":       "dev: true\nserver: {trusted_proxies: [proxy.example.com]}\n",
 		"short mapped proxy":      "dev: true\nserver: {trusted_proxies: ['::ffff:0.0.0.0/95']}\n",
+		"cert header no proxies":  "dev: true\nserver: {client_certificates: {header: X-Client-Cert}}\n",
+		"cert header bad proxy":   "dev: true\nserver: {client_certificates: {header: X-Client-Cert, proxies: [proxy]}}\n",
+		"cert header format":      "dev: true\nserver: {client_certificates: {header: X, proxies: [10.0.0.1], header_format: xml}}\n",
+		"mtls without cert":       "dev: true\nserver: {client_certificates: {mtls_addr: ':8443'}}\n",
+		"mtls same addr":          "dev: true\nserver: {public_addr: ':1', admin_addr: ':2', client_certificates: {mtls_addr: ':1', cert_file: a, key_file: b}}\n",
 	}
 	for name, y := range cases {
 		if _, err := Parse([]byte(y)); err == nil {
 			t.Errorf("%s: want error", name)
 		}
+	}
+}
+
+func TestMethodSettings(t *testing.T) {
+	c, err := Parse([]byte("dev: true\nmethods:\n  x509: {realms: {default: {mapping: san_upn}}}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		Realms map[string]struct{ Mapping string } `yaml:"realms"`
+	}
+	if err := c.MethodSettings()["x509"](&v); err != nil || v.Realms["default"].Mapping != "san_upn" {
+		t.Fatalf("method settings = %+v, %v", v, err)
 	}
 }
 

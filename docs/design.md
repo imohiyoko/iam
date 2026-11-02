@@ -188,7 +188,7 @@ passkeys             id, user_id, credential_id, public_key, alg（ES256 / EdDSA
                      aaguid, attestation_format, attested（ADR 0096。既存の行は '' と false）
                      UNIQUE (realm_id, credential_id)（realm_id は user から引く）
 revoked_passkey_credentials  realm_id, credential_id, revoked_at（再登録の拒否）, PK (realm_id, credential_id)
-authn_credentials    id, realm_id, user_id, method, lookup（検索キーのブラインドインデックス。任意）
+authn_credentials    id, realm_id, user_id, method, lookup（検索キーのブラインドインデックス。任意）, lookup_key_id（ADR 0103）
                      data（方式固有のデータ。ユーザーのデータ鍵で暗号化）, data_version, created_at, last_used_at, revoked_*
                      UNIQUE (realm_id, method, lookup)（無効化していないもの）。認証方式のプラグインの汎用の認証情報（ADR 0090、0092）
 
@@ -256,6 +256,7 @@ Group に入れるのは、その Org の active な Membership を持つユー�
 | passkey | 不要 | 1要素目・2要素目。最も推奨 |
 | TOTP | 不要 | 2要素目 |
 | HOTP（RFC 4226） | 不要 | 2要素目。フィーチャー（`hotp`。認証方式のプラグイン。ADR 0092） |
+| X.509 のクライアント証明書・スマートカード（PIV、CAC） | OCSP・CRL の取得 | 1要素目・2要素目。フィーチャー（`x509`。ADR 0103）。証明書は mTLS の専用の待ち受けか、設定で信じたプロキシのヘッダーで受ける |
 | OAuth / SSO | 不要 | 識別は `(connection, provider_subject)` |
 | メールのコード・マジックリンク | 必要（Notifier） | 所有確認、パスワードなしのログイン、復旧 |
 | メール + パスワード | 不要 | フィーチャー（`password`） |
@@ -291,6 +292,7 @@ Org のポリシーで受け入れる経路を絞れる。
 argon2id。パスワードのみのログインには警告 `single_factor`。レートリミットはアカウント単位と IP 単位。アカウント単位はアドレスと接続元の組で数え（`per_account`）、アドレス全体には
 高めの上限（`per_account_total`）を置く。第三者が上限を使い切って本人を締め出すのを難しくする。
 リバースプロキシの後ろでは `server.trusted_proxies` にプロキシの範囲を書き、接続元を X-Forwarded-For から求める（ADR 0088）。
+クライアント証明書を TLS を終えるプロキシのヘッダーで受けるときは、それとは別に `server.client_certificates.proxies` を書く（ADR 0103）。
 
 #### メールのコード・リンクの安全策
 
@@ -786,6 +788,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | カスタム属性（11.7） | オフ | ― | 属性の読み書きなし |
 | フロー フック（11.8） | オフ | ― | フックを一切呼ばない |
 | HOTP（4.1、ADR 0092） | オフ | ― | HOTP の登録・照合なし。無効化は認証情報が 0 件になって完了 |
+| X.509 のクライアント証明書（4.1、ADR 0103） | オフ | ― | 証明書の登録・ログインなし（設定の無い realm でも）。無効化は認証情報が 0 件になって完了 |
 | OIDC のログアウト（5.6） | オフ | ― | `end_session_endpoint` と Front-Channel Logout なし（Back-Channel Logout は動く） |
 | Token Exchange の委任（5.7） | オフ | ― | token-exchange の grant を受けない。交換のトークンは使えない |
 | なりすまし（5.7） | オフ | Token Exchange | `requested_subject` を受けない。なりすましのトークンは使えない |

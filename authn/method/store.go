@@ -71,12 +71,38 @@ func (s *Store) List(ctx context.Context, userID string) ([]port.MethodCredentia
 	return out, nil
 }
 
-func (s *Store) lookup(ctx context.Context, lookup string) ([]byte, error) {
-	ix, err := s.Crypter.Index(ctx, LookupPurpose(s.Info.Name), lookup)
-	if err != nil {
-		return nil, err
+func (s *Store) lookup(ctx context.Context, lookup string) (pii.Index, error) {
+	return s.Crypter.Index(ctx, LookupPurpose(s.Info.Name), lookup)
+}
+
+// find は検索キーで有効な認証情報を引く。今のインデックス鍵で無ければ、有効な認証情報が使っている前の鍵でも引く
+// （インデックス鍵の切り替えの後も、前に登録したものを使えるように。ADR 0092、0103）。
+func (s *Store) find(ctx context.Context, lookup string, cur pii.Index) (port.Credential, error) {
+	c, err := s.Tx.Credentials().GetByLookup(ctx, s.RealmID, s.Info.Name, cur.Value)
+	if err == nil || !errors.Is(err, errs.NotFound) {
+		return c, err
 	}
-	return ix.Value, nil
+	kids, err := s.Tx.Credentials().LookupKeyIDs(ctx, s.RealmID, s.Info.Name)
+	if err != nil {
+		return port.Credential{}, err
+	}
+	for _, kid := range kids {
+		if kid == "" || kid == cur.KeyID {
+			continue
+		}
+		ix, err := s.Crypter.IndexWith(ctx, kid, LookupPurpose(s.Info.Name), lookup)
+		if errors.Is(err, errs.NotFound) {
+			continue // 鍵を消した後のものは引けない（登録し直す）
+		}
+		if err != nil {
+			return port.Credential{}, err
+		}
+		c, err := s.Tx.Credentials().GetByLookup(ctx, s.RealmID, s.Info.Name, ix.Value)
+		if err == nil || !errors.Is(err, errs.NotFound) {
+			return c, err
+		}
+	}
+	return port.Credential{}, errs.New(errs.KindNotFound, "credential")
 }
 
 // FindByLookup は検索キーで有効な認証情報を返す。持ち主が active でなくても返す（呼び出し側が状態を確かめる）。
@@ -88,14 +114,14 @@ func (s *Store) FindByLookup(ctx context.Context, lookup string) (port.MethodCre
 	if err != nil {
 		return port.MethodCredential{}, err
 	}
-	c, err := s.Tx.Credentials().GetByLookup(ctx, s.RealmID, s.Info.Name, ix)
+	c, err := s.find(ctx, lookup, ix)
 	if err != nil {
 		return port.MethodCredential{}, err
 	}
 	return Open(ctx, s.Tx, s.Crypter, c)
 }
 
-// Create は認証情報を作る。
+// Create は認証情報を作る。検索キーが、今の鍵か前の鍵で作った有効なものと重なれば errs.Conflict。
 func (s *Store) Create(ctx context.Context, userID, lookup string, data []byte) (port.MethodCredential, error) {
 	c := port.Credential{ID: id.New(id.Credential), PublicID: id.NewExternal(id.Credential), RealmID: s.RealmID, UserID: userID,
 		Method: s.Info.Name, DataVersion: s.Info.DataVersion, CreatedAt: s.Now}
@@ -104,7 +130,12 @@ func (s *Store) Create(ctx context.Context, userID, lookup string, data []byte) 
 		if err != nil {
 			return port.MethodCredential{}, err
 		}
-		c.Lookup = ix
+		if _, err := s.find(ctx, lookup, ix); err == nil {
+			return port.MethodCredential{}, errs.New(errs.KindConflict, "credential lookup exists")
+		} else if !errors.Is(err, errs.NotFound) {
+			return port.MethodCredential{}, err
+		}
+		c.Lookup, c.LookupKeyID = ix.Value, ix.KeyID
 	}
 	ct, err := s.Crypter.Encrypt(ctx, s.Tx.DataKeys(), userID, data, DataAAD(c.Method, c.ID))
 	if err != nil {

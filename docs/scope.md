@@ -31,7 +31,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | HOTP・ハードウェアトークン | S（RFC 4226）P | ✅ | フィーチャー `hotp`（ADR 0092）。2要素目 |
 | SMS・音声の OTP | P | ❌ | SP 800-63B では制限付き。Notifier 経由 |
 | プッシュ通知の承認（番号の照合付き） | P | ❌ | |
-| X.509 クライアント証明書・スマートカード（PIV、CAC） | S P C | ❌ | |
+| X.509 クライアント証明書・スマートカード（PIV、CAC） | S P C | ✅ | フィーチャー `x509`（ADR 0103）。mTLS の専用の待ち受けかプロキシのヘッダー、OCSP・CRL、ハードウェアの CA で AAL3 |
 | Kerberos／SPNEGO | S P | ❌ | |
 | LDAP のバインド認証 | P | ❌ | |
 | 外部 IdP（OAuth／OIDC） | S P | ✅ | |
@@ -46,7 +46,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | --- | --- | --- | --- |
 | 2 要素目の強制と登録の要求 | P C | ✅ | passkey と TOTP に固定 |
 | step-up（RFC 9470） | S P | ✅ | フィーチャー acr（ADR 0093）。判定の API の `step_up`、公開 API の `WWW-Authenticate` |
-| `acr`・`acr_values`・AAL | S（OIDC、SP 800-63B） | △ | フィーチャー acr（ADR 0093）。AAL3・`phrh` は方式の宣言（0090）を待つ |
+| `acr`・`acr_values`・AAL | S（OIDC、SP 800-63B） | ✅ | フィーチャー acr（ADR 0093）。AAL3・`phrh` は、ハードウェアの CA を設定した X.509（ADR 0103）で届く |
 | リスクに応じた追加認証 | P | △ | リスクは認可に効く（ADR 0084） |
 | 新しい端末・異常な場所の検知 | P | △ | `new_device` は ignore |
 | ブルートフォース対策・ロックアウト | P C | △ | レートリミットはある。アカウント単位のロックは要確認 |

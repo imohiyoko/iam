@@ -1,6 +1,6 @@
 -- name: CreateCredential :exec
-INSERT INTO authn_credentials (id, public_id, realm_id, user_id, method, lookup, data, data_version, created_at, last_used_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_credentials (id, public_id, realm_id, user_id, method, lookup, lookup_key_id, data, data_version, created_at, last_used_at, revoked_at, revoke_reason)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetCredential :one
 SELECT * FROM authn_credentials WHERE realm_id = ? AND id = ?;
@@ -10,6 +10,10 @@ SELECT * FROM authn_credentials WHERE realm_id = ? AND public_id = ?;
 
 -- name: GetCredentialByLookup :one
 SELECT * FROM authn_credentials WHERE realm_id = ? AND method = ? AND lookup = ? AND revoked_at IS NULL;
+
+-- name: ListCredentialLookupKeys :many
+SELECT DISTINCT lookup_key_id FROM authn_credentials
+WHERE realm_id = ? AND method = ? AND lookup IS NOT NULL AND revoked_at IS NULL ORDER BY lookup_key_id;
 
 -- name: ListCredentialsByUser :many
 SELECT * FROM authn_credentials WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;

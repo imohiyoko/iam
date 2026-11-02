@@ -47,28 +47,35 @@ func TestAAL(t *testing.T) {
 	}
 }
 
-// ハードウェアに鍵があると確かめた方式（今は無い。方式の宣言で足す）があれば AAL3 と phrh に届く。
+// ハードウェアに鍵があると確かめた方式（X.509 でハードウェアの CA を設定したもの。ADR 0103）は AAL3 と phrh に届く。
 func TestAAL3WithHardwareBoundMethod(t *testing.T) {
-	saved := acr.Methods["sc"]
-	acr.Methods["sc"] = acr.Method{Class: acr.Possession, PhishingResistant: true, HardwareBound: true}
-	t.Cleanup(func() { acr.Methods["sc"] = saved })
-	if got := acr.AAL([]string{"sc", "pin"}); got != 3 {
+	if got := acr.AAL([]string{"sc", "pin", "mfa"}); got != 3 {
 		t.Errorf("AAL(sc, pin) = %d, want 3", got)
+	}
+	if got := acr.AAL([]string{"sc", "pwd", "mfa"}); got != 3 {
+		t.Errorf("AAL(sc, pwd) = %d, want 3", got)
 	}
 	if got := acr.AAL([]string{"sc"}); got != 1 {
 		t.Errorf("AAL(sc) = %d, want 1", got)
 	}
-	if !acr.Satisfies(acr.PHRH, []string{"sc"}) || acr.Satisfies(acr.PHRH, []string{"fed", "fed:sc"}) {
-		t.Error("phrh must need a local hardware-bound method")
+	// 鍵の置き場所を問わない証明書（pop）は、パスワードと合わせても AAL2 まで。
+	if got := acr.AAL([]string{"pop", "pwd", "mfa"}); got != 2 {
+		t.Errorf("AAL(pop, pwd) = %d, want 2", got)
 	}
-	if want := []string{acr.AAL1, acr.AAL2, acr.AAL3, acr.PHR, acr.PHRH}; !slices.Equal(acr.Supported(), want) {
-		t.Errorf("Supported = %v, want %v", acr.Supported(), want)
+	if !acr.Satisfies(acr.PHRH, []string{"sc"}) || acr.Satisfies(acr.PHRH, []string{"fed", "fed:sc"}) || acr.Satisfies(acr.PHR, []string{"pop"}) {
+		t.Error("phrh must need a local hardware-bound method")
 	}
 }
 
 func TestSupported(t *testing.T) {
-	if want := []string{acr.AAL1, acr.AAL2, acr.PHR}; !slices.Equal(acr.Supported(), want) {
-		t.Errorf("Supported = %v, want %v", acr.Supported(), want)
+	if want := []string{acr.AAL1, acr.AAL2, acr.PHR}; !slices.Equal(acr.Supported(false), want) {
+		t.Errorf("Supported(false) = %v, want %v", acr.Supported(false), want)
+	}
+	if want := []string{acr.AAL1, acr.AAL2, acr.AAL3, acr.PHR, acr.PHRH}; !slices.Equal(acr.Supported(true), want) {
+		t.Errorf("Supported(true) = %v, want %v", acr.Supported(true), want)
+	}
+	if got := acr.Requested([]string{acr.AAL3, acr.PHRH}, true); !slices.Equal(got, []string{acr.AAL3, acr.PHRH}) {
+		t.Errorf("Requested with hardware = %v", got)
 	}
 }
 
@@ -97,7 +104,7 @@ func TestSatisfies(t *testing.T) {
 }
 
 func TestRequestedAndSelect(t *testing.T) {
-	req := acr.Requested([]string{"urn:example:other", acr.PHR, acr.AAL2, acr.PHR, acr.AAL3, acr.Zero})
+	req := acr.Requested([]string{"urn:example:other", acr.PHR, acr.AAL2, acr.PHR, acr.AAL3, acr.Zero}, false)
 	if want := []string{acr.PHR, acr.AAL2}; !slices.Equal(req, want) {
 		t.Fatalf("Requested = %v, want %v", req, want)
 	}
