@@ -16,7 +16,7 @@
 | [0002](0002-go.md) | 実装言語に Go を使う | 承認 |
 | [0003](0003-ports-and-adapters.md) | 外部依存をポート & アダプタで切り離し、必須の製品を持たない | 承認 |
 | [0004](0004-storage-adapter-native.md) | Storage アダプタは DB ごとに内部を最適化する | 承認 |
-| [0005](0005-crypto-no-rsa-pqc.md) | RSA を自前の鍵で使わず、耐量子暗号を併用する | 承認 |
+| [0005](0005-crypto-no-rsa-pqc.md) | RSA を自前の鍵で使わず、耐量子暗号を併用する | 一部置き換え: 0089 |
 | [0006](0006-passkey-rs256.md) | 外部の RS256（passkey 等）は受け入れ、警告の対象にする | 承認 |
 | [0007](0007-auth-warnings.md) | 全認証経路に共通の警告の仕組みを持つ | 承認 |
 | [0008](0008-hosted-login-and-api.md) | ホスト型ログイン画面と公開 API の2本立てにする | 承認 |
@@ -32,12 +32,12 @@
 | [0018](0018-suspension-and-validity.md) | 停止と有効期間を時刻で判定し、停止には種別を付ける | 承認 |
 | [0019](0019-quota-as-precondition.md) | Org の人数上限は Membership の前提条件として扱う | 承認 |
 | [0020](0020-leaving-and-deletion.md) | 退会の可否はユーザーの種類で決め、削除は猶予期間と crypto-shredding で行う | 承認 |
-| [0021](0021-opaque-access-tokens.md) | アクセストークンは不透明トークンにする | 承認 |
+| [0021](0021-opaque-access-tokens.md) | アクセストークンは不透明トークンにする | 一部置き換え: 0089 |
 | [0022](0022-deny-reason-disclosure.md) | 拒否理由は本人確認の後にだけ返す | 承認 |
 | [0023](0023-admin-model.md) | 管理権限は realm の運営者ロールと Org のロールの2層で表す | 承認 |
 | [0024](0024-session-validity-cache.md) | セッションの有効性をキャッシュし、反映遅れの上限を保証値とする | 承認 |
 | [0025](0025-account-recovery.md) | アカウント復旧は複数の経路と復旧専用のセッションで行う | 承認 |
-| [0026](0026-first-party-clients.md) | 連携先は当面ファーストパーティのみとする | 承認 |
+| [0026](0026-first-party-clients.md) | 連携先は当面ファーストパーティのみとする | 置き換え: 0089 |
 | [0027](0027-layered-session-lifetime.md) | セッションの寿命はホスト → realm → Org の階層で設定する | 承認 |
 | [0028](0028-time-handling.md) | 時刻は UTC で扱い、タイムゾーンは日付入力の変換にだけ使う | 承認 |
 | [0029](0029-audit-retention.md) | 監査ログはホスト先が決めた保持期間で削除し、ハッシュチェーンはチェックポイントで切り詰める | 承認 |
@@ -77,7 +77,7 @@
 | [0063](0063-audit-client-data.md) | 監査ログの IP と User-Agent の暗号化 | 承認 |
 | [0064](0064-authz-roles-groups-check.md) | ロール・付与・Group と認可の判定 | 承認 |
 | [0065](0065-oidc-clients-and-signing-keys.md) | OIDC の連携先の登録と ID トークンの署名鍵 | 承認 |
-| [0066](0066-oidc-authorization-code-flow.md) | OIDC の認可コードフローと、トークンをログインの系列に結び付けること | 承認 |
+| [0066](0066-oidc-authorization-code-flow.md) | OIDC の認可コードフローと、トークンをログインの系列に結び付けること | 一部置き換え: 0089 |
 | [0067](0067-postgres-adapter.md) | PostgreSQL のアダプタは SQLite のアダプタから作り、advisory lock で直列化する | 承認 |
 | [0068](0068-storage-export-import.md) | Storage の書き出しと読み込み（移行）は表ごとの行を JSON Lines で運ぶ | 承認 |
 | [0069](0069-org-login-policy.md) | Org のログインポリシーは Org の設定に持ち、ログインと切り替えのときに判定する | 承認 |
@@ -85,7 +85,7 @@
 | [0071](0071-siem-outputs.md) | SIEM 向けの出力は EventSink のアダプタで、形式と個人情報の出し方を出力先ごとに選ぶ | 承認 |
 | [0072](0072-retention.md) | 保持期間は1つの掃除のループで消し、監査ログはチェックポイントを残して先頭から切り詰める | 承認 |
 | [0073](0073-build-and-feature-toggle.md) | iam build は imports.go を差し替えてビルドし、フィーチャーの無効化はデータが 0 件になって完了する | 承認 |
-| [0074](0074-service-accounts.md) | 汎用サービスアカウントは管理 API で作り、API キーか client credentials の短命トークンで管理 API を使う | 承認 |
+| [0074](0074-service-accounts.md) | 汎用サービスアカウントは管理 API で作り、API キーか client credentials の短命トークンで管理 API を使う | 一部置き換え: 0089 |
 | [0075](0075-org-domain-verification.md) | Org のドメインの所有は DNS の TXT で証明し、証明済みのドメインは realm で1つの Org だけが持つ | 承認 |
 | [0076](0076-org-managed-users.md) | Org 管理ユーザーは users.managed_org_id で表し、既存のユーザーは本人の同意で切り替える | 承認 |
 | [0077](0077-org-sso.md) | Org 専用 SSO は Org の管理ユーザーのための OIDC の connection にする | 承認 |
@@ -98,3 +98,6 @@
 | [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |
 | [0085](0085-my-groups-and-group-scoped-read.md) | 本人の Group の一覧と、Group に限った所属の参照 | 承認 |
 | [0088](0088-trusted-proxies.md) | 信頼できるプロキシを設定で決め、その後ろでは X-Forwarded-For を右から読んで接続元を求める | 承認 |
+| [0089](0089-enterprise-full-scope.md) | エンタープライズ向けに全部入りを目指し、以前に除外した機能もフィーチャーとして含める | 承認 |
+| [0090](0090-authenticator-plugins.md) | 認証方式を共通のポートを持つプラグインにし、1 方式 1 ディレクトリで持つ | 承認 |
+| [0091](0091-process-roles.md) | 同じバイナリを役割ごとに別のプロセスで動かせるようにする | 承認 |
