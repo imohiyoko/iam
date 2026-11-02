@@ -164,6 +164,20 @@ service_accounts:  # 汎用サービスアカウント（フィーチャー serv
 #           - {certificate: /etc/iam/x509/piv-issuing.pem, pin_activation: true}
 #         revocation: {mode: ocsp_crl, fail_open: false, cache_max: 1h, timeout: 5s}
 #         max_credentials: 5
+#   kerberos:                                      # Kerberos / SPNEGO（ADR 0107。フィーチャー kerberos）
+#     realms:
+#       default:                                   # realm の slug。書いていない realm では方式を動かさない
+#         keytab: /etc/iam/http.keytab             # サービスの鍵（起動時に読む）
+#         service_principal: HTTP/id.example.com@CORP.EXAMPLE.COM
+#         accepted_realms: [CORP.EXAMPLE.COM]      # 受け付ける本人の realm（既定はサービスの realm）
+#         max_clock_skew: 5m
+#         case_insensitive_names: true             # Active Directory では true
+#         allow_rc4: false                         # RC4-HMAC のチケットを受けるか（既定は AES だけ）
+#         mapping:
+#           rule: ldap                             # enrollment（既定。本人の登録）・email・ldap
+#           ldap: {connection: corp-ad, attribute: userPrincipalName, value: principal}
+#           # email_domains: {CORP.EXAMPLE.COM: example.com}   # rule: email のとき
+#         max_credentials: 5                       # rule: enrollment で 1 人が登録できる数
 #   openid4vp:                                     # OpenID4VP の検証者（フィーチャー openid4vp。ADR 0108）。server.public_url が要る
 #     realms:
 #       default:                                   # realm の slug。書いていない realm では方式を動かさない

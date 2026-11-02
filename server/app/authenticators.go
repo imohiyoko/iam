@@ -176,6 +176,19 @@ func (s publicServer) CompleteMethodLogin(ctx context.Context, req publicapi.Com
 	if errors.Is(err, port.ErrMethodPending) {
 		return publicapi.CompleteMethodLogin202JSONResponse{Status: publicapi.MethodPendingStatusPending, Interval: pendingInterval}, nil
 	}
+	if errors.Is(err, port.ErrNegotiate) {
+		challengeNegotiate(ctx)
+		return publicapi.CompleteMethodLogin401JSONResponse{UnauthenticatedJSONResponse: publicapi.UnauthenticatedJSONResponse{Error: errCode(err)}}, nil
+	}
+	if errors.Is(err, errs.Unavailable) {
+		// 結び付けに使うディレクトリなど、方式の依存先の障害（ADR 0107）。利用者の失敗にしない。
+		s.a.deps.Logger.WarnContext(ctx, "method login: dependency unavailable", "method", req.Method, "error", err)
+		out := directoryUnavailable()
+		if c := errCode(err); c != "" {
+			out.Error = c
+		}
+		return publicapi.CompleteMethodLogin503JSONResponse{DirectoryUnavailableJSONResponse: out}, nil
+	}
 	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.CompleteMethodLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
@@ -302,6 +315,10 @@ func (s publicServer) BeginEnrollCredential(ctx context.Context, req publicapi.B
 	}
 	if errors.Is(err, port.ErrDeliveryFailed) {
 		return publicapi.BeginEnrollCredential503JSONResponse{Error: "delivery_failed"}, nil
+	}
+	if errors.Is(err, port.ErrNegotiate) {
+		challengeNegotiate(ctx)
+		return publicapi.BeginEnrollCredential401JSONResponse{UnauthenticatedJSONResponse: publicapi.UnauthenticatedJSONResponse{Error: errCode(err)}}, nil
 	}
 	if code, ok := invalidPayload(err); ok {
 		return publicapi.BeginEnrollCredential400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: code}}, nil
