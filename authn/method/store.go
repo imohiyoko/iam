@@ -125,6 +125,37 @@ func (s *Store) find(ctx context.Context, tx port.Tx, lookup string, cur pii.Ind
 	return port.Credential{}, errs.New(errs.KindNotFound, "credential")
 }
 
+// retired は検索キーが退役済みか（無効化した認証情報の検索キーを再登録させない方式。ADR 0106）を、今の鍵と、退役に使った前の
+// 鍵で確かめる。Storage の Create も今の鍵の値で確かめる。
+func (s *Store) retired(ctx context.Context, tx port.Tx, lookup string, cur pii.Index) (bool, error) {
+	if !s.Info.ReserveRevokedLookups {
+		return false, nil
+	}
+	if ok, err := tx.Credentials().LookupRetired(ctx, s.RealmID, s.Info.Name, cur.Value); err != nil || ok {
+		return ok, err
+	}
+	kids, err := tx.Credentials().RetiredLookupKeyIDs(ctx, s.RealmID, s.Info.Name)
+	if err != nil {
+		return false, err
+	}
+	for _, kid := range kids {
+		if kid == "" || kid == cur.KeyID {
+			continue
+		}
+		ix, err := s.Crypter.IndexWith(ctx, kid, LookupPurpose(s.Info.Name), lookup)
+		if errors.Is(err, errs.NotFound) {
+			continue // 鍵を消した後のものは確かめられない（鍵の消去は運用の判断。ADR 0103）
+		}
+		if err != nil {
+			return false, err
+		}
+		if ok, err := tx.Credentials().LookupRetired(ctx, s.RealmID, s.Info.Name, ix.Value); err != nil || ok {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
 // FindByLookup は検索キーで有効な認証情報を返す。持ち主が active でなくても返す（呼び出し側が状態を確かめる）。
 func (s *Store) FindByLookup(ctx context.Context, lookup string) (port.MethodCredential, error) {
 	if lookup == "" {
@@ -149,7 +180,7 @@ func (s *Store) FindByLookup(ctx context.Context, lookup string) (port.MethodCre
 // Create は認証情報を作る。検索キーが、今の鍵か前の鍵で作った有効なものと重なれば errs.Conflict。
 func (s *Store) Create(ctx context.Context, userID, lookup string, data []byte) (port.MethodCredential, error) {
 	c := port.Credential{ID: id.New(id.Credential), PublicID: id.NewExternal(id.Credential), RealmID: s.RealmID, UserID: userID,
-		Method: s.Info.Name, DataVersion: s.Info.DataVersion, CreatedAt: s.Now}
+		Method: s.Info.Name, DataVersion: s.Info.DataVersion, CreatedAt: s.Now, ReserveLookup: s.Info.ReserveRevokedLookups && lookup != ""}
 	var ix pii.Index
 	if lookup != "" {
 		var err error
@@ -164,6 +195,11 @@ func (s *Store) Create(ctx context.Context, userID, lookup string, data []byte) 
 				return errs.New(errs.KindConflict, "credential lookup exists")
 			} else if !errors.Is(err, errs.NotFound) {
 				return err
+			}
+			if retired, err := s.retired(ctx, tx, lookup, ix); err != nil {
+				return err
+			} else if retired {
+				return errs.New(errs.KindConflict, "credential lookup retired")
 			}
 		}
 		ct, err := s.Crypter.Encrypt(ctx, tx.DataKeys(), userID, data, DataAAD(c.Method, c.ID))

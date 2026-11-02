@@ -34,8 +34,13 @@ func (r authnCredentials) Create(_ context.Context, c port.Credential) error {
 		if x.PublicID == c.PublicID {
 			return errs.New(errs.KindConflict, "credential public id exists in realm")
 		}
-		if len(c.Lookup) > 0 && x.Method == c.Method && x.RevokedAt == nil && bytes.Equal(x.Lookup, c.Lookup) {
+		if len(c.Lookup) > 0 && c.RevokedAt == nil && x.Method == c.Method && x.RevokedAt == nil && bytes.Equal(x.Lookup, c.Lookup) {
 			return errs.New(errs.KindConflict, "credential lookup exists in realm")
+		}
+	}
+	if len(c.Lookup) > 0 && c.RevokedAt == nil {
+		if _, ok := r.t.s.retiredLookups[retiredKey(c.RealmID, c.Method, c.Lookup)]; ok {
+			return errs.New(errs.KindConflict, "credential lookup retired")
 		}
 	}
 	setKey(r.t, r.t.s.authnCreds, c.ID, cloneAuthnCredential(c))
@@ -125,7 +130,57 @@ func (r authnCredentials) Revoke(_ context.Context, realmID, id string, at time.
 	c = cloneAuthnCredential(c)
 	c.RevokedAt, c.RevokeReason = &at, reason
 	setKey(r.t, r.t.s.authnCreds, id, c)
+	if c.ReserveLookup && len(c.Lookup) > 0 {
+		return r.Retire(context.Background(), port.RetiredLookup{RealmID: realmID, Method: c.Method, Lookup: c.Lookup, LookupKeyID: c.LookupKeyID, RetiredAt: at})
+	}
 	return nil
+}
+
+func (r authnCredentials) SetPreferredOrg(_ context.Context, realmID, id, orgID string) error {
+	c, err := get(r.t.s.authnCreds, realmID, id, credentialRealm, "credential")
+	if err != nil {
+		return err
+	}
+	c = cloneAuthnCredential(c)
+	c.PreferredOrgID = orgID
+	setKey(r.t, r.t.s.authnCreds, id, c)
+	return nil
+}
+
+func retiredKey(realmID, method string, lookup []byte) string {
+	return realmID + "\x00" + method + "\x00" + string(lookup)
+}
+
+func (r authnCredentials) Retire(_ context.Context, x port.RetiredLookup) error {
+	if len(x.Lookup) == 0 {
+		return errs.New(errs.KindInvalid, "retired lookup is empty")
+	}
+	k := retiredKey(x.RealmID, x.Method, x.Lookup)
+	if _, ok := r.t.s.retiredLookups[k]; ok {
+		return nil
+	}
+	x.Lookup = bytes.Clone(x.Lookup)
+	setKey(r.t, r.t.s.retiredLookups, k, x)
+	return nil
+}
+
+func (r authnCredentials) LookupRetired(_ context.Context, realmID, method string, lookup []byte) (bool, error) {
+	if len(lookup) == 0 {
+		return false, nil
+	}
+	_, ok := r.t.s.retiredLookups[retiredKey(realmID, method, lookup)]
+	return ok, nil
+}
+
+func (r authnCredentials) RetiredLookupKeyIDs(_ context.Context, realmID, method string) ([]string, error) {
+	var out []string
+	for _, x := range r.t.s.retiredLookups {
+		if x.RealmID == realmID && x.Method == method && !slices.Contains(out, x.LookupKeyID) {
+			out = append(out, x.LookupKeyID)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 func (r authnCredentials) MoveUser(_ context.Context, realmID, fromUserID, toUserID string) (int, error) {

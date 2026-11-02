@@ -12,8 +12,9 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
-	"github.com/imohiyoko/iam/authn/passkey"
-	"github.com/imohiyoko/iam/authn/passkey/attestation"
+	"github.com/imohiyoko/iam/authn/method"
+	passkeym "github.com/imohiyoko/iam/authn/method/passkey"
+	"github.com/imohiyoko/iam/authn/method/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -166,7 +167,7 @@ func (s *Service) policyDenied(ctx context.Context, tx port.Tx, o port.Org, m po
 	}
 	p := st.LoginPolicy
 	var codes []string
-	if p.RequirePasskey && !slices.Contains(in.AuthMethods, passkey.AMRKey) {
+	if p.RequirePasskey && !slices.Contains(in.AuthMethods, passkeym.AMRKey) {
 		codes = append(codes, "policy."+PolicyRequirePasskey)
 	}
 	if len(p.MembershipEmailDomains) > 0 {
@@ -246,22 +247,27 @@ func (s *Service) emailInDomains(ctx context.Context, tx port.Tx, m port.Members
 // ポリシー p も満たすかを返す（ADR 0096）。passkey を使っていなければ true。満たさなければ AAGUID と判定を監査ログに残す
 // （ログインのトランザクションに書くので、ログインそのものが失敗すれば残らない。失敗は passkey の側で残す）。
 func (s *Service) passkeyAllowed(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, p *attestation.Policy, in session.OrgPick) (bool, error) {
-	var ps []port.Passkey
+	var ps []port.Credential
 	for _, c := range in.Credentials {
-		if !strings.HasPrefix(c, string(id.Passkey)+"_") {
+		// 移す前の psk_ と、汎用の crd_ の ID（ADR 0106）。方式が passkey のものだけを判定する。
+		if !strings.HasPrefix(c, string(id.Passkey)+"_") && !strings.HasPrefix(c, string(id.Credential)+"_") {
 			continue
 		}
 		if ps == nil {
 			var err error
-			if ps, err = tx.Passkeys().ListByUser(ctx, o.RealmID, m.UserID); err != nil {
+			if ps, err = tx.Credentials().ListByUser(ctx, o.RealmID, m.UserID, method.Passkey); err != nil {
 				return false, err
 			}
 		}
 		for _, k := range ps {
-			if k.ID != c {
+			if k.ID != c || k.RevokedAt != nil {
 				continue
 			}
-			d := s.Passkeys.Evaluate(s.Clock.Now(), k, attestation.Tiered{Tier: "org", Policy: p})
+			_, data, err := passkeym.Read(ctx, tx, s.Crypter, k)
+			if err != nil {
+				return false, err
+			}
+			d := s.Passkeys.Evaluate(s.Clock.Now(), data, attestation.Tiered{Tier: "org", Policy: p})
 			if d.Allowed {
 				continue
 			}

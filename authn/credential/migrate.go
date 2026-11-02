@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/imohiyoko/iam/authn/method"
+	passkeym "github.com/imohiyoko/iam/authn/method/passkey"
 	pwm "github.com/imohiyoko/iam/authn/method/password"
 	totpm "github.com/imohiyoko/iam/authn/method/totp"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -147,4 +149,127 @@ func moveLegacy(ctx context.Context, tx port.Tx, crypter *pii.Crypter, c port.Cr
 		return err
 	}
 	return del()
+}
+
+// MigrationPasskeys は、passkey を方式専用の表から authn_credentials へ移したことの台帳の記録（ADR 0106）。移す前のバイナリは、
+// この記録を知らないので起動を拒む（移した後の DB では、passkey が見えなくなるため）。
+const MigrationPasskeys = feature.MigrationPrefix + "authn_credentials_passkey"
+
+func init() { feature.RegisterMigration(MigrationPasskeys) }
+
+// MigratedPasskeys は移した件数。Retired は無効化済みの credential ID（退役した検索キーへ移したもの）。
+type MigratedPasskeys struct{ Passkeys, Retired int }
+
+// MigratePasskeys は方式専用の表（authn_passkeys・authn_revoked_passkey_credentials）の行を authn_credentials と
+// authn_retired_credential_lookups へ移す（ADR 0106）。MigrateLegacy と同じく、1行ずつ同じトランザクションで作って古い行を消し、
+// 起動のたびに呼び、終わったら台帳に記録する。
+//
+// passkey は内部 ID（psk_ の接頭辞のもの）と公開 ID を保つ（セッションの結び付き、方式専用のパスの名前の変更・無効化、Org の
+// 指定が続けて効く）。credential ID は検索キー（ブラインドインデックス）にし、公開鍵・署名の回数・フラグ・名前・attestation の結果と、
+// ユーザーハンドル（空なら持ち主の公開 ID）は方式のデータとして持ち主のデータ鍵で暗号化する。無効化した credential ID は、
+// 持ち主を消した後のものも、退役した検索キーにする。データ鍵や持ち主が無ければ、移さずに起動を止める（fail-closed）。
+func MigratePasskeys(ctx context.Context, st port.Storage, crypter *pii.Crypter, clk clock.Clock, batch int) (MigratedPasskeys, error) {
+	if batch <= 0 {
+		batch = 100
+	}
+	var out MigratedPasskeys
+	for {
+		var n int
+		err := st.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			ps, err := tx.Passkeys().ListAll(ctx, batch)
+			if err != nil {
+				return err
+			}
+			for _, p := range ps {
+				if err := migratePasskey(ctx, tx, crypter, p); err != nil {
+					return fmt.Errorf("credential: migrate passkey %s: %w", p.ID, err)
+				}
+			}
+			n = len(ps)
+			return nil
+		})
+		if err != nil {
+			return out, err
+		}
+		if out.Passkeys += n; n < batch {
+			break
+		}
+	}
+	for {
+		var n int
+		err := st.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			rs, err := tx.Passkeys().ListRevoked(ctx, batch)
+			if err != nil {
+				return err
+			}
+			for _, r := range rs {
+				ix, err := crypter.Index(ctx, method.LookupPurpose(passkeym.Name), passkeym.Lookup(r.CredentialID))
+				if err != nil {
+					return fmt.Errorf("credential: migrate revoked passkey: %w", err)
+				}
+				if err := tx.Credentials().Retire(ctx, port.RetiredLookup{RealmID: r.RealmID, Method: passkeym.Name, Lookup: ix.Value,
+					LookupKeyID: ix.KeyID, RetiredAt: r.RevokedAt}); err != nil {
+					return err
+				}
+				if err := tx.Passkeys().DeleteRevoked(ctx, r.RealmID, r.CredentialID); err != nil {
+					return err
+				}
+			}
+			n = len(rs)
+			return nil
+		})
+		if err != nil {
+			return out, err
+		}
+		if out.Retired += n; n < batch {
+			break
+		}
+	}
+	err := st.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		ledger, err := tx.Features().List(ctx)
+		if err != nil {
+			return err
+		}
+		recorded := slices.ContainsFunc(ledger, func(r port.FeatureRecord) bool { return r.Feature == MigrationPasskeys })
+		if !recorded {
+			if err := tx.Features().Put(ctx, port.FeatureRecord{Feature: MigrationPasskeys, State: port.FeatureActive, DataVersion: 1,
+				UpdatedAt: clk.Now()}); err != nil {
+				return err
+			}
+		}
+		if out == (MigratedPasskeys{}) {
+			return nil // 移すものが無かった（新しい DB など）。
+		}
+		_, err = eventlog.Record(ctx, tx, clk, audit.Event{
+			Type: "credentials.migrated", Result: audit.ResultSuccess, Actor: audit.Actor{Type: "system"},
+			Details: map[string]any{"migration": MigrationPasskeys, "passkeys": out.Passkeys, "retired": out.Retired},
+		})
+		return err
+	})
+	return out, err
+}
+
+func migratePasskey(ctx context.Context, tx port.Tx, crypter *pii.Crypter, p port.Passkey) error {
+	handle := p.UserHandle
+	if len(handle) == 0 {
+		u, err := tx.Users().Get(ctx, p.RealmID, p.UserID)
+		if err != nil {
+			return err
+		}
+		handle = []byte(u.PublicID)
+	}
+	raw, err := passkeym.Encode(passkeym.Data{CredentialID: p.CredentialID, PublicKey: p.PublicKey, Alg: p.Alg, SignCount: p.SignCount,
+		Flags: p.Flags, AAGUID: p.AAGUID, Transports: p.Transports, UserHandle: handle, Name: p.Name,
+		AttestationFormat: p.AttestationFormat, Attested: p.Attested})
+	if err != nil {
+		return err
+	}
+	ix, err := crypter.Index(ctx, method.LookupPurpose(passkeym.Name), passkeym.Lookup(p.CredentialID))
+	if err != nil {
+		return err
+	}
+	return moveLegacy(ctx, tx, crypter, port.Credential{ID: p.ID, PublicID: p.PublicID, RealmID: p.RealmID, UserID: p.UserID,
+		Method: passkeym.Name, Lookup: ix.Value, LookupKeyID: ix.KeyID, DataVersion: 1, PreferredOrgID: p.PreferredOrgID, ReserveLookup: true,
+		CreatedAt: p.CreatedAt, LastUsedAt: p.LastUsedAt, RevokedAt: p.RevokedAt, RevokeReason: p.RevokeReason}, raw,
+		func() error { return tx.Passkeys().Delete(ctx, p.RealmID, p.ID) })
 }

@@ -172,29 +172,14 @@ INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, pub
     transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id, user_handle, attestation_format, attested)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
--- name: IsPasskeyCredentialRevoked :one
-SELECT COUNT(*) FROM authn_revoked_passkey_credentials WHERE realm_id = ? AND credential_id = ?;
+-- name: ListAllPasskeys :many
+SELECT * FROM authn_passkeys ORDER BY id LIMIT sqlc.arg(lim);
 
--- name: GetPasskeyByCredentialID :one
-SELECT * FROM authn_passkeys WHERE realm_id = ? AND credential_id = ? AND revoked_at IS NULL;
-
--- name: GetPasskeyByPublicID :one
-SELECT * FROM authn_passkeys WHERE realm_id = ? AND public_id = ?;
+-- name: DeletePasskey :exec
+DELETE FROM authn_passkeys WHERE realm_id = ? AND id = ?;
 
 -- name: GetPasskey :one
 SELECT * FROM authn_passkeys WHERE realm_id = ? AND id = ?;
-
--- name: ListPasskeysByUser :many
-SELECT * FROM authn_passkeys WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
-
--- name: UsePasskey :execrows
-UPDATE authn_passkeys SET sign_count = ?, flags = ?, last_used_at = ? WHERE realm_id = ? AND id = ?;
-
--- name: RenamePasskey :execrows
-UPDATE authn_passkeys SET name = ? WHERE realm_id = ? AND id = ?;
-
--- name: SetPasskeyPreferredOrg :execrows
-UPDATE authn_passkeys SET preferred_org_id = ? WHERE realm_id = ? AND id = ?;
 
 -- name: RevokePasskey :exec
 UPDATE authn_passkeys SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
@@ -202,6 +187,12 @@ UPDATE authn_passkeys SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? A
 -- name: AddRevokedPasskeyCredential :exec
 INSERT INTO authn_revoked_passkey_credentials (realm_id, credential_id, revoked_at) VALUES (?, ?, ?)
 ON CONFLICT (realm_id, credential_id) DO NOTHING;
+
+-- name: ListRevokedPasskeyCredentials :many
+SELECT * FROM authn_revoked_passkey_credentials ORDER BY realm_id, credential_id LIMIT sqlc.arg(lim);
+
+-- name: DeleteRevokedPasskeyCredential :exec
+DELETE FROM authn_revoked_passkey_credentials WHERE realm_id = ? AND credential_id = ?;
 
 -- name: CreateTOTP :exec
 INSERT INTO authn_totp_credentials (id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason)
@@ -366,9 +357,3 @@ WHERE id IN (SELECT u.id FROM authn_users u WHERE u.managed_org_id IS NOT NULL L
 -- name: SetUserMerged :execrows
 UPDATE authn_users SET status = 'merged', merged_into = ?, deletion_scheduled_at = NULL, updated_at = ?
 WHERE realm_id = ? AND id = ? AND status = 'active';
-
--- name: SetPasskeyHandles :exec
-UPDATE authn_passkeys SET user_handle = ? WHERE realm_id = ? AND user_id = ? AND length(user_handle) = 0;
-
--- name: MovePasskeys :execrows
-UPDATE authn_passkeys SET user_id = sqlc.arg(to_user_id) WHERE realm_id = sqlc.arg(realm_id) AND user_id = sqlc.arg(from_user_id);

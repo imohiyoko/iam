@@ -53,19 +53,21 @@ type AuthnConnection struct {
 }
 
 type AuthnCredential struct {
-	ID           string
-	PublicID     string
-	RealmID      string
-	UserID       string
-	Method       string
-	Lookup       []byte
-	Data         []byte
-	DataVersion  int64
-	CreatedAt    string
-	LastUsedAt   sql.NullString
-	RevokedAt    sql.NullString
-	RevokeReason string
-	LookupKeyID  string
+	ID             string
+	PublicID       string
+	RealmID        string
+	UserID         string
+	Method         string
+	Lookup         []byte
+	Data           []byte
+	DataVersion    int64
+	CreatedAt      string
+	LastUsedAt     sql.NullString
+	RevokedAt      sql.NullString
+	RevokeReason   string
+	LookupKeyID    string
+	PreferredOrgID string
+	ReserveLookup  int64
 }
 
 type AuthnDirectoryGroup struct {
@@ -197,6 +199,14 @@ type AuthnRecoveryCode struct {
 	Hash      string
 	CreatedAt string
 	UsedAt    sql.NullString
+}
+
+type AuthnRetiredCredentialLookup struct {
+	RealmID     string
+	Method      string
+	Lookup      []byte
+	LookupKeyID string
+	RetiredAt   string
 }
 
 type AuthnRevokedPasskeyCredential struct {

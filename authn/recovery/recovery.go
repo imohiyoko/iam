@@ -379,15 +379,6 @@ func (s *Service) Complete(ctx context.Context, realmID, sessionID string, c Cli
 // addedSince はユーザーが since より後に認証手段を足したかを返す。
 func addedSince(ctx context.Context, tx port.Tx, realmID, userID string, since time.Time) (bool, error) {
 	after := func(t time.Time) bool { return t.After(since) }
-	ps, err := tx.Passkeys().ListByUser(ctx, realmID, userID)
-	if err != nil {
-		return false, err
-	}
-	for _, p := range ps {
-		if p.RevokedAt == nil && after(p.CreatedAt) {
-			return true, nil
-		}
-	}
 	is, err := tx.Identities().ListByUser(ctx, realmID, userID)
 	if err != nil {
 		return false, err
@@ -397,7 +388,7 @@ func addedSince(ctx context.Context, tx port.Tx, realmID, userID string, since t
 			return true, nil
 		}
 	}
-	// 汎用の認証情報（TOTP・パスワードを含む。ADR 0101）。
+	// 汎用の認証情報（TOTP・パスワード・passkey を含む。ADR 0101、0106）。
 	cs, err := tx.Credentials().ListByUser(ctx, realmID, userID, "")
 	if err != nil {
 		return false, err

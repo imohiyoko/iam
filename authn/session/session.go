@@ -553,16 +553,13 @@ func (m *Manager) secondFactor(ctx context.Context, tx port.Tx, in Issue) (port.
 // （同じ認証情報を2つの要素に数えない。X.509 の証明書で入った人に、同じ証明書を2要素目に出さない。ADR 0103）。
 func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string, methods *method.Set, used ...string) ([]string, error) {
 	var out []string
-	ps, err := tx.Passkeys().ListByUser(ctx, realmID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if slices.ContainsFunc(ps, func(p port.Passkey) bool { return p.RevokedAt == nil }) {
-		out = append(out, SecondFactorPasskey)
-	}
 	cs, err := tx.Credentials().ListByUser(ctx, realmID, userID, "")
 	if err != nil {
 		return nil, err
+	}
+	// passkey（コアの方式。ADR 0106）は方式の組に関わらず先頭に置く（従来の順）。1要素目に使った passkey も2要素目に出す（従来どおり）。
+	if slices.ContainsFunc(cs, func(c port.Credential) bool { return c.RevokedAt == nil && c.Method == method.Passkey }) {
+		out = append(out, SecondFactorPasskey)
 	}
 	// TOTP（コアの方式。ADR 0101）は方式の組に関わらず、passkey の次に置く（従来の順）。
 	if slices.ContainsFunc(cs, func(c port.Credential) bool { return c.RevokedAt == nil && c.Method == method.TOTP }) {
@@ -959,7 +956,6 @@ func (m *Manager) checkSession(ctx context.Context, tx port.Tx, s port.Session, 
 
 func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 	var identities []port.Identity
-	var passkeys []port.Passkey
 	var creds []port.Credential
 	for _, c := range s.AuthCredentialIDs {
 		var revoked, found bool
@@ -976,20 +972,8 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 					found, revoked = true, i.RevokedAt != nil
 				}
 			}
-		case strings.HasPrefix(c, string(id.Passkey)+"_"):
-			if passkeys == nil {
-				var err error
-				if passkeys, err = tx.Passkeys().ListByUser(ctx, s.RealmID, s.PrincipalID); err != nil {
-					return err
-				}
-			}
-			for _, p := range passkeys {
-				if p.ID == c {
-					found, revoked = true, p.RevokedAt != nil
-				}
-			}
-		// 方式専用の表から移した TOTP（ADR 0101）は otp_ の ID のまま汎用の認証情報にある。
-		case strings.HasPrefix(c, string(id.TOTP)+"_"), strings.HasPrefix(c, string(id.Credential)+"_"):
+		// 方式専用の表から移した TOTP（ADR 0101）と passkey（ADR 0106）は otp_・psk_ の ID のまま汎用の認証情報にある。
+		case strings.HasPrefix(c, string(id.TOTP)+"_"), strings.HasPrefix(c, string(id.Passkey)+"_"), strings.HasPrefix(c, string(id.Credential)+"_"):
 			if creds == nil {
 				var err error
 				if creds, err = tx.Credentials().ListByUser(ctx, s.RealmID, s.PrincipalID, ""); err != nil {

@@ -57,11 +57,14 @@ type state struct {
 	emails     map[string]port.UserEmail
 	identities map[string]port.Identity
 	passkeys   map[string]port.Passkey
-	// revokedPasskeys は無効化した credential_id（realm と credential_id の組）。再登録を拒否する（4.6）。
-	revokedPasskeys map[string]time.Time
+	// passkeys と revokedPasskeys は方式専用の表（authn_credentials への移行でだけ使う。ADR 0106）。revokedPasskeys のキーは
+	// realm と credential_id の組。
+	revokedPasskeys map[string]port.RevokedPasskeyCredential
 	totps           map[string]port.TOTPCredential
 	// authnCreds は汎用の認証情報（ADR 0092）。
 	authnCreds map[string]port.Credential
+	// retiredLookups は退役した検索キー（ADR 0106）。キーは realm_id + method + lookup。
+	retiredLookups map[string]port.RetiredLookup
 	// devices は本人がログインした端末（ADR 0105）。
 	devices       map[string]port.KnownDevice
 	passwords     map[string]port.PasswordCredential
@@ -124,8 +127,8 @@ func New(clk clock.Clock) *Storage {
 		realms: map[string]port.Realm{}, features: map[string]port.FeatureRecord{},
 		dataKeys: map[string]port.DataKey{}, auditKeys: map[string]port.DataKey{}, outboxIx: map[string]int{},
 		users: map[string]port.User{}, emails: map[string]port.UserEmail{}, identities: map[string]port.Identity{},
-		passkeys: map[string]port.Passkey{}, revokedPasskeys: map[string]time.Time{}, totps: map[string]port.TOTPCredential{},
-		authnCreds: map[string]port.Credential{}, devices: map[string]port.KnownDevice{},
+		passkeys: map[string]port.Passkey{}, revokedPasskeys: map[string]port.RevokedPasskeyCredential{}, totps: map[string]port.TOTPCredential{},
+		authnCreds: map[string]port.Credential{}, retiredLookups: map[string]port.RetiredLookup{}, devices: map[string]port.KnownDevice{},
 		passwords: map[string]port.PasswordCredential{}, suspensions: map[string]port.Suspension{},
 		scheduled: map[string]port.ScheduledEvent{}, recoveryCodes: map[string]port.RecoveryCode{},
 		connections: map[string]port.Connection{}, sessions: map[string]port.Session{},

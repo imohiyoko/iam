@@ -12,7 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/imohiyoko/iam/authn/passkey/attestation"
+	passkeym "github.com/imohiyoko/iam/authn/method/passkey"
+	"github.com/imohiyoko/iam/authn/method/passkey/attestation"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/server/publicapi"
@@ -58,9 +59,13 @@ func passkeyPolicyOut[T apiPasskeyPolicy](p *attestation.Policy) *T {
 	return &out
 }
 
-// userPasskey は管理 API の passkey（AAGUID と認証器の名前を付ける）。
-func (a *App) userPasskey(p port.Passkey) adminapi.UserPasskey {
-	out := adminapi.UserPasskey{Id: p.PublicID, Name: p.Name, CreatedAt: p.CreatedAt, LastUsedAt: p.LastUsedAt, Attested: p.Attested}
+// userPasskey は管理 API の passkey（AAGUID と認証器の名前を付ける）。passkey は authn_credentials の方式 passkey（ADR 0106）。
+func (a *App) userPasskey(ctx context.Context, tx port.Tx, c port.Credential) (adminapi.UserPasskey, error) {
+	_, p, err := passkeym.Read(ctx, tx, a.pii, c)
+	if err != nil {
+		return adminapi.UserPasskey{}, err
+	}
+	out := adminapi.UserPasskey{Id: c.PublicID, Name: p.Name, CreatedAt: c.CreatedAt, LastUsedAt: c.LastUsedAt, Attested: p.Attested}
 	if s := attestation.FormatAAGUID(p.AAGUID); s != "" {
 		u := uuid.MustParse(s)
 		out.Aaguid = &u
@@ -71,7 +76,7 @@ func (a *App) userPasskey(p port.Passkey) adminapi.UserPasskey {
 	if n := a.root.metadata.Name(p.AAGUID); n != "" {
 		out.AuthenticatorName = &n
 	}
-	return out
+	return out, nil
 }
 
 // metadataRefresh は MDS の BLOB を読み直す間隔（既定 24 時間）。

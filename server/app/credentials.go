@@ -57,7 +57,11 @@ func (s adminServer) credentialsOut(ctx context.Context, tx port.Tx, m account.M
 		return out, err
 	}
 	for _, p := range m.Passkeys {
-		out.Passkeys = append(out.Passkeys, s.a.userPasskey(p))
+		up, err := s.a.userPasskey(ctx, tx, p)
+		if err != nil {
+			return out, err
+		}
+		out.Passkeys = append(out.Passkeys, up)
 	}
 	for _, i := range m.Identities {
 		out.Identities = append(out.Identities, adminapi.UserIdentity{Id: i.PublicID, Connection: slugs[i.ConnectionID], CreatedAt: i.CreatedAt})

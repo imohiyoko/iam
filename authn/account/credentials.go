@@ -28,8 +28,8 @@ func (s *Service) RevokeCredential(ctx context.Context, tx port.Tx, realmID, use
 	if err != nil {
 		return port.Credential{}, err
 	}
-	// パスワードはフィーチャーが止まっていてもログインの手段に数える（loginMethods と同じ）。
-	if c.Method == method.Password || s.Methods.Supports(c.Method, port.UsageFirstFactor) {
+	// パスワードと passkey は方式が動いていなくてもログインの手段に数える（loginMethods と同じ）。
+	if c.Method == method.Password || c.Method == method.Passkey || s.Methods.Supports(c.Method, port.UsageFirstFactor) {
 		m, err := s.ListMethods(ctx, tx, realmID, userID)
 		if err != nil {
 			return port.Credential{}, err
@@ -53,8 +53,18 @@ func (s *Service) RevokeCredential(ctx context.Context, tx port.Tx, realmID, use
 	if err := tx.Credentials().Revoke(ctx, realmID, c.ID, now, ReasonRevokedByUser); err != nil {
 		return port.Credential{}, err
 	}
-	return c, s.record(ctx, tx, realmID, "credential.revoked", actor, requestID,
-		map[string]any{"credential_id": c.PublicID, "method": c.Method, "reason": ReasonRevokedByUser})
+	return c, s.recordRevoked(ctx, tx, realmID, c, actor, requestID, map[string]any{"reason": ReasonRevokedByUser})
+}
+
+// recordRevoked は無効化を監査ログに残す。passkey は、方式専用のパスと同じ passkey.revoked で残す（ADR 0106）。
+func (s *Service) recordRevoked(ctx context.Context, tx port.Tx, realmID string, c port.Credential, actor audit.Actor, requestID string, details map[string]any) error {
+	typ := "credential.revoked"
+	if c.Method == method.Passkey {
+		typ, details["passkey_id"] = "passkey.revoked", c.PublicID
+	} else {
+		details["credential_id"], details["method"] = c.PublicID, c.Method
+	}
+	return s.record(ctx, tx, realmID, typ, actor, requestID, details)
 }
 
 // adminRevokeCredential は運営者が汎用の認証情報を無効化する。方式の Revoke は呼ばない（方式の都合で止められないように）。
@@ -66,6 +76,5 @@ func (s *Service) adminRevokeCredential(ctx context.Context, tx port.Tx, realmID
 	if err := tx.Credentials().Revoke(ctx, realmID, c.ID, s.Clock.Now(), ReasonRevokedByAdmin); err != nil {
 		return err
 	}
-	return s.record(ctx, tx, realmID, "credential.revoked", actor, requestID,
-		map[string]any{"user_id": u.PublicID, "credential_id": c.PublicID, "method": c.Method, "reason": ReasonRevokedByAdmin})
+	return s.recordRevoked(ctx, tx, realmID, c, actor, requestID, map[string]any{"user_id": u.PublicID, "reason": ReasonRevokedByAdmin})
 }

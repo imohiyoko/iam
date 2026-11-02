@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/adapters/storage/postgres/db"
-	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
+// passkeys は方式専用の表（authn_credentials への移行でだけ使う。ADR 0106）。
 type passkeys struct{ q *db.Queries }
 
 func toPasskey(r db.AuthnPasskey) (port.Passkey, error) {
@@ -36,13 +36,6 @@ func toPasskey(r db.AuthnPasskey) (port.Passkey, error) {
 }
 
 func (r passkeys) Create(ctx context.Context, k port.Passkey) error {
-	n, err := r.q.IsPasskeyCredentialRevoked(ctx, db.IsPasskeyCredentialRevokedParams{RealmID: k.RealmID, CredentialID: k.CredentialID})
-	if err != nil {
-		return mapErr(err)
-	}
-	if n > 0 {
-		return errs.New(errs.KindConflict, "passkey credential revoked")
-	}
 	transports := k.Transports
 	if transports == nil {
 		transports = []string{}
@@ -56,36 +49,6 @@ func (r passkeys) Create(ctx context.Context, k port.Passkey) error {
 		Aaguid: append([]byte{}, k.AAGUID...), Transports: string(tj), Name: k.Name, CreatedAt: formatTime(k.CreatedAt),
 		LastUsedAt: nullTime(k.LastUsedAt), RevokedAt: nullTime(k.RevokedAt), RevokeReason: k.RevokeReason, PreferredOrgID: k.PreferredOrgID,
 		UserHandle: append([]byte{}, k.UserHandle...), AttestationFormat: k.AttestationFormat, Attested: boolInt(k.Attested)}))
-}
-
-func (r passkeys) GetByCredentialID(ctx context.Context, realmID string, credentialID []byte) (port.Passkey, error) {
-	row, err := r.q.GetPasskeyByCredentialID(ctx, db.GetPasskeyByCredentialIDParams{RealmID: realmID, CredentialID: credentialID})
-	return one(row, err, toPasskey)
-}
-
-func (r passkeys) GetByPublicID(ctx context.Context, realmID, publicID string) (port.Passkey, error) {
-	row, err := r.q.GetPasskeyByPublicID(ctx, db.GetPasskeyByPublicIDParams{RealmID: realmID, PublicID: publicID})
-	return one(row, err, toPasskey)
-}
-
-func (r passkeys) ListByUser(ctx context.Context, realmID, userID string) ([]port.Passkey, error) {
-	rs, err := r.q.ListPasskeysByUser(ctx, db.ListPasskeysByUserParams{RealmID: realmID, UserID: userID})
-	return rows(rs, err, toPasskey)
-}
-
-func (r passkeys) Used(ctx context.Context, realmID, id string, signCount uint32, flags uint8, at time.Time) error {
-	n, err := r.q.UsePasskey(ctx, db.UsePasskeyParams{SignCount: int64(signCount), Flags: int64(flags), LastUsedAt: nullTime(&at), RealmID: realmID, ID: id})
-	return affected(n, err, "passkey")
-}
-
-func (r passkeys) Rename(ctx context.Context, realmID, id, name string) error {
-	n, err := r.q.RenamePasskey(ctx, db.RenamePasskeyParams{Name: name, RealmID: realmID, ID: id})
-	return affected(n, err, "passkey")
-}
-
-func (r passkeys) SetPreferredOrg(ctx context.Context, realmID, id, orgID string) error {
-	n, err := r.q.SetPasskeyPreferredOrg(ctx, db.SetPasskeyPreferredOrgParams{PreferredOrgID: orgID, RealmID: realmID, ID: id})
-	return affected(n, err, "passkey")
 }
 
 func (r passkeys) Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error {
@@ -102,10 +65,25 @@ func (r passkeys) Revoke(ctx context.Context, realmID, id string, at time.Time, 
 	return mapErr(r.q.RevokePasskey(ctx, db.RevokePasskeyParams{RevokedAt: nullTime(&at), RevokeReason: reason, RealmID: realmID, ID: id}))
 }
 
-func (r passkeys) MoveUser(ctx context.Context, realmID, fromUserID, toUserID string, handle []byte) (int, error) {
-	if err := r.q.SetPasskeyHandles(ctx, db.SetPasskeyHandlesParams{UserHandle: handle, RealmID: realmID, UserID: fromUserID}); err != nil {
-		return 0, mapErr(err)
-	}
-	n, err := r.q.MovePasskeys(ctx, db.MovePasskeysParams{ToUserID: toUserID, RealmID: realmID, FromUserID: fromUserID})
-	return int(n), mapErr(err)
+func (r passkeys) ListAll(ctx context.Context, limit int) ([]port.Passkey, error) {
+	rs, err := r.q.ListAllPasskeys(ctx, int64(limit))
+	return rows(rs, err, toPasskey)
+}
+
+func (r passkeys) Delete(ctx context.Context, realmID, id string) error {
+	return mapErr(r.q.DeletePasskey(ctx, db.DeletePasskeyParams{RealmID: realmID, ID: id}))
+}
+
+func toRevokedPasskey(r db.AuthnRevokedPasskeyCredential) (port.RevokedPasskeyCredential, error) {
+	var p times
+	return port.RevokedPasskeyCredential{RealmID: r.RealmID, CredentialID: r.CredentialID, RevokedAt: p.at(r.RevokedAt)}, p.err
+}
+
+func (r passkeys) ListRevoked(ctx context.Context, limit int) ([]port.RevokedPasskeyCredential, error) {
+	rs, err := r.q.ListRevokedPasskeyCredentials(ctx, int64(limit))
+	return rows(rs, err, toRevokedPasskey)
+}
+
+func (r passkeys) DeleteRevoked(ctx context.Context, realmID string, credentialID []byte) error {
+	return mapErr(r.q.DeleteRevokedPasskeyCredential(ctx, db.DeleteRevokedPasskeyCredentialParams{RealmID: realmID, CredentialID: credentialID}))
 }

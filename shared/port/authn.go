@@ -206,9 +206,8 @@ type DirectoryGroupRepo interface {
 	Purge(ctx context.Context, limit int) (int, error)
 }
 
-// Passkey は passkeys の1行（design.md 3.1、9.4）。公開鍵は COSE の形で持つ（秘密ではない）。
-// 無効化は削除ではなく RevokedAt を記録し、credential_id は revoked_passkey_credentials にも残す（4.6）。
-// ID は内部 ID で、API に出すのは PublicID（ADR 0045）。
+// Passkey は方式専用の表 authn_passkeys の1行（design.md 3.1、9.4）。passkey は認証方式のポートに移し（authn_credentials の
+// 方式 passkey。ADR 0106）、この表は起動時の移行でだけ読む（次のリリースで消す）。公開鍵は COSE の形で持つ（秘密ではない）。
 type Passkey struct {
 	ID           string
 	PublicID     string // 外部 ID。realm 内で一意
@@ -218,19 +217,18 @@ type Passkey struct {
 	PublicKey    []byte // COSE_Key
 	Alg          int64  // COSE のアルゴリズム（ES256 = -7、EdDSA = -8）
 	SignCount    uint32
-	// Flags は認証器のフラグ（UP、UV、BE、BS など）。BE は登録の後に変わらないことを検証に使う。
+	// Flags は認証器のフラグ（UP、UV、BE、BS など）。
 	Flags      uint8
 	AAGUID     []byte
 	Transports []string
 	Name       string
 	// PreferredOrgID はこの passkey でログインしたときに入る Org（内部 ID。4.4）。空なら指定なし。
 	PreferredOrgID string
-	// UserHandle は登録時のユーザーハンドル（WebAuthn の user.id）。空なら持ち主の公開 ID。統合（11.6）で移した passkey は
-	// 元のユーザーの公開 ID を持つ。
+	// UserHandle は登録時のユーザーハンドル（WebAuthn の user.id）。空なら持ち主の公開 ID。
 	UserHandle []byte
-	// AttestationFormat は登録のときの attestation の形式（none、packed など。ADR 0096）。空はこの列を足す前に登録したもの。
+	// AttestationFormat は登録のときの attestation の形式（none、packed など。ADR 0096）。
 	AttestationFormat string
-	// Attested は登録のときに attestation の証明書の連なりを信頼の起点（MDS か設定）まで確かめたか。既存の行は false。
+	// Attested は登録のときに attestation の証明書の連なりを信頼の起点まで確かめたか。
 	Attested     bool
 	CreatedAt    time.Time
 	LastUsedAt   *time.Time
@@ -238,28 +236,29 @@ type Passkey struct {
 	RevokeReason string
 }
 
-// PasskeyRepo は passkeys と revoked_passkey_credentials の Repository。
+// RevokedPasskeyCredential は方式専用の表 authn_revoked_passkey_credentials の1行（無効化した credential ID。4.6）。
+// 移行で authn_retired_credential_lookups へ移す（ADR 0106）。
+type RevokedPasskeyCredential struct {
+	RealmID      string
+	CredentialID []byte
+	RevokedAt    time.Time
+}
+
+// PasskeyRepo は方式専用の表（authn_passkeys と authn_revoked_passkey_credentials）の Repository。authn_credentials への
+// 移行（ADR 0106）でだけ使う。テストと移行の確認のために Create と Revoke を残す。
 type PasskeyRepo interface {
-	// Create は、(realm, CredentialID) か (realm, PublicID) が重複するか、CredentialID が無効化済み
-	// （revoked_passkey_credentials にある）なら errs.Conflict を返す（4.6 の再登録の拒否）。
+	// Create は、(realm, CredentialID) か (realm, PublicID) が重複すれば errs.Conflict を返す。
 	Create(ctx context.Context, p Passkey) error
-	// GetByCredentialID は無効化していない passkey を返す。無ければ errs.NotFound。
-	GetByCredentialID(ctx context.Context, realmID string, credentialID []byte) (Passkey, error)
-	GetByPublicID(ctx context.Context, realmID, publicID string) (Passkey, error)
-	// ListByUser はユーザーの passkey を作成時刻の順（同時刻は ID の順）に返す（無効化したものも含む）。
-	ListByUser(ctx context.Context, realmID, userID string) ([]Passkey, error)
-	// Used はログインに使ったことを記録する（署名の回数、フラグ、最終利用時刻）。無ければ errs.NotFound。
-	Used(ctx context.Context, realmID, id string, signCount uint32, flags uint8, at time.Time) error
-	// Rename は名前を変える。無ければ errs.NotFound。
-	Rename(ctx context.Context, realmID, id, name string) error
-	// SetPreferredOrg はログインで入る Org（内部 ID。空なら指定なし）を変える。無ければ errs.NotFound。
-	SetPreferredOrg(ctx context.Context, realmID, id, orgID string) error
-	// Revoke は at に無効化し、credential_id を無効化済みに加える。既に無効化されていれば何もしない。
-	// 無ければ errs.NotFound。
+	// Revoke は at に無効化し、credential_id を無効化済みに加える。既に無効化されていれば何もしない。無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
-	// MoveUser は fromUserID の passkey（無効化したものも）を toUserID に移し、移した数を返す（統合。11.6）。UserHandle が
-	// 空のものには handle（元の持ち主の公開 ID）を入れる。
-	MoveUser(ctx context.Context, realmID, fromUserID, toUserID string, handle []byte) (int, error)
+	// ListAll は全 realm の passkey を ID の順に最大 limit 件返す（無効化したものも）。
+	ListAll(ctx context.Context, limit int) ([]Passkey, error)
+	// Delete は行を消す（移した後）。無ければ何もしない。
+	Delete(ctx context.Context, realmID, id string) error
+	// ListRevoked は全 realm の無効化済みの credential ID を (realm, credential_id) の順に最大 limit 件返す。
+	ListRevoked(ctx context.Context, limit int) ([]RevokedPasskeyCredential, error)
+	// DeleteRevoked は無効化済みの credential ID を消す（移した後）。無ければ何もしない。
+	DeleteRevoked(ctx context.Context, realmID string, credentialID []byte) error
 }
 
 // TOTPCredential は totp_credentials の1行（design.md 3.1、4.1）。秘密はユーザーのデータ鍵で暗号化する（9.5）。

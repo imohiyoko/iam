@@ -12622,6 +12622,21 @@ func (response FinishRegisterPasskey409JSONResponse) VisitFinishRegisterPasskeyR
 	return err
 }
 
+type FinishRegisterPasskey429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response FinishRegisterPasskey429JSONResponse) VisitFinishRegisterPasskeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartRegisterPasskeyRequestObject struct {
 }
 

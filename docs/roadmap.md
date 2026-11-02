@@ -382,7 +382,12 @@ Group のネスト、Org 階層（M7）。
   完了の条件：方式専用の表の行（無効化したものも）が起動で移り、台帳に記録され、移す前のバイナリが起動を拒む。汎用のパスと方式専用の
   パスが同じ処理で動き、amr・AAL・acr と既存のテストが変わらない。パスワードのハッシュを直列のトランザクションの外で計算する。
   メモリ・SQLite・PostgreSQL で移行に使う Storage の操作の契約テストが通る
-- [ ] passkey を `authn_credentials` へ移す
+- [x] passkey を `authn/method/passkey` に移し、`authn_credentials` に置く（ADR 0106）。
+  完了の条件：方式専用の表の行（無効化したものも）と無効化した credential ID が起動で移り、台帳に記録され、移す前のバイナリが起動を拒む。
+  無効化した credential ID はユーザーの消去の後も再登録できない。方式専用のパス（ログイン・2要素目・登録・名前の変更・既定の Org）と
+  汎用のパスが同じ処理で動き、amr・AAL・attestation のポリシー（ADR 0096）と監査ログの種類、既存のテストが変わらない。チャレンジは
+  1 回限り。保存したデータ・入力・フローの状態の読み取りにファジングのテストがある。メモリ・SQLite・PostgreSQL で契約テストが通る
+- [ ] 方式専用の古い表（`authn_passkeys`・`authn_revoked_passkey_credentials`）と、その Repository を消す（ADR 0106 の次のリリース）
 - [ ] 方式のペイロードの JSON Schema と OpenAPI の `oneOf`、ホスト型のログイン画面への表示
 
 #### acr・AAL と step-up（ADR 0093）
