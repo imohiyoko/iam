@@ -55,6 +55,9 @@ type (
 	BreachCheckFactory func(context.Context, Config) (port.BreachChecker, error)
 	// FIDOMDSFactory は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation で使う。ADR 0096）。
 	FIDOMDSFactory func(context.Context, Config) (port.FIDOMetadataSource, error)
+	// SMSSenderFactory と PushSenderFactory は送信（フィーチャー sms_otp・push_auth。ADR 0104）。
+	SMSSenderFactory  func(context.Context, Config) (port.SMSSender, error)
+	PushSenderFactory func(context.Context, Config) (port.PushSender, error)
 	// GeoIPFactory は接続元の場所を引く（フィーチャー login_risk で使う。ADR 0105）。
 	GeoIPFactory func(context.Context, Config) (port.GeoIP, error)
 	// BotCheckFactory はボットの確認のトークンを確かめる（フィーチャー bot_protection で使う。ADR 0105）。
@@ -72,6 +75,8 @@ const (
 	KindEventSink   Kind = "event_sink"
 	KindBreachCheck Kind = "breach_check"
 	KindFIDOMDS     Kind = "fido_mds"
+	KindSMSSender   Kind = "sms_sender"
+	KindPushSender  Kind = "push_sender"
 	KindGeoIP       Kind = "geoip"
 	KindBotCheck    Kind = "bot_check"
 )
@@ -102,7 +107,14 @@ func RegisterBreachCheck(name string, f BreachCheckFactory) {
 	register(KindBreachCheck, name, f)
 }
 func RegisterFIDOMDS(name string, f FIDOMDSFactory) { register(KindFIDOMDS, name, f) }
-func RegisterGeoIP(name string, f GeoIPFactory)     { register(KindGeoIP, name, f) }
+func RegisterSMSSender(name string, f SMSSenderFactory) {
+	register(KindSMSSender, name, f)
+}
+func RegisterPushSender(name string, f PushSenderFactory) {
+	register(KindPushSender, name, f)
+}
+
+func RegisterGeoIP(name string, f GeoIPFactory) { register(KindGeoIP, name, f) }
 func RegisterBotCheck(name string, f BotCheckFactory) {
 	register(KindBotCheck, name, f)
 }
@@ -137,6 +149,14 @@ func BreachCheck(name string) (BreachCheckFactory, error) {
 }
 
 func FIDOMDS(name string) (FIDOMDSFactory, error) { return lookup[FIDOMDSFactory](KindFIDOMDS, name) }
+
+func SMSSender(name string) (SMSSenderFactory, error) {
+	return lookup[SMSSenderFactory](KindSMSSender, name)
+}
+
+func PushSender(name string) (PushSenderFactory, error) {
+	return lookup[PushSenderFactory](KindPushSender, name)
+}
 
 func GeoIP(name string) (GeoIPFactory, error) { return lookup[GeoIPFactory](KindGeoIP, name) }
 

@@ -6,6 +6,7 @@
 package method
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"slices"
@@ -92,6 +93,12 @@ type Set struct {
 // Active は登録した方式のうち、宣言したフィーチャーが動いているもの（featureActive が true）と、extra（組み込み用。
 // フィーチャーを問わない）の組を返す。名前が重なれば extra を優先する。
 func Active(featureActive func(string) bool, extra ...port.Authenticator) (*Set, error) {
+	return ActiveWith(context.Background(), featureActive, nil, extra...)
+}
+
+// ActiveWith は Active と同じで、設定を持つ方式（port.ConfigurableAuthenticator）に setup の結果を渡して設定する（ADR 0104）。
+// 設定に失敗すればエラー（起動を止める）。
+func ActiveWith(ctx context.Context, featureActive func(string) bool, setup func(port.MethodInfo) port.MethodSetup, extra ...port.Authenticator) (*Set, error) {
 	s := &Set{m: map[string]port.Authenticator{}}
 	for _, a := range Registered() {
 		if featureActive(a.Info().Feature) {
@@ -103,6 +110,13 @@ func Active(featureActive func(string) bool, extra ...port.Authenticator) (*Set,
 			return nil, err
 		}
 		s.m[a.Info().Name] = a
+	}
+	for n, a := range s.m {
+		c, err := Configure(ctx, a, setup)
+		if err != nil {
+			return nil, err
+		}
+		s.m[n] = c
 	}
 	return s, nil
 }

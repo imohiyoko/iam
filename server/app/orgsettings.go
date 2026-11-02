@@ -73,6 +73,9 @@ func policyOut(p *org.LoginPolicy) *publicapi.OrgLoginPolicy {
 	if p.MinAAL != 0 {
 		out.MinAal = &p.MinAAL
 	}
+	if p.DenyRestrictedAuthenticators {
+		out.DenyRestrictedAuthenticators = &p.DenyRestrictedAuthenticators
+	}
 	return &out
 }
 
@@ -96,6 +99,9 @@ func policyIn(p *publicapi.OrgLoginPolicy) *org.LoginPolicy {
 	out.Passkey = passkeyPolicyIn(p.Passkey)
 	if p.MinAal != nil {
 		out.MinAAL = *p.MinAal
+	}
+	if p.DenyRestrictedAuthenticators != nil {
+		out.DenyRestrictedAuthenticators = *p.DenyRestrictedAuthenticators
 	}
 	return &out
 }
@@ -185,7 +191,8 @@ func adminSettingsView(v publicapi.OrgSettingsView) adminapi.OrgSettingsView {
 		MaxAuthAgeSeconds: v.Settings.MaxAuthAgeSeconds, Requirements: v.Settings.Requirements}
 	if p := v.Settings.LoginPolicy; p != nil {
 		out.Settings.LoginPolicy = &adminapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist,
-			RequireSso: p.RequireSso, Passkey: passkeyPolicyOut[adminapi.PasskeyPolicy](passkeyPolicyIn(p.Passkey)), MinAal: p.MinAal}
+			RequireSso: p.RequireSso, Passkey: passkeyPolicyOut[adminapi.PasskeyPolicy](passkeyPolicyIn(p.Passkey)), MinAal: p.MinAal,
+			DenyRestrictedAuthenticators: p.DenyRestrictedAuthenticators}
 	}
 	if v.Settings.Warnings != nil {
 		w := make(map[string]adminapi.OrgSettingsWarnings, len(*v.Settings.Warnings))
@@ -378,7 +385,8 @@ func (s adminServer) putOrgSettings(ctx context.Context, req adminapi.PutOrgSett
 	st.Warnings = actionsIn(b.Warnings)
 	if p := b.LoginPolicy; p != nil {
 		st.LoginPolicy = policyIn(&publicapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist,
-			RequireSso: p.RequireSso, Passkey: passkeyPolicyOut[publicapi.PasskeyPolicy](passkeyPolicyIn(p.Passkey)), MinAal: p.MinAal})
+			RequireSso: p.RequireSso, Passkey: passkeyPolicyOut[publicapi.PasskeyPolicy](passkeyPolicyIn(p.Passkey)), MinAal: p.MinAal,
+			DenyRestrictedAuthenticators: p.DenyRestrictedAuthenticators})
 	}
 	rs, err := requirementsIn(b.Requirements)
 	if o, ok, err := outcomeOf(nil, err); !ok {

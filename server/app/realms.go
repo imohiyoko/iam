@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -42,7 +43,12 @@ type realmSettings struct {
 	// PasskeyPolicy は realm の段の認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。null は「無し」
 	// （設定ファイルの値を引き継がない）。項目が無い（この項目を足す前に作った realm）なら設定ファイルの値。
 	PasskeyPolicy *attestation.Policy `json:"passkey_policy"`
+	// DisabledMethods はこの realm で止める認証方式のプラグイン（ADR 0104。SMS など制限付きの認証器を realm ごとに止める）。
+	DisabledMethods []string `json:"disabled_methods"`
 }
+
+// maxDisabledMethods は DisabledMethods の件数の上限（API の maxItems と同じ）。
+const maxDisabledMethods = 32
 
 // maxDeclaredContextClients は DeclaredContextClients の件数の上限（API の maxItems と同じ）。
 const maxDeclaredContextClients = 100
@@ -59,7 +65,7 @@ func defaultRealmSettings(c config.Realm) realmSettings {
 		Timezone: c.Timezone, VerifiedVia: slices.Clone(c.VerifiedVia), OrgCreation: c.OrgCreation,
 		OrgDeletionGraceSeconds: int64(c.OrgDeletionGrace.D() / time.Second), UserDeletionGraceSeconds: int64(c.UserDeletionGrace.D() / time.Second),
 		EmailStorage: c.EmailStorage, QuotaCount: realmQuotaSettings(c.QuotaCount), DeclaredContextClients: slices.Clone(c.DeclaredContextClients),
-		PasskeyPolicy: normalizedPolicy(c.PasskeyPolicy),
+		PasskeyPolicy: normalizedPolicy(c.PasskeyPolicy), DisabledMethods: slices.Clone(c.DisabledMethods),
 	}
 }
 
@@ -109,6 +115,9 @@ func (s realmSettings) validate() error {
 	}
 	if _, err := attestation.Normalize(s.PasskeyPolicy); err != nil {
 		problems = append(problems, "passkey_policy")
+	}
+	if len(s.DisabledMethods) > maxDisabledMethods || slices.ContainsFunc(s.DisabledMethods, func(n string) bool { return !method.ValidName(n) }) {
+		problems = append(problems, "disabled_methods")
 	}
 	if len(problems) > 0 {
 		return errs.WithCode(errs.KindInvalid, "invalid_realm_settings", "invalid realm settings: "+strings.Join(problems, ", "))

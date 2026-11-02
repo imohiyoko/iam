@@ -43,6 +43,8 @@ const (
 	ACR                 = "acr"
 	SAML                = "saml"
 	LDAP                = "ldap"
+	SMSOTP              = "sms_otp"
+	PushAuth            = "push_auth"
 	// ADR 0105。
 	AccountLockout    = "account_lockout"
 	DeviceRecognition = "device_recognition"

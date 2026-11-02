@@ -25,6 +25,8 @@ import (
 	"github.com/imohiyoko/iam/authn/method/hotp"
 	"github.com/imohiyoko/iam/authn/method/ldap"
 	"github.com/imohiyoko/iam/authn/method/password"
+	"github.com/imohiyoko/iam/authn/method/push"
+	"github.com/imohiyoko/iam/authn/method/sms"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/provider"
@@ -74,6 +76,8 @@ var featureCatalog = map[string]struct {
 	feature.DeviceRecognition:  {device.Feature, module + "/features/devicerecognition"},
 	feature.LoginRisk:          {device.RiskFeature, module + "/features/loginrisk"},
 	feature.BotProtection:      {botcheck.Feature, module + "/features/botprotection"},
+	feature.SMSOTP:             {sms.Feature, module + "/features/sms"},
+	feature.PushAuth:           {push.Feature, module + "/features/push"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。
@@ -92,9 +96,11 @@ var adapterCatalog = map[plugin.Kind]map[string]string{
 	plugin.KindFIDOMDS:     {"file": module + "/adapters/fidomds/file", "http": module + "/adapters/fidomds/http"},
 	plugin.KindGeoIP:       {"static": module + "/adapters/geoip/static"},
 	plugin.KindBotCheck:    {"siteverify": module + "/adapters/botcheck/siteverify", "dev": module + "/adapters/botcheck/dev"},
+	plugin.KindSMSSender:   {"dev": module + "/adapters/sms/dev", "twilio": module + "/adapters/sms/twilio"},
+	plugin.KindPushSender:  {"dev": module + "/adapters/push/dev", "webhook": module + "/adapters/push/webhook"},
 }
 
-// requiredKinds は起動に必ず要るアダプタの種類（breach_check・fido_mds・geoip・bot_check は任意）。
+// requiredKinds は起動に必ず要るアダプタの種類（breach_check・fido_mds・geoip・bot_check・sms_sender・push_sender は任意）。
 var requiredKinds = []plugin.Kind{plugin.KindStorage, plugin.KindEphemeral, plugin.KindKeyStore, plugin.KindEventSink, plugin.KindNotifier}
 
 // Spec は build.yaml。

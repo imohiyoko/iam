@@ -283,6 +283,41 @@ type Notifier interface {
 	Notify(ctx context.Context, n Notification) error
 }
 
+// SMSMessage は SMS・音声で送るコード（ADR 0104）。0031 の例外として、宛先の番号とコードを事業者に渡す。名前・メールアドレス・
+// ユーザーの ID は入れない。
+type SMSMessage struct {
+	// To は E.164 の番号（+ と数字）。
+	To string
+	// Channel は "sms" か "voice"。
+	Channel string
+	// Code は送るコード（数字）。
+	Code string
+	// ExpiresAt はコードの期限。
+	ExpiresAt time.Time
+}
+
+// SMSSender は SMS・音声でコードを送る（フィーチャー sms_otp）。エラーなら届かなかったとみなす。
+type SMSSender interface {
+	Send(ctx context.Context, m SMSMessage) error
+}
+
+// PushMessage は本人の端末に送るプッシュの承認の要求（ADR 0104）。照合する番号は入れない。
+type PushMessage struct {
+	// Token は端末の宛先（FCM の登録トークン、APNs のデバイストークンなど）。
+	Token string
+	// Platform は端末が登録のときに申告した種類（"apns"・"fcm" など。空でもよい）。
+	Platform string
+	// ChallengeID と DeviceID は、端末が応答に署名する値。
+	ChallengeID string
+	DeviceID    string
+	ExpiresAt   time.Time
+}
+
+// PushSender は本人の端末にプッシュを送る（フィーチャー push_auth）。
+type PushSender interface {
+	Send(ctx context.Context, m PushMessage) error
+}
+
 // BreachChecker は漏洩済みパスワードの確認（design.md 4.1）。パスワードそのものは渡さない。
 // 外部に問い合わせるアダプタは k-匿名（SHA-1 の先頭 5 文字）で問い合わせ、残りを手元で照合する。
 type BreachChecker interface {

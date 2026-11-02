@@ -59,6 +59,50 @@ func objectPayload(raw json.RawMessage) (map[string]any, error) {
 	return out, nil
 }
 
+// pendingInterval は、別の経路からの応答を待つ間に complete を呼び直すまでの秒数（ADR 0104）。
+const pendingInterval = 2
+
+// client は要求の接続元（方式の接続元ごとの制限と監査ログ）。
+func (s publicServer) client(ctx context.Context) credential.Client {
+	c := s.a.clientOf(ctx)
+	return credential.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}
+}
+
+// MethodCallback は、別の経路（本人の端末など）からの応答を方式に渡す（ADR 0104）。セッションを要さない。
+func (s publicServer) MethodCallback(ctx context.Context, req publicapi.MethodCallbackRequestObject) (publicapi.MethodCallbackResponseObject, error) {
+	if _, err := s.a.credentials.Method(req.Method, ""); err != nil {
+		return publicapi.MethodCallback404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	}
+	bad := publicapi.MethodCallback400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}
+	if req.Body == nil {
+		return bad, nil
+	}
+	p, err := rawPayload(req.Body.Payload)
+	if err != nil {
+		return bad, nil
+	}
+	out, err := s.a.credentials.Callback(ctx, s.a.realm.ID, req.Method, p, s.client(ctx))
+	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
+		return publicapi.MethodCallback429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+	}
+	if code, ok := invalidPayload(err); ok {
+		return publicapi.MethodCallback400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: code}}, nil
+	}
+	switch {
+	case errors.Is(err, credential.ErrUnknownMethod):
+		return publicapi.MethodCallback404JSONResponse{NotFoundJSONResponse: notFound()}, nil
+	case errors.Is(err, errs.AuthenticationFailed):
+		return publicapi.MethodCallback401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
+	case err != nil:
+		return nil, err
+	}
+	payload, err := objectPayload(out)
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.MethodCallback200JSONResponse{Payload: payload}, nil
+}
+
 func challengeOut(ch credential.Challenge) (publicapi.MethodChallenge, error) {
 	p, err := objectPayload(ch.Payload)
 	return publicapi.MethodChallenge{FlowId: ch.FlowID, Payload: p, ExpiresAt: ch.ExpiresAt}, err
@@ -91,9 +135,12 @@ func (s publicServer) BeginMethodLogin(ctx context.Context, req publicapi.BeginM
 			return fail, nil
 		}
 	}
-	ch, err := s.a.credentials.Begin(ctx, s.a.realm.ID, "", req.Method, port.UsageFirstFactor, p)
+	ch, err := s.a.credentials.Begin(ctx, s.a.realm.ID, "", req.Method, port.UsageFirstFactor, p, s.client(ctx))
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.BeginMethodLogin429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+	}
+	if errors.Is(err, port.ErrDeliveryFailed) {
+		return publicapi.BeginMethodLogin503JSONResponse{Error: "delivery_failed"}, nil
 	}
 	if err != nil {
 		if errors.Is(err, errs.AuthenticationFailed) || errors.Is(err, errs.Invalid) {
@@ -126,6 +173,9 @@ func (s publicServer) CompleteMethodLogin(ctx context.Context, req publicapi.Com
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.CompleteMethodLogin429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
+	if errors.Is(err, port.ErrMethodPending) {
+		return publicapi.CompleteMethodLogin202JSONResponse{Status: publicapi.MethodPendingStatusPending, Interval: pendingInterval}, nil
+	}
 	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.CompleteMethodLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
@@ -154,8 +204,13 @@ func (s publicServer) BeginSecondFactorMethod(ctx context.Context, req publicapi
 			return fail, nil
 		}
 	}
-	ch, err := s.a.credentials.Begin(ctx, s.a.realm.ID, au.PrincipalID, req.Method, port.UsageSecondFactor, p)
+	ch, err := s.a.credentials.Begin(ctx, s.a.realm.ID, au.PrincipalID, req.Method, port.UsageSecondFactor, p, s.client(ctx))
+	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
+		return publicapi.BeginSecondFactorMethod429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+	}
 	switch {
+	case errors.Is(err, port.ErrDeliveryFailed):
+		return publicapi.BeginSecondFactorMethod503JSONResponse{Error: "delivery_failed"}, nil
 	case errors.Is(err, errs.NotFound):
 		// 本人がその方式の認証情報を持たない（本人確認の後なので区別してよい）。
 		return publicapi.BeginSecondFactorMethod404JSONResponse{NotFoundJSONResponse: notFound()}, nil
@@ -189,6 +244,9 @@ func (s publicServer) CompleteSecondFactorMethod(ctx context.Context, req public
 		credential.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID})
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.CompleteSecondFactorMethod429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+	}
+	if errors.Is(err, port.ErrMethodPending) {
+		return publicapi.CompleteSecondFactorMethod202JSONResponse{Status: publicapi.MethodPendingStatusPending, Interval: pendingInterval}, nil
 	}
 	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.CompleteSecondFactorMethod403JSONResponse{DeniedJSONResponse: denied(d)}, nil
@@ -238,9 +296,12 @@ func (s publicServer) BeginEnrollCredential(ctx context.Context, req publicapi.B
 	}
 	// 汎用のパスは直近の認証を求める（stale）ので RecentAuth。復旧専用のセッションでは、今の秘密を求めない再設定になる（ADR 0101）。
 	ch, err := s.a.credentials.EnrollBegin(ctx, s.a.realm.ID, au.PrincipalID, req.Method, p,
-		credential.EnrollOptions{Recovery: au.Restriction == port.RestrictionRecovery, RecentAuth: true})
+		credential.EnrollOptions{Recovery: au.Restriction == port.RestrictionRecovery, RecentAuth: true, Client: s.client(ctx)})
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.BeginEnrollCredential429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+	}
+	if errors.Is(err, port.ErrDeliveryFailed) {
+		return publicapi.BeginEnrollCredential503JSONResponse{Error: "delivery_failed"}, nil
 	}
 	if code, ok := invalidPayload(err); ok {
 		return publicapi.BeginEnrollCredential400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: code}}, nil

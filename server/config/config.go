@@ -42,6 +42,13 @@ type Config struct {
 	// FIDOMDS は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation。ADR 0096）。driver が空なら
 	// MDS を読まない（設定した信頼の起点だけで確かめる）。
 	FIDOMDS Adapter `yaml:"fido_mds"`
+	// SMSSender は SMS・音声のコードの送信（フィーチャー sms_otp。ADR 0104）。フィーチャーが動いていて driver が空なら起動しない。
+	SMSSender Adapter `yaml:"sms_sender"`
+	// PushSender は本人の端末へのプッシュの送信（フィーチャー push_auth。ADR 0104）。
+	PushSender Adapter `yaml:"push_sender"`
+
+	// Methods は認証方式のプラグインごとの設定（methods.<方式>.<項目>。ADR 0104）。項目は方式が確かめ、知らない項目は起動を止める。
+	Methods map[string]map[string]string `yaml:"methods"`
 	// GeoIP は接続元の場所を引く（フィーチャー login_risk。ADR 0105）。driver が空なら ip のリスクを評価しない。
 	GeoIP Adapter `yaml:"geoip"`
 	// BotCheck はボットの確認のトークンを確かめる（フィーチャー bot_protection。ADR 0105）。フィーチャーが動いていれば必須。
@@ -265,6 +272,8 @@ type Realm struct {
 	DeclaredContextClients []string `yaml:"declared_context_clients"`
 	// PasskeyPolicy は認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。登録とログインのたびに判定する。
 	PasskeyPolicy *attestation.Policy `yaml:"passkey_policy"`
+	// DisabledMethods は既定の realm で止める認証方式のプラグイン（方式の名前。ADR 0104）。新しい realm の既定値にもなる。
+	DisabledMethods []string `yaml:"disabled_methods"`
 }
 
 // KnownEmailStorage は realm.email_storage の値。
@@ -614,6 +623,25 @@ func (c Config) validatePasskey() []string {
 	return problems
 }
 
+// methodNameRE は認証方式のプラグインの名前（authn/method と同じ）。
+var methodNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+
+// validateMethods は methods と realm.disabled_methods の方式の名前の形を確かめる（項目は起動時に方式が確かめる。ADR 0104）。
+func (c Config) validateMethods() []string {
+	var problems []string
+	for name := range c.Methods {
+		if !methodNameRE.MatchString(name) {
+			problems = append(problems, fmt.Sprintf("methods: invalid method name %q", name))
+		}
+	}
+	for _, name := range c.Realm.DisabledMethods {
+		if !methodNameRE.MatchString(name) {
+			problems = append(problems, fmt.Sprintf("realm.disabled_methods: invalid method name %q", name))
+		}
+	}
+	return problems
+}
+
 func (c Config) validateAttestation() []string {
 	var problems []string
 	a := c.Passkey.Attestation
@@ -820,6 +848,7 @@ func (c Config) Validate() error {
 	problems = append(problems, c.validatePasskey()...)
 	problems = append(problems, c.validateAttestation()...)
 	problems = append(problems, c.validateHooks()...)
+	problems = append(problems, c.validateMethods()...)
 	problems = append(problems, c.validateLoginProtection()...)
 	if len(problems) > 0 {
 		return fmt.Errorf("config: %s", strings.Join(problems, "; "))

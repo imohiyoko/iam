@@ -29,8 +29,8 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | WebAuthn の attestation、AAGUID の許可リスト、FIDO MDS | S C | ✅ | 企業が認めた鍵だけを通す。フィーチャー `passkey_attestation`（ADR 0096） |
 | TOTP | S（RFC 6238） | ✅ | |
 | HOTP・ハードウェアトークン | S（RFC 4226）P | ✅ | フィーチャー `hotp`（ADR 0092）。2要素目 |
-| SMS・音声の OTP | P | ❌ | SP 800-63B では制限付き。Notifier 経由 |
-| プッシュ通知の承認（番号の照合付き） | P | ❌ | |
+| SMS・音声の OTP | P | ✅ | フィーチャー `sms_otp`（ADR 0104）。2要素目。SP 800-63B の制限付きの認証器で、realm と Org で止められる。送信は `sms_sender`（`twilio`） |
+| プッシュ通知の承認（番号の照合付き） | P | ✅ | フィーチャー `push_auth`（ADR 0104）。2要素目。端末の鍵の署名、番号の照合、拒否が続けば止める。送信は `push_sender`（`webhook`） |
 | X.509 クライアント証明書・スマートカード（PIV、CAC） | S P C | ❌ | |
 | Kerberos／SPNEGO | S P | ❌ | |
 | LDAP のバインド認証 | P | ✅ | フィーチャー `ldap`（ADR 0102）。Active Directory も。ホスト型の画面は後続 |

@@ -3205,6 +3205,11 @@ components:
           maximum: 3
           description: >-
             amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（理由は policy.min_aal）。フィーチャー acr も要る（ADR 0093）
+        deny_restricted_authenticators:
+          type: boolean
+          description: >-
+            amr に SP 800-63B の制限付きの認証器（SMS・音声の OTP。sms・tel）があるセッションを入れない（理由は
+            policy.restricted_authenticator。ADR 0104）
     PasskeyPolicy:
       type: object
       description: >-
@@ -3955,6 +3960,13 @@ components:
         passkey_policy:
           allOf: [{ $ref: "#/components/schemas/PasskeyPolicy" }]
           description: realm の段の認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。空のオブジェクトで外す
+        disabled_methods:
+          type: array
+          maxItems: 32
+          description: >-
+            この realm で止める認証方式のプラグインの名前（`sms` など。ADR 0104）。止めた方式はこの realm で 404 になる。
+            登録済みの認証情報は残る
+          items: { type: string }
     Realm:
       type: object
       required: [id, slug, hosts, default, settings, created_at, updated_at]
@@ -3989,6 +4001,9 @@ components:
               type: array
               items: { type: string }
             passkey_policy: { $ref: "#/components/schemas/PasskeyPolicy" }
+            disabled_methods:
+              type: array
+              items: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     RealmInput:
