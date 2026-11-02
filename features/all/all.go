@@ -18,6 +18,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/multirealm"
 	_ "github.com/imohiyoko/iam/features/nestedgroups"
 	_ "github.com/imohiyoko/iam/features/oidclogout"
+	_ "github.com/imohiyoko/iam/features/openid4vp"
 	_ "github.com/imohiyoko/iam/features/org"
 	_ "github.com/imohiyoko/iam/features/orgauditlog"
 	_ "github.com/imohiyoko/iam/features/orghierarchy"

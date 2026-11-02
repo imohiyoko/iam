@@ -24,6 +24,7 @@ import (
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method/hotp"
 	"github.com/imohiyoko/iam/authn/method/ldap"
+	"github.com/imohiyoko/iam/authn/method/openid4vp"
 	"github.com/imohiyoko/iam/authn/method/password"
 	"github.com/imohiyoko/iam/authn/method/push"
 	"github.com/imohiyoko/iam/authn/method/sms"
@@ -80,6 +81,7 @@ var featureCatalog = map[string]struct {
 	feature.SMSOTP:             {sms.Feature, module + "/features/sms"},
 	feature.PushAuth:           {push.Feature, module + "/features/push"},
 	feature.X509:               {x509method.Feature, module + "/features/x509"},
+	feature.OpenID4VP:          {openid4vp.Feature, module + "/features/openid4vp"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

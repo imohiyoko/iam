@@ -53,9 +53,15 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 		}
 		api.ServeHTTP(w, r)
 	}))
+	endpoints := a.withLoginGuard(http.HandlerFunc(a.methodEndpoint))
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSAMLACS(r) {
 			login.ServeHTTP(w, r)
+			return
+		}
+		// 方式のエンドポイント（ADR 0108）はウォレットなど、ブラウザでない相手から別オリジンで届く。
+		if isMethodEndpoint(r) {
+			endpoints.ServeHTTP(w, r)
 			return
 		}
 		csrf.ServeHTTP(w, r)

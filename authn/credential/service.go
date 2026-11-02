@@ -368,6 +368,34 @@ func (s *Service) Callback(ctx context.Context, realmID, name string, p json.Raw
 	return payload(r.Payload), nil
 }
 
+// ErrEndpointRejected は方式のエンドポイントが入力を拒んだこと（照合の失敗・入力の誤り・見つからない。外には 400）。
+var ErrEndpointRejected = errs.WithCode(errs.KindInvalid, "invalid_request", "method endpoint rejected the request")
+
+// Endpoint は方式のエンドポイント（port.EndpointAuthenticator。ADR 0108）を呼ぶ。方式が持たなければ ErrUnknownMethod。
+// 方式が拒めば ErrEndpointRejected。方式はトランザクションの外で呼び、監査ログは後で記録する。
+func (s *Service) Endpoint(ctx context.Context, realmID, name string, req port.MethodHTTPRequest, c Client) (port.MethodHTTPResponse, error) {
+	a, err := s.Method(name, "")
+	if err != nil {
+		return port.MethodHTTPResponse{}, err
+	}
+	ep, ok := a.(port.EndpointAuthenticator)
+	if !ok || !method.ValidName(req.Endpoint) {
+		return port.MethodHTTPResponse{}, ErrUnknownMethod
+	}
+	env := s.env(ctx, nil, realmID, "", a, "")
+	env.ClientIP = c.IP
+	r, err := ep.Endpoint(ctx, env, req)
+	if errors.Is(err, errs.AuthenticationFailed) || errors.Is(err, errs.Invalid) || errors.Is(err, errs.NotFound) {
+		s.logger().DebugContext(ctx, "method endpoint rejected", "method", name, "endpoint", req.Endpoint, "error", err)
+		return port.MethodHTTPResponse{}, ErrEndpointRejected
+	}
+	if err != nil {
+		return port.MethodHTTPResponse{}, err
+	}
+	s.record(ctx, realmID, name, c, r.Events)
+	return r, nil
+}
+
 func (s *Service) start(ctx context.Context, f flow, p json.RawMessage) (Challenge, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -802,8 +830,9 @@ func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, in EnrollInput
 	if err != nil {
 		return Enrolled{}, err
 	}
-	// 知識の要素は始め（今の秘密の照合）で数えたので、ここでは数えない。
-	if a.Info().Kind != port.FactorKnowledge {
+	// 知識の要素は始め（今の秘密の照合）で数えたので、ここでは数えない。別の経路から応答が届く方式は、待っている間（pending）の
+	// 呼び直しを数えないように、方式が答えた後に数える（ADR 0104、0108）。
+	if a.Info().Kind != port.FactorKnowledge && !a.Info().OutOfBand {
 		if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
 			return Enrolled{}, err
 		}
@@ -818,6 +847,15 @@ func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, in EnrollInput
 		e.Usage = port.UsageRecovery
 	}
 	en, err := a.EnrollComplete(ctx, e, port.MethodRequest{Payload: in.Payload, State: f.State})
+	// 別の経路からの応答を待つ方式（ADR 0104、0108）は、フローを回数を数えずに置き直す。呼び出し側はトランザクションを巻き戻す。
+	if errors.Is(err, port.ErrMethodPending) && a.Info().OutOfBand {
+		return Enrolled{}, s.pending(ctx, in.FlowID, f)
+	}
+	if a.Info().Kind != port.FactorKnowledge && a.Info().OutOfBand {
+		if lerr := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); lerr != nil {
+			return Enrolled{}, lerr
+		}
+	}
 	if errors.Is(err, errs.AuthenticationFailed) {
 		s.retry(ctx, in.FlowID, f)
 		s.logger().DebugContext(ctx, "enrollment rejected", "method", name, "error", err)

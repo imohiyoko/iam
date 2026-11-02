@@ -362,6 +362,9 @@ func (s publicServer) CompleteEnrollCredential(ctx context.Context, req publicap
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.CompleteEnrollCredential429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
+	if errors.Is(err, port.ErrMethodPending) {
+		return publicapi.CompleteEnrollCredential202JSONResponse{Status: publicapi.MethodPendingStatusPending, Interval: pendingInterval}, nil
+	}
 	if code, ok := invalidPayload(err); ok {
 		return publicapi.CompleteEnrollCredential400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: code}}, nil
 	}

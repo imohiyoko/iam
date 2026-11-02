@@ -51,6 +51,8 @@ const (
 	DeviceRecognition = "device_recognition"
 	LoginRisk         = "login_risk"
 	BotProtection     = "bot_protection"
+	// ADR 0108。
+	OpenID4VP = "openid4vp"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

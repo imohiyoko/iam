@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net/url"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/clock"
@@ -219,6 +220,35 @@ type CallbackAuthenticator interface {
 	Callback(ctx context.Context, env MethodEnv, in MethodRequest) (MethodCallbackResult, error)
 }
 
+// MethodHTTPRequest は方式のエンドポイント（EndpointAuthenticator）への要求（ADR 0108）。
+type MethodHTTPRequest struct {
+	// Endpoint はパスの {endpoint}（方式が決める名前。小文字の英数字と `_`）。
+	Endpoint string
+	// HTTPMethod は GET か POST。
+	HTTPMethod string
+	// Query はクエリ。Form は application/x-www-form-urlencoded の本文（POST だけ。それ以外の本文は渡さない）。
+	Query, Form url.Values
+}
+
+// MethodHTTPResponse は方式のエンドポイントの応答。コアは Cache-Control: no-store を付けて、そのまま返す。
+type MethodHTTPResponse struct {
+	Status      int
+	ContentType string
+	Body        []byte
+	// Events は、応答の後にコアが記録する方式の監査ログ。
+	Events []MethodEvent
+}
+
+// EndpointAuthenticator は、HTTP の形を外部の仕様が決めるエンドポイントを持つ方式（任意。ADR 0108）。OpenID4VP のウォレットの
+// request_uri・response_uri のように、JSON の汎用のパスを話せない相手から呼ばれる。
+// GET・POST /v1/login/methods/{method}/endpoints/{endpoint} で、セッションを要さず、CrossOriginProtection の外で呼ぶ。
+// 本人の確認は方式が行い、入力は全部疑う。env.UserID と env.Usage は空。照合の失敗・入力の誤り・見つからないは errs.AuthenticationFailed・
+// errs.Invalid・errs.NotFound で返す（コアは 400 にする）。
+type EndpointAuthenticator interface {
+	Authenticator
+	Endpoint(ctx context.Context, env MethodEnv, req MethodHTTPRequest) (MethodHTTPResponse, error)
+}
+
 // MethodSetup は、設定を持つ方式（ConfigurableAuthenticator）に起動時に渡すもの（ADR 0104）。
 type MethodSetup struct {
 	// RealmID は方式を使う realm（方式は realm ごとに設定する）。
@@ -239,6 +269,9 @@ type MethodSetup struct {
 	// SMS と Push は送信のポート。設定されていなければ nil。
 	SMS  SMSSender
 	Push PushSender
+	// BaseURL は realm の公開の URL（server.public_url。realm のパスの接頭辞を含み、末尾の / は無い）。外部に渡す
+	// 戻り先の URL（OpenID4VP の response_uri など。ADR 0108）を作るのに使う。設定されていなければ空。
+	BaseURL string
 	// Dev は開発モードか。
 	Dev   bool
 	Clock clock.Clock
