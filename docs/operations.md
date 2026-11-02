@@ -76,7 +76,7 @@ SQLite から PostgreSQL へ（逆も）：
 
 1. 書き込みを止める（インスタンスを止める）
 2. `iam storage export -config from.yaml -out dump.jsonl`
-3. 移行先の KeyStore に、移行元と同じ鍵（`master_keys` と `index_keys`、監査の鍵を使っていれば `audit_keys` と `current_audit_key`、`audit_unkeyed_until`）を置く。新しい鍵を作らない（書き出しは鍵を含まず、`storage import` は鍵が合うかを確かめないので、違う鍵では個人情報を復号できず、メールの検索もできない）
+3. 移行先の KeyStore に、移行元と同じ鍵（`master_keys` と `index_keys`、監査の鍵を使っていれば `audit_keys` と `current_audit_key`、`audit_unkeyed_until`）を置く。新しい鍵を作らない（書き出しは鍵を含まず、`storage import` はマスター鍵・インデックス鍵が合うかを確かめないので、違う鍵では個人情報を復号できず、メールの検索もできない）
 4. 移行先で `iam migrate -config to.yaml`、続けて `iam storage import -config to.yaml -in dump.jsonl`（空の Storage にだけ入る。監査ログのチェーンを検証する）
 5. 設定を移行先に変えて起動する
 
