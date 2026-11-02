@@ -61,6 +61,8 @@ const (
 	WSFed = "wsfed"
 	// CIBA は OpenID Connect Client-Initiated Backchannel Authentication（ADR 0114）。
 	CIBA = "ciba"
+	// SAMLIdP は SAML 2.0 の IdP（iam が IdP。ADR 0115）。
+	SAMLIdP = "saml_idp"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

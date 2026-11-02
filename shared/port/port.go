@@ -78,6 +78,8 @@ type Tx interface {
 	OIDCTokens() OIDCTokenRepo
 	// WSFed は WS-Federation の RP と署名の証明書（フィーチャー wsfed。ADR 0110）。
 	WSFed() WSFedRepo
+	// SAMLIdP は SAML の SP の登録と IdP の署名の証明書（フィーチャー saml_idp。ADR 0115）。
+	SAMLIdP() SAMLIdPRepo
 }
 
 // Realm はユーザー集合の単位（design.md 3.1）。

@@ -103,6 +103,9 @@ type state struct {
 	// pats は本人の Personal Access Token、patPolicies は realm ごとのポリシー（キーは realm_id。ADR 0109）。
 	pats        map[string]port.PersonalAccessToken
 	patPolicies map[string]port.PersonalAccessTokenPolicy
+	// samlSPs と samlCerts は SAML の SP の登録と IdP の署名の証明書（ADR 0115）。キーは realm_id + ID / key_id。
+	samlSPs   map[string]port.SAMLServiceProvider
+	samlCerts map[string]port.SAMLIdPCertificate
 }
 
 // Storage はインメモリの Storage。
@@ -133,6 +136,7 @@ func New(clk clock.Clock) *Storage {
 		dirGroups: map[string]port.DirectoryGroup{},
 		wsfedRPs:  map[string]port.WSFedRelyingParty{}, wsfedCerts: map[string]port.WSFedCertificate{},
 		pats: map[string]port.PersonalAccessToken{}, patPolicies: map[string]port.PersonalAccessTokenPolicy{},
+		samlSPs: map[string]port.SAMLServiceProvider{}, samlCerts: map[string]port.SAMLIdPCertificate{},
 	}}
 }
 
@@ -212,6 +216,9 @@ func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t} }
 
 // PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t} }
+
+// SAMLIdP は SAML の SP の登録と IdP の署名の証明書（ADR 0115）。
+func (t *tx) SAMLIdP() port.SAMLIdPRepo { return samlIdP{t} }
 
 // setKey は map の値を設定し、取り消し方を記録する。
 func setKey[K comparable, V any](t *tx, m map[K]V, k K, v V) {

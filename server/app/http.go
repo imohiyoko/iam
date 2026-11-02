@@ -55,6 +55,8 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 	}))
 	// WS-Federation（ADR 0110）は別のオリジンの RP からのトップレベルの遷移で届く。フィーチャーがオフなら API と同じ 404。
 	federation := newWSFedHandler(a)
+	// SAML の IdP（ADR 0115）も別のオリジンの SP からのトップレベルの遷移（GET と自動の POST）で届く。
+	samlIdP := newSAMLIdPHandler(a)
 	endpoints := a.withLoginGuard(http.HandlerFunc(a.methodEndpoint))
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSAMLACS(r) {
@@ -63,6 +65,10 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 		}
 		if federation != nil && isWSFed(r.URL.Path) {
 			federation.ServeHTTP(w, r)
+			return
+		}
+		if samlIdP != nil && isSAMLIdP(r.URL.Path) {
+			samlIdP.ServeHTTP(w, r)
 			return
 		}
 		// 方式のエンドポイント（ADR 0108）はウォレットなど、ブラウザでない相手から別オリジンで届く。

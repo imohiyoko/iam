@@ -223,6 +223,9 @@ clients              id, realm_id, name, trust_level（first_party / third_party
 wsfed_relying_parties  id, realm_id, realm（wtrealm）, name, reply_urls, token_type（saml11 / saml20）, claims, token_lifetime
                      UNIQUE (realm_id, realm)。WS-Federation の RP（5.8、ADR 0110）
 wsfed_certificates   realm_id, key_id（signing_keys の ID）, der, PK (realm_id, key_id)。署名鍵の自己署名の証明書
+saml_service_providers  id, realm_id, entity_id, name, config（ACS・SLO・証明書・NameID・属性・署名と暗号化。JSON）
+                     UNIQUE (realm_id, entity_id)。SAML の SP（5.9、ADR 0115）
+saml_idp_certificates  realm_id, key_id, der, PK (realm_id, key_id)。SAML の IdP の署名鍵の自己署名の証明書
 
 user_attributes      user_id, key, value, PK (user_id, key)（11.7 の汎用形。アダプタが別の持ち方を選んでもよい）
 
@@ -644,6 +647,23 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 - `wa=wsignout1.0`：登録済みの `wtrealm` と `wreply` のときだけ、確かめずにセッションを失効させて戻す（`POST /v1/logout` と同じ）
 - RP は管理 API（`/v1/admin/wsfed/relying-parties`、`clients:manage`）で realm ごとに登録する
 
+### 5.9 SAML 2.0 の IdP
+
+フィーチャー `saml_idp`（既定オフ。ADR 0115）。SAML 2.0 の Web Browser SSO と Single Logout で、iam が IdP になる。Entity ID は realm の issuer。
+
+- `/saml/idp/sso`：AuthnRequest を HTTP-Redirect（GET）と HTTP-POST（POST）で受ける。Issuer が登録した SP で、ACS（URL・番号）が登録と完全一致し、
+  署名（あれば必ず確かめる。SP ごとに必須にできる）が SP の証明書で確かめられるときだけ受け、どの誤りも SP に戻さずに 400 の画面にする。
+  署名を確かめた後は署名を確かめた要素からだけ読む（XML Signature Wrapping を防ぐ）。要求の ID は 1 回だけ
+- HTTP-POST の要求は Lax の Cookie が届かないので、封をして預けて `/saml/idp/sso/resume` へ 303 で回す。ForceAuthn・RequestedAuthnContext
+  （acr。11.15）をセッションが満たさなければログイン画面へ回し、IsPassive なら NoPassive を返す。応えられない内容は ACS へ失敗の Response で返す
+- 応答は ACS へ自動で POST する画面（CSP の `form-action` は ACS のオリジンだけ）。bearer の Assertion（Audience は SP の Entity ID、NameID は
+  公開のユーザー ID・確認済みのメール・属性・transient、属性は SP ごとの対応）を realm の ES256 の鍵で XML 署名する（Assertion・Response。9.3）。
+  SP の RSA の証明書があれば AES-128-GCM と RSA-OAEP で暗号化する
+- IdP-initiated（`/saml/idp/init`）は SP ごとに許したときだけ
+- `/saml/idp/slo`：署名した LogoutRequest の本人（NameID・SessionIndex）がブラウザのセッションの本人ならセッションを失効させ（`POST /v1/logout` と同じ）、
+  SP の SLO へ署名した LogoutResponse を返す。ほかの SP への伝播はしない
+- SP は管理 API（`/v1/admin/saml/service-providers`、`clients:manage`）で realm ごとに登録する。メタデータは `/saml/idp/metadata`（署名付き）
+
 ## 6. 監査ログとイベント出力
 
 ### 6.1 記録するもの
@@ -727,6 +747,8 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 - 実装：zitadel/oidc の go-jose に `OpaqueSigner` で `crypto/mldsa` を差し込む。JWKS の AKP 出力は jwx で組み立てる（ADR 0038）
 - RS256 を出さないため、OIDC Discovery には厳密には適合しない（既知の差異）
 - WS-Federation（5.8）の Assertion とメタデータは、同じ realm の ES256 の鍵で XML 署名する（ECDSA-SHA256、Exclusive C14N、署名の値は `r||s`）。鍵ごとの自己署名の証明書を `wsfed_certificates` に置いて同じものを出す。RSA しか読めない RP とはつながらない
+- SAML の IdP（5.9）の Assertion・Response・LogoutResponse・メタデータも同じ鍵と形で署名し、証明書は `saml_idp_certificates` に置く。受け取った XML 署名の検証は、
+  ECDSA の `r||s` の値も受ける（SAML の SP の側も同じ。ADR 0115）
 
 ### 9.4 外部の RSA
 
@@ -841,6 +863,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | 本人の Personal Access Token（11.18、ADR 0109） | オフ | ― | PAT の API は 404。`iampat_` のトークンはどの経路でも通らない。無効化でトークンと realm のポリシーを消す |
 | WS-Federation（5.8、ADR 0110） | オフ | ― | `/wsfed` とメタデータは 404、RP の管理 API は `404 wsfed_disabled`。無効化は RP と署名の証明書を消して完了 |
 | CIBA（11.19、ADR 0114） | オフ | ― | backchannel authentication エンドポイントと本人の API は 404、CIBA の grant は `unsupported_grant_type`。Discovery に出さない。無効化は連携先の登録を外して完了 |
+| SAML 2.0 の IdP（5.9、ADR 0115） | オフ | ― | `/saml/idp/*` は 404、SP の管理 API は `404 saml_idp_disabled`。無効化は SP の登録と署名の証明書を消して完了 |
 
 ### 11.1 複数 realm
 
