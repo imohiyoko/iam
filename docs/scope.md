@@ -28,7 +28,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | passkey（WebAuthn L3） | S（W3C、FIDO2） | ✅ | Related Origin Requests も |
 | WebAuthn の attestation、AAGUID の許可リスト、FIDO MDS | S C | ✅ | 企業が認めた鍵だけを通す。フィーチャー `passkey_attestation`（ADR 0096） |
 | TOTP | S（RFC 6238） | ✅ | |
-| HOTP・ハードウェアトークン | S（RFC 4226）P | ❌ | |
+| HOTP・ハードウェアトークン | S（RFC 4226）P | ✅ | フィーチャー `hotp`（ADR 0092）。2要素目 |
 | SMS・音声の OTP | P | ❌ | SP 800-63B では制限付き。Notifier 経由 |
 | プッシュ通知の承認（番号の照合付き） | P | ❌ | |
 | X.509 クライアント証明書・スマートカード（PIV、CAC） | S P C | ❌ | |
@@ -38,7 +38,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 外部 IdP（SAML 2.0） | S P C | ✅ | ADR 0098。Single Logout・暗号化された Assertion は後続 |
 | 運営者が発行するログインリンク | P | ✅ | |
 | Verifiable Credentials（OpenID4VP、mdoc） | S | ❌ | |
-| 外部の認証方式（プラグイン・Webhook） | P | ❌ | ADR 0090 |
+| 外部の認証方式（プラグイン・Webhook） | P | △ | ADR 0090。Go のプラグインはある（ADR 0092）。外部 Authenticator のアダプタは未 |
 
 ## 2. 多要素・保証レベル・リスク
 
@@ -176,6 +176,6 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | --- | --- | --- | --- |
 | フロー フック | P | ✅ | |
 | アダプタの自己登録、ビルド時に選ぶフィーチャー | P | ✅ | |
-| 認証方式のプラグイン（ADR 0090） | P | ❌ | |
+| 認証方式のプラグイン（ADR 0090） | P | △ | ポート・汎用の認証情報・汎用の HTTP（ADR 0092）。既存の方式の移行は未 |
 | 画面のテーマ、i18n | P | △ | |
 | 通知の文面のテンプレートと SMTP | P | ⛔ | ADR 0031 |

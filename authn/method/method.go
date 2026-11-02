@@ -1,0 +1,131 @@
+// Package method は認証方式のプラグイン（port.Authenticator）の登録と、コアが方式に渡す認証情報のストアを持つ
+// （ADR 0090、0092）。
+//
+// 方式は authn/method/<name>/ に置き、features/<name> を import すると Register で登録される（フィーチャーと同じ。ADR 0073）。
+// 登録した方式は、宣言したフィーチャーが動いているときだけ使える（Active）。
+package method
+
+import (
+	"fmt"
+	"regexp"
+	"slices"
+	"sort"
+	"sync"
+
+	"github.com/imohiyoko/iam/shared/port"
+)
+
+// nameRE は方式の名前（API のパスと authn_credentials.method に使う）。
+var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+
+// ValidName は name が方式の名前の形かを返す。
+func ValidName(name string) bool { return nameRE.MatchString(name) }
+
+var (
+	mu       sync.Mutex
+	registry = map[string]port.Authenticator{}
+)
+
+// Check は方式の宣言を確かめる。
+func Check(a port.Authenticator) error {
+	i := a.Info()
+	switch {
+	case !ValidName(i.Name):
+		return fmt.Errorf("method: invalid name %q", i.Name)
+	case i.Feature == "":
+		return fmt.Errorf("method: %s has no feature", i.Name)
+	case i.Kind != port.FactorKnowledge && i.Kind != port.FactorPossession && i.Kind != port.FactorInherence:
+		return fmt.Errorf("method: %s has unknown factor kind %q", i.Name, i.Kind)
+	case i.AAL < 1 || i.AAL > 3:
+		return fmt.Errorf("method: %s has invalid AAL %d", i.Name, i.AAL)
+	case len(i.Usages) == 0 || len(i.AMR) == 0:
+		return fmt.Errorf("method: %s declares no usage or amr", i.Name)
+	case i.DataVersion < 1:
+		return fmt.Errorf("method: %s has invalid data version", i.Name)
+	}
+	for _, u := range i.Usages {
+		if u != port.UsageFirstFactor && u != port.UsageSecondFactor && u != port.UsageRecovery && u != port.UsageStepUp {
+			return fmt.Errorf("method: %s has unknown usage %q", i.Name, u)
+		}
+	}
+	return nil
+}
+
+// Register は方式を登録する。features/<name> の init から呼ぶ。
+func Register(a port.Authenticator) {
+	mu.Lock()
+	defer mu.Unlock()
+	if err := Check(a); err != nil {
+		panic(err.Error())
+	}
+	name := a.Info().Name
+	if _, dup := registry[name]; dup {
+		panic("method: duplicate registration: " + name)
+	}
+	registry[name] = a
+}
+
+// Registered はバイナリに含まれる方式を名前順に返す。
+func Registered() []port.Authenticator {
+	mu.Lock()
+	defer mu.Unlock()
+	out := make([]port.Authenticator, 0, len(registry))
+	for _, a := range registry {
+		out = append(out, a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Info().Name < out[j].Info().Name })
+	return out
+}
+
+// Set は動いている方式の組。nil は方式が無いことを表す。
+type Set struct {
+	m map[string]port.Authenticator
+}
+
+// Active は登録した方式のうち、宣言したフィーチャーが動いているもの（featureActive が true）と、extra（組み込み用。
+// フィーチャーを問わない）の組を返す。名前が重なれば extra を優先する。
+func Active(featureActive func(string) bool, extra ...port.Authenticator) (*Set, error) {
+	s := &Set{m: map[string]port.Authenticator{}}
+	for _, a := range Registered() {
+		if featureActive(a.Info().Feature) {
+			s.m[a.Info().Name] = a
+		}
+	}
+	for _, a := range extra {
+		if err := Check(a); err != nil {
+			return nil, err
+		}
+		s.m[a.Info().Name] = a
+	}
+	return s, nil
+}
+
+// Get は名前の方式を返す。
+func (s *Set) Get(name string) (port.Authenticator, bool) {
+	if s == nil {
+		return nil, false
+	}
+	a, ok := s.m[name]
+	return a, ok
+}
+
+// Supports は方式 name が動いていて、用途 u に使えるかを返す。
+func (s *Set) Supports(name string, u port.MethodUsage) bool {
+	a, ok := s.Get(name)
+	return ok && a.Info().Supports(u)
+}
+
+// Names は用途 u に使える方式の名前を名前順に返す。u が空なら全部。
+func (s *Set) Names(u port.MethodUsage) []string {
+	if s == nil {
+		return nil
+	}
+	var out []string
+	for n, a := range s.m {
+		if u == "" || a.Info().Supports(u) {
+			out = append(out, n)
+		}
+	}
+	slices.Sort(out)
+	return out
+}

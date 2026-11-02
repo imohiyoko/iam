@@ -520,7 +520,7 @@ type LoginResult struct {
 	// OrgId セッションが入った Org（公開 ID。Org がオフなら無し。4.4）
 	OrgId *string `json:"org_id,omitempty"`
 
-	// SecondFactorMethods `next: second_factor` のとき使える2要素目（`passkey`、`totp`）
+	// SecondFactorMethods `next: second_factor` のとき使える2要素目（`passkey`、`totp`、認証方式のプラグインの名前（`hotp` など））
 	SecondFactorMethods *[]string `json:"second_factor_methods,omitempty"`
 	SessionId           string    `json:"session_id"`
 
@@ -603,6 +603,30 @@ type MeGroup struct {
 	Name string `json:"name"`
 }
 
+// MethodBeginRequest defines model for MethodBeginRequest.
+type MethodBeginRequest struct {
+	// Payload 方式ごとの入力
+	Payload *map[string]interface{} `json:"payload,omitempty"`
+}
+
+// MethodChallenge defines model for MethodChallenge.
+type MethodChallenge struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	FlowId    string    `json:"flow_id"`
+
+	// Payload 方式ごとの応答
+	Payload map[string]interface{} `json:"payload"`
+}
+
+// MethodCompleteRequest defines model for MethodCompleteRequest.
+type MethodCompleteRequest struct {
+	FlowId string `json:"flow_id"`
+
+	// Payload 方式ごとの入力
+	Payload     *map[string]interface{} `json:"payload,omitempty"`
+	ReturnToken *bool                   `json:"return_token,omitempty"`
+}
+
 // MyAttributes defines model for MyAttributes.
 type MyAttributes struct {
 	Attributes map[string]interface{} `json:"attributes"`
@@ -620,6 +644,18 @@ type MyCheckRequest struct {
 
 	// ResourceType `org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`
 	ResourceType *string `json:"resource_type,omitempty"`
+}
+
+// MyCredential defines model for MyCredential.
+type MyCredential struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id 公開の認証情報の ID（crd_…）
+	Id         string     `json:"id"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+
+	// Method 方式の名前（hotp など）
+	Method string `json:"method"`
 }
 
 // MyEmail defines model for MyEmail.
@@ -1395,6 +1431,12 @@ type VerifyEmailLoginJSONRequestBody VerifyEmailLoginJSONBody
 // RedeemLoginLinkJSONRequestBody defines body for RedeemLoginLink for application/json ContentType.
 type RedeemLoginLinkJSONRequestBody RedeemLoginLinkJSONBody
 
+// BeginMethodLoginJSONRequestBody defines body for BeginMethodLogin for application/json ContentType.
+type BeginMethodLoginJSONRequestBody = MethodBeginRequest
+
+// CompleteMethodLoginJSONRequestBody defines body for CompleteMethodLogin for application/json ContentType.
+type CompleteMethodLoginJSONRequestBody = MethodCompleteRequest
+
 // StartOAuthLoginJSONRequestBody defines body for StartOAuthLogin for application/json ContentType.
 type StartOAuthLoginJSONRequestBody StartOAuthLoginJSONBody
 
@@ -1410,6 +1452,12 @@ type PasswordLoginJSONRequestBody PasswordLoginJSONBody
 // CompleteSAMLLoginJSONRequestBody defines body for CompleteSAMLLogin for application/json ContentType.
 type CompleteSAMLLoginJSONRequestBody CompleteSAMLLoginJSONBody
 
+// BeginSecondFactorMethodJSONRequestBody defines body for BeginSecondFactorMethod for application/json ContentType.
+type BeginSecondFactorMethodJSONRequestBody = MethodBeginRequest
+
+// CompleteSecondFactorMethodJSONRequestBody defines body for CompleteSecondFactorMethod for application/json ContentType.
+type CompleteSecondFactorMethodJSONRequestBody = MethodCompleteRequest
+
 // VerifySecondFactorJSONRequestBody defines body for VerifySecondFactor for application/json ContentType.
 type VerifySecondFactorJSONRequestBody VerifySecondFactorJSONBody
 
@@ -1421,6 +1469,12 @@ type CancelMyAccountDeletionJSONRequestBody CancelMyAccountDeletionJSONBody
 
 // UpdateMyAttributesJSONRequestBody defines body for UpdateMyAttributes for application/json ContentType.
 type UpdateMyAttributesJSONRequestBody UpdateMyAttributesJSONBody
+
+// BeginEnrollCredentialJSONRequestBody defines body for BeginEnrollCredential for application/json ContentType.
+type BeginEnrollCredentialJSONRequestBody = MethodBeginRequest
+
+// CompleteEnrollCredentialJSONRequestBody defines body for CompleteEnrollCredential for application/json ContentType.
+type CompleteEnrollCredentialJSONRequestBody = MethodCompleteRequest
 
 // StartAddEmailJSONRequestBody defines body for StartAddEmail for application/json ContentType.
 type StartAddEmailJSONRequestBody StartAddEmailJSONBody
@@ -1550,6 +1604,12 @@ type ServerInterface interface {
 	// RedeemLoginLink 運営者が発行したログイン用リンクでログインする
 	// (POST /v1/login/link:redeem)
 	RedeemLoginLink(w http.ResponseWriter, r *http.Request)
+	// BeginMethodLogin 認証方式のプラグインでログインを始める（1要素目）
+	// (POST /v1/login/methods/{method}:begin)
+	BeginMethodLogin(w http.ResponseWriter, r *http.Request, method string)
+	// CompleteMethodLogin 認証方式のプラグインでログインを完了する（1要素目）
+	// (POST /v1/login/methods/{method}:complete)
+	CompleteMethodLogin(w http.ResponseWriter, r *http.Request, method string)
 	// StartOAuthLogin 外部プロバイダ（OAuth / OIDC）による登録・ログインを始める
 	// (POST /v1/login/oauth/{connection}:start)
 	StartOAuthLogin(w http.ResponseWriter, r *http.Request, connection string)
@@ -1574,6 +1634,12 @@ type ServerInterface interface {
 	// StartSecondFactorPasskey 2要素目の passkey の確認を始める
 	// (POST /v1/login/second-factor/passkey:start)
 	StartSecondFactorPasskey(w http.ResponseWriter, r *http.Request)
+	// BeginSecondFactorMethod 認証方式のプラグインで2要素目の確認を始める
+	// (POST /v1/login/second-factor/{method}:begin)
+	BeginSecondFactorMethod(w http.ResponseWriter, r *http.Request, method string)
+	// CompleteSecondFactorMethod 認証方式のプラグインで2要素目を確かめ、通常のセッションに替える
+	// (POST /v1/login/second-factor/{method}:complete)
+	CompleteSecondFactorMethod(w http.ResponseWriter, r *http.Request, method string)
 	// VerifySecondFactor 2要素目を確かめ、通常のセッションに替える
 	// (POST /v1/login/second-factor:verify)
 	VerifySecondFactor(w http.ResponseWriter, r *http.Request)
@@ -1598,6 +1664,15 @@ type ServerInterface interface {
 	// UpdateMyAttributes 自分のカスタム属性の値を書く
 	// (PATCH /v1/me/attributes)
 	UpdateMyAttributes(w http.ResponseWriter, r *http.Request)
+	// RevokeMyCredential 認証方式のプラグインの認証情報を無効化する
+	// (POST /v1/me/credentials/{id}:revoke)
+	RevokeMyCredential(w http.ResponseWriter, r *http.Request, id string)
+	// BeginEnrollCredential 認証方式のプラグインの認証情報の登録を始める
+	// (POST /v1/me/credentials/{method}:enroll-begin)
+	BeginEnrollCredential(w http.ResponseWriter, r *http.Request, method string)
+	// CompleteEnrollCredential 認証方式のプラグインの認証情報の登録を完了する
+	// (POST /v1/me/credentials/{method}:enroll-complete)
+	CompleteEnrollCredential(w http.ResponseWriter, r *http.Request, method string)
 	// MakeMyEmailPrimary 確認済みのメールを primary にする
 	// (POST /v1/me/emails/{id}:make-primary)
 	MakeMyEmailPrimary(w http.ResponseWriter, r *http.Request, id string)
@@ -1631,7 +1706,7 @@ type ServerInterface interface {
 	// MergeIntoMe 別のアカウントをこのアカウントに統合する（取り消し不可）
 	// (POST /v1/me/merges)
 	MergeIntoMe(w http.ResponseWriter, r *http.Request)
-	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
+	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、認証方式のプラグインの認証情報、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(w http.ResponseWriter, r *http.Request)
 	// ListMyOrgs 本人の Org の一覧（終了した Membership は含めない。11.13）
@@ -1927,6 +2002,58 @@ func (siw *ServerInterfaceWrapper) RedeemLoginLink(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// BeginMethodLogin operation middleware
+func (siw *ServerInterfaceWrapper) BeginMethodLogin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "method" -------------
+	var method string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "method", r.PathValue("method"), &method, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "method", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BeginMethodLogin(w, r, method)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteMethodLogin operation middleware
+func (siw *ServerInterfaceWrapper) CompleteMethodLogin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "method" -------------
+	var method string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "method", r.PathValue("method"), &method, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "method", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteMethodLogin(w, r, method)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartOAuthLogin operation middleware
 func (siw *ServerInterfaceWrapper) StartOAuthLogin(w http.ResponseWriter, r *http.Request) {
 
@@ -2063,6 +2190,58 @@ func (siw *ServerInterfaceWrapper) StartSecondFactorPasskey(w http.ResponseWrite
 	handler.ServeHTTP(w, r)
 }
 
+// BeginSecondFactorMethod operation middleware
+func (siw *ServerInterfaceWrapper) BeginSecondFactorMethod(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "method" -------------
+	var method string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "method", r.PathValue("method"), &method, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "method", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BeginSecondFactorMethod(w, r, method)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteSecondFactorMethod operation middleware
+func (siw *ServerInterfaceWrapper) CompleteSecondFactorMethod(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "method" -------------
+	var method string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "method", r.PathValue("method"), &method, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "method", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteSecondFactorMethod(w, r, method)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // VerifySecondFactor operation middleware
 func (siw *ServerInterfaceWrapper) VerifySecondFactor(w http.ResponseWriter, r *http.Request) {
 
@@ -2166,6 +2345,84 @@ func (siw *ServerInterfaceWrapper) UpdateMyAttributes(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateMyAttributes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeMyCredential operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMyCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeMyCredential(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BeginEnrollCredential operation middleware
+func (siw *ServerInterfaceWrapper) BeginEnrollCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "method" -------------
+	var method string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "method", r.PathValue("method"), &method, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "method", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BeginEnrollCredential(w, r, method)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteEnrollCredential operation middleware
+func (siw *ServerInterfaceWrapper) CompleteEnrollCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "method" -------------
+	var method string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "method", r.PathValue("method"), &method, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "method", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteEnrollCredential(w, r, method)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4271,6 +4528,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/password", wrapper.PasswordLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor/passkey:start", wrapper.StartSecondFactorPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor:verify", wrapper.VerifySecondFactor)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/methods/{method}:begin", wrapper.BeginMethodLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/methods/{method}:complete", wrapper.CompleteMethodLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor/{method}:begin", wrapper.BeginSecondFactorMethod)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor/{method}:complete", wrapper.CompleteSecondFactorMethod)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/recovery/code:redeem", wrapper.RedeemRecoveryCode)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/recovery/email:start", wrapper.StartEmailRecovery)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/recovery/email:verify", wrapper.VerifyEmailRecovery)
@@ -4306,6 +4567,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:start", wrapper.StartRegisterTOTP)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp:confirm", wrapper.ConfirmRegisterTOTP)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/totp/{id}:revoke", wrapper.RevokeMyTOTP)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/credentials/{method}:enroll-begin", wrapper.BeginEnrollCredential)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/credentials/{method}:enroll-complete", wrapper.CompleteEnrollCredential)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/credentials/{id}:revoke", wrapper.RevokeMyCredential)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs", wrapper.ListMyOrgs)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs", wrapper.CreateMyOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/members", wrapper.ListOrgMembers)
@@ -4704,6 +4968,152 @@ func (response RedeemLoginLink403JSONResponse) VisitRedeemLoginLinkResponse(w ht
 type RedeemLoginLink429JSONResponse struct{ RateLimitedJSONResponse }
 
 func (response RedeemLoginLink429JSONResponse) VisitRedeemLoginLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginMethodLoginRequestObject struct {
+	Method string `json:"method"`
+	Body   *BeginMethodLoginJSONRequestBody
+}
+
+type BeginMethodLoginResponseObject interface {
+	VisitBeginMethodLoginResponse(w http.ResponseWriter) error
+}
+
+type BeginMethodLogin200JSONResponse MethodChallenge
+
+func (response BeginMethodLogin200JSONResponse) VisitBeginMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginMethodLogin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response BeginMethodLogin401JSONResponse) VisitBeginMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginMethodLogin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response BeginMethodLogin404JSONResponse) VisitBeginMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginMethodLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response BeginMethodLogin429JSONResponse) VisitBeginMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteMethodLoginRequestObject struct {
+	Method string `json:"method"`
+	Body   *CompleteMethodLoginJSONRequestBody
+}
+
+type CompleteMethodLoginResponseObject interface {
+	VisitCompleteMethodLoginResponse(w http.ResponseWriter) error
+}
+
+type CompleteMethodLogin200JSONResponse LoginResult
+
+func (response CompleteMethodLogin200JSONResponse) VisitCompleteMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteMethodLogin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteMethodLogin401JSONResponse) VisitCompleteMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteMethodLogin403JSONResponse struct{ DeniedJSONResponse }
+
+func (response CompleteMethodLogin403JSONResponse) VisitCompleteMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteMethodLogin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CompleteMethodLogin404JSONResponse) VisitCompleteMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteMethodLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response CompleteMethodLogin429JSONResponse) VisitCompleteMethodLoginResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -5280,6 +5690,137 @@ func (response StartSecondFactorPasskey404JSONResponse) VisitStartSecondFactorPa
 	return err
 }
 
+type BeginSecondFactorMethodRequestObject struct {
+	Method string `json:"method"`
+	Body   *BeginSecondFactorMethodJSONRequestBody
+}
+
+type BeginSecondFactorMethodResponseObject interface {
+	VisitBeginSecondFactorMethodResponse(w http.ResponseWriter) error
+}
+
+type BeginSecondFactorMethod200JSONResponse MethodChallenge
+
+func (response BeginSecondFactorMethod200JSONResponse) VisitBeginSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginSecondFactorMethod401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response BeginSecondFactorMethod401JSONResponse) VisitBeginSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginSecondFactorMethod404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response BeginSecondFactorMethod404JSONResponse) VisitBeginSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSecondFactorMethodRequestObject struct {
+	Method string `json:"method"`
+	Body   *CompleteSecondFactorMethodJSONRequestBody
+}
+
+type CompleteSecondFactorMethodResponseObject interface {
+	VisitCompleteSecondFactorMethodResponse(w http.ResponseWriter) error
+}
+
+type CompleteSecondFactorMethod200JSONResponse LoginResult
+
+func (response CompleteSecondFactorMethod200JSONResponse) VisitCompleteSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSecondFactorMethod401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteSecondFactorMethod401JSONResponse) VisitCompleteSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSecondFactorMethod403JSONResponse struct{ DeniedJSONResponse }
+
+func (response CompleteSecondFactorMethod403JSONResponse) VisitCompleteSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSecondFactorMethod404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CompleteSecondFactorMethod404JSONResponse) VisitCompleteSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSecondFactorMethod429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response CompleteSecondFactorMethod429JSONResponse) VisitCompleteSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type VerifySecondFactorRequestObject struct {
 	Body *VerifySecondFactorJSONRequestBody
 }
@@ -5689,6 +6230,246 @@ func (response UpdateMyAttributes404JSONResponse) VisitUpdateMyAttributesRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyCredentialRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RevokeMyCredentialResponseObject interface {
+	VisitRevokeMyCredentialResponse(w http.ResponseWriter) error
+}
+
+type RevokeMyCredential204Response struct {
+}
+
+func (response RevokeMyCredential204Response) VisitRevokeMyCredentialResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeMyCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeMyCredential401JSONResponse) VisitRevokeMyCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeMyCredential404JSONResponse) VisitRevokeMyCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyCredential409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RevokeMyCredential409JSONResponse) VisitRevokeMyCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginEnrollCredentialRequestObject struct {
+	Method string `json:"method"`
+	Body   *BeginEnrollCredentialJSONRequestBody
+}
+
+type BeginEnrollCredentialResponseObject interface {
+	VisitBeginEnrollCredentialResponse(w http.ResponseWriter) error
+}
+
+type BeginEnrollCredential200JSONResponse MethodChallenge
+
+func (response BeginEnrollCredential200JSONResponse) VisitBeginEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginEnrollCredential400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response BeginEnrollCredential400JSONResponse) VisitBeginEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginEnrollCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response BeginEnrollCredential401JSONResponse) VisitBeginEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginEnrollCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response BeginEnrollCredential404JSONResponse) VisitBeginEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginEnrollCredential409JSONResponse struct{ ConflictJSONResponse }
+
+func (response BeginEnrollCredential409JSONResponse) VisitBeginEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteEnrollCredentialRequestObject struct {
+	Method string `json:"method"`
+	Body   *CompleteEnrollCredentialJSONRequestBody
+}
+
+type CompleteEnrollCredentialResponseObject interface {
+	VisitCompleteEnrollCredentialResponse(w http.ResponseWriter) error
+}
+
+type CompleteEnrollCredential200JSONResponse struct {
+	Credential MyCredential `json:"credential"`
+	Login      *LoginResult `json:"login,omitempty"`
+
+	// Payload 方式ごとの応答
+	Payload map[string]interface{} `json:"payload"`
+
+	// RecoveryCodes 最初の強い認証手段なら、リカバリーコード（表示は1回だけ。4.12）
+	RecoveryCodes *[]string `json:"recovery_codes,omitempty"`
+}
+
+func (response CompleteEnrollCredential200JSONResponse) VisitCompleteEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteEnrollCredential400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CompleteEnrollCredential400JSONResponse) VisitCompleteEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteEnrollCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteEnrollCredential401JSONResponse) VisitCompleteEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteEnrollCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CompleteEnrollCredential404JSONResponse) VisitCompleteEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteEnrollCredential409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CompleteEnrollCredential409JSONResponse) VisitCompleteEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteEnrollCredential429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response CompleteEnrollCredential429JSONResponse) VisitCompleteEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6435,9 +7216,11 @@ type ListMyMethodsResponseObject interface {
 }
 
 type ListMyMethods200JSONResponse struct {
-	Emails     []MyEmail    `json:"emails"`
-	Identities []MyIdentity `json:"identities"`
-	Passkeys   []MyPasskey  `json:"passkeys"`
+	// Credentials 認証方式のプラグインの、無効化していない認証情報（ADR 0092）
+	Credentials []MyCredential `json:"credentials"`
+	Emails      []MyEmail      `json:"emails"`
+	Identities  []MyIdentity   `json:"identities"`
+	Passkeys    []MyPasskey    `json:"passkeys"`
 
 	// Password 設定したパスワード（無ければ省略）
 	Password *struct {
@@ -11169,6 +11952,12 @@ type StrictServerInterface interface {
 	// RedeemLoginLink 運営者が発行したログイン用リンクでログインする
 	// (POST /v1/login/link:redeem)
 	RedeemLoginLink(ctx context.Context, request RedeemLoginLinkRequestObject) (RedeemLoginLinkResponseObject, error)
+	// BeginMethodLogin 認証方式のプラグインでログインを始める（1要素目）
+	// (POST /v1/login/methods/{method}:begin)
+	BeginMethodLogin(ctx context.Context, request BeginMethodLoginRequestObject) (BeginMethodLoginResponseObject, error)
+	// CompleteMethodLogin 認証方式のプラグインでログインを完了する（1要素目）
+	// (POST /v1/login/methods/{method}:complete)
+	CompleteMethodLogin(ctx context.Context, request CompleteMethodLoginRequestObject) (CompleteMethodLoginResponseObject, error)
 	// StartOAuthLogin 外部プロバイダ（OAuth / OIDC）による登録・ログインを始める
 	// (POST /v1/login/oauth/{connection}:start)
 	StartOAuthLogin(ctx context.Context, request StartOAuthLoginRequestObject) (StartOAuthLoginResponseObject, error)
@@ -11193,6 +11982,12 @@ type StrictServerInterface interface {
 	// StartSecondFactorPasskey 2要素目の passkey の確認を始める
 	// (POST /v1/login/second-factor/passkey:start)
 	StartSecondFactorPasskey(ctx context.Context, request StartSecondFactorPasskeyRequestObject) (StartSecondFactorPasskeyResponseObject, error)
+	// BeginSecondFactorMethod 認証方式のプラグインで2要素目の確認を始める
+	// (POST /v1/login/second-factor/{method}:begin)
+	BeginSecondFactorMethod(ctx context.Context, request BeginSecondFactorMethodRequestObject) (BeginSecondFactorMethodResponseObject, error)
+	// CompleteSecondFactorMethod 認証方式のプラグインで2要素目を確かめ、通常のセッションに替える
+	// (POST /v1/login/second-factor/{method}:complete)
+	CompleteSecondFactorMethod(ctx context.Context, request CompleteSecondFactorMethodRequestObject) (CompleteSecondFactorMethodResponseObject, error)
 	// VerifySecondFactor 2要素目を確かめ、通常のセッションに替える
 	// (POST /v1/login/second-factor:verify)
 	VerifySecondFactor(ctx context.Context, request VerifySecondFactorRequestObject) (VerifySecondFactorResponseObject, error)
@@ -11217,6 +12012,15 @@ type StrictServerInterface interface {
 	// UpdateMyAttributes 自分のカスタム属性の値を書く
 	// (PATCH /v1/me/attributes)
 	UpdateMyAttributes(ctx context.Context, request UpdateMyAttributesRequestObject) (UpdateMyAttributesResponseObject, error)
+	// RevokeMyCredential 認証方式のプラグインの認証情報を無効化する
+	// (POST /v1/me/credentials/{id}:revoke)
+	RevokeMyCredential(ctx context.Context, request RevokeMyCredentialRequestObject) (RevokeMyCredentialResponseObject, error)
+	// BeginEnrollCredential 認証方式のプラグインの認証情報の登録を始める
+	// (POST /v1/me/credentials/{method}:enroll-begin)
+	BeginEnrollCredential(ctx context.Context, request BeginEnrollCredentialRequestObject) (BeginEnrollCredentialResponseObject, error)
+	// CompleteEnrollCredential 認証方式のプラグインの認証情報の登録を完了する
+	// (POST /v1/me/credentials/{method}:enroll-complete)
+	CompleteEnrollCredential(ctx context.Context, request CompleteEnrollCredentialRequestObject) (CompleteEnrollCredentialResponseObject, error)
 	// MakeMyEmailPrimary 確認済みのメールを primary にする
 	// (POST /v1/me/emails/{id}:make-primary)
 	MakeMyEmailPrimary(ctx context.Context, request MakeMyEmailPrimaryRequestObject) (MakeMyEmailPrimaryResponseObject, error)
@@ -11250,7 +12054,7 @@ type StrictServerInterface interface {
 	// MergeIntoMe 別のアカウントをこのアカウントに統合する（取り消し不可）
 	// (POST /v1/me/merges)
 	MergeIntoMe(ctx context.Context, request MergeIntoMeRequestObject) (MergeIntoMeResponseObject, error)
-	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
+	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、認証方式のプラグインの認証情報、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(ctx context.Context, request ListMyMethodsRequestObject) (ListMyMethodsResponseObject, error)
 	// ListMyOrgs 本人の Org の一覧（終了した Membership は含めない。11.13）
@@ -11664,6 +12468,75 @@ func (sh *strictHandler) RedeemLoginLink(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// BeginMethodLogin operation middleware
+func (sh *strictHandler) BeginMethodLogin(w http.ResponseWriter, r *http.Request, method string) {
+	var request BeginMethodLoginRequestObject
+
+	request.Method = method
+
+	var body BeginMethodLoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.BeginMethodLogin(ctx, request.(BeginMethodLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BeginMethodLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(BeginMethodLoginResponseObject); ok {
+		if err := validResponse.VisitBeginMethodLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteMethodLogin operation middleware
+func (sh *strictHandler) CompleteMethodLogin(w http.ResponseWriter, r *http.Request, method string) {
+	var request CompleteMethodLoginRequestObject
+
+	request.Method = method
+
+	var body CompleteMethodLoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteMethodLogin(ctx, request.(CompleteMethodLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteMethodLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteMethodLoginResponseObject); ok {
+		if err := validResponse.VisitCompleteMethodLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // StartOAuthLogin operation middleware
 func (sh *strictHandler) StartOAuthLogin(w http.ResponseWriter, r *http.Request, connection string) {
 	var request StartOAuthLoginRequestObject
@@ -11898,6 +12771,75 @@ func (sh *strictHandler) StartSecondFactorPasskey(w http.ResponseWriter, r *http
 	}
 }
 
+// BeginSecondFactorMethod operation middleware
+func (sh *strictHandler) BeginSecondFactorMethod(w http.ResponseWriter, r *http.Request, method string) {
+	var request BeginSecondFactorMethodRequestObject
+
+	request.Method = method
+
+	var body BeginSecondFactorMethodJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.BeginSecondFactorMethod(ctx, request.(BeginSecondFactorMethodRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BeginSecondFactorMethod")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(BeginSecondFactorMethodResponseObject); ok {
+		if err := validResponse.VisitBeginSecondFactorMethodResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteSecondFactorMethod operation middleware
+func (sh *strictHandler) CompleteSecondFactorMethod(w http.ResponseWriter, r *http.Request, method string) {
+	var request CompleteSecondFactorMethodRequestObject
+
+	request.Method = method
+
+	var body CompleteSecondFactorMethodJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteSecondFactorMethod(ctx, request.(CompleteSecondFactorMethodRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteSecondFactorMethod")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteSecondFactorMethodResponseObject); ok {
+		if err := validResponse.VisitCompleteSecondFactorMethodResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // VerifySecondFactor operation middleware
 func (sh *strictHandler) VerifySecondFactor(w http.ResponseWriter, r *http.Request) {
 	var request VerifySecondFactorRequestObject
@@ -12114,6 +13056,101 @@ func (sh *strictHandler) UpdateMyAttributes(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateMyAttributesResponseObject); ok {
 		if err := validResponse.VisitUpdateMyAttributesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeMyCredential operation middleware
+func (sh *strictHandler) RevokeMyCredential(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevokeMyCredentialRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeMyCredential(ctx, request.(RevokeMyCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeMyCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeMyCredentialResponseObject); ok {
+		if err := validResponse.VisitRevokeMyCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// BeginEnrollCredential operation middleware
+func (sh *strictHandler) BeginEnrollCredential(w http.ResponseWriter, r *http.Request, method string) {
+	var request BeginEnrollCredentialRequestObject
+
+	request.Method = method
+
+	var body BeginEnrollCredentialJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.BeginEnrollCredential(ctx, request.(BeginEnrollCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BeginEnrollCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(BeginEnrollCredentialResponseObject); ok {
+		if err := validResponse.VisitBeginEnrollCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteEnrollCredential operation middleware
+func (sh *strictHandler) CompleteEnrollCredential(w http.ResponseWriter, r *http.Request, method string) {
+	var request CompleteEnrollCredentialRequestObject
+
+	request.Method = method
+
+	var body CompleteEnrollCredentialJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteEnrollCredential(ctx, request.(CompleteEnrollCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteEnrollCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteEnrollCredentialResponseObject); ok {
+		if err := validResponse.VisitCompleteEnrollCredentialResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
