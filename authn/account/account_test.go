@@ -70,8 +70,9 @@ func TestRemoveEmailKeepsPasskeyAsMethod(t *testing.T) {
 		if err := s.RemoveEmail(ctx, tx, k.RealmID, c.User.ID, e.PublicID, audit.Actor{}, ""); !errors.Is(err, account.ErrLastMethod) {
 			t.Errorf("remove without a passkey = %v", err)
 		}
-		if err := tx.Passkeys().Create(ctx, port.Passkey{ID: id.New(id.Passkey), PublicID: id.NewExternal(id.Passkey), RealmID: k.RealmID,
-			UserID: c.User.ID, CredentialID: []byte("cred"), PublicKey: []byte("key"), Alg: -7, Name: "Key", CreatedAt: k.Clock.Now()}); err != nil {
+		// passkey は汎用の認証情報の方式 passkey（ADR 0106）。方式が動いていなくてもログインの手段に数える。
+		if err := tx.Credentials().Create(ctx, port.Credential{ID: id.New(id.Credential), PublicID: id.NewExternal(id.Credential), RealmID: k.RealmID,
+			UserID: c.User.ID, Method: "passkey", Lookup: []byte("cred"), Data: []byte("ct"), DataVersion: 1, CreatedAt: k.Clock.Now()}); err != nil {
 			return err
 		}
 		return s.RemoveEmail(ctx, tx, k.RealmID, c.User.ID, e.PublicID, audit.Actor{}, "")

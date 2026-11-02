@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
+	passkeym "github.com/imohiyoko/iam/authn/method/passkey"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/check"
@@ -847,8 +848,9 @@ func (s publicServer) SetMyPasskeyOrg(ctx context.Context, req publicapi.SetMyPa
 		orgPublicID = deref(req.Body.OrgId)
 	}
 	nf, _, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
-		p, err := tx.Passkeys().GetByPublicID(ctx, s.a.realm.ID, req.Id)
-		if err == nil && (p.UserID != au.PrincipalID || p.RevokedAt != nil) {
+		// 移す前の psk_ と、汎用の crd_ の公開 ID（ADR 0106）。
+		p, err := tx.Credentials().GetByPublicID(ctx, s.a.realm.ID, req.Id)
+		if err == nil && (p.UserID != au.PrincipalID || p.RevokedAt != nil || p.Method != passkeym.Name) {
 			err = errs.New(errs.KindNotFound, "passkey")
 		}
 		if err != nil {
@@ -863,7 +865,7 @@ func (s publicServer) SetMyPasskeyOrg(ctx context.Context, req publicapi.SetMyPa
 			}
 			orgID = o.ID
 		}
-		return tx.Passkeys().SetPreferredOrg(ctx, s.a.realm.ID, p.ID, orgID)
+		return tx.Credentials().SetPreferredOrg(ctx, s.a.realm.ID, p.ID, orgID)
 	})
 	switch {
 	case err != nil:

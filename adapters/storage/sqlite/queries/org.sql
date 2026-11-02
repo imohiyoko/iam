@@ -165,5 +165,5 @@ UPDATE authn_service_accounts SET org_id = sqlc.arg(to_org_id) WHERE realm_id = 
 -- name: MoveOrgQuotaGrants :exec
 UPDATE org_quota_grants SET org_id = sqlc.arg(to_org_id) WHERE realm_id = sqlc.arg(realm_id) AND org_id = sqlc.arg(from_org_id);
 
--- name: MoveOrgPasskeyPreferences :exec
-UPDATE authn_passkeys SET preferred_org_id = sqlc.arg(to_org_id) WHERE realm_id = sqlc.arg(realm_id) AND preferred_org_id = sqlc.arg(from_org_id);
+-- name: MoveOrgCredentialPreferences :exec
+UPDATE authn_credentials SET preferred_org_id = sqlc.arg(to_org_id) WHERE realm_id = sqlc.arg(realm_id) AND preferred_org_id = sqlc.arg(from_org_id);

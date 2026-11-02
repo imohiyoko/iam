@@ -190,11 +190,16 @@ passkeys             id, user_id, credential_id, public_key, alg（ES256 / EdDSA
                      sign_count, transports, name, preferred_org_id（4.4）, created_at, last_used_at, revoked_*
                      aaguid, attestation_format, attested（ADR 0096。既存の行は '' と false）
                      UNIQUE (realm_id, credential_id)（realm_id は user から引く）
+                     （ADR 0106 で authn_credentials の方式 passkey へ移す。起動時に移して空になる。次のリリースで消す）
 revoked_passkey_credentials  realm_id, credential_id, revoked_at（再登録の拒否）, PK (realm_id, credential_id)
+                     （ADR 0106 で authn_retired_credential_lookups へ移す。同上）
 authn_credentials    id, realm_id, user_id, method, lookup（検索キーのブラインドインデックス。任意）, lookup_key_id（ADR 0103）
                      data（方式固有のデータ。ユーザーのデータ鍵で暗号化）, data_version, created_at, last_used_at, revoked_*
                      UNIQUE (realm_id, method, lookup)（無効化していないもの）。認証方式のプラグインの汎用の認証情報（ADR 0090、0092）。
                      TOTP（method totp。otp_ の ID を保つ）とパスワード（method password）もここに置く（ADR 0101）
+                     passkey（method passkey。psk_ の ID を保つ）もここに置く。preferred_org_id（4.4）, reserve_lookup（ADR 0106）
+authn_retired_credential_lookups  realm_id, method, lookup, lookup_key_id, retired_at, PK (realm_id, method, lookup)
+                     無効化した認証情報の検索キー（reserve_lookup のもの。passkey の credential_id）。再登録を拒む。消去でも残す（ADR 0106）
 
 service_accounts     id, realm_id, org_id, name, valid_from, valid_until, created_at
 service_account_credentials  id, service_account_id, type（client_secret / private_key_jwt / api_key）
@@ -259,7 +264,7 @@ Group に入れるのは、その Org の active な Membership を持つユー�
 
 | 要素 | 外部への送信 | 位置づけ |
 |---|---|---|
-| passkey | 不要 | 1要素目・2要素目。最も推奨 |
+| passkey | 不要 | 1要素目・2要素目。最も推奨。認証方式のプラグインのコアの方式（`passkey`。RP を決められれば動く。ADR 0106） |
 | TOTP | 不要 | 2要素目。認証方式のプラグインのコアの方式（`totp`。フィーチャーに属さず、いつも動く。ADR 0101） |
 | HOTP（RFC 4226） | 不要 | 2要素目。フィーチャー（`hotp`。認証方式のプラグイン。ADR 0092） |
 | X.509 のクライアント証明書・スマートカード（PIV、CAC） | OCSP・CRL の取得 | 1要素目・2要素目。フィーチャー（`x509`。ADR 0103）。証明書は mTLS の専用の待ち受けか、設定で信じたプロキシのヘッダーで受ける |
@@ -333,7 +338,7 @@ Org フィーチャー（11.13）がオンのときだけ行う。
 |---|---|
 | メールアドレス | Membership に結び付けたメール |
 | OAuth / SSO | プロバイダが返したメールが結び付けたメールと一致（その場で HMAC を計算）。Org 専用 SSO ならその Org |
-| passkey | `passkeys.preferred_org_id` |
+| passkey | `authn_credentials.preferred_org_id`（方式 passkey。ADR 0106） |
 | IP | Org の `ip_allowlist`（将来） |
 
 手がかりは優先度にすぎず、入れるかはポリシーで決まる。
@@ -372,7 +377,7 @@ check(principal, action, resource, context) -> allow / deny
 | サービスアカウントの認証情報 | 指定 | 全部 |
 
 - 侵害時の初動用に「全認証情報と全セッションを一括で無効化」も用意する
-- 削除ではなく無効化（`revoked_*` を記録）。取り消し不可。passkey は credential_id の再登録も拒否する
+- 削除ではなく無効化（`revoked_*` を記録）。取り消し不可。passkey は credential_id の再登録も拒否する（退役した検索キー。ユーザーの消去でも残す。ADR 0106）
 - その認証情報で認証したセッションも失効させ、Back-Channel Logout で通知する
 - 本人は最後の1つを無効化できない。管理者はできる（以後は復旧手順で戻る）。Org 管理者は管理ユーザーとサービスアカウントのみ
 
@@ -939,7 +944,7 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - データ形式は前進のみで移行する。互換性の保証は「1つ前のバージョンのバイナリが同じデータで動く」こと
 - 例外：フィーチャーに属さないコアのデータの移行（名前は `migration:…`）は、台帳に記録し、知らないバイナリ（移す前のもの）の起動を拒む。
   移す前のサーバーを止めてから移した後のサーバーを起動し、戻すときは移す前の `iam storage export` を読み込む
-  （TOTP とパスワードの `authn_credentials` への移行。ADR 0101）
+  （TOTP とパスワードの `authn_credentials` への移行。ADR 0101。passkey の移行。ADR 0106）
 
 ### 11.13 Org と個人 Org
 

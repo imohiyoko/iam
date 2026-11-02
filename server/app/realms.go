@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/method"
-	"github.com/imohiyoko/iam/authn/passkey/attestation"
+	"github.com/imohiyoko/iam/authn/method/passkey/attestation"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/eventlog"

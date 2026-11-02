@@ -7,8 +7,8 @@ import (
 	"slices"
 
 	"github.com/imohiyoko/iam/authn/credential"
+	passkeym "github.com/imohiyoko/iam/authn/method/passkey"
 	totpm "github.com/imohiyoko/iam/authn/method/totp"
-	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -88,17 +88,18 @@ func (s publicServer) StartSecondFactorPasskey(ctx context.Context, _ publicapi.
 	if !ok {
 		return publicapi.StartSecondFactorPasskey401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
-	if s.a.passkeys == nil {
+	if s.a.passkey() == nil {
 		return publicapi.StartSecondFactorPasskey404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	}
-	st, err := s.a.passkeys.BeginVerify(ctx, s.a.realm.ID, au.PrincipalID)
+	// 汎用の方式（ADR 0106）。フロー ID は汎用の `/v1/login/second-factor/passkey:complete` でも使える。
+	ch, err := s.a.credentials.Begin(ctx, s.a.realm.ID, au.PrincipalID, passkeym.Name, port.UsageSecondFactor, nil, s.client(ctx))
 	if errors.Is(err, errs.NotFound) {
 		return publicapi.StartSecondFactorPasskey404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.ceremony(ctx, st)
+	out, err := s.ceremony(ctx, ch)
 	if err != nil {
 		return nil, err
 	}
@@ -134,49 +135,30 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 		}
 		return publicapi.VerifySecondFactor200JSONResponse(s.loginResult(ctx, is, au.PublicID, false, req.Body.ReturnToken)), nil
 	}
-	f := session.SecondFactor{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}
-	usePasskey := req.Body.Credential != nil && s.a.passkeys != nil
-	var is session.Issued
-	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		switch {
-		case usePasskey:
-			resp, err := json.Marshal(*req.Body.Credential)
-			if err != nil {
-				return passkey.ErrAuthFailed
-			}
-			p, err := s.a.passkeys.Verify(ctx, tx, s.a.realm.ID, au.PrincipalID, s.passkeyFlowID(ctx, req.Body.FlowId), resp)
-			if err != nil {
-				return err
-			}
-			f.AMR, f.CredentialID = []string{passkey.AMRKey}, p.ID
-		default:
-			return credential.ErrAuthFailed
-		}
-		var err error
-		is, err = s.a.sessions.CompleteSecondFactor(ctx, tx, s.a.realm.ID, au.SessionID, f)
-		return err
-	})
-	if usePasskey {
-		// 失敗でもフローは使い終わったので Cookie を消す。
-		s.setPasskeyCookie(ctx, "", -1)
+	if req.Body.Credential == nil || s.a.passkey() == nil {
+		return fail, nil
 	}
+	// passkey は汎用の方式（ADR 0106）を、方式専用の開始（second-factor/passkey:start）のフローで呼ぶ。
+	p, err := passkeyPayload(*req.Body.Credential, "")
+	if err != nil {
+		return fail, nil
+	}
+	is, err := s.a.credentials.SecondFactor(ctx, s.a.realm.ID, au.PrincipalID, au.SessionID, passkeym.Name, s.passkeyFlowID(ctx, req.Body.FlowId), p,
+		credential.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID})
+	// 失敗でもフローは使い終わったので Cookie を消す。
+	s.setPasskeyCookie(ctx, "", -1)
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.VerifySecondFactor429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
-	}
-	if na, ok := errors.AsType[*passkey.NotAllowedError](err); ok {
-		// 認証器のポリシーによる拒否（ADR 0096）。トランザクションは戻ったので、監査ログはここで残す。
-		s.a.passkeys.RecordDenied(ctx, s.a.realm.ID, s.passkeyClient(ctx), na)
 	}
 	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.VerifySecondFactor403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	switch {
-	case errors.Is(err, errs.AuthenticationFailed), errors.Is(err, session.ErrNotRestricted):
+	case errors.Is(err, errs.AuthenticationFailed), errors.Is(err, errs.Invalid), errors.Is(err, session.ErrNotRestricted), errors.Is(err, credential.ErrUnknownMethod):
 		return fail, nil
 	case err != nil:
 		return nil, err
 	}
-	s.a.sessions.Committed(ctx, s.a.realm.ID, is)
 	return publicapi.VerifySecondFactor200JSONResponse(s.loginResult(ctx, is, au.PublicID, false, req.Body.ReturnToken)), nil
 }
 

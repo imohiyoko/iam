@@ -8,18 +8,23 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
-	"github.com/imohiyoko/iam/authn/passkey"
+	"github.com/imohiyoko/iam/authn/credential"
+	passkeym "github.com/imohiyoko/iam/authn/method/passkey"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
+	"github.com/imohiyoko/iam/shared/ratelimit"
 )
 
 // passkeyCookie は passkey のフロー ID を要求したブラウザにだけ渡す Cookie。
 const passkeyCookie = "__Host-iam_passkey" // #nosec G101 -- Cookie の名前で、秘密ではない
 
-func (s publicServer) passkeyClient(ctx context.Context) passkey.Client {
-	c := s.a.clientOf(ctx)
-	return passkey.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}
+// passkey は動いている passkey の方式（ADR 0106）。Relying Party が決まらない構成（public_url も rp_id も無い）か、realm の設定で
+// 止めていれば nil。
+func (a *App) passkey() *passkeym.Method {
+	m, _ := a.methods.Get(passkeym.Name)
+	pk, _ := m.(*passkeym.Method)
+	return pk
 }
 
 func (s publicServer) setPasskeyCookie(ctx context.Context, flowID string, maxAge int) {
@@ -27,14 +32,14 @@ func (s publicServer) setPasskeyCookie(ctx context.Context, flowID string, maxAg
 		SameSite: http.SameSiteLaxMode, MaxAge: maxAge})
 }
 
-// ceremony はフローを応答の形にし、フロー ID を Cookie でも渡す。
-func (s publicServer) ceremony(ctx context.Context, st passkey.Started) (publicapi.PasskeyCeremony, error) {
+// ceremony は方式のフローを応答の形にし、フロー ID を Cookie でも渡す。options は方式の Payload（{"publicKey": …}）。
+func (s publicServer) ceremony(ctx context.Context, ch credential.Challenge) (publicapi.PasskeyCeremony, error) {
 	var opts map[string]any
-	if err := json.Unmarshal(st.Options, &opts); err != nil {
+	if err := json.Unmarshal(ch.Payload, &opts); err != nil {
 		return publicapi.PasskeyCeremony{}, err
 	}
-	s.setPasskeyCookie(ctx, st.FlowID, max(int(st.ExpiresAt.Sub(s.a.deps.Clock.Now())/time.Second), 1))
-	return publicapi.PasskeyCeremony{FlowId: st.FlowID, Options: opts, ExpiresAt: st.ExpiresAt}, nil
+	s.setPasskeyCookie(ctx, ch.FlowID, max(int(ch.ExpiresAt.Sub(s.a.deps.Clock.Now())/time.Second), 1))
+	return publicapi.PasskeyCeremony{FlowId: ch.FlowID, Options: opts, ExpiresAt: ch.ExpiresAt}, nil
 }
 
 // flowID は本文か Cookie のフロー ID。
@@ -45,31 +50,50 @@ func (s publicServer) passkeyFlowID(ctx context.Context, body *string) string {
 	return cookie(ctx, s.a.cookie(passkeyCookie))
 }
 
-func myPasskey(p port.Passkey) publicapi.MyPasskey {
-	return publicapi.MyPasskey{Id: p.PublicID, Name: p.Name, CreatedAt: p.CreatedAt, LastUsedAt: p.LastUsedAt,
-		BackupEligible: p.Flags&0x08 != 0}
+// passkeyPayload は方式に渡す入力（{"credential": …, "name": …}）。
+func passkeyPayload(cred map[string]any, name string) (json.RawMessage, error) {
+	in := map[string]any{"credential": cred}
+	if name != "" {
+		in["name"] = name
+	}
+	return json.Marshal(in)
+}
+
+func myPasskey(v passkeym.Summary) publicapi.MyPasskey {
+	return publicapi.MyPasskey{Id: v.ID, Name: v.Name, CreatedAt: v.CreatedAt, LastUsedAt: v.LastUsedAt, BackupEligible: v.BackupEligible}
+}
+
+// passkeyView は authn_credentials の passkey を本人に見せる形にする。
+func (a *App) passkeyView(ctx context.Context, tx port.Tx, c port.Credential) (passkeym.Summary, error) {
+	mc, d, err := passkeym.Read(ctx, tx, a.pii, c)
+	if err != nil {
+		return passkeym.Summary{}, err
+	}
+	return passkeym.View(mc, d), nil
 }
 
 func (s publicServer) GetWebAuthnRelatedOrigins(context.Context, publicapi.GetWebAuthnRelatedOriginsRequestObject) (publicapi.GetWebAuthnRelatedOriginsResponseObject, error) {
-	if s.a.passkeys == nil {
+	pk := s.a.passkey()
+	if pk == nil {
 		return publicapi.GetWebAuthnRelatedOrigins404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	}
-	origins, err := s.a.passkeys.RelatedOrigins()
+	origins, err := pk.RelatedOrigins()
 	if err != nil {
 		return nil, err
 	}
 	return publicapi.GetWebAuthnRelatedOrigins200JSONResponse{Origins: origins}, nil
 }
 
+// StartPasskeyLogin は passkey の1要素目を始める（方式専用の互換のパス。汎用の /v1/login/methods/passkey:begin と同じフロー）。
 func (s publicServer) StartPasskeyLogin(ctx context.Context, _ publicapi.StartPasskeyLoginRequestObject) (publicapi.StartPasskeyLoginResponseObject, error) {
-	if s.a.passkeys == nil {
+	if s.a.passkey() == nil {
 		return publicapi.StartPasskeyLogin404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	}
-	st, err := s.a.passkeys.BeginLogin(ctx, s.a.realm.ID)
+	ch, err := s.a.credentials.Begin(ctx, s.a.realm.ID, "", passkeym.Name, port.UsageFirstFactor, nil, s.client(ctx))
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.ceremony(ctx, st)
+	out, err := s.ceremony(ctx, ch)
 	if err != nil {
 		return nil, err
 	}
@@ -78,30 +102,31 @@ func (s publicServer) StartPasskeyLogin(ctx context.Context, _ publicapi.StartPa
 
 func (s publicServer) FinishPasskeyLogin(ctx context.Context, req publicapi.FinishPasskeyLoginRequestObject) (publicapi.FinishPasskeyLoginResponseObject, error) {
 	fail := publicapi.FinishPasskeyLogin401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}
-	if s.a.passkeys == nil || req.Body == nil {
+	if s.a.passkey() == nil || req.Body == nil {
 		return fail, nil
 	}
-	resp, err := json.Marshal(req.Body.Credential)
+	p, err := passkeyPayload(req.Body.Credential, "")
 	if err != nil {
 		return fail, nil
 	}
-	in := passkey.Login{FlowID: s.passkeyFlowID(ctx, req.Body.FlowId), Response: resp, Client: s.passkeyClient(ctx)}
-	if tok, viaCookie := s.a.sessionToken(httpFrom(ctx).r); viaCookie {
-		in.ReplaceToken = tok
-	}
-	res, err := s.a.passkeys.FinishLogin(ctx, s.a.realm.ID, in)
+	is, uid, err := s.a.credentials.Login(ctx, s.a.realm.ID, passkeym.Name, s.passkeyFlowID(ctx, req.Body.FlowId), p, s.client(ctx), s.a.replaceToken(ctx))
 	// 失敗でもフローは使い終わったので Cookie を消す。
 	s.setPasskeyCookie(ctx, "", -1)
 	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.FinishPasskeyLogin403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	switch {
-	case errors.Is(err, errs.AuthenticationFailed):
+	case errors.Is(err, errs.AuthenticationFailed), errors.Is(err, errs.Invalid):
 		return fail, nil
 	case err != nil:
 		return nil, err
 	}
-	return publicapi.FinishPasskeyLogin200JSONResponse(s.loginResult(ctx, res.Session, res.UserID, false, req.Body.ReturnToken)), nil
+	return publicapi.FinishPasskeyLogin200JSONResponse(s.loginResult(ctx, is, uid, false, req.Body.ReturnToken)), nil
+}
+
+// enrollOptions は方式専用の登録のパスの条件（汎用のパスと同じ。直近の認証は stale で確かめてある）。
+func (s publicServer) enrollOptions(ctx context.Context, au auth) credential.EnrollOptions {
+	return credential.EnrollOptions{Recovery: au.Restriction == port.RestrictionRecovery, RecentAuth: true, Client: s.client(ctx)}
 }
 
 func (s publicServer) StartRegisterPasskey(ctx context.Context, _ publicapi.StartRegisterPasskeyRequestObject) (publicapi.StartRegisterPasskeyResponseObject, error) {
@@ -112,14 +137,14 @@ func (s publicServer) StartRegisterPasskey(ctx context.Context, _ publicapi.Star
 	if s.stale(ctx, au) {
 		return publicapi.StartRegisterPasskey401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
-	if s.a.passkeys == nil {
+	if s.a.passkey() == nil {
 		return publicapi.StartRegisterPasskey404JSONResponse{NotFoundJSONResponse: notFound()}, nil
 	}
-	st, err := s.a.passkeys.BeginRegister(ctx, s.a.realm.ID, au.PrincipalID)
+	ch, err := s.a.credentials.EnrollBegin(ctx, s.a.realm.ID, au.PrincipalID, passkeym.Name, nil, s.enrollOptions(ctx, au))
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.ceremony(ctx, st)
+	out, err := s.ceremony(ctx, ch)
 	if err != nil {
 		return nil, err
 	}
@@ -135,39 +160,55 @@ func (s publicServer) FinishRegisterPasskey(ctx context.Context, req publicapi.F
 	if s.stale(ctx, au) {
 		return publicapi.FinishRegisterPasskey401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
-	if s.a.passkeys == nil {
+	if s.a.passkey() == nil {
 		return fail, nil
 	}
-	resp, err := json.Marshal(req.Body.Credential)
+	name := deref(req.Body.Name)
+	if name != "" {
+		// 名前の誤りはフローを使う前に返すので、Cookie は消さない（直して送り直せる）。
+		if _, err := account.PasskeyName(name); err != nil {
+			return publicapi.FinishRegisterPasskey400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_name"}}, nil
+		}
+	}
+	p, err := passkeyPayload(req.Body.Credential, name)
 	if err != nil {
 		return fail, nil
 	}
-	in := passkey.Register{FlowID: s.passkeyFlowID(ctx, req.Body.FlowId), Response: resp, Name: deref(req.Body.Name), Client: s.passkeyClient(ctx)}
-	p, err := s.a.passkeys.FinishRegister(ctx, s.a.realm.ID, au.PrincipalID, in)
-	if errors.Is(err, account.ErrPasskeyName) {
-		// 名前の誤りはフローを使う前に返すので、Cookie は消さない（直して送り直せる）。
-		return publicapi.FinishRegisterPasskey400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_name"}}, nil
-	}
+	c := s.client(ctx)
+	var en credential.Enrolled
+	var out publicapi.FinishRegisterPasskey200JSONResponse
+	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		if en, err = s.a.credentials.EnrollComplete(ctx, tx, credential.EnrollInput{RealmID: s.a.realm.ID, UserID: au.PrincipalID,
+			Method: passkeym.Name, FlowID: s.passkeyFlowID(ctx, req.Body.FlowId), Payload: p, Actor: au.Actor(), RequestID: c.RequestID,
+			KeepSession: au.SessionID}); err != nil {
+			return err
+		}
+		v, err := s.a.passkeyView(ctx, tx, en.Credential)
+		if err != nil {
+			return err
+		}
+		m := myPasskey(v)
+		out = publicapi.FinishRegisterPasskey200JSONResponse{Id: m.Id, Name: m.Name, CreatedAt: m.CreatedAt, LastUsedAt: m.LastUsedAt,
+			BackupEligible: m.BackupEligible}
+		out.RecoveryCodes, err = s.initialCodes(ctx, tx, au)
+		return err
+	})
 	s.setPasskeyCookie(ctx, "", -1)
+	if err != nil {
+		s.a.credentials.EnrollFailed(ctx, s.a.realm.ID, passkeym.Name, c, err)
+	}
+	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
+		return publicapi.FinishRegisterPasskey429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+	}
 	if code, ok := stateCode(err); ok {
 		return publicapi.FinishRegisterPasskey409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
 	}
 	switch {
-	case errors.Is(err, errs.AuthenticationFailed):
+	case errors.Is(err, errs.AuthenticationFailed), errors.Is(err, errs.Invalid):
 		return fail, nil
 	case err != nil:
 		return nil, err
-	}
-	m := myPasskey(p)
-	out := publicapi.FinishRegisterPasskey200JSONResponse{Id: m.Id, Name: m.Name, CreatedAt: m.CreatedAt, LastUsedAt: m.LastUsedAt,
-		BackupEligible: m.BackupEligible}
-	// passkey は別のトランザクションで登録済み。コードを作れなくても登録は成功で、本人は作り直せる。
-	if err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		var err error
-		out.RecoveryCodes, err = s.initialCodes(ctx, tx, au)
-		return err
-	}); err != nil {
-		s.a.deps.Logger.WarnContext(ctx, "could not issue recovery codes", "error", err)
 	}
 	return out, nil
 }
@@ -179,7 +220,7 @@ func (s publicServer) RenameMyPasskey(ctx context.Context, req publicapi.RenameM
 	if req.Body == nil {
 		return publicapi.RenameMyPasskey400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 	}
-	var p port.Passkey
+	var p passkeym.Summary
 	nf, _, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
 		var err error
 		p, err = s.a.accounts.RenamePasskey(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Id, req.Body.Name, au.Actor(), requestID(ctx))

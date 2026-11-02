@@ -13,8 +13,8 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/google/uuid"
 
-	"github.com/imohiyoko/iam/authn/passkey/attestation"
-	"github.com/imohiyoko/iam/authn/passkey/passkeytest"
+	"github.com/imohiyoko/iam/authn/method/passkey/attestation"
+	"github.com/imohiyoko/iam/authn/method/passkey/passkeytest"
 	"github.com/imohiyoko/iam/shared/clock"
 )
 

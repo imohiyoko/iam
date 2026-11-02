@@ -1283,7 +1283,8 @@ paths:
         `credential` は `navigator.credentials.create()` の結果の JSON（`PublicKeyCredential.toJSON()`）。
         登録済みなら `409 passkey_exists`、無効化した passkey は再登録できない（`409 passkey_revoked`。4.6）。
         フィーチャー passkey_attestation が動いていれば attestation を信頼の起点に照らし、認証器が realm の段のポリシーで
-        許されなければ `409 passkey_not_allowed`（ADR 0096）。
+        許されなければ `409 passkey_not_allowed`（ADR 0096）。汎用の `/v1/me/credentials/passkey:enroll-complete` と同じ処理で、
+        本人ごとの登録の確認の回数に上限がある（`429`。ADR 0106）。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -1307,6 +1308,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/me/passkeys/{id}:rename:
     post:

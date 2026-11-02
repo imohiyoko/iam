@@ -54,6 +54,13 @@ type MethodInfo struct {
 	// OutOfBand は応答が別の経路（本人の端末など）から届く方式（ADR 0104）。Complete は届くまで ErrMethodPending を返し、
 	// クライアントの入力では照合しないので、コアはユーザーごとの照合の回数で数えない。
 	OutOfBand bool
+	// OneShot は、チャレンジを1回限りにする方式（passkey。ADR 0106）。照合に失敗しても、コアはフローを置き直さない
+	// （同じチャレンジへの応答を2度受けない）。
+	OneShot bool
+	// ReserveRevokedLookups は、無効化した認証情報の検索キーを再登録させない方式（passkey の credential ID。4.6、ADR 0106）。
+	// 作った認証情報に印を付け（Credential.ReserveLookup）、Storage が無効化で検索キーを退役済みに加える。退役済みの検索キーは、
+	// 持ち主を消した後も残り、同じ方式で作れない。
+	ReserveRevokedLookups bool
 }
 
 // Supports は用途 u に使えるかを返す。
@@ -119,6 +126,8 @@ type MethodEnv struct {
 	Now time.Time
 	// Issuer と Account は登録のときに認証器に表示する名前（発行者と、本人のメールアドレスか公開 ID）。
 	Issuer, Account string
+	// UserPublicID は本人の公開 ID（登録の始めだけ。passkey のユーザーハンドルにする。内部 ID は認証器に渡さない。ADR 0045、0106）。
+	UserPublicID string
 	// ClientIP は要求の接続元（接続元ごとの制限に使う。ADR 0104）。分からなければ空。
 	ClientIP string
 	// Users は1要素目で本人を引き当てる（ログイン ID で本人を決める方式だけが使う）。1要素目以外では nil。
@@ -178,6 +187,8 @@ type MethodResult struct {
 	AMR []string
 	// KnowledgeBreached は、知識の要素（パスワード）が漏洩済みか。確かめなかったか、確かめられなければ nil（警告の評価。ADR 0051）。
 	KnowledgeBreached *bool
+	// Details はコアがログインの成功の監査ログに足す詳細（ADR 0106）。個人情報と秘密を入れない。
+	Details map[string]any
 }
 
 // MethodEnrollment は登録（EnrollComplete）の結果。
@@ -186,6 +197,15 @@ type MethodEnrollment struct {
 	Credential MethodCredential
 	// Payload はクライアントに返す JSON（object）。nil なら {}。
 	Payload json.RawMessage
+	// Details はコアが登録の監査ログに足す詳細（ADR 0106）。個人情報と秘密を入れない。
+	Details map[string]any
+}
+
+// MethodAuditDetails は、方式が返すエラーのうち、失敗の監査ログに詳細を足したいもの（認証器のポリシーによる拒否など。ADR 0106）。
+// コアは、本人確認の後の拒否（errs.Denial）でも、この詳細を付けて失敗を記録する。個人情報と秘密を入れない。
+type MethodAuditDetails interface {
+	error
+	AuditDetails() map[string]any
 }
 
 // Authenticator は認証方式（ADR 0090）。照合の失敗（利用者の入力による）は errs.AuthenticationFailed に一致するエラーで返す。
@@ -276,19 +296,33 @@ type Credential struct {
 	Method   string
 	Lookup   []byte
 	// LookupKeyID は Lookup を作ったインデックス鍵の ID（Lookup が無ければ空）。鍵を切り替えた後も前の鍵で引くのに使う（ADR 0103）。
-	LookupKeyID  string
-	Data         []byte
-	DataVersion  int
-	CreatedAt    time.Time
-	LastUsedAt   *time.Time
-	RevokedAt    *time.Time
-	RevokeReason string
+	LookupKeyID string
+	Data        []byte
+	DataVersion int
+	// PreferredOrgID はこの認証情報でログインしたときに入る Org（内部 ID。4.4。passkey から移した。ADR 0106）。空なら指定なし。
+	PreferredOrgID string
+	// ReserveLookup は、無効化で Lookup を退役済みに加える（方式の MethodInfo.ReserveRevokedLookups。ADR 0106）。
+	ReserveLookup bool
+	CreatedAt     time.Time
+	LastUsedAt    *time.Time
+	RevokedAt     *time.Time
+	RevokeReason  string
+}
+
+// RetiredLookup は退役した検索キー（authn_retired_credential_lookups の1行。ADR 0106）。無効化した認証情報の検索キーで、
+// 同じ realm・方式では作れない。持ち主の消去でも消さない。
+type RetiredLookup struct {
+	RealmID     string
+	Method      string
+	Lookup      []byte
+	LookupKeyID string
+	RetiredAt   time.Time
 }
 
 // CredentialRepo は authn_credentials の Repository。Storage は方式を知らない。
 type CredentialRepo interface {
-	// Create は (realm, PublicID) が重複するか、Lookup が空でなく、同じ (realm, Method, Lookup) の無効化していないものがあれば
-	// errs.Conflict を返す（原子的に判定する）。
+	// Create は (realm, PublicID) が重複するか、Lookup が空でなく、同じ (realm, Method, Lookup) の無効化していないものがあるか、
+	// 無効化していないものを作るときに (realm, Method, Lookup) が退役済みなら errs.Conflict を返す（原子的に判定する）。
 	Create(ctx context.Context, c Credential) error
 	// Get は内部 ID で返す（無効化したものも）。無ければ errs.NotFound。
 	Get(ctx context.Context, realmID, id string) (Credential, error)
@@ -304,8 +338,18 @@ type CredentialRepo interface {
 	UpdateData(ctx context.Context, realmID, id string, old, data []byte, dataVersion int) error
 	// Used は最終使用の時刻を記録する。無ければ errs.NotFound。
 	Used(ctx context.Context, realmID, id string, at time.Time) error
-	// Revoke は at に無効化する。既に無効化されていれば何もしない。無ければ errs.NotFound。
+	// Revoke は at に無効化する。ReserveLookup で Lookup があれば、検索キーを退役済みに加える（既にあれば何もしない）。
+	// 既に無効化されていれば何もしない。無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+	// SetPreferredOrg はログインで入る Org（内部 ID。空なら指定なし）を変える。無ければ errs.NotFound（ADR 0106）。
+	SetPreferredOrg(ctx context.Context, realmID, id, orgID string) error
+	// Retire は検索キーを退役済みに加える（既にあれば何もしない。方式専用の表からの移行。ADR 0106）。
+	Retire(ctx context.Context, r RetiredLookup) error
+	// LookupRetired は (realm, method, lookup) が退役済みかを返す。
+	LookupRetired(ctx context.Context, realmID, method string, lookup []byte) (bool, error)
+	// RetiredLookupKeyIDs は方式の退役済みの検索キーの LookupKeyID を、重複を除いて名前の順に返す（インデックス鍵の切り替えの後も、
+	// 前の鍵で退役させたものを拒むため）。
+	RetiredLookupKeyIDs(ctx context.Context, realmID, method string) ([]string, error)
 	// MoveUser は fromUserID の認証情報（無効化したものも）を toUserID に移し、移した数を返す（統合。11.6）。
 	// データの暗号化し直しは呼び出し側が先に行う。
 	MoveUser(ctx context.Context, realmID, fromUserID, toUserID string) (int, error)

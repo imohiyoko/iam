@@ -11,9 +11,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/imohiyoko/iam/authn/method/passkey/attestation"
+	"github.com/imohiyoko/iam/authn/method/passkey/passkeytest"
 	"github.com/imohiyoko/iam/authn/org"
-	"github.com/imohiyoko/iam/authn/passkey/attestation"
-	"github.com/imohiyoko/iam/authn/passkey/passkeytest"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -159,7 +159,7 @@ func TestPasskeyAttestation(t *testing.T) {
 	}
 
 	// realm の段：拒否の一覧に入れれば、登録済みの passkey でもログインできない（本人確認の後なので理由を返す）。
-	l.a.passkeys.Attestation.Policy = &attestation.Policy{DeniedAAGUIDs: []string{attYubi.String()}}
+	l.a.passkey().Attestation().Policy = &attestation.Policy{DeniedAAGUIDs: []string{attYubi.String()}}
 	if status, out, _ := l.passkeyLogin(t, key); status != 403 || out["error"] != "passkey_not_allowed" {
 		t.Fatalf("login with denied passkey: %d %v", status, out)
 	}
@@ -192,7 +192,7 @@ func TestPasskeyAttestation(t *testing.T) {
 
 func TestPasskeyAttestationFeatureOff(t *testing.T) {
 	l, vendor := newAttestationEnv(t, false, nil)
-	if l.a.metadata != nil || l.a.passkeys.Attestation != nil {
+	if l.a.metadata != nil || l.a.passkey().Attestation() != nil {
 		t.Fatal("attestation must not be wired without the feature")
 	}
 	_, cookie := l.login(t, "pat@example.com")

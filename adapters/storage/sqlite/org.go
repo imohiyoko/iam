@@ -149,7 +149,7 @@ func (r orgs) MoveContents(ctx context.Context, realmID, fromID, toID string) er
 		r.q.MoveOrgGroups(ctx, db.MoveOrgGroupsParams(p)),
 		r.q.MoveOrgServiceAccounts(ctx, db.MoveOrgServiceAccountsParams(p)),
 		r.q.MoveOrgQuotaGrants(ctx, db.MoveOrgQuotaGrantsParams(p)),
-		r.q.MoveOrgPasskeyPreferences(ctx, db.MoveOrgPasskeyPreferencesParams(p)),
+		r.q.MoveOrgCredentialPreferences(ctx, db.MoveOrgCredentialPreferencesParams(p)),
 	} {
 		if err != nil {
 			return mapErr(err)

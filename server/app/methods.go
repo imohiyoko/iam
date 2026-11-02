@@ -74,7 +74,11 @@ func (s publicServer) ListMyMethods(ctx context.Context, _ publicapi.ListMyMetho
 			out.Identities = append(out.Identities, publicapi.MyIdentity{Id: i.PublicID, Connection: slugs[i.ConnectionID], CreatedAt: i.CreatedAt})
 		}
 		for _, p := range m.Passkeys {
-			out.Passkeys = append(out.Passkeys, myPasskey(p))
+			v, err := s.a.passkeyView(ctx, tx, p)
+			if err != nil {
+				return err
+			}
+			out.Passkeys = append(out.Passkeys, myPasskey(v))
 		}
 		for _, t := range m.TOTP {
 			out.Totp = append(out.Totp, myTOTP(t))

@@ -3,7 +3,7 @@
 package passkeyattestation
 
 import (
-	impl "github.com/imohiyoko/iam/authn/passkey"
+	impl "github.com/imohiyoko/iam/authn/method/passkey"
 	"github.com/imohiyoko/iam/shared/feature"
 )
 

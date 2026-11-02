@@ -16,10 +16,12 @@ import (
 	"github.com/imohiyoko/iam/shared/port"
 )
 
-// コアが互換の欄（/v1/me/methods の totp・password など）で特別に扱う方式の名前（ADR 0101）。
+// コアが互換の欄（/v1/me/methods の totp・password・passkeys など）で特別に扱う方式の名前（ADR 0101、0106）。
 const (
 	TOTP     = "totp"
 	Password = "password"
+	// Passkey はコアの方式（ADR 0106）。/v1/me/methods の passkeys、方式専用のパス、Org の passkey の指定で特別に扱う。
+	Passkey = "passkey"
 )
 
 // nameRE は方式の名前（API のパスと authn_credentials.method に使う）。

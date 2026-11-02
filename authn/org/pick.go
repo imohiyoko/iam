@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -125,11 +126,11 @@ func needsPasskey(ctx context.Context, tx port.Tx, u port.User, denied error) (b
 	if !ok || !slices.Equal(ue.Codes, []string{"policy." + PolicyRequirePasskey}) {
 		return false, nil
 	}
-	ps, err := tx.Passkeys().ListByUser(ctx, u.RealmID, u.ID)
+	ps, err := tx.Credentials().ListByUser(ctx, u.RealmID, u.ID, method.Passkey)
 	if err != nil {
 		return false, err
 	}
-	return !slices.ContainsFunc(ps, func(p port.Passkey) bool { return p.RevokedAt == nil }), nil
+	return !slices.ContainsFunc(ps, func(p port.Credential) bool { return p.RevokedAt == nil }), nil
 }
 
 // hinted はログインの手がかりに結び付いた候補の Org（内部 ID、Membership の作成の順）を返す。
@@ -140,15 +141,17 @@ func (s *Service) hinted(ctx context.Context, tx port.Tx, u port.User, candidate
 		switch {
 		case strings.HasPrefix(c, string(id.Email)+"_"):
 			emails[c] = true
-		case strings.HasPrefix(c, string(id.Passkey)+"_"):
-			ps, err := tx.Passkeys().ListByUser(ctx, u.RealmID, u.ID)
+		// 認証に使った認証情報（passkey など。移す前の psk_ と汎用の crd_。ADR 0106）に、ログインで入る Org の指定があれば使う。
+		case strings.HasPrefix(c, string(id.Passkey)+"_"), strings.HasPrefix(c, string(id.Credential)+"_"):
+			cr, err := tx.Credentials().Get(ctx, u.RealmID, c)
+			if errors.Is(err, errs.NotFound) {
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
-			for _, p := range ps {
-				if p.ID == c && p.PreferredOrgID != "" {
-					preferred[p.PreferredOrgID] = true
-				}
+			if cr.UserID == u.ID && cr.PreferredOrgID != "" {
+				preferred[cr.PreferredOrgID] = true
 			}
 		}
 	}

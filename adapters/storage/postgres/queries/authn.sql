@@ -174,29 +174,14 @@ INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, pub
     transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id, user_handle, attestation_format, attested)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20);
 
--- name: IsPasskeyCredentialRevoked :one
-SELECT COUNT(*) FROM authn_revoked_passkey_credentials WHERE realm_id = $1 AND credential_id = $2;
+-- name: ListAllPasskeys :many
+SELECT * FROM authn_passkeys ORDER BY id LIMIT sqlc.arg(lim)::bigint;
 
--- name: GetPasskeyByCredentialID :one
-SELECT * FROM authn_passkeys WHERE realm_id = $1 AND credential_id = $2 AND revoked_at IS NULL;
-
--- name: GetPasskeyByPublicID :one
-SELECT * FROM authn_passkeys WHERE realm_id = $1 AND public_id = $2;
+-- name: DeletePasskey :exec
+DELETE FROM authn_passkeys WHERE realm_id = $1 AND id = $2;
 
 -- name: GetPasskey :one
 SELECT * FROM authn_passkeys WHERE realm_id = $1 AND id = $2;
-
--- name: ListPasskeysByUser :many
-SELECT * FROM authn_passkeys WHERE realm_id = $1 AND user_id = $2 ORDER BY created_at, id;
-
--- name: UsePasskey :execrows
-UPDATE authn_passkeys SET sign_count = $1, flags = $2, last_used_at = $3 WHERE realm_id = $4 AND id = $5;
-
--- name: RenamePasskey :execrows
-UPDATE authn_passkeys SET name = $1 WHERE realm_id = $2 AND id = $3;
-
--- name: SetPasskeyPreferredOrg :execrows
-UPDATE authn_passkeys SET preferred_org_id = $1 WHERE realm_id = $2 AND id = $3;
 
 -- name: RevokePasskey :exec
 UPDATE authn_passkeys SET revoked_at = $1, revoke_reason = $2 WHERE realm_id = $3 AND id = $4 AND revoked_at IS NULL;
@@ -204,6 +189,12 @@ UPDATE authn_passkeys SET revoked_at = $1, revoke_reason = $2 WHERE realm_id = $
 -- name: AddRevokedPasskeyCredential :exec
 INSERT INTO authn_revoked_passkey_credentials (realm_id, credential_id, revoked_at) VALUES ($1, $2, $3)
 ON CONFLICT (realm_id, credential_id) DO NOTHING;
+
+-- name: ListRevokedPasskeyCredentials :many
+SELECT * FROM authn_revoked_passkey_credentials ORDER BY realm_id, credential_id LIMIT sqlc.arg(lim)::bigint;
+
+-- name: DeleteRevokedPasskeyCredential :exec
+DELETE FROM authn_revoked_passkey_credentials WHERE realm_id = $1 AND credential_id = $2;
 
 -- name: CreateTOTP :exec
 INSERT INTO authn_totp_credentials (id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason)
@@ -368,9 +359,3 @@ WHERE id IN (SELECT u.id FROM authn_users u WHERE u.managed_org_id IS NOT NULL L
 -- name: SetUserMerged :execrows
 UPDATE authn_users SET status = 'merged', merged_into = $1, deletion_scheduled_at = NULL, updated_at = $2
 WHERE realm_id = $3 AND id = $4 AND status = 'active';
-
--- name: SetPasskeyHandles :exec
-UPDATE authn_passkeys SET user_handle = $1 WHERE realm_id = $2 AND user_id = $3 AND length(user_handle) = 0;
-
--- name: MovePasskeys :execrows
-UPDATE authn_passkeys SET user_id = sqlc.arg(to_user_id) WHERE realm_id = sqlc.arg(realm_id) AND user_id = sqlc.arg(from_user_id);

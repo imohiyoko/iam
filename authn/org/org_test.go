@@ -101,9 +101,10 @@ func TestPickByHints(t *testing.T) {
 			t.Fatalf("last = %+v", got)
 		}
 		// passkey の既定の Org は1つに決まる。
-		p := port.Passkey{ID: id.New(id.Passkey), PublicID: id.NewExternal(id.Passkey), RealmID: u.RealmID, UserID: u.ID,
-			CredentialID: []byte("cred"), PreferredOrgID: a.ID, CreatedAt: k.Clock.Now()}
-		if err := tx.Passkeys().Create(ctx, p); err != nil {
+		// passkey は汎用の認証情報（ADR 0106）。移す前の psk_ の ID のものも同じに扱う。
+		p := port.Credential{ID: id.New(id.Passkey), PublicID: id.NewExternal(id.Passkey), RealmID: u.RealmID, UserID: u.ID, Method: "passkey",
+			Lookup: []byte("cred"), Data: []byte("ct"), DataVersion: 1, PreferredOrgID: a.ID, CreatedAt: k.Clock.Now()}
+		if err := tx.Credentials().Create(ctx, p); err != nil {
 			return err
 		}
 		if got, _ := s.Pick(ctx, tx, u, session.OrgPick{Credentials: []string{p.ID}}); got.OrgID != a.ID {

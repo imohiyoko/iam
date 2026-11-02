@@ -1,7 +1,6 @@
 package storagetest
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"testing"
@@ -16,9 +15,7 @@ func testAccountMerge(t *testing.T, h Harness) {
 	s, _ := open(t, h)
 	r := id.New(id.Realm)
 	a, b := newUser(r), newUser(r)
-	keep := newPasskey(r, b.ID, "cred-keep")
-	keep.UserHandle = []byte("handle-from-before")
-	pk, revoked, other := newPasskey(r, b.ID, "cred-b"), newPasskey(r, b.ID, "cred-revoked"), newPasskey(r, a.ID, "cred-a")
+	other := newCredential(r, a.ID, "passkey", []byte("cred-a"))
 	personal := newOrg(r, port.OrgPersonal, b.ID)
 	groupID := id.NewExternal(id.Group)
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
@@ -27,52 +24,12 @@ func testAccountMerge(t *testing.T, h Harness) {
 				return err
 			}
 		}
-		for _, p := range []port.Passkey{keep, pk, revoked, other} {
-			if err := tx.Passkeys().Create(ctx, p); err != nil {
-				return err
-			}
-		}
-		if err := tx.Passkeys().Revoke(ctx, r, revoked.ID, T0, "user"); err != nil {
+		if err := tx.Credentials().Create(ctx, other); err != nil {
 			return err
 		}
 		if err := tx.Orgs().Create(ctx, personal); err != nil {
 			return err
 		}
-		// passkey：無効化したものも移し、空のハンドルには元の持ち主のハンドルを入れる。
-		n, err := tx.Passkeys().MoveUser(ctx, r, b.ID, a.ID, []byte(b.PublicID))
-		if err != nil || n != 3 {
-			return fmt.Errorf("move passkeys = %d, %v", n, err)
-		}
-		got, err := tx.Passkeys().ListByUser(ctx, r, a.ID)
-		if err != nil || len(got) != 4 {
-			return fmt.Errorf("passkeys of a = %d, %v", len(got), err)
-		}
-		for _, p := range got {
-			want := []byte(b.PublicID)
-			switch p.ID {
-			case other.ID:
-				want = nil
-			case keep.ID:
-				want = keep.UserHandle
-			}
-			if !bytes.Equal(p.UserHandle, want) {
-				return fmt.Errorf("passkey %s handle = %q, want %q", p.Name, p.UserHandle, want)
-			}
-			// attestation の結果（ADR 0096）は移した後も残す。
-			if !p.Attested || p.AttestationFormat != "packed" || len(p.AAGUID) != 16 {
-				return fmt.Errorf("passkey %s attestation = %q %v %x", p.Name, p.AttestationFormat, p.Attested, p.AAGUID)
-			}
-		}
-		if rest, err := tx.Passkeys().ListByUser(ctx, r, b.ID); err != nil || len(rest) != 0 {
-			return fmt.Errorf("passkeys left on b = %d, %v", len(rest), err)
-		}
-		if err := conflict("revoked credential after move", tx.Passkeys().Create(ctx, newPasskey(r, a.ID, "cred-revoked"))); err != nil {
-			return err
-		}
-		if n, err := tx.Passkeys().MoveUser(ctx, id.New(id.Realm), a.ID, b.ID, nil); err != nil || n != 0 {
-			return fmt.Errorf("another realm moved %d, %v", n, err)
-		}
-
 		// ユーザー：active なユーザーだけを統合済みにする。
 		at := T0.Add(1)
 		if err := tx.Users().SetMerged(ctx, r, b.ID, a.ID, at); err != nil {
@@ -100,7 +57,7 @@ func testAccountMerge(t *testing.T, h Harness) {
 		rb := port.RoleBinding{ID: id.New(id.RoleBinding), PublicID: id.NewExternal(id.RoleBinding), RealmID: r, Role: "org:admin",
 			PrincipalType: port.PrincipalUser, PrincipalID: a.ID, OrgID: personal.ID, CreatedAt: T0}
 		for _, err := range []error{tx.Groups().Create(ctx, g), tx.Roles().Create(ctx, ro), tx.RoleBindings().Create(ctx, rb),
-			tx.Passkeys().SetPreferredOrg(ctx, r, other.ID, personal.ID)} {
+			tx.Credentials().SetPreferredOrg(ctx, r, other.ID, personal.ID)} {
 			if err != nil {
 				return err
 			}
@@ -117,8 +74,8 @@ func testAccountMerge(t *testing.T, h Harness) {
 		if got, err := tx.RoleBindings().GetByPublicID(ctx, r, rb.PublicID); err != nil || got.OrgID != personal.ID {
 			return fmt.Errorf("binding = %+v, %v (bindings stay)", got, err)
 		}
-		if got, err := tx.Passkeys().GetByPublicID(ctx, r, other.PublicID); err != nil || got.PreferredOrgID != target.ID {
-			return fmt.Errorf("passkey preference = %+v, %v", got, err)
+		if got, err := tx.Credentials().Get(ctx, r, other.ID); err != nil || got.PreferredOrgID != target.ID {
+			return fmt.Errorf("credential preference = %+v, %v", got, err)
 		}
 		return nil
 	})

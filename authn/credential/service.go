@@ -424,8 +424,12 @@ func (s *Service) take(ctx context.Context, flowID, realmID, userID, name, purpo
 	return f, nil
 }
 
-// retry は照合に失敗したフローを、回数の上限まで同じ ID で置き直す。
+// retry は照合に失敗したフローを、回数の上限まで同じ ID で置き直す。チャレンジを1回限りにする方式（passkey。ADR 0106）は
+// 置き直さない。
 func (s *Service) retry(ctx context.Context, flowID string, f flow) {
+	if a, ok := s.Methods.Get(f.Method); !ok || a.Info().OneShot {
+		return
+	}
 	if f.Attempts++; f.Attempts >= s.maxAttempts() {
 		return
 	}
@@ -550,10 +554,14 @@ func (s *Service) login(ctx context.Context, realmID, name string, state []byte,
 				return err
 			}
 			publicID = u.PublicID
+			details := map[string]any{}
+			for k, v := range r.Details {
+				details[k] = v
+			}
+			details["method"], details["credential_id"] = name, cred.PublicID
 			_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
 				Type: "login.succeeded", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
-				SessionID: is.Session.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
-				Details: map[string]any{"method": name, "credential_id": cred.PublicID},
+				SessionID: is.Session.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, Details: details,
 			})
 			return err
 		})
@@ -598,27 +606,57 @@ func (s *Service) lockoutResult(ctx context.Context, realmID, scope, subject, us
 	return nil
 }
 
-// fail は1要素目の失敗を監査ログに残し、利用者の入力による失敗を ErrAuthFailed にする。
+// fail は1要素目の失敗を監査ログに残し、利用者の入力による失敗を ErrAuthFailed にする。本人確認の後の拒否（errs.Denial）は、
+// 方式が詳細を付けたもの（認証器のポリシーなど。port.MethodAuditDetails）だけを残す。
 func (s *Service) fail(ctx context.Context, realmID, name string, c Client, cause error) error {
 	_, denied := errors.AsType[errs.Denial](cause)
 	_, limited := errors.AsType[*ratelimit.ExceededError](cause)
-	if !denied && !limited {
-		err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-			_, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{
-				Type: "login.failed", Result: audit.ResultFailure, RealmID: realmID, Actor: audit.Actor{Type: "anonymous"},
-				IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
-				Details: map[string]any{"method": name, "reason": cause.Error()},
-			})
-			return err
-		})
-		if err != nil {
-			s.logger().WarnContext(ctx, "could not record login failure", "error", err)
-		}
+	_, detailed := errors.AsType[port.MethodAuditDetails](cause)
+	if (!denied && !limited) || detailed {
+		s.recordFailure(ctx, realmID, "login.failed", name, c, cause)
 	}
 	if rejectedByUser(cause) {
 		return ErrAuthFailed
 	}
 	return cause
+}
+
+// recordFailure は失敗を監査ログに残す（理由は内部向け。6.1）。方式が詳細を付けていれば（port.MethodAuditDetails）足す。
+func (s *Service) recordFailure(ctx context.Context, realmID, typ, name string, c Client, cause error) {
+	// 方式の詳細は reason（判定の理由のコード）を上書きしてよい。
+	details := map[string]any{"method": name, "reason": cause.Error()}
+	if d, ok := errors.AsType[port.MethodAuditDetails](cause); ok {
+		for k, v := range d.AuditDetails() {
+			details[k] = v
+		}
+	}
+	details["method"] = name
+	err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		_, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{
+			Type: typ, Result: audit.ResultFailure, RealmID: realmID, Actor: audit.Actor{Type: "anonymous"},
+			IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, Details: details,
+		})
+		return err
+	})
+	if err != nil {
+		s.logger().WarnContext(ctx, "could not record failure", "type", typ, "error", err)
+	}
+}
+
+// EnrollFailed は登録の完了の失敗を監査ログに残す（呼び出し側のトランザクションが戻った後に呼ぶ）。passkey は従来どおり
+// passkey.registration_failed を残し、ほかの方式は詳細を付けた失敗（port.MethodAuditDetails）だけを credential.registration_failed
+// で残す（ADR 0106）。回数の上限と、方式の無いことは残さない。
+func (s *Service) EnrollFailed(ctx context.Context, realmID, name string, c Client, cause error) {
+	_, limited := errors.AsType[*ratelimit.ExceededError](cause)
+	_, detailed := errors.AsType[port.MethodAuditDetails](cause)
+	if cause == nil || limited || errors.Is(cause, ErrUnknownMethod) || (name != method.Passkey && !detailed) {
+		return
+	}
+	typ := "credential.registration_failed"
+	if name == method.Passkey {
+		typ = "passkey.registration_failed"
+	}
+	s.recordFailure(ctx, realmID, typ, name, c, cause)
 }
 
 // SecondFactor は2要素目のフローを完了し、制限つきのセッション sessionID を通常のセッションに替える（ADR 0050）。
@@ -703,6 +741,10 @@ func (s *Service) secondFactor(ctx context.Context, realmID, userID, sessionID, 
 		})
 	}
 	if err != nil {
+		if _, ok := errors.AsType[port.MethodAuditDetails](err); ok {
+			// 本人確認の後の、方式の判定による拒否（認証器のポリシーなど）。トランザクションは戻ったので、ここで残す。
+			s.recordFailure(ctx, realmID, "login.failed", name, c, err)
+		}
 		if rejectedByUser(err) {
 			s.logger().DebugContext(ctx, "second factor rejected", "method", name, "error", err)
 			return session.Issued{}, ErrAuthFailed
@@ -742,7 +784,7 @@ func (s *Service) EnrollBegin(ctx context.Context, realmID, userID, name string,
 	}
 	if err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		e.Account, err = s.accountName(ctx, tx, realmID, userID)
+		e.Account, e.UserPublicID, err = s.accountName(ctx, tx, realmID, userID)
 		return err
 	}); err != nil {
 		return Challenge{}, err
@@ -757,22 +799,23 @@ func (s *Service) EnrollBegin(ctx context.Context, realmID, userID, name string,
 	return s.start(ctx, flow{RealmID: realmID, UserID: userID, Method: name, Purpose: purposeEnroll, State: ch.State, Recovery: o.Recovery}, ch.Payload)
 }
 
-// accountName は認証器に表示する本人の名前（primary のメールアドレス。最小化モードなら公開 ID）。
-func (s *Service) accountName(ctx context.Context, tx port.Tx, realmID, userID string) (string, error) {
+// accountName は認証器に表示する本人の名前（primary のメールアドレス。最小化モードなら公開 ID）と、本人の公開 ID を返す。
+func (s *Service) accountName(ctx context.Context, tx port.Tx, realmID, userID string) (string, string, error) {
 	u, err := tx.Users().Get(ctx, realmID, userID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	es, err := tx.Emails().ListByUser(ctx, realmID, userID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	for _, e := range es {
 		if e.IsPrimary && len(e.Ciphertext) > 0 {
-			return s.Accounts.EmailAddress(ctx, tx, e)
+			addr, err := s.Accounts.EmailAddress(ctx, tx, e)
+			return addr, u.PublicID, err
 		}
 	}
-	return u.PublicID, nil
+	return u.PublicID, u.PublicID, nil
 }
 
 // Enrolled は登録の結果。
@@ -833,9 +876,17 @@ func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, in EnrollInput
 	if c.UserID != userID || c.Method != name || c.RevokedAt != nil {
 		return Enrolled{}, fmt.Errorf("credential: method %s enrolled a credential for another user or method", name)
 	}
+	// passkey は従来どおり passkey.registered で残す（SIEM の対応表。ADR 0106）。
+	typ, details := "credential.registered", map[string]any{}
+	if name == method.Passkey {
+		typ = "passkey.registered"
+	}
+	for k, v := range en.Details {
+		details[k] = v
+	}
+	details["credential_id"], details["method"] = c.PublicID, name
 	if _, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
-		Type: "credential.registered", Result: audit.ResultSuccess, RealmID: realmID, Actor: in.Actor, RequestID: in.RequestID,
-		Details: map[string]any{"credential_id": c.PublicID, "method": name},
+		Type: typ, Result: audit.ResultSuccess, RealmID: realmID, Actor: in.Actor, RequestID: in.RequestID, Details: details,
 	}); err != nil {
 		return Enrolled{}, err
 	}

@@ -27,8 +27,8 @@ var authnTests = []struct {
 	{"EmailUniqueConcurrent", testEmailUniqueConcurrent},
 	{"Identities", testIdentities},
 	{"IdentityUniqueConcurrent", testIdentityUniqueConcurrent},
-	{"Passkeys", testPasskeys},
-	{"PasskeyUniqueConcurrent", testPasskeyUniqueConcurrent},
+	{"LegacyPasskeys", testLegacyPasskeys},
+	{"RetiredLookups", testRetiredLookups},
 	{"TOTP", testTOTP},
 	{"TOTPUseConcurrent", testTOTPUseConcurrent},
 	{"LegacyCredentialsListAllDelete", testLegacyListAllDelete},
@@ -705,8 +705,8 @@ func testUserDeletion(t *testing.T, h Harness) {
 		if err := notFound("erased session", second(tx.Sessions().Get(ctx, r, ses.ID))); err != nil {
 			return err
 		}
-		if err := notFound("erased passkey", second(tx.Passkeys().GetByPublicID(ctx, r, pk.PublicID))); err != nil {
-			return err
+		if left, err := tx.Passkeys().ListAll(ctx, 10); err != nil || slices.ContainsFunc(left, func(p port.Passkey) bool { return p.ID == pk.ID }) {
+			return fmt.Errorf("erased legacy passkey = %+v, %v", left, err)
 		}
 		if err := notFound("erased password", second(tx.Passwords().Get(ctx, r, pw.ID))); err != nil {
 			return err
@@ -884,7 +884,6 @@ func testServiceAccountsM7(t *testing.T, h Harness) {
 const (
 	isoUser    = "usr_00000000000000000000000000"
 	isoPublic  = "usr_00000000000000000000000009"
-	isoPasskey = "psk_00000000000000000000000009"
 	isoTOTP    = "otp_00000000000000000000000009"
 	isoConn    = "con_00000000000000000000000000"
 	isoSubject = "iso-subject"

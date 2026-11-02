@@ -179,11 +179,11 @@ func (r orgs) MoveContents(_ context.Context, realmID, fromID, toID string) erro
 			setKey(r.t, s.quotaGrants, k, g)
 		}
 	}
-	for k, p := range s.passkeys {
-		if p.RealmID == realmID && p.PreferredOrgID == fromID {
-			p = clonePasskey(p)
-			p.PreferredOrgID = toID
-			setKey(r.t, s.passkeys, k, p)
+	for k, c := range s.authnCreds {
+		if c.RealmID == realmID && c.PreferredOrgID == fromID {
+			c = cloneAuthnCredential(c)
+			c.PreferredOrgID = toID
+			setKey(r.t, s.authnCreds, k, c)
 		}
 	}
 	return nil

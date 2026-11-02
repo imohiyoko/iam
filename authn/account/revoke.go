@@ -39,11 +39,12 @@ func (s *Service) AdminRevokeCredential(ctx context.Context, tx port.Tx, realmID
 	now := s.Clock.Now()
 	switch prefix, _, _ := strings.Cut(publicID, "_"); prefix {
 	case string(id.Passkey):
+		// 方式専用の表から移した passkey（ADR 0106）は psk_ の公開 ID のまま。
 		p, err := passkey(ctx, tx, realmID, u.ID, publicID)
 		if err != nil {
 			return err
 		}
-		if err := tx.Passkeys().Revoke(ctx, realmID, p.ID, now, ReasonRevokedByAdmin); err != nil {
+		if err := tx.Credentials().Revoke(ctx, realmID, p.ID, now, ReasonRevokedByAdmin); err != nil {
 			return err
 		}
 		return s.record(ctx, tx, realmID, "passkey.revoked", actor, requestID, map[string]any{"user_id": u.PublicID, "passkey_id": p.PublicID, "reason": ReasonRevokedByAdmin})
@@ -105,7 +106,7 @@ func (s *Service) RevokeAllCredentials(ctx context.Context, tx port.Tx, realmID 
 	now := s.Clock.Now()
 	var out Revoked
 	for _, p := range m.Passkeys {
-		if err := tx.Passkeys().Revoke(ctx, realmID, p.ID, now, ReasonCompromised); err != nil {
+		if err := tx.Credentials().Revoke(ctx, realmID, p.ID, now, ReasonCompromised); err != nil {
 			return Revoked{}, err
 		}
 		out.Passkeys++

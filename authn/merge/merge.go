@@ -305,9 +305,11 @@ func (s *Service) moveIdentities(ctx context.Context, tx port.Tx, from, into por
 	return n, nil
 }
 
-// movePasskeys は passkey を移す。認証器は統合元のユーザーハンドルを返すので、それを passkey に残す。
-func movePasskeys(ctx context.Context, tx port.Tx, from, into port.User) (int, error) {
-	return tx.Passkeys().MoveUser(ctx, from.RealmID, from.ID, into.ID, []byte(from.PublicID))
+// movePasskeys は移す passkey（無効化したものも）を数える（移すのは moveCredentials。ADR 0106）。認証器は統合元のユーザー
+// ハンドルを返すが、passkey のデータは登録のときのハンドルを持っているので、そのまま使える。
+func movePasskeys(ctx context.Context, tx port.Tx, from, _ port.User) (int, error) {
+	ps, err := tx.Credentials().ListByUser(ctx, from.RealmID, from.ID, method.Passkey)
+	return len(ps), err
 }
 
 // moveCredentials は汎用の認証情報（ADR 0092）を同じ ID のまま移す。有効なものは方式固有のデータを統合先のデータ鍵で
@@ -329,8 +331,8 @@ func (s *Service) moveCredentials(ctx context.Context, tx port.Tx, from, into po
 		if err := tx.Credentials().UpdateData(ctx, c.RealmID, c.ID, c.Data, ct, c.DataVersion); err != nil {
 			return 0, err
 		}
-		// TOTP とパスワードは moveSingle が数える。
-		if c.Method != method.TOTP && c.Method != method.Password {
+		// TOTP とパスワードは moveSingle が、passkey は movePasskeys が数える。
+		if c.Method != method.TOTP && c.Method != method.Password && c.Method != method.Passkey {
 			n++
 		}
 	}

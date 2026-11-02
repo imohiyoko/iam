@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/method/passkey/passkeytest"
 	"github.com/imohiyoko/iam/authn/method/totp"
-	"github.com/imohiyoko/iam/authn/passkey/passkeytest"
 	"github.com/imohiyoko/iam/server/config"
 )
 

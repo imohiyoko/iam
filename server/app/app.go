@@ -21,8 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-webauthn/webauthn/protocol"
-
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/botcheck"
@@ -36,13 +34,13 @@ import (
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method"
 	dirldap "github.com/imohiyoko/iam/authn/method/ldap"
+	passkeym "github.com/imohiyoko/iam/authn/method/passkey"
+	"github.com/imohiyoko/iam/authn/method/passkey/attestation"
 	pwm "github.com/imohiyoko/iam/authn/method/password"
 	totpm "github.com/imohiyoko/iam/authn/method/totp"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/org"
-	"github.com/imohiyoko/iam/authn/passkey"
-	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/recovery"
@@ -129,8 +127,6 @@ type App struct {
 	saml *saml.Service
 	// ldap は LDAP / Active Directory のバインド認証と同期（ADR 0102）。フィーチャー ldap が動いていなければ nil。
 	ldap *dirldap.Service
-	// passkeys は passkey の登録とログイン。Relying Party が決まらない構成（public_url も rp_id も無い）では nil。
-	passkeys *passkey.Service
 	// metadata は認証器のメタデータ（フィーチャー passkey_attestation。ADR 0096）。root だけが持ち、全 realm で共有する。
 	// フィーチャーが動いていなければ nil。
 	metadata *attestation.Metadata
@@ -246,6 +242,12 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	} else if m != (credential.Migrated{}) {
 		d.Logger.Info("migrated credentials to authn_credentials", "totp", m.TOTP, "passwords", m.Passwords)
 	}
+	// passkey を方式専用の表から authn_credentials へ移す（ADR 0106）。
+	if m, err := credential.MigratePasskeys(ctx, d.Storage, crypter, d.Clock, prepareBatch); err != nil {
+		return nil, fmt.Errorf("app: migrate passkeys: %w", err)
+	} else if m != (credential.MigratedPasskeys{}) {
+		d.Logger.Info("migrated passkeys to authn_credentials", "passkeys", m.Passkeys, "retired", m.Retired)
+	}
 
 	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary, clientSealer: clientSealer, pii: crypter}
 	a.root = a
@@ -282,7 +284,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if a.issuer == "" {
 		d.Logger.Info("the OIDC provider is disabled: set server.public_url")
 	}
-	if a.passkeys == nil {
+	if a.passkey() == nil {
 		d.Logger.Info("passkeys are disabled: set server.public_url or passkey.rp_id and passkey.origins")
 	}
 	if plan.IsActive(feature.LoginRisk) && d.GeoIP == nil {
@@ -407,6 +409,18 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 			MinLength: minLength, Breach: d.BreachCheck, Log: d.Logger}
 		builtin = append(builtin, pwMethod)
 	}
+	// passkey はコアの方式で、Relying Party が決まる構成でだけ動く（ADR 0106）。
+	var pa *passkeym.Attestation
+	if m := a.root.metadata; m != nil {
+		pa = &passkeym.Attestation{Metadata: m, Conveyance: cfg.Passkey.Attestation.Conveyance, Policy: rs.PasskeyPolicy}
+	}
+	if ep.rpOK {
+		pk, err := passkeym.New(passkeym.Config{RPID: ep.rpID, RPName: ep.rpName, Origins: ep.origins}, pa)
+		if err != nil {
+			return err
+		}
+		builtin = append(builtin, pk)
+	}
 	methods, err := method.ActiveWith(ctx, plan.IsActive, a.methodSetup(realm.ID, realm.Slug), append(builtin, d.Methods...)...)
 	if err != nil {
 		return err
@@ -506,21 +520,6 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		// 名前ごとの照合の回数の上限はパスワードと同じ（ディレクトリのアカウントのロックアウトも防ぐ。ADR 0102）。
 		a.ldap = &dirldap.Service{Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, OAuth: a.oauth, Accounts: a.accounts, Sessions: a.sessions,
 			PerAccount: a.accountLimiter(), GroupsChanged: a.authz.Invalidate, Log: d.Logger}
-	}
-	a.passkeys = nil
-	var pa *passkey.Attestation
-	if m := a.root.metadata; m != nil {
-		pa = &passkey.Attestation{Metadata: m, Conveyance: protocol.ConveyancePreference(cfg.Passkey.Attestation.Conveyance), Policy: rs.PasskeyPolicy}
-	}
-	if ep.rpOK {
-		var err error
-		a.passkeys, err = passkey.New(passkey.Config{RPID: ep.rpID, RPName: ep.rpName, Origins: ep.origins}, passkey.Service{
-			Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Log: d.Logger,
-			Attestation: pa,
-		})
-		if err != nil {
-			return err
-		}
 	}
 	if a.orgs != nil {
 		a.orgs.Passkeys = pa

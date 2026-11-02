@@ -19,7 +19,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/imohiyoko/iam/authn/passkey/attestation"
+	"github.com/imohiyoko/iam/authn/method/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/port"
