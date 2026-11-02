@@ -412,6 +412,17 @@ Group のネスト、Org 階層（M7）。
 - [x] 監査ログ（承認・拒否・発行）、フィーチャーの無効化で連携先の許可を外す、標準の RP（zitadel/oidc の rp）での E2E
 - 端末の名前や場所を確認の画面に出す、承認の通知
 
+#### 外部 IdP としての SAML 2.0（ADR 0098）
+
+- [x] Org の owner と運営者が、IdP のメタデータ（XML か URL）から SAML の connection を登録できる。URL の取得は公開のアドレスに限る
+- [x] SP のメタデータを公開し、AuthnRequest（HTTP-Redirect、ECDSA-SHA256 の署名は任意）を送り、ACS（HTTP-POST）で応答を受ける
+- [x] 署名を確かめた Assertion だけを受ける。XML Signature Wrapping・コメントの挿入・複数の Assertion・SHA-1・暗号化された Assertion を拒むテストがある
+- [x] Audience・Recipient・Destination・InResponseTo（フローに結び付けて 1 回だけ）・時刻（Clock）・Assertion の ID の再利用を確かめる
+- [x] ログイン・登録・連携は Org 専用 SSO の OIDC と同じ（管理ユーザーだけ、証明済みドメイン、`require_sso`）
+- [x] 応答の検証と IdP のメタデータの解析にファジングのテストがある
+- [x] フィーチャー `saml`（既定オフ）。無効化で connection を消し、外部 ID を無効化する
+- [ ] Single Logout、暗号化された Assertion、メタデータの定期的な取り直し
+
 #### WebAuthn の attestation と AAGUID の許可リスト（ADR 0096）
 
 **ゴール**：企業が承認した認証器だけで passkey を登録・ログインさせられる。

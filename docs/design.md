@@ -757,6 +757,7 @@ GET    /v1/admin/signing-keys
 | OIDC のログアウト（5.6） | オフ | ― | `end_session_endpoint` と Front-Channel Logout なし（Back-Channel Logout は動く） |
 | acr・AAL と step-up（11.15） | オフ | ― | `acr` を出さず、`acr_values` を見ない。AAL で書く条件・ポリシーなし |
 | Device Authorization Grant（11.16） | オフ | ― | device_authorization エンドポイントと承認の画面なし。Discovery に出さない |
+| SAML 2.0 の外部 IdP（11.3、ADR 0098） | オフ | ― | SAML の connection を使わない（Org 専用には Org 管理ユーザーも要る） |
 
 ### 11.1 複数 realm
 
@@ -797,7 +798,8 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 - 証明済みのドメインは `org_domains.recheck`（既定 1 日）ごとに TXT を確かめ直し、`org_domains.grace`（既定 7 日）の間ずっと無ければ証明を外す（ADR 0087）
 - 管理ユーザーは `users.managed_org_id`（ADR 0076）。Org の owner が求め（`:request-management`）、本人が受け入れる（`:accept-management`）。対象は、この Org で使う確認済みのメールが証明済みドメインのメンバー。管理ユーザーはその Org を抜けられず、自分でアカウントを消せない。Org が手放す・除名・削除すると個人ユーザーに戻る
 - 招待の `managed` で、新しく登録した人を最初から管理ユーザーにする。管理ユーザーは管理する Org に入れなければログインできず（停止・ログインポリシー）、Org の owner がアカウントを消せる
-- Org 専用 SSO（ADR 0077）：Org の owner が `/v1/me/orgs/{id}/connections` で OIDC の connection を登録する。その Org の管理ユーザーだけがログインでき、未登録なら証明済みドメインのアドレスで管理ユーザーとして作る。戻り先は固定、トークンエンドポイントは公開のアドレスに限る。ログインポリシー `require_sso`、`/v1/login/sso:discover` でドメインから探す。SAML は後に回す
+- Org 専用 SSO（ADR 0077）：Org の owner が `/v1/me/orgs/{id}/connections` で OIDC の connection を登録する。その Org の管理ユーザーだけがログインでき、未登録なら証明済みドメインのアドレスで管理ユーザーとして作る。戻り先は固定、トークンエンドポイントは公開のアドレスに限る。ログインポリシー `require_sso`、`/v1/login/sso:discover` でドメインから探す
+- SAML 2.0（ADR 0098）：フィーチャー `saml`。Org の owner は `/v1/me/orgs/{id}/connections:saml`、運営者は `/v1/admin/connections:saml` で、IdP のメタデータ（XML か URL）から connection を登録する。iam は SP になり、AuthnRequest（HTTP-Redirect、署名は任意）を送り、ACS（`/login/saml/acs`、HTTP-POST）で受けた応答をホスト型の画面が `/v1/login/saml:complete` に渡す。署名を確かめた Assertion だけを受け（SHA-256 以上、暗号化された Assertion は受けない）、応答は始めたフローに結び付けて 1 回だけ受ける。外部 ID は NameID。ログイン・登録・連携の扱いは OIDC の connection と同じ。Single Logout は後続
 
 ### 11.4 Org 階層
 
@@ -962,7 +964,7 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - OIDC：zitadel/oidc（v3 で開始し v4 を追う）。自前で補うのは ML-DSA の署名と JWKS、Back-Channel Logout の送信、
   RP-Initiated Logout の画面と Front-Channel Logout
 - JWT / JWK：lestrrat-go/jwx v4。WebAuthn：go-webauthn
-- SAML は Org 専用 SSO の実装時に最も慎重に選ぶ
+- SAML（SP）：XML 署名の検証は russellhaering/goxmldsig、プロトコルの確認は `authn/saml` の薄い層（ADR 0098）
 - セキュリティ上重要なコード（トークン、セッション、連携・統合、認可判定、fail-closed 判定）はディレクトリを分けて明示する
 
 ### 13.3 適合試験

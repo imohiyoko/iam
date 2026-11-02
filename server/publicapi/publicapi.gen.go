@@ -157,6 +157,24 @@ func (e MyOrgStatus) Valid() bool {
 	}
 }
 
+// Defines values for OrgConnectionType.
+const (
+	OrgConnectionTypeOidc OrgConnectionType = "oidc"
+	OrgConnectionTypeSaml OrgConnectionType = "saml"
+)
+
+// Valid indicates whether the value is a known member of the OrgConnectionType enum.
+func (e OrgConnectionType) Valid() bool {
+	switch e {
+	case OrgConnectionTypeOidc:
+		return true
+	case OrgConnectionTypeSaml:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OrgDomainStatus.
 const (
 	OrgDomainStatusPending  OrgDomainStatus = "pending"
@@ -364,6 +382,24 @@ func (e WarningSeverity) Valid() bool {
 	case Low:
 		return true
 	case Medium:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DiscoverSSO200JSONResponseBodyEntriesType.
+const (
+	DiscoverSSO200JSONResponseBodyEntriesTypeOidc DiscoverSSO200JSONResponseBodyEntriesType = "oidc"
+	DiscoverSSO200JSONResponseBodyEntriesTypeSaml DiscoverSSO200JSONResponseBodyEntriesType = "saml"
+)
+
+// Valid indicates whether the value is a known member of the DiscoverSSO200JSONResponseBodyEntriesType enum.
+func (e DiscoverSSO200JSONResponseBodyEntriesType) Valid() bool {
+	switch e {
+	case DiscoverSSO200JSONResponseBodyEntriesTypeOidc:
+		return true
+	case DiscoverSSO200JSONResponseBodyEntriesTypeSaml:
 		return true
 	default:
 		return false
@@ -720,21 +756,26 @@ type MyTOTP struct {
 	Id string `json:"id"`
 }
 
-// OrgConnection defines model for OrgConnection.
+// OrgConnection OIDC の項目（issuer から redirect_uri まで）は `type` が `oidc` のときだけ値を持つ（`saml` なら空）。
 type OrgConnection struct {
 	AuthorizationEndpoint string    `json:"authorization_endpoint"`
 	ClientId              string    `json:"client_id"`
 	CreatedAt             time.Time `json:"created_at"`
 
-	// Id 公開の connection ID（con_…）。`/v1/login/oauth/{connection}:start` に渡す
+	// Id 公開の connection ID（con_…）。`/v1/login/oauth/{connection}:start`（SAML なら `/v1/login/saml/{connection}:start`）に渡す
 	Id     string `json:"id"`
 	Issuer string `json:"issuer"`
 
 	// RedirectUri IdP に登録する戻り先
-	RedirectUri   string   `json:"redirect_uri"`
-	Scopes        []string `json:"scopes"`
-	TokenEndpoint string   `json:"token_endpoint"`
+	RedirectUri   string              `json:"redirect_uri"`
+	Saml          *SAMLConnectionInfo `json:"saml,omitempty"`
+	Scopes        []string            `json:"scopes"`
+	TokenEndpoint string              `json:"token_endpoint"`
+	Type          OrgConnectionType   `json:"type"`
 }
+
+// OrgConnectionType defines model for OrgConnection.Type.
+type OrgConnectionType string
 
 // OrgDomain defines model for OrgDomain.
 type OrgDomain struct {
@@ -998,6 +1039,52 @@ type Roles struct {
 	Roles []Role `json:"roles"`
 }
 
+// SAMLConnectionInfo defines model for SAMLConnectionInfo.
+type SAMLConnectionInfo struct {
+	// AcsUrl IdP に登録する ACS（HTTP-POST）
+	AcsUrl         string  `json:"acs_url"`
+	EmailAttribute *string `json:"email_attribute,omitempty"`
+
+	// IdpCertificateExpiresAt IdP の署名の証明書の最も遅い期限
+	IdpCertificateExpiresAt *time.Time `json:"idp_certificate_expires_at,omitempty"`
+	IdpEntityId             string     `json:"idp_entity_id"`
+	MetadataUrl             *string    `json:"metadata_url,omitempty"`
+	NameIdFormat            *string    `json:"name_id_format,omitempty"`
+	SignRequests            bool       `json:"sign_requests"`
+
+	// SpEntityId SP の Entity ID。SP のメタデータの URL でもある
+	SpEntityId string `json:"sp_entity_id"`
+	SsoUrl     string `json:"sso_url"`
+}
+
+// SAMLConnectionInput `metadata_xml` と `metadata_url` のどちらか 1 つ。
+type SAMLConnectionInput struct {
+	// EmailAttribute メールの属性の名前
+	EmailAttribute *string `json:"email_attribute,omitempty"`
+
+	// EntityId メタデータに IdP が複数あるときに選ぶ
+	EntityId    *string `json:"entity_id,omitempty"`
+	MetadataUrl *string `json:"metadata_url,omitempty"`
+
+	// MetadataXml IdP のメタデータ（EntityDescriptor）
+	MetadataXml *string `json:"metadata_xml,omitempty"`
+
+	// NameIdFormat 求める NameID の形式（transient は使えない）
+	NameIdFormat *string `json:"name_id_format,omitempty"`
+
+	// SignRequests AuthnRequest に署名する（ECDSA-SHA256）
+	SignRequests *bool `json:"sign_requests,omitempty"`
+}
+
+// SAMLStarted defines model for SAMLStarted.
+type SAMLStarted struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	FlowId    string    `json:"flow_id"`
+
+	// RedirectUrl IdP の SingleSignOnService への URL（AuthnRequest を含む）
+	RedirectUrl string `json:"redirect_url"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	AuthMethods     []string  `json:"auth_methods"`
@@ -1119,6 +1206,16 @@ type PasswordLoginJSONBody struct {
 	ReturnToken *bool  `json:"return_token,omitempty"`
 }
 
+// CompleteSAMLLoginJSONBody defines parameters for CompleteSAMLLogin.
+type CompleteSAMLLoginJSONBody struct {
+	FlowId      *string `json:"flow_id,omitempty"`
+	RelayState  string  `json:"relay_state"`
+	ReturnToken *bool   `json:"return_token,omitempty"`
+
+	// SamlResponse ACS に POST された SAMLResponse（base64）のまま
+	SamlResponse string `json:"saml_response"`
+}
+
 // VerifySecondFactorJSONBody defines parameters for VerifySecondFactor.
 type VerifySecondFactorJSONBody struct {
 	Credential  *map[string]interface{} `json:"credential,omitempty"`
@@ -1131,6 +1228,9 @@ type VerifySecondFactorJSONBody struct {
 type DiscoverSSOJSONBody struct {
 	Email string `json:"email"`
 }
+
+// DiscoverSSO200JSONResponseBodyEntriesType defines parameters for DiscoverSSO.
+type DiscoverSSO200JSONResponseBodyEntriesType string
 
 // CancelMyAccountDeletionJSONBody defines parameters for CancelMyAccountDeletion.
 type CancelMyAccountDeletionJSONBody struct {
@@ -1152,6 +1252,13 @@ type VerifyAddEmailJSONBody struct {
 	Code   *string `json:"code,omitempty"`
 	FlowId *string `json:"flow_id,omitempty"`
 	Token  *string `json:"token,omitempty"`
+}
+
+// CompleteLinkSAMLIdentityJSONBody defines parameters for CompleteLinkSAMLIdentity.
+type CompleteLinkSAMLIdentityJSONBody struct {
+	FlowId       *string `json:"flow_id,omitempty"`
+	RelayState   string  `json:"relay_state"`
+	SamlResponse string  `json:"saml_response"`
 }
 
 // StartLinkIdentityJSONBody defines parameters for StartLinkIdentity.
@@ -1342,6 +1449,9 @@ type FinishPasskeyLoginJSONRequestBody FinishPasskeyLoginJSONBody
 // PasswordLoginJSONRequestBody defines body for PasswordLogin for application/json ContentType.
 type PasswordLoginJSONRequestBody PasswordLoginJSONBody
 
+// CompleteSAMLLoginJSONRequestBody defines body for CompleteSAMLLogin for application/json ContentType.
+type CompleteSAMLLoginJSONRequestBody CompleteSAMLLoginJSONBody
+
 // BeginSecondFactorMethodJSONRequestBody defines body for BeginSecondFactorMethod for application/json ContentType.
 type BeginSecondFactorMethodJSONRequestBody = MethodBeginRequest
 
@@ -1372,6 +1482,9 @@ type StartAddEmailJSONRequestBody StartAddEmailJSONBody
 // VerifyAddEmailJSONRequestBody defines body for VerifyAddEmail for application/json ContentType.
 type VerifyAddEmailJSONRequestBody VerifyAddEmailJSONBody
 
+// CompleteLinkSAMLIdentityJSONRequestBody defines body for CompleteLinkSAMLIdentity for application/json ContentType.
+type CompleteLinkSAMLIdentityJSONRequestBody CompleteLinkSAMLIdentityJSONBody
+
 // StartLinkIdentityJSONRequestBody defines body for StartLinkIdentity for application/json ContentType.
 type StartLinkIdentityJSONRequestBody StartLinkIdentityJSONBody
 
@@ -1386,6 +1499,9 @@ type CreateMyOrgJSONRequestBody CreateMyOrgJSONBody
 
 // AddOrgConnectionJSONRequestBody defines body for AddOrgConnection for application/json ContentType.
 type AddOrgConnectionJSONRequestBody AddOrgConnectionJSONBody
+
+// AddOrgSAMLConnectionJSONRequestBody defines body for AddOrgSAMLConnection for application/json ContentType.
+type AddOrgSAMLConnectionJSONRequestBody = SAMLConnectionInput
 
 // AddOrgDomainJSONRequestBody defines body for AddOrgDomain for application/json ContentType.
 type AddOrgDomainJSONRequestBody AddOrgDomainJSONBody
@@ -1509,6 +1625,12 @@ type ServerInterface interface {
 	// PasswordLogin メールとパスワードでログインする（フィーチャー password）
 	// (POST /v1/login/password)
 	PasswordLogin(w http.ResponseWriter, r *http.Request)
+	// StartSAMLLogin 外部 IdP（SAML 2.0）による登録・ログインを始める（ADR 0098）
+	// (POST /v1/login/saml/{connection}:start)
+	StartSAMLLogin(w http.ResponseWriter, r *http.Request, connection string)
+	// CompleteSAMLLogin IdP の応答（SAMLResponse と RelayState）でフローを完了する（ADR 0098）
+	// (POST /v1/login/saml:complete)
+	CompleteSAMLLogin(w http.ResponseWriter, r *http.Request)
 	// StartSecondFactorPasskey 2要素目の passkey の確認を始める
 	// (POST /v1/login/second-factor/passkey:start)
 	StartSecondFactorPasskey(w http.ResponseWriter, r *http.Request)
@@ -1563,6 +1685,12 @@ type ServerInterface interface {
 	// VerifyAddEmail コードかリンクのトークンでメールの追加を完了する
 	// (POST /v1/me/emails:verify)
 	VerifyAddEmail(w http.ResponseWriter, r *http.Request)
+	// StartLinkSAMLIdentity 外部 IdP（SAML 2.0）の連携を始める（ADR 0098）
+	// (POST /v1/me/identities/saml/{connection}:start)
+	StartLinkSAMLIdentity(w http.ResponseWriter, r *http.Request, connection string)
+	// CompleteLinkSAMLIdentity IdP の応答で SAML の連携を完了する（ADR 0098）
+	// (POST /v1/me/identities/saml:complete)
+	CompleteLinkSAMLIdentity(w http.ResponseWriter, r *http.Request)
 	// StartLinkIdentity 外部プロバイダ（OAuth / OIDC）の連携を始める
 	// (POST /v1/me/identities/{connection}:start)
 	StartLinkIdentity(w http.ResponseWriter, r *http.Request, connection string)
@@ -1596,6 +1724,9 @@ type ServerInterface interface {
 	// DeleteOrgConnection Org 専用 SSO の connection を消す（Org の owner）
 	// (POST /v1/me/orgs/{id}/connections/{connection_id}:delete)
 	DeleteOrgConnection(w http.ResponseWriter, r *http.Request, id string, connectionId string)
+	// AddOrgSAMLConnection Org 専用 SSO の connection（SAML 2.0）を登録する（Org の owner。ADR 0077、0098）
+	// (POST /v1/me/orgs/{id}/connections:saml)
+	AddOrgSAMLConnection(w http.ResponseWriter, r *http.Request, id string)
 	// ListOrgDomains Org のドメインの一覧（Org の owner。11.3）
 	// (GET /v1/me/orgs/{id}/domains)
 	ListOrgDomains(w http.ResponseWriter, r *http.Request, id string)
@@ -2005,6 +2136,46 @@ func (siw *ServerInterfaceWrapper) PasswordLogin(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// StartSAMLLogin operation middleware
+func (siw *ServerInterfaceWrapper) StartSAMLLogin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection" -------------
+	var connection string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection", r.PathValue("connection"), &connection, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartSAMLLogin(w, r, connection)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteSAMLLogin operation middleware
+func (siw *ServerInterfaceWrapper) CompleteSAMLLogin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteSAMLLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartSecondFactorPasskey operation middleware
 func (siw *ServerInterfaceWrapper) StartSecondFactorPasskey(w http.ResponseWriter, r *http.Request) {
 
@@ -2341,6 +2512,46 @@ func (siw *ServerInterfaceWrapper) VerifyAddEmail(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// StartLinkSAMLIdentity operation middleware
+func (siw *ServerInterfaceWrapper) StartLinkSAMLIdentity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection" -------------
+	var connection string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection", r.PathValue("connection"), &connection, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartLinkSAMLIdentity(w, r, connection)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteLinkSAMLIdentity operation middleware
+func (siw *ServerInterfaceWrapper) CompleteLinkSAMLIdentity(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteLinkSAMLIdentity(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartLinkIdentity operation middleware
 func (siw *ServerInterfaceWrapper) StartLinkIdentity(w http.ResponseWriter, r *http.Request) {
 
@@ -2555,6 +2766,32 @@ func (siw *ServerInterfaceWrapper) DeleteOrgConnection(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteOrgConnection(w, r, id, connectionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddOrgSAMLConnection operation middleware
+func (siw *ServerInterfaceWrapper) AddOrgSAMLConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddOrgSAMLConnection(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4283,6 +4520,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/link:redeem", wrapper.RedeemLoginLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth/{connection}:start", wrapper.StartOAuthLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth:complete", wrapper.CompleteOAuthLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/saml/{connection}:start", wrapper.StartSAMLLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/saml:complete", wrapper.CompleteSAMLLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/sso:discover", wrapper.DiscoverSSO)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:start", wrapper.StartPasskeyLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:finish", wrapper.FinishPasskeyLogin)
@@ -4312,6 +4551,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/emails/{id}:remove", wrapper.RemoveMyEmail)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/{connection}:start", wrapper.StartLinkIdentity)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities:complete", wrapper.CompleteLinkIdentity)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/saml/{connection}:start", wrapper.StartLinkSAMLIdentity)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/saml:complete", wrapper.CompleteLinkSAMLIdentity)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/{id}:unlink", wrapper.UnlinkMyIdentity)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys:start", wrapper.StartRegisterPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys:finish", wrapper.FinishRegisterPasskey)
@@ -4352,6 +4593,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains/{domain_id}:delete", wrapper.DeleteOrgDomain)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/connections", wrapper.ListOrgConnections)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/connections", wrapper.AddOrgConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/connections:saml", wrapper.AddOrgSAMLConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/connections/{connection_id}:delete", wrapper.DeleteOrgConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:request-management", wrapper.RequestOrgManagement)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:release-management", wrapper.ReleaseOrgManagement)
@@ -5241,6 +5483,164 @@ func (response PasswordLogin429JSONResponse) VisitPasswordLoginResponse(w http.R
 	return err
 }
 
+type StartSAMLLoginRequestObject struct {
+	Connection string `json:"connection"`
+}
+
+type StartSAMLLoginResponseObject interface {
+	VisitStartSAMLLoginResponse(w http.ResponseWriter) error
+}
+
+type StartSAMLLogin200JSONResponse SAMLStarted
+
+func (response StartSAMLLogin200JSONResponse) VisitStartSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSAMLLogin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response StartSAMLLogin404JSONResponse) VisitStartSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartSAMLLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response StartSAMLLogin429JSONResponse) VisitStartSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSAMLLoginRequestObject struct {
+	Body *CompleteSAMLLoginJSONRequestBody
+}
+
+type CompleteSAMLLoginResponseObject interface {
+	VisitCompleteSAMLLoginResponse(w http.ResponseWriter) error
+}
+
+type CompleteSAMLLogin200JSONResponse LoginResult
+
+func (response CompleteSAMLLogin200JSONResponse) VisitCompleteSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSAMLLogin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CompleteSAMLLogin400JSONResponse) VisitCompleteSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSAMLLogin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteSAMLLogin401JSONResponse) VisitCompleteSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSAMLLogin403JSONResponse struct{ DeniedJSONResponse }
+
+func (response CompleteSAMLLogin403JSONResponse) VisitCompleteSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSAMLLogin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CompleteSAMLLogin404JSONResponse) VisitCompleteSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSAMLLogin409JSONResponse Error
+
+func (response CompleteSAMLLogin409JSONResponse) VisitCompleteSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSAMLLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response CompleteSAMLLogin429JSONResponse) VisitCompleteSAMLLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartSecondFactorPasskeyRequestObject struct {
 }
 
@@ -5496,6 +5896,11 @@ type DiscoverSSOResponseObject interface {
 
 type DiscoverSSO200JSONResponse struct {
 	Connections []string `json:"connections"`
+	Entries     []struct {
+		// Connection connection（公開の ID）
+		Connection string                                    `json:"connection"`
+		Type       DiscoverSSO200JSONResponseBodyEntriesType `json:"type"`
+	} `json:"entries"`
 }
 
 func (response DiscoverSSO200JSONResponse) VisitDiscoverSSOResponse(w http.ResponseWriter) error {
@@ -6317,6 +6722,134 @@ func (response VerifyAddEmail409JSONResponse) VisitVerifyAddEmailResponse(w http
 	return err
 }
 
+type StartLinkSAMLIdentityRequestObject struct {
+	Connection string `json:"connection"`
+}
+
+type StartLinkSAMLIdentityResponseObject interface {
+	VisitStartLinkSAMLIdentityResponse(w http.ResponseWriter) error
+}
+
+type StartLinkSAMLIdentity200JSONResponse SAMLStarted
+
+func (response StartLinkSAMLIdentity200JSONResponse) VisitStartLinkSAMLIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLinkSAMLIdentity401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response StartLinkSAMLIdentity401JSONResponse) VisitStartLinkSAMLIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLinkSAMLIdentity404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response StartLinkSAMLIdentity404JSONResponse) VisitStartLinkSAMLIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartLinkSAMLIdentity409JSONResponse struct{ ConflictJSONResponse }
+
+func (response StartLinkSAMLIdentity409JSONResponse) VisitStartLinkSAMLIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteLinkSAMLIdentityRequestObject struct {
+	Body *CompleteLinkSAMLIdentityJSONRequestBody
+}
+
+type CompleteLinkSAMLIdentityResponseObject interface {
+	VisitCompleteLinkSAMLIdentityResponse(w http.ResponseWriter) error
+}
+
+type CompleteLinkSAMLIdentity200JSONResponse MyIdentity
+
+func (response CompleteLinkSAMLIdentity200JSONResponse) VisitCompleteLinkSAMLIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteLinkSAMLIdentity401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteLinkSAMLIdentity401JSONResponse) VisitCompleteLinkSAMLIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteLinkSAMLIdentity404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CompleteLinkSAMLIdentity404JSONResponse) VisitCompleteLinkSAMLIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteLinkSAMLIdentity409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CompleteLinkSAMLIdentity409JSONResponse) VisitCompleteLinkSAMLIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartLinkIdentityRequestObject struct {
 	Connection string `json:"connection"`
 	Body       *StartLinkIdentityJSONRequestBody
@@ -7068,6 +7601,99 @@ func (response DeleteOrgConnection404JSONResponse) VisitDeleteOrgConnectionRespo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgSAMLConnectionRequestObject struct {
+	Id   string `json:"id"`
+	Body *AddOrgSAMLConnectionJSONRequestBody
+}
+
+type AddOrgSAMLConnectionResponseObject interface {
+	VisitAddOrgSAMLConnectionResponse(w http.ResponseWriter) error
+}
+
+type AddOrgSAMLConnection201JSONResponse OrgConnection
+
+func (response AddOrgSAMLConnection201JSONResponse) VisitAddOrgSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgSAMLConnection400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AddOrgSAMLConnection400JSONResponse) VisitAddOrgSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgSAMLConnection401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AddOrgSAMLConnection401JSONResponse) VisitAddOrgSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgSAMLConnection403JSONResponse struct{ DeniedJSONResponse }
+
+func (response AddOrgSAMLConnection403JSONResponse) VisitAddOrgSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgSAMLConnection404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AddOrgSAMLConnection404JSONResponse) VisitAddOrgSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgSAMLConnection409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddOrgSAMLConnection409JSONResponse) VisitAddOrgSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -11347,6 +11973,12 @@ type StrictServerInterface interface {
 	// PasswordLogin メールとパスワードでログインする（フィーチャー password）
 	// (POST /v1/login/password)
 	PasswordLogin(ctx context.Context, request PasswordLoginRequestObject) (PasswordLoginResponseObject, error)
+	// StartSAMLLogin 外部 IdP（SAML 2.0）による登録・ログインを始める（ADR 0098）
+	// (POST /v1/login/saml/{connection}:start)
+	StartSAMLLogin(ctx context.Context, request StartSAMLLoginRequestObject) (StartSAMLLoginResponseObject, error)
+	// CompleteSAMLLogin IdP の応答（SAMLResponse と RelayState）でフローを完了する（ADR 0098）
+	// (POST /v1/login/saml:complete)
+	CompleteSAMLLogin(ctx context.Context, request CompleteSAMLLoginRequestObject) (CompleteSAMLLoginResponseObject, error)
 	// StartSecondFactorPasskey 2要素目の passkey の確認を始める
 	// (POST /v1/login/second-factor/passkey:start)
 	StartSecondFactorPasskey(ctx context.Context, request StartSecondFactorPasskeyRequestObject) (StartSecondFactorPasskeyResponseObject, error)
@@ -11401,6 +12033,12 @@ type StrictServerInterface interface {
 	// VerifyAddEmail コードかリンクのトークンでメールの追加を完了する
 	// (POST /v1/me/emails:verify)
 	VerifyAddEmail(ctx context.Context, request VerifyAddEmailRequestObject) (VerifyAddEmailResponseObject, error)
+	// StartLinkSAMLIdentity 外部 IdP（SAML 2.0）の連携を始める（ADR 0098）
+	// (POST /v1/me/identities/saml/{connection}:start)
+	StartLinkSAMLIdentity(ctx context.Context, request StartLinkSAMLIdentityRequestObject) (StartLinkSAMLIdentityResponseObject, error)
+	// CompleteLinkSAMLIdentity IdP の応答で SAML の連携を完了する（ADR 0098）
+	// (POST /v1/me/identities/saml:complete)
+	CompleteLinkSAMLIdentity(ctx context.Context, request CompleteLinkSAMLIdentityRequestObject) (CompleteLinkSAMLIdentityResponseObject, error)
 	// StartLinkIdentity 外部プロバイダ（OAuth / OIDC）の連携を始める
 	// (POST /v1/me/identities/{connection}:start)
 	StartLinkIdentity(ctx context.Context, request StartLinkIdentityRequestObject) (StartLinkIdentityResponseObject, error)
@@ -11434,6 +12072,9 @@ type StrictServerInterface interface {
 	// DeleteOrgConnection Org 専用 SSO の connection を消す（Org の owner）
 	// (POST /v1/me/orgs/{id}/connections/{connection_id}:delete)
 	DeleteOrgConnection(ctx context.Context, request DeleteOrgConnectionRequestObject) (DeleteOrgConnectionResponseObject, error)
+	// AddOrgSAMLConnection Org 専用 SSO の connection（SAML 2.0）を登録する（Org の owner。ADR 0077、0098）
+	// (POST /v1/me/orgs/{id}/connections:saml)
+	AddOrgSAMLConnection(ctx context.Context, request AddOrgSAMLConnectionRequestObject) (AddOrgSAMLConnectionResponseObject, error)
 	// ListOrgDomains Org のドメインの一覧（Org の owner。11.3）
 	// (GET /v1/me/orgs/{id}/domains)
 	ListOrgDomains(ctx context.Context, request ListOrgDomainsRequestObject) (ListOrgDomainsResponseObject, error)
@@ -12049,6 +12690,63 @@ func (sh *strictHandler) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// StartSAMLLogin operation middleware
+func (sh *strictHandler) StartSAMLLogin(w http.ResponseWriter, r *http.Request, connection string) {
+	var request StartSAMLLoginRequestObject
+
+	request.Connection = connection
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartSAMLLogin(ctx, request.(StartSAMLLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartSAMLLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartSAMLLoginResponseObject); ok {
+		if err := validResponse.VisitStartSAMLLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteSAMLLogin operation middleware
+func (sh *strictHandler) CompleteSAMLLogin(w http.ResponseWriter, r *http.Request) {
+	var request CompleteSAMLLoginRequestObject
+
+	var body CompleteSAMLLoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteSAMLLogin(ctx, request.(CompleteSAMLLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteSAMLLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteSAMLLoginResponseObject); ok {
+		if err := validResponse.VisitCompleteSAMLLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // StartSecondFactorPasskey operation middleware
 func (sh *strictHandler) StartSecondFactorPasskey(w http.ResponseWriter, r *http.Request) {
 	var request StartSecondFactorPasskeyRequestObject
@@ -12574,6 +13272,63 @@ func (sh *strictHandler) VerifyAddEmail(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// StartLinkSAMLIdentity operation middleware
+func (sh *strictHandler) StartLinkSAMLIdentity(w http.ResponseWriter, r *http.Request, connection string) {
+	var request StartLinkSAMLIdentityRequestObject
+
+	request.Connection = connection
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartLinkSAMLIdentity(ctx, request.(StartLinkSAMLIdentityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartLinkSAMLIdentity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartLinkSAMLIdentityResponseObject); ok {
+		if err := validResponse.VisitStartLinkSAMLIdentityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteLinkSAMLIdentity operation middleware
+func (sh *strictHandler) CompleteLinkSAMLIdentity(w http.ResponseWriter, r *http.Request) {
+	var request CompleteLinkSAMLIdentityRequestObject
+
+	var body CompleteLinkSAMLIdentityJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteLinkSAMLIdentity(ctx, request.(CompleteLinkSAMLIdentityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteLinkSAMLIdentity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteLinkSAMLIdentityResponseObject); ok {
+		if err := validResponse.VisitCompleteLinkSAMLIdentityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // StartLinkIdentity operation middleware
 func (sh *strictHandler) StartLinkIdentity(w http.ResponseWriter, r *http.Request, connection string) {
 	var request StartLinkIdentityRequestObject
@@ -12880,6 +13635,39 @@ func (sh *strictHandler) DeleteOrgConnection(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteOrgConnectionResponseObject); ok {
 		if err := validResponse.VisitDeleteOrgConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddOrgSAMLConnection operation middleware
+func (sh *strictHandler) AddOrgSAMLConnection(w http.ResponseWriter, r *http.Request, id string) {
+	var request AddOrgSAMLConnectionRequestObject
+
+	request.Id = id
+
+	var body AddOrgSAMLConnectionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddOrgSAMLConnection(ctx, request.(AddOrgSAMLConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddOrgSAMLConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddOrgSAMLConnectionResponseObject); ok {
+		if err := validResponse.VisitAddOrgSAMLConnectionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

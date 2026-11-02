@@ -388,24 +388,56 @@ type Result struct {
 func (s *Service) Complete(ctx context.Context, realmID string, in Complete) (Result, error) {
 	out, err := s.complete(ctx, realmID, in)
 	if err != nil {
-		s.recordFailure(ctx, realmID, in.Client, err)
-		if errors.Is(err, ErrAccountExists) || errors.Is(err, ErrEmailUnverified) || errors.Is(err, ErrSSODomainNotVerified) || errors.Is(err, ErrQuotaExceeded) {
-			return Result{}, err
-		}
-		if denied, ok := errors.AsType[errs.Denial](err); ok {
-			return Result{}, denied
-		}
-		return Result{}, ErrAuthFailed
+		s.RecordFailure(ctx, realmID, methodOAuth, in.Client, err)
+		return Result{}, DiscloseLogin(err)
 	}
 	return out, nil
 }
+
+// DiscloseLogin は外部 IdP でのログインの失敗のうち、外に返してよいものを返す（それ以外は ErrAuthFailed。4.9）。
+// メール・ドメイン・Quota・ログインの可否は、本人確認の後なので理由を返す。
+func DiscloseLogin(err error) error {
+	if errors.Is(err, ErrAccountExists) || errors.Is(err, ErrEmailUnverified) || errors.Is(err, ErrSSODomainNotVerified) || errors.Is(err, ErrQuotaExceeded) {
+		return err
+	}
+	if denied, ok := errors.AsType[errs.Denial](err); ok {
+		return denied
+	}
+	return ErrAuthFailed
+}
+
+// DiscloseLink は連携の失敗のうち、外に返してよいものを返す（それ以外は ErrAuthFailed）。
+func DiscloseLink(err error) error {
+	if errors.Is(err, ErrIdentityExists) || errors.Is(err, ErrNotManagedByOwner) {
+		return err
+	}
+	return ErrAuthFailed
+}
+
+// methodOAuth は監査ログの method。
+const methodOAuth = "oauth"
 
 func (s *Service) complete(ctx context.Context, realmID string, in Complete) (Result, error) {
 	conn, c, err := s.finish(ctx, realmID, in, "")
 	if err != nil {
 		return Result{}, err
 	}
-	return s.login(ctx, realmID, conn, c, in, s.Clock.Now())
+	return s.LoginFederated(ctx, realmID, conn, c.federated(), in.Client, in.ReplaceToken)
+}
+
+// Federated は外部 IdP（OIDC・SAML）で確かめた本人の属性。
+type Federated struct {
+	// Subject は IdP での識別子（OIDC の sub、SAML の NameID）。外部 ID は (connection, Subject) で見分ける。
+	Subject string
+	Email   string
+	// EmailVerified は IdP がメールを確認済みとしたか。Org 専用 SSO では、加えて Org が証明したドメインに限る。
+	EmailVerified bool
+	// Method は監査ログの method（oauth、saml）。
+	Method string
+}
+
+func (c claims) federated() Federated {
+	return Federated{Subject: c.Subject, Email: c.Email, EmailVerified: bool(c.EmailVerified), Method: methodOAuth}
 }
 
 // ErrIdentityExists は、外部 ID が既に別のユーザー（または同じユーザー）に紐付いていること。
@@ -417,11 +449,11 @@ var ErrIdentityExists = errs.WithCode(errs.KindConflict, "identity_exists", "the
 func (s *Service) CompleteLink(ctx context.Context, realmID, userID string, in Complete) (port.Identity, error) {
 	ident, err := s.completeLink(ctx, realmID, userID, in)
 	if err != nil {
-		if errors.Is(err, ErrIdentityExists) || errors.Is(err, ErrNotManagedByOwner) {
-			return port.Identity{}, err
+		out := DiscloseLink(err)
+		if out == ErrAuthFailed {
+			s.RecordFailure(ctx, realmID, methodOAuth, in.Client, err)
 		}
-		s.recordFailure(ctx, realmID, in.Client, err)
-		return port.Identity{}, ErrAuthFailed
+		return port.Identity{}, out
 	}
 	return ident, nil
 }
@@ -434,9 +466,24 @@ func (s *Service) completeLink(ctx context.Context, realmID, userID string, in C
 	if err != nil {
 		return port.Identity{}, err
 	}
+	return s.LinkFederated(ctx, realmID, userID, conn, c.federated(), in.Client)
+}
+
+// LinkFederated は、確かめた外部 ID をログイン済みのユーザー（内部 ID）に紐付ける（OIDC・SAML の共通の部分）。
+// Org 専用 SSO の connection は、その Org の管理ユーザーにだけ紐付ける（ADR 0077）。
+func (s *Service) LinkFederated(ctx context.Context, realmID, userID string, conn port.Connection, f Federated, cl Client) (port.Identity, error) {
+	if userID == "" {
+		return port.Identity{}, errors.New("link requires a user")
+	}
+	if conn.OwnerOrgID != "" && s.OrgSSO == nil {
+		return port.Identity{}, errors.New("org connections are disabled")
+	}
+	if f.Subject == "" || len(f.Subject) > 255 {
+		return port.Identity{}, errors.New("invalid subject")
+	}
 	var ident port.Identity
-	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		switch _, err := tx.Identities().GetBySubject(ctx, realmID, conn.ID, c.Subject); {
+	err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		switch _, err := tx.Identities().GetBySubject(ctx, realmID, conn.ID, f.Subject); {
 		case err == nil:
 			return ErrIdentityExists
 		case !errors.Is(err, errs.NotFound):
@@ -450,7 +497,7 @@ func (s *Service) completeLink(ctx context.Context, realmID, userID string, in C
 			return ErrNotManagedByOwner
 		}
 		ident = port.Identity{ID: id.New(id.Identity), PublicID: id.NewExternal(id.Identity), RealmID: realmID, UserID: u.ID,
-			ConnectionID: conn.ID, ProviderSubject: c.Subject, CreatedAt: s.Clock.Now()}
+			ConnectionID: conn.ID, ProviderSubject: f.Subject, CreatedAt: s.Clock.Now()}
 		if err := tx.Identities().Create(ctx, ident); err != nil {
 			if errors.Is(err, errs.Conflict) {
 				return ErrIdentityExists
@@ -459,7 +506,7 @@ func (s *Service) completeLink(ctx context.Context, realmID, userID string, in C
 		}
 		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
 			Type: "identity.linked", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
-			IP: in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID,
+			IP: cl.IP, UserAgent: cl.UserAgent, RequestID: cl.RequestID,
 			Details: map[string]any{"connection_id": conn.ID, "identity_id": ident.PublicID, "user_id": u.PublicID},
 		})
 		return err
@@ -669,18 +716,27 @@ func (s *Service) exchange(ctx context.Context, cfg Config, st state, code strin
 	return c, nil
 }
 
-// login は (connection, sub) でユーザーを探し、無ければ登録する。
-func (s *Service) login(ctx context.Context, realmID string, conn port.Connection, c claims, in Complete, now time.Time) (Result, error) {
+// LoginFederated は (connection, Subject) でユーザーを探してログインさせ、無ければ登録する（OIDC・SAML の共通の部分）。
+// Org 専用 SSO の connection では、その Org の管理ユーザーだけがログインでき、その Org に入る（ADR 0077）。
+// replaceToken は同じブラウザが持っていた古いセッションのトークン（session.Issue を参照）。
+func (s *Service) LoginFederated(ctx context.Context, realmID string, conn port.Connection, f Federated, cl Client, replaceToken string) (Result, error) {
+	if conn.OwnerOrgID != "" && s.OrgSSO == nil {
+		return Result{}, errors.New("org connections are disabled")
+	}
+	if f.Subject == "" || len(f.Subject) > 255 {
+		return Result{}, errors.New("invalid subject")
+	}
+	now := s.Clock.Now()
 	var out Result
 	err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		ident, err := tx.Identities().GetBySubject(ctx, realmID, conn.ID, c.Subject)
+		ident, err := tx.Identities().GetBySubject(ctx, realmID, conn.ID, f.Subject)
 		switch {
 		case err == nil:
 			if ident.RevokedAt != nil {
 				return errors.New("identity revoked")
 			}
 		case errors.Is(err, errs.NotFound):
-			if ident, err = s.signup(ctx, tx, realmID, conn, c, in.Client, now); err != nil {
+			if ident, err = s.signup(ctx, tx, realmID, conn, f, cl, now); err != nil {
 				return err
 			}
 			out.Created = true
@@ -699,9 +755,9 @@ func (s *Service) login(ctx context.Context, realmID string, conn port.Connectio
 			return err
 		}
 		is, err := s.Sessions.Issue(ctx, tx, session.Issue{
-			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"fed"}, Credentials: []string{ident.ID}, OrgEmail: verifiedEmail(c), OrgID: conn.OwnerOrgID,
-			Evidence: warning.Evidence{OAuthEmailVerified: new(bool(c.EmailVerified))},
-			IP:       in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID, ReplaceToken: in.ReplaceToken,
+			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"fed"}, Credentials: []string{ident.ID}, OrgEmail: verifiedEmail(f), OrgID: conn.OwnerOrgID,
+			Evidence: warning.Evidence{OAuthEmailVerified: new(f.EmailVerified)},
+			IP:       cl.IP, UserAgent: cl.UserAgent, RequestID: cl.RequestID, ReplaceToken: replaceToken,
 		})
 		if err != nil {
 			return err
@@ -709,8 +765,8 @@ func (s *Service) login(ctx context.Context, realmID string, conn port.Connectio
 		out.Session, out.UserID = is, u.PublicID
 		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
 			Type: "login.succeeded", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
-			SessionID: is.Session.ID, IP: in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID,
-			Details: map[string]any{"method": "oauth", "connection_id": conn.ID, "signup": out.Created},
+			SessionID: is.Session.ID, IP: cl.IP, UserAgent: cl.UserAgent, RequestID: cl.RequestID,
+			Details: map[string]any{"method": f.Method, "connection_id": conn.ID, "signup": out.Created},
 		})
 		return err
 	})
@@ -722,7 +778,7 @@ func (s *Service) login(ctx context.Context, realmID string, conn port.Connectio
 
 // signup はプロバイダが確認済みとしたメールでユーザーを作り、外部 ID を紐付ける。
 // メールが登録済みなら ErrAccountExists（自動リンクしない）。
-func (s *Service) signup(ctx context.Context, tx port.Tx, realmID string, conn port.Connection, c claims, cl Client, now time.Time) (port.Identity, error) {
+func (s *Service) signup(ctx context.Context, tx port.Tx, realmID string, conn port.Connection, c Federated, cl Client, now time.Time) (port.Identity, error) {
 	if c.Email == "" || !c.EmailVerified {
 		return port.Identity{}, ErrEmailUnverified
 	}
@@ -766,13 +822,13 @@ func (s *Service) signup(ctx context.Context, tx port.Tx, realmID string, conn p
 	return ident, err
 }
 
-// recordFailure は失敗を監査ログに残す（理由は内部向け。6.1）。
-func (s *Service) recordFailure(ctx context.Context, realmID string, c Client, cause error) {
+// RecordFailure は失敗を監査ログに残す（理由は内部向け。6.1）。method は oauth か saml。
+func (s *Service) RecordFailure(ctx context.Context, realmID, method string, c Client, cause error) {
 	err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		_, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{
 			Type: "login.failed", Result: audit.ResultFailure, RealmID: realmID, Actor: audit.Actor{Type: "anonymous"},
 			IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
-			Details: map[string]any{"method": "oauth", "reason": cause.Error()},
+			Details: map[string]any{"method": method, "reason": cause.Error()},
 		})
 		return err
 	})
@@ -789,7 +845,7 @@ func (s *Service) logger() *slog.Logger {
 }
 
 // verifiedEmail はプロバイダが確認済みとしたアドレス（Org の手がかり。4.4）。確認済みでなければ空。
-func verifiedEmail(c claims) string {
+func verifiedEmail(c Federated) string {
 	if !c.EmailVerified {
 		return ""
 	}
