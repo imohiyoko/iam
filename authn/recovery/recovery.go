@@ -406,6 +406,15 @@ func addedSince(ctx context.Context, tx port.Tx, realmID, userID string, since t
 			return true, nil
 		}
 	}
+	cs, err := tx.Credentials().ListByUser(ctx, realmID, userID, "")
+	if err != nil {
+		return false, err
+	}
+	for _, c := range cs {
+		if c.RevokedAt == nil && after(c.CreatedAt) {
+			return true, nil
+		}
+	}
 	switch p, err := tx.Passwords().GetActive(ctx, realmID, userID); {
 	case err == nil:
 		return after(p.CreatedAt), nil

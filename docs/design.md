@@ -188,6 +188,9 @@ passkeys             id, user_id, credential_id, public_key, alg（ES256 / EdDSA
                      aaguid, attestation_format, attested（ADR 0096。既存の行は '' と false）
                      UNIQUE (realm_id, credential_id)（realm_id は user から引く）
 revoked_passkey_credentials  realm_id, credential_id, revoked_at（再登録の拒否）, PK (realm_id, credential_id)
+authn_credentials    id, realm_id, user_id, method, lookup（検索キーのブラインドインデックス。任意）
+                     data（方式固有のデータ。ユーザーのデータ鍵で暗号化）, data_version, created_at, last_used_at, revoked_*
+                     UNIQUE (realm_id, method, lookup)（無効化していないもの）。認証方式のプラグインの汎用の認証情報（ADR 0090、0092）
 
 service_accounts     id, realm_id, org_id, name, valid_from, valid_until, created_at
 service_account_credentials  id, service_account_id, type（client_secret / private_key_jwt / api_key）
@@ -252,12 +255,13 @@ Group に入れるのは、その Org の active な Membership を持つユー�
 |---|---|---|
 | passkey | 不要 | 1要素目・2要素目。最も推奨 |
 | TOTP | 不要 | 2要素目 |
+| HOTP（RFC 4226） | 不要 | 2要素目。フィーチャー（`hotp`。認証方式のプラグイン。ADR 0092） |
 | OAuth / SSO | 不要 | 識別は `(connection, provider_subject)` |
 | メールのコード・マジックリンク | 必要（Notifier） | 所有確認、パスワードなしのログイン、復旧 |
 | メール + パスワード | 不要 | フィーチャー（`password`） |
 | SMS | ― | 対応しない |
 
-- 2段階認証は passkey / TOTP。要否は設定（2.8）。1要素目がメールなら、メールのコードは2要素目にしない（設定で外せない。13.5）
+- 2段階認証は passkey / TOTP（と、2要素目に使える認証方式のプラグイン。ADR 0092）。要否は設定（2.8）。1要素目がメールなら、メールのコードは2要素目にしない（設定で外せない。13.5）
 
 #### メールアドレスは1つ以上必須
 
@@ -351,6 +355,7 @@ check(principal, action, resource, context) -> allow / deny
 | セッション | 指定を失効 | 全部 / 指定以外 |
 | リフレッシュトークン | ファミリー単位 | ユーザー・クライアント単位 |
 | passkey / 外部 ID 連携 | 指定 | 全部 |
+| 認証方式のプラグインの認証情報（`crd_…`。ADR 0092） | 指定 | 全部 |
 | パスワード | 無効化し再設定を必須に | ― |
 | サービスアカウントの認証情報 | 指定 | 全部 |
 
@@ -670,7 +675,7 @@ GET    /v1/admin/signing-keys
 | データ | 扱い |
 |---|---|
 | メールアドレス | 暗号化 + ブラインドインデックス（最小化モードではインデックスのみ） |
-| 表示名（持つ場合）、TOTP シークレット | 暗号化 |
+| 表示名（持つ場合）、TOTP シークレット、認証方式のプラグインのデータ（HOTP の種など） | 暗号化 |
 | IP アドレス | 暗号化。保持期間後は切り詰め |
 | カスタム属性 | 定義ごとに指定 |
 | `provider_subject` | 暗号化しない |
@@ -747,6 +752,7 @@ GET    /v1/admin/signing-keys
 | アカウント統合（11.6） | オフ | ― | 統合 API なし |
 | カスタム属性（11.7） | オフ | ― | 属性の読み書きなし |
 | フロー フック（11.8） | オフ | ― | フックを一切呼ばない |
+| HOTP（4.1、ADR 0092） | オフ | ― | HOTP の登録・照合なし。無効化は認証情報が 0 件になって完了 |
 | OIDC のログアウト（5.6） | オフ | ― | `end_session_endpoint` と Front-Channel Logout なし（Back-Channel Logout は動く） |
 | acr・AAL と step-up（11.15） | オフ | ― | `acr` を出さず、`acr_values` を見ない。AAL で書く条件・ポリシーなし |
 
@@ -809,7 +815,7 @@ Group のネストの実装（ADR 0079）：フィーチャー `nested_groups`�
 
 A にログインした状態で B の所有を証明すると、B のメール・外部 ID・passkey・Membership・ロール・個人 Org のデータを A に移す（Org 管理ユーザーが絡む場合はその Org の許可が必要）。B は `status = merged`、`merged_into = A` になり、セッションとトークンを失効する。`sub` が変わるため `user.merged` イベントを出す。取り消し不可。
 
-実装（ADR 0082）：フィーチャー `account_merge`。B でログインして発行した1回限りの統合トークンを、A でログインして使う（どちらも直近の本人確認が要る）。メールと passkey は同じ ID のまま移し、外部 ID・ロールの付与・Group の所属は付け直す。TOTP・パスワード・属性の値は A に無いものだけ移す。B の個人 Org は残し、A を owner にした新しい共有 Org に中身（ロールの付与を除く）を移す。Org 管理ユーザーの統合は未実装（`409 managed_user`）。
+実装（ADR 0082）：フィーチャー `account_merge`。B でログインして発行した1回限りの統合トークンを、A でログインして使う（どちらも直近の本人確認が要る）。メールと passkey は同じ ID のまま移し、外部 ID・ロールの付与・Group の所属は付け直す。TOTP・パスワード・属性の値は A に無いものだけ移す。認証方式のプラグインの認証情報（ADR 0092）は、A のデータ鍵で暗号化し直してすべて移す。B の個人 Org は残し、A を owner にした新しい共有 Org に中身（ロールの付与を除く）を移す。Org 管理ユーザーの統合は未実装（`409 managed_user`）。
 
 ### 11.7 カスタム属性
 

@@ -50,6 +50,21 @@ type AuthnConnection struct {
 	OwnerOrgID string
 }
 
+type AuthnCredential struct {
+	ID           string
+	PublicID     string
+	RealmID      string
+	UserID       string
+	Method       string
+	Lookup       []byte
+	Data         []byte
+	DataVersion  int64
+	CreatedAt    string
+	LastUsedAt   sql.NullString
+	RevokedAt    sql.NullString
+	RevokeReason string
+}
+
 type AuthnOidcGrant struct {
 	ID           string
 	RealmID      string

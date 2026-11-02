@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -140,6 +141,39 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Passwords().Purge(ctx, limit)
 		}},
+}
+
+// methodCleaner は、フィーチャー name で動く認証方式のプラグイン（ADR 0092）の認証情報の数え上げと片付け。方式が無ければ false。
+func methodCleaner(name string) (cleaner, bool) {
+	var names []string
+	for _, a := range method.Registered() {
+		if a.Info().Feature == name {
+			names = append(names, a.Info().Name)
+		}
+	}
+	if len(names) == 0 {
+		return cleaner{}, false
+	}
+	return cleaner{Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		n := 0
+		for _, m := range names {
+			c, err := tx.Credentials().Count(ctx, m)
+			if err != nil {
+				return 0, err
+			}
+			n += c
+		}
+		return n, nil
+	}, Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+		n := 0
+		for _, m := range names {
+			c, err := tx.Credentials().Purge(ctx, m, limit-n)
+			if n += c; err != nil || n >= limit {
+				return n, err
+			}
+		}
+		return n, nil
+	}}, true
 }
 
 // eachOwnedConnections は全 realm の Org 専用の connection を数える。purge なら limit（0 以上なら）まで消す。
@@ -489,6 +523,9 @@ func (a *App) DisableFeature(ctx context.Context, name string, purge bool) (Disa
 		return DisableResult{Done: err == nil}, err
 	}
 	c, hasData := cleaners[name]
+	if !hasData {
+		c, hasData = methodCleaner(name)
+	}
 	var res DisableResult
 	if hasData && purge && c.Purge == nil {
 		return res, fmt.Errorf("feature: %s data cannot be purged here: %s", name, c.Hint)

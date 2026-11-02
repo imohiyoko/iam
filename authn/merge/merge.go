@@ -17,6 +17,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/attribute"
+	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/totp"
@@ -230,7 +231,7 @@ func (s *Service) move(ctx context.Context, tx port.Tx, from, into port.User, pe
 		name string
 		fn   func(context.Context, port.Tx, port.User, port.User) (int, error)
 	}{
-		{"emails", s.moveEmails}, {"identities", s.moveIdentities}, {"passkeys", movePasskeys}, {"totp", s.moveTOTP},
+		{"emails", s.moveEmails}, {"identities", s.moveIdentities}, {"passkeys", movePasskeys}, {"totp", s.moveTOTP}, {"credentials", s.moveCredentials},
 		{"passwords", s.movePassword}, {"role_bindings", bindings}, {"groups", s.moveGroups}, {"attributes", s.moveAttributes},
 	}
 	for _, st := range steps {
@@ -302,6 +303,33 @@ func (s *Service) moveIdentities(ctx context.Context, tx port.Tx, from, into por
 // movePasskeys は passkey を移す。認証器は統合元のユーザーハンドルを返すので、それを passkey に残す。
 func movePasskeys(ctx context.Context, tx port.Tx, from, into port.User) (int, error) {
 	return tx.Passkeys().MoveUser(ctx, from.RealmID, from.ID, into.ID, []byte(from.PublicID))
+}
+
+// moveCredentials は汎用の認証情報（ADR 0092）を同じ ID のまま移す。有効なものは方式固有のデータを統合先のデータ鍵で
+// 暗号化し直す。無効化したものは暗号化し直さずに移す（以後は復号しない）。
+func (s *Service) moveCredentials(ctx context.Context, tx port.Tx, from, into port.User) (int, error) {
+	cs, err := tx.Credentials().ListByUser(ctx, from.RealmID, from.ID, "")
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, c := range cs {
+		if c.RevokedAt != nil {
+			continue
+		}
+		ct, err := method.Reseal(ctx, tx, s.Crypter, c, into.ID)
+		if err != nil {
+			return 0, err
+		}
+		if err := tx.Credentials().UpdateData(ctx, c.RealmID, c.ID, c.Data, ct, c.DataVersion); err != nil {
+			return 0, err
+		}
+		n++
+	}
+	if _, err := tx.Credentials().MoveUser(ctx, from.RealmID, from.ID, into.ID); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // moveTOTP は統合先に TOTP が無ければ統合元の有効な TOTP を移し、統合元のものは無効化する。
