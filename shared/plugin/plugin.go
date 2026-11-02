@@ -53,6 +53,8 @@ type (
 	EventSinkFactory func(context.Context, Config) (port.EventSink, error)
 	// BreachCheckFactory は漏洩済みパスワードの確認（フィーチャー password で使う）。
 	BreachCheckFactory func(context.Context, Config) (port.BreachChecker, error)
+	// FIDOMDSFactory は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation で使う。ADR 0096）。
+	FIDOMDSFactory func(context.Context, Config) (port.FIDOMetadataSource, error)
 )
 
 // Kind はアダプタの種類。
@@ -65,6 +67,7 @@ const (
 	KindKeyStore    Kind = "keystore"
 	KindEventSink   Kind = "event_sink"
 	KindBreachCheck Kind = "breach_check"
+	KindFIDOMDS     Kind = "fido_mds"
 )
 
 var (
@@ -92,6 +95,7 @@ func RegisterEventSink(name string, f EventSinkFactory) { register(KindEventSink
 func RegisterBreachCheck(name string, f BreachCheckFactory) {
 	register(KindBreachCheck, name, f)
 }
+func RegisterFIDOMDS(name string, f FIDOMDSFactory) { register(KindFIDOMDS, name, f) }
 
 func lookup[F any](k Kind, name string) (F, error) {
 	mu.Lock()
@@ -121,6 +125,8 @@ func EventSink(name string) (EventSinkFactory, error) {
 func BreachCheck(name string) (BreachCheckFactory, error) {
 	return lookup[BreachCheckFactory](KindBreachCheck, name)
 }
+
+func FIDOMDS(name string) (FIDOMDSFactory, error) { return lookup[FIDOMDSFactory](KindFIDOMDS, name) }
 
 // Registered はバイナリに含まれるアダプタを種類ごとに名前順で返す（マニフェスト用）。
 func Registered() map[Kind][]string {

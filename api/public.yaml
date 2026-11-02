@@ -327,6 +327,8 @@ paths:
       description: |
         `credential` は `navigator.credentials.get()` の結果の JSON（`PublicKeyCredential.toJSON()`）。
         `flow_id` は本文か `__Host-iam_passkey` Cookie で渡す。成功するとセッションを発行する。
+        認証器が realm の段の認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）で許されなければ、署名を確かめた後の
+        拒否として `403 passkey_not_allowed`。
       requestBody:
         required: true
         content:
@@ -1013,6 +1015,8 @@ paths:
       description: |
         `credential` は `navigator.credentials.create()` の結果の JSON（`PublicKeyCredential.toJSON()`）。
         登録済みなら `409 passkey_exists`、無効化した passkey は再登録できない（`409 passkey_revoked`。4.6）。
+        フィーチャー passkey_attestation が動いていれば attestation を信頼の起点に照らし、認証器が realm の段のポリシーで
+        許されなければ `409 passkey_not_allowed`（ADR 0096）。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -2888,12 +2892,41 @@ components:
         require_sso:
           type: boolean
           description: この Org の connection（Org 専用 SSO。ADR 0077）で認証したセッションだけを入れる。フィーチャー org_managed_users も要る
+        passkey:
+          allOf: [{ $ref: "#/components/schemas/PasskeyPolicy" }]
+          description: >-
+            Org の段の認証器のポリシー（ADR 0096）。認証に使った passkey が realm の段に加えてこれも満たすこと（理由は
+            policy.passkey_authenticator）。passkey を使わない認証には効かない。フィーチャー passkey_attestation も要る
         min_aal:
           type: integer
           minimum: 1
           maximum: 3
           description: >-
             amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（理由は policy.min_aal）。フィーチャー acr も要る（ADR 0093）
+    PasskeyPolicy:
+      type: object
+      description: >-
+        認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。登録とログインのたびに判定し、外れれば
+        passkey_not_allowed（どの条件に外れたかは監査ログにだけ残す）。空の項目は判定しない。require_attestation が無ければ
+        AAGUID は認証器の自己申告
+      properties:
+        allowed_aaguids:
+          type: array
+          maxItems: 200
+          description: 許可する認証器の AAGUID。空でなければ、このどれかであること
+          items: { type: string, format: uuid }
+        denied_aaguids:
+          type: array
+          maxItems: 200
+          description: 拒否する認証器の AAGUID
+          items: { type: string, format: uuid }
+        min_certification_level:
+          type: string
+          enum: [L1, L1plus, L2, L2plus, L3, L3plus]
+          description: 求める FIDO の認定レベル（FIDO Metadata Service の status report）
+        require_attestation:
+          type: boolean
+          description: 登録のときに信頼の起点（MDS か設定）に連なる attestation を確かめた passkey だけを通す。既存の passkey は確かめていない
     OrgSettingsView:
       type: object
       required: [settings, effective]

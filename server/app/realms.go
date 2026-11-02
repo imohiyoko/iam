@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/eventlog"
@@ -38,6 +39,9 @@ type realmSettings struct {
 	QuotaCount               realmQuotaSettings `json:"quota_count"`
 	// DeclaredContextClients は判定で認証の文脈を申告できるサービスアカウント（公開 ID。ADR 0084）。
 	DeclaredContextClients []string `json:"declared_context_clients"`
+	// PasskeyPolicy は realm の段の認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。null は「無し」
+	// （設定ファイルの値を引き継がない）。項目が無い（この項目を足す前に作った realm）なら設定ファイルの値。
+	PasskeyPolicy *attestation.Policy `json:"passkey_policy"`
 }
 
 // maxDeclaredContextClients は DeclaredContextClients の件数の上限（API の maxItems と同じ）。
@@ -55,7 +59,14 @@ func defaultRealmSettings(c config.Realm) realmSettings {
 		Timezone: c.Timezone, VerifiedVia: slices.Clone(c.VerifiedVia), OrgCreation: c.OrgCreation,
 		OrgDeletionGraceSeconds: int64(c.OrgDeletionGrace.D() / time.Second), UserDeletionGraceSeconds: int64(c.UserDeletionGrace.D() / time.Second),
 		EmailStorage: c.EmailStorage, QuotaCount: realmQuotaSettings(c.QuotaCount), DeclaredContextClients: slices.Clone(c.DeclaredContextClients),
+		PasskeyPolicy: normalizedPolicy(c.PasskeyPolicy),
 	}
+}
+
+// normalizedPolicy は確かめ済みのポリシー（設定ファイルは起動時に確かめる）を正規化する。誤りなら nil。
+func normalizedPolicy(p *attestation.Policy) *attestation.Policy {
+	out, _ := attestation.Normalize(p)
+	return out
 }
 
 // parseRealmSettings は保存した設定を、設定ファイルの値に重ねて読む（保存の後に足した項目は設定ファイルの値になる）。
@@ -66,7 +77,11 @@ func parseRealmSettings(c config.Realm, raw []byte) (realmSettings, error) {
 			return realmSettings{}, fmt.Errorf("realm settings: %w", err)
 		}
 	}
-	return s, s.validate()
+	if err := s.validate(); err != nil {
+		return realmSettings{}, err
+	}
+	s.PasskeyPolicy, _ = attestation.Normalize(s.PasskeyPolicy)
+	return s, nil
 }
 
 func (s realmSettings) validate() error {
@@ -91,6 +106,9 @@ func (s realmSettings) validate() error {
 	}
 	if len(s.DeclaredContextClients) > maxDeclaredContextClients {
 		problems = append(problems, "declared_context_clients")
+	}
+	if _, err := attestation.Normalize(s.PasskeyPolicy); err != nil {
+		problems = append(problems, "passkey_policy")
 	}
 	if len(problems) > 0 {
 		return errs.WithCode(errs.KindInvalid, "invalid_realm_settings", "invalid realm settings: "+strings.Join(problems, ", "))
