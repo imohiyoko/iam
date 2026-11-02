@@ -184,9 +184,21 @@ func (s publicServer) CompleteSecondFactorMethod(ctx context.Context, req public
 	if err != nil {
 		return fail, nil
 	}
+	// 2 要素目のコードはアカウント単位のロックアウトで数える（ADR 0105）。
+	if err := s.a.secondFactorLocked(ctx, au.PrincipalID); err != nil {
+		if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
+			return publicapi.CompleteSecondFactorMethod429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+		}
+		return nil, err
+	}
 	c := s.a.clientOf(ctx)
 	is, err := s.a.credentials.SecondFactor(ctx, s.a.realm.ID, au.PrincipalID, au.SessionID, req.Method, req.Body.FlowId, p,
 		credential.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID})
+	if err == nil || errors.Is(err, errs.AuthenticationFailed) {
+		if err := s.a.secondFactorResult(ctx, au, err != nil); err != nil {
+			return nil, err
+		}
+	}
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.CompleteSecondFactorMethod429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}

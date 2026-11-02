@@ -24,10 +24,13 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/attribute"
+	"github.com/imohiyoko/iam/authn/botcheck"
 	"github.com/imohiyoko/iam/authn/credential"
+	"github.com/imohiyoko/iam/authn/device"
 	"github.com/imohiyoko/iam/authn/emailflow"
 	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/hook"
+	"github.com/imohiyoko/iam/authn/lockout"
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method"
@@ -69,6 +72,10 @@ type Deps struct {
 	BreachCheck port.BreachChecker
 	// FIDOMDS は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation。ADR 0096）。nil なら MDS を読まない。
 	FIDOMDS port.FIDOMetadataSource
+	// GeoIP は接続元の場所を引く（フィーチャー login_risk。ADR 0105）。nil なら ip のリスクを評価しない。
+	GeoIP port.GeoIP
+	// BotVerifier はボットの確認のトークンを確かめる（フィーチャー bot_protection。ADR 0105）。フィーチャーが動いていれば必須。
+	BotVerifier port.BotVerifier
 	// DNS は Org のドメインの証明で TXT を引く。nil なら net.DefaultResolver。
 	DNS org.TXTResolver
 	// Hooks は Go のインターフェースで実装したフロー フック（11.8）。設定の hooks で url の無いものに使う。
@@ -127,7 +134,12 @@ type App struct {
 	// password はメール + パスワード。フィーチャー password が動いていなければ nil。
 	password *password.Service
 	perIP    *ratelimit.Limiter
-	links    *loginlink.Service
+	// lockout・devices・bot はログインの守り（ADR 0105）。フィーチャー account_lockout・device_recognition・bot_protection が
+	// 動いていなければ nil。
+	lockout *lockout.Guard
+	devices *device.Service
+	bot     *botcheck.Guard
+	links   *loginlink.Service
 	// recovery はリカバリーコードと復旧の完了（4.12）。
 	recovery *recovery.Service
 	notifier *eventlog.Relay
@@ -234,6 +246,9 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if !slices.Contains(cfg.Realm.VerifiedVia, string(port.VerifiedViaCode)) {
 		d.Logger.Warn("realm.verified_via does not include code: email codes and links are disabled, and email recovery is unavailable")
 	}
+	if plan.IsActive(feature.BotProtection) && d.BotVerifier == nil {
+		return nil, errors.New("app: the bot_protection feature requires bot_check.driver")
+	}
 	if plan.IsActive(feature.FlowHooks) {
 		if a.hookSecrets, err = hookSecrets(cfg); err != nil {
 			return nil, err
@@ -254,6 +269,9 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	}
 	if a.passkeys == nil {
 		d.Logger.Info("passkeys are disabled: set server.public_url or passkey.rp_id and passkey.origins")
+	}
+	if plan.IsActive(feature.LoginRisk) && d.GeoIP == nil {
+		d.Logger.Warn("login_risk is active without geoip.driver: the ip risk is not evaluated")
 	}
 	if a.password != nil && d.BreachCheck == nil {
 		d.Logger.Warn("password breach check is disabled: set breach_check.driver")
@@ -463,6 +481,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		Issuer: issuer, TTL: cfg.Security.SecondFactor.TTL.D(), MaxAttempts: cfg.Security.SecondFactor.MaxAttempts,
 		PerUser: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
 	}
+	a.loginProtection(cfg, d, plan)
 	if plan.IsActive(feature.Password) {
 		minLength := password.MinLength
 		if cfg.Security.SecondFactor.Required {
@@ -471,7 +490,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.password = &password.Service{
 			Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Breach: d.BreachCheck,
 			Params:    password.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
-			MinLength: minLength, PerAccount: a.accountLimiter(), Log: d.Logger,
+			MinLength: minLength, PerAccount: a.accountLimiter(), Lockout: a.lockout, Log: d.Logger,
 		}
 	}
 	if plan.IsActive(feature.AccountMerge) {

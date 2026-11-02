@@ -55,6 +55,10 @@ type (
 	BreachCheckFactory func(context.Context, Config) (port.BreachChecker, error)
 	// FIDOMDSFactory は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation で使う。ADR 0096）。
 	FIDOMDSFactory func(context.Context, Config) (port.FIDOMetadataSource, error)
+	// GeoIPFactory は接続元の場所を引く（フィーチャー login_risk で使う。ADR 0105）。
+	GeoIPFactory func(context.Context, Config) (port.GeoIP, error)
+	// BotCheckFactory はボットの確認のトークンを確かめる（フィーチャー bot_protection で使う。ADR 0105）。
+	BotCheckFactory func(context.Context, Config) (port.BotVerifier, error)
 )
 
 // Kind はアダプタの種類。
@@ -68,6 +72,8 @@ const (
 	KindEventSink   Kind = "event_sink"
 	KindBreachCheck Kind = "breach_check"
 	KindFIDOMDS     Kind = "fido_mds"
+	KindGeoIP       Kind = "geoip"
+	KindBotCheck    Kind = "bot_check"
 )
 
 var (
@@ -96,6 +102,10 @@ func RegisterBreachCheck(name string, f BreachCheckFactory) {
 	register(KindBreachCheck, name, f)
 }
 func RegisterFIDOMDS(name string, f FIDOMDSFactory) { register(KindFIDOMDS, name, f) }
+func RegisterGeoIP(name string, f GeoIPFactory)     { register(KindGeoIP, name, f) }
+func RegisterBotCheck(name string, f BotCheckFactory) {
+	register(KindBotCheck, name, f)
+}
 
 func lookup[F any](k Kind, name string) (F, error) {
 	mu.Lock()
@@ -127,6 +137,12 @@ func BreachCheck(name string) (BreachCheckFactory, error) {
 }
 
 func FIDOMDS(name string) (FIDOMDSFactory, error) { return lookup[FIDOMDSFactory](KindFIDOMDS, name) }
+
+func GeoIP(name string) (GeoIPFactory, error) { return lookup[GeoIPFactory](KindGeoIP, name) }
+
+func BotCheck(name string) (BotCheckFactory, error) {
+	return lookup[BotCheckFactory](KindBotCheck, name)
+}
 
 // Registered はバイナリに含まれるアダプタを種類ごとに名前順で返す（マニフェスト用）。
 func Registered() map[Kind][]string {

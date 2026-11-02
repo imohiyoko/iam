@@ -5,14 +5,18 @@ package main
 // このバイナリに含めるフィーチャーとアダプタ（自己登録。design.md 11.11）。
 import (
 	// フィーチャー。
+	_ "github.com/imohiyoko/iam/features/accountlockout"
 	_ "github.com/imohiyoko/iam/features/accountmerge"
 	_ "github.com/imohiyoko/iam/features/acr"
+	_ "github.com/imohiyoko/iam/features/botprotection"
 	_ "github.com/imohiyoko/iam/features/customattributes"
 	_ "github.com/imohiyoko/iam/features/deviceflow"
+	_ "github.com/imohiyoko/iam/features/devicerecognition"
 	_ "github.com/imohiyoko/iam/features/eventsubscriptions"
 	_ "github.com/imohiyoko/iam/features/flowhooks"
 	_ "github.com/imohiyoko/iam/features/hotp"
 	_ "github.com/imohiyoko/iam/features/impersonation"
+	_ "github.com/imohiyoko/iam/features/loginrisk"
 	_ "github.com/imohiyoko/iam/features/multirealm"
 	_ "github.com/imohiyoko/iam/features/nestedgroups"
 	_ "github.com/imohiyoko/iam/features/oidclogout"
@@ -30,6 +34,8 @@ import (
 	_ "github.com/imohiyoko/iam/features/warnings"
 
 	// アダプタ。
+	_ "github.com/imohiyoko/iam/adapters/botcheck/dev"
+	_ "github.com/imohiyoko/iam/adapters/botcheck/siteverify"
 	_ "github.com/imohiyoko/iam/adapters/breachcheck/hibp"
 	_ "github.com/imohiyoko/iam/adapters/ephemeral/memory"
 	_ "github.com/imohiyoko/iam/adapters/ephemeral/redis"
@@ -39,6 +45,7 @@ import (
 	_ "github.com/imohiyoko/iam/adapters/eventsink/webhook"
 	_ "github.com/imohiyoko/iam/adapters/fidomds/file"
 	_ "github.com/imohiyoko/iam/adapters/fidomds/http"
+	_ "github.com/imohiyoko/iam/adapters/geoip/static"
 	_ "github.com/imohiyoko/iam/adapters/keystore/env"
 	_ "github.com/imohiyoko/iam/adapters/keystore/file"
 	_ "github.com/imohiyoko/iam/adapters/notifier/dev"

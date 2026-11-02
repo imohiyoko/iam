@@ -20,6 +20,8 @@ import (
 const (
 	riskSourceHook  = "post_authentication"
 	riskSourceAdmin = "admin"
+	// riskSourceLogin は組み込みの評価器（フィーチャー login_risk。ADR 0105）。
+	riskSourceLogin = "login_risk"
 )
 
 // Catalog は realm のリスクの種類の一覧。
@@ -196,4 +198,18 @@ func nonNilScores(scores map[string]int) map[string]int {
 		return map[string]int{}
 	}
 	return scores
+}
+
+// mergeRisk は種類ごとに大きい方の点数をとる。
+func mergeRisk(a, b map[string]int) map[string]int {
+	if len(a) == 0 {
+		return maps.Clone(b)
+	}
+	out := maps.Clone(a)
+	for k, v := range b {
+		if old, ok := out[k]; !ok || v > old {
+			out[k] = v
+		}
+	}
+	return out
 }

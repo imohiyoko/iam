@@ -42,6 +42,11 @@ const (
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 	SAML                = "saml"
+	// ADR 0105。
+	AccountLockout    = "account_lockout"
+	DeviceRecognition = "device_recognition"
+	LoginRisk         = "login_risk"
+	BotProtection     = "bot_protection"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

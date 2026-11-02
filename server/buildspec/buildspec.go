@@ -16,8 +16,11 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/imohiyoko/iam/authn/attribute"
+	"github.com/imohiyoko/iam/authn/botcheck"
+	"github.com/imohiyoko/iam/authn/device"
 	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/hook"
+	"github.com/imohiyoko/iam/authn/lockout"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method/hotp"
 	"github.com/imohiyoko/iam/authn/org"
@@ -65,6 +68,10 @@ var featureCatalog = map[string]struct {
 	feature.OrgAuditLog:        {eventlog.OrgAuditLogFeature, module + "/features/orgauditlog"},
 	feature.EventSubscriptions: {eventsub.Feature, module + "/features/eventsubscriptions"},
 	feature.DeviceFlow:         {provider.DeviceFeature, module + "/features/deviceflow"},
+	feature.AccountLockout:     {lockout.Feature, module + "/features/accountlockout"},
+	feature.DeviceRecognition:  {device.Feature, module + "/features/devicerecognition"},
+	feature.LoginRisk:          {device.RiskFeature, module + "/features/loginrisk"},
+	feature.BotProtection:      {botcheck.Feature, module + "/features/botprotection"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。
@@ -81,9 +88,11 @@ var adapterCatalog = map[plugin.Kind]map[string]string{
 	plugin.KindNotifier:    {"dev": module + "/adapters/notifier/dev", "webhook": module + "/adapters/notifier/webhook"},
 	plugin.KindBreachCheck: {"hibp": module + "/adapters/breachcheck/hibp"},
 	plugin.KindFIDOMDS:     {"file": module + "/adapters/fidomds/file", "http": module + "/adapters/fidomds/http"},
+	plugin.KindGeoIP:       {"static": module + "/adapters/geoip/static"},
+	plugin.KindBotCheck:    {"siteverify": module + "/adapters/botcheck/siteverify", "dev": module + "/adapters/botcheck/dev"},
 }
 
-// requiredKinds は起動に必ず要るアダプタの種類（breach_check と fido_mds は任意）。
+// requiredKinds は起動に必ず要るアダプタの種類（breach_check・fido_mds・geoip・bot_check は任意）。
 var requiredKinds = []plugin.Kind{plugin.KindStorage, plugin.KindEphemeral, plugin.KindKeyStore, plugin.KindEventSink, plugin.KindNotifier}
 
 // Spec は build.yaml。

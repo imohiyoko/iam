@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/lockout"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
@@ -65,7 +66,9 @@ type Service struct {
 	MinLength int
 	// PerAccount はメールアドレス（とユーザー）ごとの照合の回数の上限。nil なら制限しない。
 	PerAccount *ratelimit.Limiter
-	Log        *slog.Logger
+	// Lockout はアカウント単位のロックアウト（フィーチャー account_lockout。ADR 0105）。nil なら数えない。
+	Lockout *lockout.Guard
+	Log     *slog.Logger
 
 	dummyOnce sync.Once
 	dummy     string
@@ -120,6 +123,18 @@ func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, 
 	if err := s.allow(ctx, realmID, email, in.Client.IP); err != nil {
 		return Result{}, err
 	}
+	// ロックアウトはメールアドレスのブラインドインデックスで数える（無いアドレスも同じに数え、有無を漏らさない。ADR 0105）。
+	var subject string
+	if s.Lockout != nil {
+		ix, err := s.Crypter.EmailIndex(ctx, email)
+		if err != nil {
+			return Result{}, err
+		}
+		subject = base64.RawURLEncoding.EncodeToString(ix.Value)
+		if err := s.Lockout.Check(ctx, realmID, lockout.ScopePassword, subject); err != nil {
+			return Result{}, err
+		}
+	}
 	if len(in.Password) > MaxInputBytes {
 		// 長さはアカウントの有無に関わらないので、照合せずに失敗させてよい。
 		s.recordFailure(ctx, realmID, in.Client, fmt.Errorf("%w: password too long", errRejected))
@@ -130,9 +145,17 @@ func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, 
 	if err != nil {
 		s.recordFailure(ctx, realmID, in.Client, err)
 		if errors.Is(err, errRejected) {
+			if err := s.lockoutFailed(ctx, realmID, email, subject, in.Client); err != nil {
+				return Result{}, err
+			}
 			return Result{}, ErrAuthFailed
 		}
 		return Result{}, err
+	}
+	if s.Lockout != nil {
+		if err := s.Lockout.Succeeded(ctx, realmID, lockout.ScopePassword, subject); err != nil {
+			return Result{}, err
+		}
 	}
 	breached := s.breached(ctx, pw)
 	var out Result
@@ -187,6 +210,36 @@ func (s *Service) Login(ctx context.Context, realmID string, in Login) (Result, 
 	}
 	s.Sessions.Committed(ctx, realmID, out.Session)
 	return out, nil
+}
+
+// lockoutFailed は照合の失敗をロックアウトに数える。この失敗でロックしたなら、アカウントがあるときだけ監査ログに残す。
+func (s *Service) lockoutFailed(ctx context.Context, realmID, email, subject string, c Client) error {
+	if s.Lockout == nil {
+		return nil
+	}
+	l, err := s.Lockout.Failed(ctx, realmID, lockout.ScopePassword, subject)
+	if err != nil || l == nil {
+		return err
+	}
+	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		e, err := s.Accounts.FindByEmail(ctx, tx, realmID, email)
+		if errors.Is(err, errs.NotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		u, err := tx.Users().Get(ctx, realmID, e.UserID)
+		if err != nil {
+			return err
+		}
+		return lockout.RecordLocked(ctx, tx, s.Clock, realmID, u.PublicID, lockout.ScopePassword, l, c.IP, c.UserAgent, c.RequestID)
+	})
+	if err != nil {
+		// ロックはかかっている。記録できなかったことだけを残す。
+		s.logger().WarnContext(ctx, "could not record account lock", "error", err)
+	}
+	return nil
 }
 
 // errRejected は照合の失敗（アカウントが無い・メールが未確認・ログインできない・パスワードが違う）。

@@ -116,6 +116,8 @@ var cleaners = map[string]cleaner{
 	// 連携先の許可と交換の認可を消す（ADR 0099）。
 	feature.TokenExchange: exchangeCleaner,
 	feature.Impersonation: impersonationCleaner,
+	// 端末の記録を消す（ADR 0105）。ロックアウトとボット対策の状態は EphemeralStore にあり、期限で消える。
+	feature.DeviceRecognition: deviceCleaner,
 	// 購読と署名の鍵（データ鍵）を消す（ADR 0100）。
 	feature.EventSubscriptions: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.EventSubscriptions().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {

@@ -113,6 +113,16 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 	c := s.a.clientOf(ctx)
 	f := session.SecondFactor{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}
 	usePasskey := deref(req.Body.TotpCode) == "" && req.Body.Credential != nil && s.a.passkeys != nil
+	// TOTP のコードはアカウント単位のロックアウトで数える（ADR 0105。passkey は推測で当てられないので数えない）。
+	useCode := deref(req.Body.TotpCode) != ""
+	if useCode {
+		if err := s.a.secondFactorLocked(ctx, au.PrincipalID); err != nil {
+			if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
+				return publicapi.VerifySecondFactor429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+			}
+			return nil, err
+		}
+	}
 	var is session.Issued
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		switch {
@@ -142,6 +152,11 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 	if usePasskey {
 		// 失敗でもフローは使い終わったので Cookie を消す。
 		s.setPasskeyCookie(ctx, "", -1)
+	}
+	if useCode && (err == nil || errors.Is(err, errs.AuthenticationFailed)) {
+		if err := s.a.secondFactorResult(ctx, au, err != nil); err != nil {
+			return nil, err
+		}
 	}
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.VerifySecondFactor429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil

@@ -42,6 +42,10 @@ type Config struct {
 	// FIDOMDS は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation。ADR 0096）。driver が空なら
 	// MDS を読まない（設定した信頼の起点だけで確かめる）。
 	FIDOMDS Adapter `yaml:"fido_mds"`
+	// GeoIP は接続元の場所を引く（フィーチャー login_risk。ADR 0105）。driver が空なら ip のリスクを評価しない。
+	GeoIP Adapter `yaml:"geoip"`
+	// BotCheck はボットの確認のトークンを確かめる（フィーチャー bot_protection。ADR 0105）。フィーチャーが動いていれば必須。
+	BotCheck Adapter `yaml:"bot_check"`
 
 	// Features は有効にするフィーチャー名。省略すると各フィーチャーの既定に従う。
 	Features *[]string `yaml:"features"`
@@ -295,7 +299,62 @@ type Security struct {
 	SuspensionCategories []string `yaml:"suspension_categories"`
 	// Warnings は警告のコードごとのアクション（ignore / warn / deny。design.md 10章）。無いコードは既定に従う。
 	Warnings map[string]string `yaml:"warnings"`
+	// Lockout はアカウント単位のロックアウト（フィーチャー account_lockout。ADR 0105）。
+	Lockout Lockout `yaml:"lockout"`
+	// Devices は端末の記憶（フィーチャー device_recognition。ADR 0105）。
+	Devices Devices `yaml:"devices"`
+	// LoginRisk はログインのリスクの点数（フィーチャー login_risk。ADR 0105）。
+	LoginRisk LoginRisk `yaml:"login_risk"`
+	// BotProtection はボット対策（フィーチャー bot_protection。ADR 0105）。
+	BotProtection BotProtection `yaml:"bot_protection"`
 }
+
+// Lockout はアカウント単位のロックアウトの設定。
+type Lockout struct {
+	// Threshold は window の内にロックする失敗の回数。
+	Threshold int      `yaml:"threshold"`
+	Window    Duration `yaml:"window"`
+	// LockDuration は最初のロックの長さ。続けてロックされるたびに倍にし、max_lock_duration で止める。
+	LockDuration    Duration `yaml:"lock_duration"`
+	MaxLockDuration Duration `yaml:"max_lock_duration"`
+	// DelayAfter は待ち時間をかけ始める失敗の回数（0 なら待ち時間なし）。base_delay から倍々で max_delay まで。
+	DelayAfter int      `yaml:"delay_after"`
+	BaseDelay  Duration `yaml:"base_delay"`
+	MaxDelay   Duration `yaml:"max_delay"`
+}
+
+// Devices は端末の記憶の設定。
+type Devices struct {
+	// CookieTTL は端末の Cookie の寿命（ログインのたびに延ばす。400 日以下）。
+	CookieTTL Duration `yaml:"cookie_ttl"`
+	// MaxPerUser はユーザーごとの端末の上限（超えれば最後に使った時刻の古いものから消す）。
+	MaxPerUser int `yaml:"max_per_user"`
+	// Notify は新しい端末からのログインを本人に知らせるか（通知 new_device_login）。
+	Notify bool `yaml:"notify"`
+}
+
+// LoginRisk はログインのリスクの点数（0〜100）。
+type LoginRisk struct {
+	NewDeviceScore         int `yaml:"new_device_score"`
+	UnconfirmedDeviceScore int `yaml:"unconfirmed_device_score"`
+	NewCountryScore        int `yaml:"new_country_score"`
+	NewASNScore            int `yaml:"new_asn_score"`
+	ImpossibleTravelScore  int `yaml:"impossible_travel_score"`
+	// MaxSpeedKmh はこれより速く動かないと来られなければ impossible travel とする（km/h）。
+	MaxSpeedKmh int `yaml:"max_speed_kmh"`
+}
+
+// BotProtection はボット対策の設定。
+type BotProtection struct {
+	// Mode は always（いつも求める）か suspicious（接続元の失敗が after_failures 回以上のときだけ。既定）。
+	Mode string `yaml:"mode"`
+	// AfterFailures は suspicious で確認を求め始める、接続元ごとの window の内のログインの失敗の回数。
+	AfterFailures int      `yaml:"after_failures"`
+	Window        Duration `yaml:"window"`
+}
+
+// KnownBotModes は security.bot_protection.mode の値。
+var KnownBotModes = []string{"always", "suspicious"}
 
 // Login はログインの要求に共通の守り（design.md 4.9、4.1）。
 type Login struct {
@@ -475,6 +534,12 @@ func Default() Config {
 			Recovery:     Recovery{Methods: slices.Clone(KnownRecoveryMethods), TTL: Duration(15 * time.Minute)},
 			Login: Login{MinResponseTime: Duration(300 * time.Millisecond),
 				RateLimit: RateLimit{Window: Duration(10 * time.Minute), PerIP: 100, PerAccount: 5, PerAccountTotal: 20}},
+			Lockout: Lockout{Threshold: 10, Window: Duration(15 * time.Minute), LockDuration: Duration(15 * time.Minute),
+				MaxLockDuration: Duration(day), DelayAfter: 3, BaseDelay: Duration(time.Second), MaxDelay: Duration(30 * time.Second)},
+			Devices: Devices{CookieTTL: Duration(400 * day), MaxPerUser: 50, Notify: true},
+			LoginRisk: LoginRisk{NewDeviceScore: 60, UnconfirmedDeviceScore: 30, NewCountryScore: 70, NewASNScore: 30,
+				ImpossibleTravelScore: 90, MaxSpeedKmh: 1000},
+			BotProtection: BotProtection{Mode: "suspicious", AfterFailures: 5, Window: Duration(10 * time.Minute)},
 		},
 		Outbox:     Outbox{Interval: Duration(time.Second), Batch: 100},
 		OrgDomains: OrgDomains{Recheck: Duration(day), Grace: Duration(7 * day)},
@@ -755,8 +820,43 @@ func (c Config) Validate() error {
 	problems = append(problems, c.validatePasskey()...)
 	problems = append(problems, c.validateAttestation()...)
 	problems = append(problems, c.validateHooks()...)
+	problems = append(problems, c.validateLoginProtection()...)
 	if len(problems) > 0 {
 		return fmt.Errorf("config: %s", strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// validateLoginProtection はロックアウト・端末の記憶・ログインのリスク・ボット対策の設定を確かめる（ADR 0105）。
+func (c Config) validateLoginProtection() []string {
+	const day = 24 * time.Hour
+	var problems []string
+	l := c.Security.Lockout
+	if l.Threshold < 1 || l.Window.D() <= 0 || l.LockDuration.D() <= 0 || l.MaxLockDuration.D() < l.LockDuration.D() || l.MaxLockDuration.D() > 30*day {
+		problems = append(problems, "security.lockout: threshold must be positive, window and lock_duration positive, and max_lock_duration within [lock_duration, 30d]")
+	}
+	if l.DelayAfter < 0 || (l.DelayAfter > 0 && (l.BaseDelay.D() <= 0 || l.MaxDelay.D() < l.BaseDelay.D() || l.MaxDelay.D() > time.Hour)) {
+		problems = append(problems, "security.lockout: delay_after must not be negative, and base_delay positive with max_delay within [base_delay, 1h]")
+	}
+	if d := c.Security.Devices; d.CookieTTL.D() <= 0 || d.CookieTTL.D() > 400*day || d.MaxPerUser < 1 || d.MaxPerUser > 1000 {
+		problems = append(problems, "security.devices: cookie_ttl must be within (0, 400d] and max_per_user within [1, 1000]")
+	}
+	r := c.Security.LoginRisk
+	for name, v := range map[string]int{"new_device_score": r.NewDeviceScore, "unconfirmed_device_score": r.UnconfirmedDeviceScore,
+		"new_country_score": r.NewCountryScore, "new_asn_score": r.NewASNScore, "impossible_travel_score": r.ImpossibleTravelScore} {
+		if v < 0 || v > 100 {
+			problems = append(problems, fmt.Sprintf("security.login_risk.%s must be within [0, 100]", name))
+		}
+	}
+	if r.MaxSpeedKmh < 1 {
+		problems = append(problems, "security.login_risk.max_speed_kmh must be positive")
+	}
+	b := c.Security.BotProtection
+	if !slices.Contains(KnownBotModes, b.Mode) {
+		problems = append(problems, fmt.Sprintf("security.bot_protection.mode: unknown value %q (known: %v)", b.Mode, KnownBotModes))
+	}
+	if b.AfterFailures < 1 || b.Window.D() <= 0 {
+		problems = append(problems, "security.bot_protection: after_failures and window must be positive")
+	}
+	return problems
 }

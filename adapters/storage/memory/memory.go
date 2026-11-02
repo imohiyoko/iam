@@ -61,7 +61,9 @@ type state struct {
 	revokedPasskeys map[string]time.Time
 	totps           map[string]port.TOTPCredential
 	// authnCreds は汎用の認証情報（ADR 0092）。
-	authnCreds    map[string]port.Credential
+	authnCreds map[string]port.Credential
+	// devices は本人がログインした端末（ADR 0105）。
+	devices       map[string]port.KnownDevice
 	passwords     map[string]port.PasswordCredential
 	recoveryCodes map[string]port.RecoveryCode
 	suspensions   map[string]port.Suspension
@@ -115,8 +117,8 @@ func New(clk clock.Clock) *Storage {
 		dataKeys: map[string]port.DataKey{}, auditKeys: map[string]port.DataKey{}, outboxIx: map[string]int{},
 		users: map[string]port.User{}, emails: map[string]port.UserEmail{}, identities: map[string]port.Identity{},
 		passkeys: map[string]port.Passkey{}, revokedPasskeys: map[string]time.Time{}, totps: map[string]port.TOTPCredential{},
-		authnCreds: map[string]port.Credential{},
-		passwords:  map[string]port.PasswordCredential{}, suspensions: map[string]port.Suspension{},
+		authnCreds: map[string]port.Credential{}, devices: map[string]port.KnownDevice{},
+		passwords: map[string]port.PasswordCredential{}, suspensions: map[string]port.Suspension{},
 		scheduled: map[string]port.ScheduledEvent{}, recoveryCodes: map[string]port.RecoveryCode{},
 		connections: map[string]port.Connection{}, sessions: map[string]port.Session{},
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
@@ -179,6 +181,7 @@ func (t *tx) Identities() port.IdentityRepo              { return identities{t} 
 func (t *tx) Passkeys() port.PasskeyRepo                 { return passkeys{t} }
 func (t *tx) TOTP() port.TOTPRepo                        { return totps{t} }
 func (t *tx) Credentials() port.CredentialRepo           { return authnCredentials{t} }
+func (t *tx) KnownDevices() port.KnownDeviceRepo         { return knownDevices{t} }
 func (t *tx) Passwords() port.PasswordRepo               { return passwords{t} }
 func (t *tx) RecoveryCodes() port.RecoveryCodeRepo       { return recoveryCodes{t} }
 func (t *tx) Suspensions() port.SuspensionRepo           { return suspensions{t} }

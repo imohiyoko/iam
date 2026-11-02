@@ -67,6 +67,17 @@ type AuthnCredential struct {
 	RevokeReason string
 }
 
+type AuthnKnownDevice struct {
+	ID         string
+	PublicID   string
+	RealmID    string
+	UserID     string
+	Lookup     []byte
+	Data       []byte
+	CreatedAt  string
+	LastSeenAt string
+}
+
 type AuthnOidcGrant struct {
 	ID           string
 	RealmID      string
