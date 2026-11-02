@@ -35,6 +35,7 @@ import (
 	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/saml"
+	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authn/wsfed"
@@ -92,6 +93,8 @@ var featureCatalog = map[string]struct {
 	feature.WSFed:                {wsfed.Feature, module + "/features/wsfed"},
 	// ADR 0114。
 	feature.CIBA: {provider.CIBAFeature, module + "/features/ciba"},
+	// ADR 0115。
+	feature.SAMLIdP: {samlidp.Feature, module + "/features/samlidp"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

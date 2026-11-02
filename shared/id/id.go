@@ -118,6 +118,8 @@ const (
 	AuditKey          Prefix = "ak"
 	// WSFedRelyingParty は WS-Federation の RP（ADR 0110）。
 	WSFedRelyingParty Prefix = "wrp"
+	// SAMLServiceProvider は SAML の SP の登録（ADR 0115）。
+	SAMLServiceProvider Prefix = "ssp"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。

@@ -84,7 +84,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | `offline_access` | S | ⛔ | ADR 0066 |
 | 同意画面・サードパーティ・動的登録（RFC 7591、7592） | S P | ⛔ | ADR 0026 |
 | ロール・Group のクレーム | P | △ | `pre_token` フックで足せる |
-| SAML 2.0 IdP | S P C | ❌ | |
+| SAML 2.0 IdP（Web Browser SSO・Single Logout の受け側） | S P C | ✅ | フィーチャー `saml_idp`（ADR 0115）。署名は ECDSA だけ（RSA は RS256 のフィーチャーの後） |
 | WS-Federation（パッシブ要求者プロファイル。SAML 1.1 / 2.0 のトークン） | P | ✅ | フィーチャー `wsfed`（ADR 0110）。署名は ECDSA だけ（RSA は RS256 のフィーチャーの後） |
 | CAS | P | ❌ | |
 | OAuth AS メタデータ（RFC 8414）、Protected Resource Metadata（RFC 9728） | S | ❌ | |
