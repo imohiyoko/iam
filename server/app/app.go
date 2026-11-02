@@ -410,7 +410,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 			MinLength: minLength, Breach: d.BreachCheck, Log: d.Logger}
 		builtin = append(builtin, pwMethod)
 	}
-	methods, err := method.ActiveWith(ctx, plan.IsActive, a.methodSetup(realm.ID, realm.Slug), append(builtin, d.Methods...)...)
+	methods, err := method.ActiveWith(ctx, plan.IsActive, a.methodSetup(realm.ID, realm.Slug, ep.issuer), append(builtin, d.Methods...)...)
 	if err != nil {
 		return err
 	}

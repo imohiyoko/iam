@@ -55,6 +55,8 @@ const (
 	Kerberos = "kerberos"
 	// PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 	PersonalAccessTokens = "personal_access_tokens"
+	// ADR 0108。
+	OpenID4VP = "openid4vp"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

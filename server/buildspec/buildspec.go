@@ -25,6 +25,7 @@ import (
 	"github.com/imohiyoko/iam/authn/method/hotp"
 	kerberosmethod "github.com/imohiyoko/iam/authn/method/kerberos"
 	"github.com/imohiyoko/iam/authn/method/ldap"
+	"github.com/imohiyoko/iam/authn/method/openid4vp"
 	"github.com/imohiyoko/iam/authn/method/password"
 	"github.com/imohiyoko/iam/authn/method/push"
 	"github.com/imohiyoko/iam/authn/method/sms"
@@ -86,6 +87,7 @@ var featureCatalog = map[string]struct {
 
 	// ADR 0109。
 	feature.PersonalAccessTokens: {pat.Feature, module + "/features/personalaccesstokens"},
+	feature.OpenID4VP:            {openid4vp.Feature, module + "/features/openid4vp"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。
