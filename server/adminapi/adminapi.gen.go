@@ -370,6 +370,24 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for LDAPSyncOnMissing.
+const (
+	LDAPSyncOnMissingNone    LDAPSyncOnMissing = "none"
+	LDAPSyncOnMissingSuspend LDAPSyncOnMissing = "suspend"
+)
+
+// Valid indicates whether the value is a known member of the LDAPSyncOnMissing enum.
+func (e LDAPSyncOnMissing) Valid() bool {
+	switch e {
+	case LDAPSyncOnMissingNone:
+		return true
+	case LDAPSyncOnMissingSuspend:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MembershipRole.
 const (
 	MembershipRoleAdmin  MembershipRole = "admin"
@@ -902,12 +920,13 @@ type ActionNamespaceInput struct {
 // AdminConnection defines model for AdminConnection.
 type AdminConnection struct {
 	// ActiveIdentities 有効な外部 ID の紐付けの数
-	ActiveIdentities      int       `json:"active_identities"`
-	AuthorizationEndpoint *string   `json:"authorization_endpoint,omitempty"`
-	ClientId              string    `json:"client_id"`
-	CreatedAt             time.Time `json:"created_at"`
-	Id                    string    `json:"id"`
-	Issuer                *string   `json:"issuer,omitempty"`
+	ActiveIdentities      int                 `json:"active_identities"`
+	AuthorizationEndpoint *string             `json:"authorization_endpoint,omitempty"`
+	ClientId              string              `json:"client_id"`
+	CreatedAt             time.Time           `json:"created_at"`
+	Id                    string              `json:"id"`
+	Issuer                *string             `json:"issuer,omitempty"`
+	Ldap                  *LDAPConnectionInfo `json:"ldap,omitempty"`
 
 	// OwnerOrgId Org 専用 SSO の connection の Org（公開 ID）
 	OwnerOrgId    *string  `json:"owner_org_id,omitempty"`
@@ -1285,6 +1304,43 @@ type Clients struct {
 	Clients []Client `json:"clients"`
 }
 
+// CreateLDAPConnectionInput defines model for CreateLDAPConnectionInput.
+type CreateLDAPConnectionInput struct {
+	// ActiveDirectory Active Directory の既定を使い、userAccountControl の無効を見る
+	ActiveDirectory *bool  `json:"active_directory,omitempty"`
+	BindDn          string `json:"bind_dn"`
+	BindPassword    string `json:"bind_password"`
+
+	// CaPem サーバーの証明書の信頼の起点（PEM）。無ければ OS の既定
+	CaPem *string `json:"ca_pem,omitempty"`
+
+	// EmailAttribute 既定は mail
+	EmailAttribute *string `json:"email_attribute,omitempty"`
+
+	// GroupAttribute 本人の項目の所属の属性。既定は memberOf
+	GroupAttribute *string `json:"group_attribute,omitempty"`
+
+	// GroupBaseDn この下の Group の所属を同期する（無ければ所属を同期しない）
+	GroupBaseDn *string `json:"group_base_dn,omitempty"`
+
+	// IdAttribute 変わらない識別子。既定は entryUUID（AD は objectGUID）
+	IdAttribute *string `json:"id_attribute,omitempty"`
+
+	// LoginAttribute 既定は uid（AD は sAMAccountName）
+	LoginAttribute *string   `json:"login_attribute,omitempty"`
+	Pins           *[]string `json:"pins,omitempty"`
+	Slug           string    `json:"slug"`
+	Sync           *LDAPSync `json:"sync,omitempty"`
+	TrustEmail     *bool     `json:"trust_email,omitempty"`
+
+	// Url ldaps://host[:port] か ldap://host[:port]（StartTLS を必ず掛ける）
+	Url        string `json:"url"`
+	UserBaseDn string `json:"user_base_dn"`
+
+	// UserFilter 既定は (objectClass=inetOrgPerson)。AD は (&(objectCategory=person)(objectClass=user))
+	UserFilter *string `json:"user_filter,omitempty"`
+}
+
 // DeclaredContext 連携先が申告する認証の文脈（ADR 0084）。realm の設定 `declared_context_clients` に載せた呼び出し元のときだけ使い、
 // それ以外は捨てる。`sid` か `access_token` があれば捨てる。申告の文脈は `attested` でなく、付与の条件の `attested` と、
 // 名前空間・Org の要件を満たさない。リスクは一覧で有効な種類・範囲内の値だけを使う
@@ -1453,6 +1509,108 @@ type Health struct {
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// LDAPConnectionInfo defines model for LDAPConnectionInfo.
+type LDAPConnectionInfo struct {
+	ActiveDirectory bool     `json:"active_directory"`
+	BindDn          string   `json:"bind_dn"`
+	CaConfigured    bool     `json:"ca_configured"`
+	EmailAttribute  string   `json:"email_attribute"`
+	GroupAttribute  *string  `json:"group_attribute,omitempty"`
+	GroupBaseDn     *string  `json:"group_base_dn,omitempty"`
+	IdAttribute     string   `json:"id_attribute"`
+	LoginAttribute  string   `json:"login_attribute"`
+	Pins            []string `json:"pins"`
+	Sync            LDAPSync `json:"sync"`
+	TrustEmail      bool     `json:"trust_email"`
+	Url             string   `json:"url"`
+	UserBaseDn      string   `json:"user_base_dn"`
+	UserFilter      string   `json:"user_filter"`
+}
+
+// LDAPConnectionInput defines model for LDAPConnectionInput.
+type LDAPConnectionInput struct {
+	// ActiveDirectory Active Directory の既定を使い、userAccountControl の無効を見る
+	ActiveDirectory *bool  `json:"active_directory,omitempty"`
+	BindDn          string `json:"bind_dn"`
+	BindPassword    string `json:"bind_password"`
+
+	// CaPem サーバーの証明書の信頼の起点（PEM）。無ければ OS の既定
+	CaPem *string `json:"ca_pem,omitempty"`
+
+	// EmailAttribute 既定は mail
+	EmailAttribute *string `json:"email_attribute,omitempty"`
+
+	// GroupAttribute 本人の項目の所属の属性。既定は memberOf
+	GroupAttribute *string `json:"group_attribute,omitempty"`
+
+	// GroupBaseDn この下の Group の所属を同期する（無ければ所属を同期しない）
+	GroupBaseDn *string `json:"group_base_dn,omitempty"`
+
+	// IdAttribute 変わらない識別子。既定は entryUUID（AD は objectGUID）
+	IdAttribute *string `json:"id_attribute,omitempty"`
+
+	// LoginAttribute 既定は uid（AD は sAMAccountName）
+	LoginAttribute *string   `json:"login_attribute,omitempty"`
+	Pins           *[]string `json:"pins,omitempty"`
+	Sync           *LDAPSync `json:"sync,omitempty"`
+
+	// Url ldaps://host[:port] か ldap://host[:port]（StartTLS を必ず掛ける）
+	Url        string `json:"url"`
+	UserBaseDn string `json:"user_base_dn"`
+
+	// UserFilter 既定は (objectClass=inetOrgPerson)。AD は (&(objectCategory=person)(objectClass=user))
+	UserFilter *string `json:"user_filter,omitempty"`
+}
+
+// LDAPSync defines model for LDAPSync.
+type LDAPSync struct {
+	// Enabled 定期的な同期を行う
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// IntervalSeconds 同期の間隔（900〜604800 秒。0 なら 3600）
+	IntervalSeconds *int64 `json:"interval_seconds,omitempty"`
+
+	// OnMissing ディレクトリから消えた・無効にされた本人の扱い（既定 suspend）
+	OnMissing *LDAPSyncOnMissing `json:"on_missing,omitempty"`
+
+	// Provision まだ紐付いていない本人を、ログインと同じ規則で事前に登録する
+	Provision *bool `json:"provision,omitempty"`
+}
+
+// LDAPSyncOnMissing ディレクトリから消えた・無効にされた本人の扱い（既定 suspend）
+type LDAPSyncOnMissing string
+
+// LDAPSyncResult defines model for LDAPSyncResult.
+type LDAPSyncResult struct {
+	// Complete 全件を読み切ったか（読み切れなければ停止と所属の削除をしない）
+	Complete bool `json:"complete"`
+
+	// DeprovisionAborted 消えた本人が多すぎ、安全のため停止を見送った
+	DeprovisionAborted bool `json:"deprovision_aborted"`
+
+	// Entries ディレクトリから読んだ本人の数
+	Entries int `json:"entries"`
+
+	// GroupConflicts 手で作った Group と名前が重なり、同期しなかった Group
+	GroupConflicts int `json:"group_conflicts"`
+	GroupsCreated  int `json:"groups_created"`
+
+	// Linked 有効な外部 ID の紐付けの数
+	Linked         int `json:"linked"`
+	MembersAdded   int `json:"members_added"`
+	MembersRemoved int `json:"members_removed"`
+
+	// Missing ディレクトリから消えた・無効にされた本人
+	Missing          int `json:"missing"`
+	ProvisionSkipped int `json:"provision_skipped"`
+	Provisioned      int `json:"provisioned"`
+	Reactivated      int `json:"reactivated"`
+
+	// Skipped 読めなかった・識別子の重なる項目
+	Skipped   int `json:"skipped"`
+	Suspended int `json:"suspended"`
+}
 
 // LiftRequest defines model for LiftRequest.
 type LiftRequest struct {
@@ -2162,6 +2320,14 @@ type DeleteConnectionJSONBody struct {
 	RevokeIdentities *bool `json:"revoke_identities,omitempty"`
 }
 
+// UpdateLDAPConnectionJSONBody defines parameters for UpdateLDAPConnection.
+type UpdateLDAPConnectionJSONBody struct {
+	BindPassword *string   `json:"bind_password,omitempty"`
+	CaPem        *string   `json:"ca_pem,omitempty"`
+	Pins         *[]string `json:"pins,omitempty"`
+	Sync         *LDAPSync `json:"sync,omitempty"`
+}
+
 // CreateSAMLConnectionJSONBody defines parameters for CreateSAMLConnection.
 type CreateSAMLConnectionJSONBody struct {
 	EmailAttribute *string `json:"email_attribute,omitempty"`
@@ -2353,6 +2519,12 @@ type UpdateConnectionJSONRequestBody UpdateConnectionJSONBody
 
 // DeleteConnectionJSONRequestBody defines body for DeleteConnection for application/json ContentType.
 type DeleteConnectionJSONRequestBody DeleteConnectionJSONBody
+
+// UpdateLDAPConnectionJSONRequestBody defines body for UpdateLDAPConnection for application/json ContentType.
+type UpdateLDAPConnectionJSONRequestBody UpdateLDAPConnectionJSONBody
+
+// CreateLDAPConnectionJSONRequestBody defines body for CreateLDAPConnection for application/json ContentType.
+type CreateLDAPConnectionJSONRequestBody = CreateLDAPConnectionInput
 
 // CreateSAMLConnectionJSONRequestBody defines body for CreateSAMLConnection for application/json ContentType.
 type CreateSAMLConnectionJSONRequestBody CreateSAMLConnectionJSONBody
@@ -2554,6 +2726,15 @@ type ServerInterface interface {
 	// DeleteConnection IdP 接続を消す（ADR 0097）
 	// (POST /v1/admin/connections/{id}:delete)
 	DeleteConnection(w http.ResponseWriter, r *http.Request, id string)
+	// SyncLDAPConnection LDAP の connection の同期をすぐに 1 回行う（ADR 0102）
+	// (POST /v1/admin/connections/{id}:sync)
+	SyncLDAPConnection(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateLDAPConnection LDAP の connection のサービスアカウントのパスワード・証明書の確かめ方・同期の設定を変える（ADR 0102）
+	// (POST /v1/admin/connections/{id}:update-ldap)
+	UpdateLDAPConnection(w http.ResponseWriter, r *http.Request, id string)
+	// CreateLDAPConnection IdP 接続（LDAP / Active Directory）を登録する（ADR 0102）
+	// (POST /v1/admin/connections:ldap)
+	CreateLDAPConnection(w http.ResponseWriter, r *http.Request)
 	// CreateSAMLConnection IdP 接続（SAML 2.0）を登録する（ADR 0098）
 	// (POST /v1/admin/connections:saml)
 	CreateSAMLConnection(w http.ResponseWriter, r *http.Request)
@@ -3529,6 +3710,72 @@ func (siw *ServerInterfaceWrapper) DeleteConnection(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteConnection(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncLDAPConnection operation middleware
+func (siw *ServerInterfaceWrapper) SyncLDAPConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncLDAPConnection(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateLDAPConnection operation middleware
+func (siw *ServerInterfaceWrapper) UpdateLDAPConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateLDAPConnection(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateLDAPConnection operation middleware
+func (siw *ServerInterfaceWrapper) CreateLDAPConnection(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateLDAPConnection(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -6338,6 +6585,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/action-namespaces/{name}", wrapper.PutActionNamespace)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/connections", wrapper.ListConnections)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections:ldap", wrapper.CreateLDAPConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections/{id}:update-ldap", wrapper.UpdateLDAPConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections/{id}:sync", wrapper.SyncLDAPConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections:saml", wrapper.CreateSAMLConnection)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs", wrapper.ListOrgs)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs", wrapper.CreateOrg)
@@ -8111,6 +8361,283 @@ func (response DeleteConnection404JSONResponse) VisitDeleteConnectionResponse(w 
 type DeleteConnection409JSONResponse Error
 
 func (response DeleteConnection409JSONResponse) VisitDeleteConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncLDAPConnectionRequestObject struct {
+	Id string `json:"id"`
+}
+
+type SyncLDAPConnectionResponseObject interface {
+	VisitSyncLDAPConnectionResponse(w http.ResponseWriter) error
+}
+
+type SyncLDAPConnection200JSONResponse LDAPSyncResult
+
+func (response SyncLDAPConnection200JSONResponse) VisitSyncLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncLDAPConnection401JSONResponse struct{ ErrorJSONResponse }
+
+func (response SyncLDAPConnection401JSONResponse) VisitSyncLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncLDAPConnection403JSONResponse Error
+
+func (response SyncLDAPConnection403JSONResponse) VisitSyncLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncLDAPConnection404JSONResponse Error
+
+func (response SyncLDAPConnection404JSONResponse) VisitSyncLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncLDAPConnection409JSONResponse Error
+
+func (response SyncLDAPConnection409JSONResponse) VisitSyncLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncLDAPConnection503JSONResponse Error
+
+func (response SyncLDAPConnection503JSONResponse) VisitSyncLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLDAPConnectionRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateLDAPConnectionJSONRequestBody
+}
+
+type UpdateLDAPConnectionResponseObject interface {
+	VisitUpdateLDAPConnectionResponse(w http.ResponseWriter) error
+}
+
+type UpdateLDAPConnection200JSONResponse AdminConnection
+
+func (response UpdateLDAPConnection200JSONResponse) VisitUpdateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLDAPConnection400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateLDAPConnection400JSONResponse) VisitUpdateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLDAPConnection401JSONResponse Error
+
+func (response UpdateLDAPConnection401JSONResponse) VisitUpdateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLDAPConnection403JSONResponse Error
+
+func (response UpdateLDAPConnection403JSONResponse) VisitUpdateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLDAPConnection404JSONResponse Error
+
+func (response UpdateLDAPConnection404JSONResponse) VisitUpdateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateLDAPConnection409JSONResponse Error
+
+func (response UpdateLDAPConnection409JSONResponse) VisitUpdateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLDAPConnectionRequestObject struct {
+	Body *CreateLDAPConnectionJSONRequestBody
+}
+
+type CreateLDAPConnectionResponseObject interface {
+	VisitCreateLDAPConnectionResponse(w http.ResponseWriter) error
+}
+
+type CreateLDAPConnection201JSONResponse AdminConnection
+
+func (response CreateLDAPConnection201JSONResponse) VisitCreateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLDAPConnection400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateLDAPConnection400JSONResponse) VisitCreateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLDAPConnection401JSONResponse Error
+
+func (response CreateLDAPConnection401JSONResponse) VisitCreateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLDAPConnection403JSONResponse Error
+
+func (response CreateLDAPConnection403JSONResponse) VisitCreateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLDAPConnection404JSONResponse Error
+
+func (response CreateLDAPConnection404JSONResponse) VisitCreateLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLDAPConnection409JSONResponse Error
+
+func (response CreateLDAPConnection409JSONResponse) VisitCreateLDAPConnectionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -15569,6 +16096,15 @@ type StrictServerInterface interface {
 	// DeleteConnection IdP 接続を消す（ADR 0097）
 	// (POST /v1/admin/connections/{id}:delete)
 	DeleteConnection(ctx context.Context, request DeleteConnectionRequestObject) (DeleteConnectionResponseObject, error)
+	// SyncLDAPConnection LDAP の connection の同期をすぐに 1 回行う（ADR 0102）
+	// (POST /v1/admin/connections/{id}:sync)
+	SyncLDAPConnection(ctx context.Context, request SyncLDAPConnectionRequestObject) (SyncLDAPConnectionResponseObject, error)
+	// UpdateLDAPConnection LDAP の connection のサービスアカウントのパスワード・証明書の確かめ方・同期の設定を変える（ADR 0102）
+	// (POST /v1/admin/connections/{id}:update-ldap)
+	UpdateLDAPConnection(ctx context.Context, request UpdateLDAPConnectionRequestObject) (UpdateLDAPConnectionResponseObject, error)
+	// CreateLDAPConnection IdP 接続（LDAP / Active Directory）を登録する（ADR 0102）
+	// (POST /v1/admin/connections:ldap)
+	CreateLDAPConnection(ctx context.Context, request CreateLDAPConnectionRequestObject) (CreateLDAPConnectionResponseObject, error)
 	// CreateSAMLConnection IdP 接続（SAML 2.0）を登録する（ADR 0098）
 	// (POST /v1/admin/connections:saml)
 	CreateSAMLConnection(ctx context.Context, request CreateSAMLConnectionRequestObject) (CreateSAMLConnectionResponseObject, error)
@@ -16584,6 +17120,96 @@ func (sh *strictHandler) DeleteConnection(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteConnectionResponseObject); ok {
 		if err := validResponse.VisitDeleteConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SyncLDAPConnection operation middleware
+func (sh *strictHandler) SyncLDAPConnection(w http.ResponseWriter, r *http.Request, id string) {
+	var request SyncLDAPConnectionRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SyncLDAPConnection(ctx, request.(SyncLDAPConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SyncLDAPConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SyncLDAPConnectionResponseObject); ok {
+		if err := validResponse.VisitSyncLDAPConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateLDAPConnection operation middleware
+func (sh *strictHandler) UpdateLDAPConnection(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateLDAPConnectionRequestObject
+
+	request.Id = id
+
+	var body UpdateLDAPConnectionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateLDAPConnection(ctx, request.(UpdateLDAPConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateLDAPConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateLDAPConnectionResponseObject); ok {
+		if err := validResponse.VisitUpdateLDAPConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateLDAPConnection operation middleware
+func (sh *strictHandler) CreateLDAPConnection(w http.ResponseWriter, r *http.Request) {
+	var request CreateLDAPConnectionRequestObject
+
+	var body CreateLDAPConnectionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateLDAPConnection(ctx, request.(CreateLDAPConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateLDAPConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateLDAPConnectionResponseObject); ok {
+		if err := validResponse.VisitCreateLDAPConnectionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

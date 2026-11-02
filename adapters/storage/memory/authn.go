@@ -302,6 +302,20 @@ func (r identities) ListByUser(_ context.Context, realmID, userID string) ([]por
 	return out, nil
 }
 
+func (r identities) ListActiveByConnection(_ context.Context, realmID, connectionID, afterID string, limit int) ([]port.Identity, error) {
+	var out []port.Identity
+	for _, x := range r.t.s.identities {
+		if x.RealmID == realmID && x.ConnectionID == connectionID && x.RevokedAt == nil && x.ID > afterID {
+			out = append(out, cloneIdentity(x))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if limit >= 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (r identities) CountActiveByConnection(_ context.Context, realmID, connectionID string) (int, error) {
 	n := 0
 	for _, x := range r.t.s.identities {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/imohiyoko/iam/authn/account"
+	dirldap "github.com/imohiyoko/iam/authn/method/ldap"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authz/manage"
@@ -780,6 +781,13 @@ func (s adminServer) connectionOut(ctx context.Context, tx port.Tx, c port.Conne
 		v.Scopes = append(v.Scopes, in.Scopes...)
 		v.RedirectUris = append(v.RedirectUris, in.RedirectURIs...)
 	}
+	if c.Type == dirldap.Type {
+		in, err := dirldap.InfoOf(c)
+		if err != nil {
+			return v, err
+		}
+		v.Ldap = adminLDAPInfo(in)
+	}
 	owner, err := s.orgPublicID(ctx, tx, c.OwnerOrgID)
 	if err != nil {
 		return v, err
@@ -942,6 +950,10 @@ func (s adminServer) DeleteConnection(ctx context.Context, req adminapi.DeleteCo
 				return errs.WithCode(errs.KindFailedPrecondition, "connection_in_use", "connection has active identities")
 			}
 			if revoked, err = tx.Identities().RevokeByConnection(ctx, s.a.realm.ID, c.ID, s.a.deps.Clock.Now(), org.RevokeConnectionDeleted); err != nil {
+				return err
+			}
+			// ディレクトリの同期の Group の対応も外す（Group は残る。ADR 0102）。
+			if _, err := tx.DirectoryGroups().DeleteByConnection(ctx, s.a.realm.ID, c.ID); err != nil {
 				return err
 			}
 			if err := tx.Connections().Delete(ctx, s.a.realm.ID, c.ID); err != nil {

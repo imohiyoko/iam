@@ -37,6 +37,24 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for LDAPSyncOnMissing.
+const (
+	None    LDAPSyncOnMissing = "none"
+	Suspend LDAPSyncOnMissing = "suspend"
+)
+
+// Valid indicates whether the value is a known member of the LDAPSyncOnMissing enum.
+func (e LDAPSyncOnMissing) Valid() bool {
+	switch e {
+	case None:
+		return true
+	case Suspend:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for LoginResultNext.
 const (
 	CancelDeletion LoginResultNext = "cancel_deletion"
@@ -174,6 +192,7 @@ func (e MyOrgStatus) Valid() bool {
 
 // Defines values for OrgConnectionType.
 const (
+	OrgConnectionTypeLdap OrgConnectionType = "ldap"
 	OrgConnectionTypeOidc OrgConnectionType = "oidc"
 	OrgConnectionTypeSaml OrgConnectionType = "saml"
 )
@@ -181,6 +200,8 @@ const (
 // Valid indicates whether the value is a known member of the OrgConnectionType enum.
 func (e OrgConnectionType) Valid() bool {
 	switch e {
+	case OrgConnectionTypeLdap:
+		return true
 	case OrgConnectionTypeOidc:
 		return true
 	case OrgConnectionTypeSaml:
@@ -405,6 +426,7 @@ func (e WarningSeverity) Valid() bool {
 
 // Defines values for DiscoverSSO200JSONResponseBodyEntriesType.
 const (
+	DiscoverSSO200JSONResponseBodyEntriesTypeLdap DiscoverSSO200JSONResponseBodyEntriesType = "ldap"
 	DiscoverSSO200JSONResponseBodyEntriesTypeOidc DiscoverSSO200JSONResponseBodyEntriesType = "oidc"
 	DiscoverSSO200JSONResponseBodyEntriesTypeSaml DiscoverSSO200JSONResponseBodyEntriesType = "saml"
 )
@@ -412,6 +434,8 @@ const (
 // Valid indicates whether the value is a known member of the DiscoverSSO200JSONResponseBodyEntriesType enum.
 func (e DiscoverSSO200JSONResponseBodyEntriesType) Valid() bool {
 	switch e {
+	case DiscoverSSO200JSONResponseBodyEntriesTypeLdap:
+		return true
 	case DiscoverSSO200JSONResponseBodyEntriesTypeOidc:
 		return true
 	case DiscoverSSO200JSONResponseBodyEntriesTypeSaml:
@@ -533,6 +557,86 @@ type Health struct {
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// LDAPConnectionInfo defines model for LDAPConnectionInfo.
+type LDAPConnectionInfo struct {
+	ActiveDirectory bool     `json:"active_directory"`
+	BindDn          string   `json:"bind_dn"`
+	CaConfigured    bool     `json:"ca_configured"`
+	EmailAttribute  string   `json:"email_attribute"`
+	GroupAttribute  *string  `json:"group_attribute,omitempty"`
+	GroupBaseDn     *string  `json:"group_base_dn,omitempty"`
+	IdAttribute     string   `json:"id_attribute"`
+	LoginAttribute  string   `json:"login_attribute"`
+	Pins            []string `json:"pins"`
+	Sync            LDAPSync `json:"sync"`
+	TrustEmail      bool     `json:"trust_email"`
+	Url             string   `json:"url"`
+	UserBaseDn      string   `json:"user_base_dn"`
+	UserFilter      string   `json:"user_filter"`
+}
+
+// LDAPConnectionInput defines model for LDAPConnectionInput.
+type LDAPConnectionInput struct {
+	// ActiveDirectory Active Directory の既定を使い、userAccountControl の無効を見る
+	ActiveDirectory *bool  `json:"active_directory,omitempty"`
+	BindDn          string `json:"bind_dn"`
+	BindPassword    string `json:"bind_password"`
+
+	// CaPem サーバーの証明書の信頼の起点（PEM）。無ければ OS の既定
+	CaPem *string `json:"ca_pem,omitempty"`
+
+	// EmailAttribute 既定は mail
+	EmailAttribute *string `json:"email_attribute,omitempty"`
+
+	// GroupAttribute 本人の項目の所属の属性。既定は memberOf
+	GroupAttribute *string `json:"group_attribute,omitempty"`
+
+	// GroupBaseDn この下の Group の所属を同期する（無ければ所属を同期しない）
+	GroupBaseDn *string `json:"group_base_dn,omitempty"`
+
+	// IdAttribute 変わらない識別子。既定は entryUUID（AD は objectGUID）
+	IdAttribute *string `json:"id_attribute,omitempty"`
+
+	// LoginAttribute 既定は uid（AD は sAMAccountName）
+	LoginAttribute *string   `json:"login_attribute,omitempty"`
+	Pins           *[]string `json:"pins,omitempty"`
+	Sync           *LDAPSync `json:"sync,omitempty"`
+
+	// Url ldaps://host[:port] か ldap://host[:port]（StartTLS を必ず掛ける）
+	Url        string `json:"url"`
+	UserBaseDn string `json:"user_base_dn"`
+
+	// UserFilter 既定は (objectClass=inetOrgPerson)。AD は (&(objectCategory=person)(objectClass=user))
+	UserFilter *string `json:"user_filter,omitempty"`
+}
+
+// LDAPCredentials defines model for LDAPCredentials.
+type LDAPCredentials struct {
+	Password    string `json:"password"`
+	ReturnToken *bool  `json:"return_token,omitempty"`
+
+	// Username ディレクトリのログインの名前（login_attribute の値）
+	Username string `json:"username"`
+}
+
+// LDAPSync defines model for LDAPSync.
+type LDAPSync struct {
+	// Enabled 定期的な同期を行う
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// IntervalSeconds 同期の間隔（900〜604800 秒。0 なら 3600）
+	IntervalSeconds *int64 `json:"interval_seconds,omitempty"`
+
+	// OnMissing ディレクトリから消えた・無効にされた本人の扱い（既定 suspend）
+	OnMissing *LDAPSyncOnMissing `json:"on_missing,omitempty"`
+
+	// Provision まだ紐付いていない本人を、ログインと同じ規則で事前に登録する
+	Provision *bool `json:"provision,omitempty"`
+}
+
+// LDAPSyncOnMissing ディレクトリから消えた・無効にされた本人の扱い（既定 suspend）
+type LDAPSyncOnMissing string
 
 // LoginResult defines model for LoginResult.
 type LoginResult struct {
@@ -820,15 +924,16 @@ type OrgAuditEvent struct {
 	Type      string                  `json:"type"`
 }
 
-// OrgConnection OIDC の項目（issuer から redirect_uri まで）は `type` が `oidc` のときだけ値を持つ（`saml` なら空）。
+// OrgConnection OIDC の項目（issuer から redirect_uri まで）は `type` が `oidc` のときだけ値を持つ（`saml`・`ldap` なら空）。
 type OrgConnection struct {
 	AuthorizationEndpoint string    `json:"authorization_endpoint"`
 	ClientId              string    `json:"client_id"`
 	CreatedAt             time.Time `json:"created_at"`
 
 	// Id 公開の connection ID（con_…）。`/v1/login/oauth/{connection}:start`（SAML なら `/v1/login/saml/{connection}:start`）に渡す
-	Id     string `json:"id"`
-	Issuer string `json:"issuer"`
+	Id     string              `json:"id"`
+	Issuer string              `json:"issuer"`
+	Ldap   *LDAPConnectionInfo `json:"ldap,omitempty"`
 
 	// RedirectUri IdP に登録する戻り先
 	RedirectUri   string              `json:"redirect_uri"`
@@ -1212,6 +1317,9 @@ type Conflict = Error
 // Denied defines model for Denied.
 type Denied = Error
 
+// DirectoryUnavailable defines model for DirectoryUnavailable.
+type DirectoryUnavailable = Error
+
 // NotFound defines model for NotFound.
 type NotFound = Error
 
@@ -1511,6 +1619,9 @@ type StartEmailLoginJSONRequestBody StartEmailLoginJSONBody
 // VerifyEmailLoginJSONRequestBody defines body for VerifyEmailLogin for application/json ContentType.
 type VerifyEmailLoginJSONRequestBody VerifyEmailLoginJSONBody
 
+// LdapLoginJSONRequestBody defines body for LdapLogin for application/json ContentType.
+type LdapLoginJSONRequestBody = LDAPCredentials
+
 // RedeemLoginLinkJSONRequestBody defines body for RedeemLoginLink for application/json ContentType.
 type RedeemLoginLinkJSONRequestBody RedeemLoginLinkJSONBody
 
@@ -1568,6 +1679,9 @@ type StartAddEmailJSONRequestBody StartAddEmailJSONBody
 // VerifyAddEmailJSONRequestBody defines body for VerifyAddEmail for application/json ContentType.
 type VerifyAddEmailJSONRequestBody VerifyAddEmailJSONBody
 
+// LinkLDAPIdentityJSONRequestBody defines body for LinkLDAPIdentity for application/json ContentType.
+type LinkLDAPIdentityJSONRequestBody = LDAPCredentials
+
 // CompleteLinkSAMLIdentityJSONRequestBody defines body for CompleteLinkSAMLIdentity for application/json ContentType.
 type CompleteLinkSAMLIdentityJSONRequestBody CompleteLinkSAMLIdentityJSONBody
 
@@ -1585,6 +1699,9 @@ type CreateMyOrgJSONRequestBody CreateMyOrgJSONBody
 
 // AddOrgConnectionJSONRequestBody defines body for AddOrgConnection for application/json ContentType.
 type AddOrgConnectionJSONRequestBody AddOrgConnectionJSONBody
+
+// AddOrgLDAPConnectionJSONRequestBody defines body for AddOrgLDAPConnection for application/json ContentType.
+type AddOrgLDAPConnectionJSONRequestBody = LDAPConnectionInput
 
 // AddOrgSAMLConnectionJSONRequestBody defines body for AddOrgSAMLConnection for application/json ContentType.
 type AddOrgSAMLConnectionJSONRequestBody = SAMLConnectionInput
@@ -1687,6 +1804,9 @@ type ServerInterface interface {
 	// VerifyEmailLogin コードかマジックリンクのトークンでフローを完了する
 	// (POST /v1/login/email:verify)
 	VerifyEmailLogin(w http.ResponseWriter, r *http.Request)
+	// LdapLogin LDAP / Active Directory の名前とパスワードで登録・ログインする（ADR 0102）
+	// (POST /v1/login/ldap/{connection}:login)
+	LdapLogin(w http.ResponseWriter, r *http.Request, connection string)
 	// RedeemLoginLink 運営者が発行したログイン用リンクでログインする
 	// (POST /v1/login/link:redeem)
 	RedeemLoginLink(w http.ResponseWriter, r *http.Request)
@@ -1774,6 +1894,9 @@ type ServerInterface interface {
 	// VerifyAddEmail コードかリンクのトークンでメールの追加を完了する
 	// (POST /v1/me/emails:verify)
 	VerifyAddEmail(w http.ResponseWriter, r *http.Request)
+	// LinkLDAPIdentity LDAP / Active Directory の本人を連携する（ADR 0102）
+	// (POST /v1/me/identities/ldap/{connection}:link)
+	LinkLDAPIdentity(w http.ResponseWriter, r *http.Request, connection string)
 	// StartLinkSAMLIdentity 外部 IdP（SAML 2.0）の連携を始める（ADR 0098）
 	// (POST /v1/me/identities/saml/{connection}:start)
 	StartLinkSAMLIdentity(w http.ResponseWriter, r *http.Request, connection string)
@@ -1816,6 +1939,9 @@ type ServerInterface interface {
 	// DeleteOrgConnection Org 専用 SSO の connection を消す（Org の owner）
 	// (POST /v1/me/orgs/{id}/connections/{connection_id}:delete)
 	DeleteOrgConnection(w http.ResponseWriter, r *http.Request, id string, connectionId string)
+	// AddOrgLDAPConnection Org 専用 SSO の connection（LDAP / Active Directory）を登録する（Org の owner。ADR 0077、0102）
+	// (POST /v1/me/orgs/{id}/connections:ldap)
+	AddOrgLDAPConnection(w http.ResponseWriter, r *http.Request, id string)
 	// AddOrgSAMLConnection Org 専用 SSO の connection（SAML 2.0）を登録する（Org の owner。ADR 0077、0098）
 	// (POST /v1/me/orgs/{id}/connections:saml)
 	AddOrgSAMLConnection(w http.ResponseWriter, r *http.Request, id string)
@@ -2071,6 +2197,32 @@ func (siw *ServerInterfaceWrapper) VerifyEmailLogin(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.VerifyEmailLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LdapLogin operation middleware
+func (siw *ServerInterfaceWrapper) LdapLogin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection" -------------
+	var connection string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection", r.PathValue("connection"), &connection, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LdapLogin(w, r, connection)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2630,6 +2782,32 @@ func (siw *ServerInterfaceWrapper) VerifyAddEmail(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// LinkLDAPIdentity operation middleware
+func (siw *ServerInterfaceWrapper) LinkLDAPIdentity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection" -------------
+	var connection string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection", r.PathValue("connection"), &connection, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LinkLDAPIdentity(w, r, connection)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartLinkSAMLIdentity operation middleware
 func (siw *ServerInterfaceWrapper) StartLinkSAMLIdentity(w http.ResponseWriter, r *http.Request) {
 
@@ -3030,6 +3208,32 @@ func (siw *ServerInterfaceWrapper) DeleteOrgConnection(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteOrgConnection(w, r, id, connectionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddOrgLDAPConnection operation middleware
+func (siw *ServerInterfaceWrapper) AddOrgLDAPConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddOrgLDAPConnection(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4786,6 +4990,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/oauth:complete", wrapper.CompleteOAuthLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/saml/{connection}:start", wrapper.StartSAMLLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/saml:complete", wrapper.CompleteSAMLLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/ldap/{connection}:login", wrapper.LdapLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/sso:discover", wrapper.DiscoverSSO)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:start", wrapper.StartPasskeyLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/passkey:finish", wrapper.FinishPasskeyLogin)
@@ -4818,6 +5023,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities:complete", wrapper.CompleteLinkIdentity)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/saml/{connection}:start", wrapper.StartLinkSAMLIdentity)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/saml:complete", wrapper.CompleteLinkSAMLIdentity)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/ldap/{connection}:link", wrapper.LinkLDAPIdentity)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/identities/{id}:unlink", wrapper.UnlinkMyIdentity)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys:start", wrapper.StartRegisterPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/passkeys:finish", wrapper.FinishRegisterPasskey)
@@ -4860,6 +5066,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/connections", wrapper.ListOrgConnections)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/connections", wrapper.AddOrgConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/connections:saml", wrapper.AddOrgSAMLConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/connections:ldap", wrapper.AddOrgLDAPConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/connections/{connection_id}:delete", wrapper.DeleteOrgConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:request-management", wrapper.RequestOrgManagement)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/members/{membership_id}:release-management", wrapper.ReleaseOrgManagement)
@@ -4895,6 +5102,8 @@ type BadRequestJSONResponse Error
 type ConflictJSONResponse Error
 
 type DeniedJSONResponse Error
+
+type DirectoryUnavailableJSONResponse Error
 
 type NotFoundJSONResponse Error
 
@@ -5177,6 +5386,130 @@ func (response VerifyEmailLogin429JSONResponse) VisitVerifyEmailLoginResponse(w 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
 	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LdapLoginRequestObject struct {
+	Connection string `json:"connection"`
+	Body       *LdapLoginJSONRequestBody
+}
+
+type LdapLoginResponseObject interface {
+	VisitLdapLoginResponse(w http.ResponseWriter) error
+}
+
+type LdapLogin200JSONResponse LoginResult
+
+func (response LdapLogin200JSONResponse) VisitLdapLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LdapLogin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response LdapLogin400JSONResponse) VisitLdapLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LdapLogin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response LdapLogin401JSONResponse) VisitLdapLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LdapLogin403JSONResponse struct{ DeniedJSONResponse }
+
+func (response LdapLogin403JSONResponse) VisitLdapLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LdapLogin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response LdapLogin404JSONResponse) VisitLdapLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LdapLogin409JSONResponse Error
+
+func (response LdapLogin409JSONResponse) VisitLdapLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LdapLogin429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response LdapLogin429JSONResponse) VisitLdapLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LdapLogin503JSONResponse struct {
+	DirectoryUnavailableJSONResponse
+}
+
+func (response LdapLogin503JSONResponse) VisitLdapLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7168,6 +7501,102 @@ func (response VerifyAddEmail409JSONResponse) VisitVerifyAddEmailResponse(w http
 	return err
 }
 
+type LinkLDAPIdentityRequestObject struct {
+	Connection string `json:"connection"`
+	Body       *LinkLDAPIdentityJSONRequestBody
+}
+
+type LinkLDAPIdentityResponseObject interface {
+	VisitLinkLDAPIdentityResponse(w http.ResponseWriter) error
+}
+
+type LinkLDAPIdentity200JSONResponse MyIdentity
+
+func (response LinkLDAPIdentity200JSONResponse) VisitLinkLDAPIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LinkLDAPIdentity401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response LinkLDAPIdentity401JSONResponse) VisitLinkLDAPIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LinkLDAPIdentity404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response LinkLDAPIdentity404JSONResponse) VisitLinkLDAPIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LinkLDAPIdentity409JSONResponse struct{ ConflictJSONResponse }
+
+func (response LinkLDAPIdentity409JSONResponse) VisitLinkLDAPIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LinkLDAPIdentity429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response LinkLDAPIdentity429JSONResponse) VisitLinkLDAPIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LinkLDAPIdentity503JSONResponse struct {
+	DirectoryUnavailableJSONResponse
+}
+
+func (response LinkLDAPIdentity503JSONResponse) VisitLinkLDAPIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartLinkSAMLIdentityRequestObject struct {
 	Connection string `json:"connection"`
 }
@@ -8131,6 +8560,99 @@ func (response DeleteOrgConnection404JSONResponse) VisitDeleteOrgConnectionRespo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgLDAPConnectionRequestObject struct {
+	Id   string `json:"id"`
+	Body *AddOrgLDAPConnectionJSONRequestBody
+}
+
+type AddOrgLDAPConnectionResponseObject interface {
+	VisitAddOrgLDAPConnectionResponse(w http.ResponseWriter) error
+}
+
+type AddOrgLDAPConnection201JSONResponse OrgConnection
+
+func (response AddOrgLDAPConnection201JSONResponse) VisitAddOrgLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgLDAPConnection400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AddOrgLDAPConnection400JSONResponse) VisitAddOrgLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgLDAPConnection401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AddOrgLDAPConnection401JSONResponse) VisitAddOrgLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgLDAPConnection403JSONResponse struct{ DeniedJSONResponse }
+
+func (response AddOrgLDAPConnection403JSONResponse) VisitAddOrgLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgLDAPConnection404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AddOrgLDAPConnection404JSONResponse) VisitAddOrgLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddOrgLDAPConnection409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddOrgLDAPConnection409JSONResponse) VisitAddOrgLDAPConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -12479,6 +13001,9 @@ type StrictServerInterface interface {
 	// VerifyEmailLogin コードかマジックリンクのトークンでフローを完了する
 	// (POST /v1/login/email:verify)
 	VerifyEmailLogin(ctx context.Context, request VerifyEmailLoginRequestObject) (VerifyEmailLoginResponseObject, error)
+	// LdapLogin LDAP / Active Directory の名前とパスワードで登録・ログインする（ADR 0102）
+	// (POST /v1/login/ldap/{connection}:login)
+	LdapLogin(ctx context.Context, request LdapLoginRequestObject) (LdapLoginResponseObject, error)
 	// RedeemLoginLink 運営者が発行したログイン用リンクでログインする
 	// (POST /v1/login/link:redeem)
 	RedeemLoginLink(ctx context.Context, request RedeemLoginLinkRequestObject) (RedeemLoginLinkResponseObject, error)
@@ -12566,6 +13091,9 @@ type StrictServerInterface interface {
 	// VerifyAddEmail コードかリンクのトークンでメールの追加を完了する
 	// (POST /v1/me/emails:verify)
 	VerifyAddEmail(ctx context.Context, request VerifyAddEmailRequestObject) (VerifyAddEmailResponseObject, error)
+	// LinkLDAPIdentity LDAP / Active Directory の本人を連携する（ADR 0102）
+	// (POST /v1/me/identities/ldap/{connection}:link)
+	LinkLDAPIdentity(ctx context.Context, request LinkLDAPIdentityRequestObject) (LinkLDAPIdentityResponseObject, error)
 	// StartLinkSAMLIdentity 外部 IdP（SAML 2.0）の連携を始める（ADR 0098）
 	// (POST /v1/me/identities/saml/{connection}:start)
 	StartLinkSAMLIdentity(ctx context.Context, request StartLinkSAMLIdentityRequestObject) (StartLinkSAMLIdentityResponseObject, error)
@@ -12608,6 +13136,9 @@ type StrictServerInterface interface {
 	// DeleteOrgConnection Org 専用 SSO の connection を消す（Org の owner）
 	// (POST /v1/me/orgs/{id}/connections/{connection_id}:delete)
 	DeleteOrgConnection(ctx context.Context, request DeleteOrgConnectionRequestObject) (DeleteOrgConnectionResponseObject, error)
+	// AddOrgLDAPConnection Org 専用 SSO の connection（LDAP / Active Directory）を登録する（Org の owner。ADR 0077、0102）
+	// (POST /v1/me/orgs/{id}/connections:ldap)
+	AddOrgLDAPConnection(ctx context.Context, request AddOrgLDAPConnectionRequestObject) (AddOrgLDAPConnectionResponseObject, error)
 	// AddOrgSAMLConnection Org 専用 SSO の connection（SAML 2.0）を登録する（Org の owner。ADR 0077、0098）
 	// (POST /v1/me/orgs/{id}/connections:saml)
 	AddOrgSAMLConnection(ctx context.Context, request AddOrgSAMLConnectionRequestObject) (AddOrgSAMLConnectionResponseObject, error)
@@ -12966,6 +13497,39 @@ func (sh *strictHandler) VerifyEmailLogin(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(VerifyEmailLoginResponseObject); ok {
 		if err := validResponse.VisitVerifyEmailLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// LdapLogin operation middleware
+func (sh *strictHandler) LdapLogin(w http.ResponseWriter, r *http.Request, connection string) {
+	var request LdapLoginRequestObject
+
+	request.Connection = connection
+
+	var body LdapLoginJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.LdapLogin(ctx, request.(LdapLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "LdapLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LdapLoginResponseObject); ok {
+		if err := validResponse.VisitLdapLoginResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -13841,6 +14405,39 @@ func (sh *strictHandler) VerifyAddEmail(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// LinkLDAPIdentity operation middleware
+func (sh *strictHandler) LinkLDAPIdentity(w http.ResponseWriter, r *http.Request, connection string) {
+	var request LinkLDAPIdentityRequestObject
+
+	request.Connection = connection
+
+	var body LinkLDAPIdentityJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.LinkLDAPIdentity(ctx, request.(LinkLDAPIdentityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "LinkLDAPIdentity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LinkLDAPIdentityResponseObject); ok {
+		if err := validResponse.VisitLinkLDAPIdentityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // StartLinkSAMLIdentity operation middleware
 func (sh *strictHandler) StartLinkSAMLIdentity(w http.ResponseWriter, r *http.Request, connection string) {
 	var request StartLinkSAMLIdentityRequestObject
@@ -14231,6 +14828,39 @@ func (sh *strictHandler) DeleteOrgConnection(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteOrgConnectionResponseObject); ok {
 		if err := validResponse.VisitDeleteOrgConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddOrgLDAPConnection operation middleware
+func (sh *strictHandler) AddOrgLDAPConnection(w http.ResponseWriter, r *http.Request, id string) {
+	var request AddOrgLDAPConnectionRequestObject
+
+	request.Id = id
+
+	var body AddOrgLDAPConnectionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddOrgLDAPConnection(ctx, request.(AddOrgLDAPConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddOrgLDAPConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddOrgLDAPConnectionResponseObject); ok {
+		if err := validResponse.VisitAddOrgLDAPConnectionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

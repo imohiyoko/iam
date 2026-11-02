@@ -20,6 +20,7 @@ import (
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method/hotp"
+	"github.com/imohiyoko/iam/authn/method/ldap"
 	"github.com/imohiyoko/iam/authn/method/password"
 	"github.com/imohiyoko/iam/authn/method/push"
 	"github.com/imohiyoko/iam/authn/method/sms"
@@ -64,6 +65,7 @@ var featureCatalog = map[string]struct {
 	feature.OIDCLogout:         {provider.LogoutFeature, module + "/features/oidclogout"},
 	feature.HOTP:               {hotp.Feature, module + "/features/hotp"},
 	feature.SAML:               {saml.Feature, module + "/features/saml"},
+	feature.LDAP:               {ldap.Feature, module + "/features/ldap"},
 	feature.OrgAuditLog:        {eventlog.OrgAuditLogFeature, module + "/features/orgauditlog"},
 	feature.EventSubscriptions: {eventsub.Feature, module + "/features/eventsubscriptions"},
 	feature.DeviceFlow:         {provider.DeviceFeature, module + "/features/deviceflow"},

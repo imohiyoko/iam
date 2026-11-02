@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	dirldap "github.com/imohiyoko/iam/authn/method/ldap"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/saml"
@@ -282,7 +283,13 @@ func (s adminServer) CreateSAMLConnection(ctx context.Context, req adminapi.Crea
 
 // connectionUsable は、connection を今のフィーチャーの構成で使えるかを返す（ホスト型の画面とホームレルム発見に出すもの）。
 func (a *App) connectionUsable(c port.Connection) bool {
-	return c.Type != saml.Type || a.saml != nil
+	switch c.Type {
+	case saml.Type:
+		return a.saml != nil
+	case dirldap.Type:
+		return a.ldap != nil
+	}
+	return true
 }
 
 // serveSAMLMetadata は SP のメタデータを返す（ホスト型の画面のパス。IdP に登録する）。

@@ -174,6 +174,36 @@ type IdentityRepo interface {
 	ListByUser(ctx context.Context, realmID, userID string) ([]Identity, error)
 	// CountActiveByConnection は connection の、無効化されていない紐付けの数を返す（connection の削除。ADR 0097）。
 	CountActiveByConnection(ctx context.Context, realmID, connectionID string) (int, error)
+	// ListActiveByConnection は connection の無効化されていない紐付けを内部 ID の順に、afterID より後から最大 limit 件返す
+	// （ディレクトリの同期。ADR 0102）。
+	ListActiveByConnection(ctx context.Context, realmID, connectionID, afterID string, limit int) ([]Identity, error)
+}
+
+// DirectoryGroup は directory_groups の1行。ディレクトリ（LDAP）の同期が作り、所属を管理する Group との対応（ADR 0102）。
+// 同期は、ここに載っている Group の、ユーザーの所属だけを変える（手で作った Group は変えない）。
+type DirectoryGroup struct {
+	RealmID      string
+	ConnectionID string
+	// ExternalKey はディレクトリでの Group の識別子（正規化した DN）。connection の中で一意。
+	ExternalKey string
+	GroupID     string // 内部 ID。realm の中で一意
+	CreatedAt   time.Time
+}
+
+// DirectoryGroupRepo は directory_groups の Repository。
+type DirectoryGroupRepo interface {
+	// Create は (realm, connection, ExternalKey) か (realm, GroupID) が重複すれば errs.Conflict を返す。
+	Create(ctx context.Context, g DirectoryGroup) error
+	// ListByConnection は connection の対応を ExternalKey の順に返す。
+	ListByConnection(ctx context.Context, realmID, connectionID string) ([]DirectoryGroup, error)
+	// Delete は対応を消す（Group は消さない）。無ければ errs.NotFound。
+	Delete(ctx context.Context, realmID, connectionID, externalKey string) error
+	// DeleteByConnection は connection の対応をすべて消し、その数を返す（connection の削除）。
+	DeleteByConnection(ctx context.Context, realmID, connectionID string) (int, error)
+	// Count はすべての realm の対応の数を返す（フィーチャーの無効化。11.12）。
+	Count(ctx context.Context) (int, error)
+	// Purge はすべての realm から最大 limit 件消し、消した数を返す。
+	Purge(ctx context.Context, limit int) (int, error)
 }
 
 // Passkey は passkeys の1行（design.md 3.1、9.4）。公開鍵は COSE の形で持つ（秘密ではない）。

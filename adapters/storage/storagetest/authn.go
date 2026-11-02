@@ -33,6 +33,8 @@ var authnTests = []struct {
 	{"TOTPUseConcurrent", testTOTPUseConcurrent},
 	{"LegacyCredentialsListAllDelete", testLegacyListAllDelete},
 	{"Credentials", testCredentials},
+	{"DirectoryGroups", testDirectoryGroups},
+	{"IdentitiesByConnection", testIdentitiesByConnection},
 	{"CredentialUpdateConcurrent", testCredentialUpdateConcurrent},
 	{"CredentialLookupConcurrent", testCredentialLookupConcurrent},
 	{"CredentialCountPurge", testCredentialCountPurge},

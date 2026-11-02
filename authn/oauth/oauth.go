@@ -432,8 +432,11 @@ type Federated struct {
 	Email   string
 	// EmailVerified は IdP がメールを確認済みとしたか。Org 専用 SSO では、加えて Org が証明したドメインに限る。
 	EmailVerified bool
-	// Method は監査ログの method（oauth、saml）。
+	// Method は監査ログの method（oauth、saml、ldap）。
 	Method string
+	// AMR はセッションの amr。空なら fed（外部 IdP に任せた認証）。LDAP のバインド認証のように、iam がパスワードを
+	// 確かめたものは pwd にする（ADR 0102）。
+	AMR []string
 }
 
 func (c claims) federated() Federated {
@@ -726,6 +729,11 @@ func (s *Service) LoginFederated(ctx context.Context, realmID string, conn port.
 	if f.Subject == "" || len(f.Subject) > 255 {
 		return Result{}, errors.New("invalid subject")
 	}
+	amr, evidence := []string{"fed"}, warning.Evidence{OAuthEmailVerified: new(f.EmailVerified)}
+	if len(f.AMR) > 0 {
+		// iam が確かめた手段（LDAP のパスワードなど）。外部 IdP のメールの確認の事実は無い。
+		amr, evidence = slices.Clone(f.AMR), warning.Evidence{}
+	}
 	now := s.Clock.Now()
 	var out Result
 	err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
@@ -755,8 +763,8 @@ func (s *Service) LoginFederated(ctx context.Context, realmID string, conn port.
 			return err
 		}
 		is, err := s.Sessions.Issue(ctx, tx, session.Issue{
-			RealmID: realmID, UserID: u.ID, AuthMethods: []string{"fed"}, Credentials: []string{ident.ID}, OrgEmail: verifiedEmail(f), OrgID: conn.OwnerOrgID,
-			Evidence: warning.Evidence{OAuthEmailVerified: new(f.EmailVerified)},
+			RealmID: realmID, UserID: u.ID, AuthMethods: amr, Credentials: []string{ident.ID}, OrgEmail: verifiedEmail(f), OrgID: conn.OwnerOrgID,
+			Evidence: evidence,
 			IP:       cl.IP, UserAgent: cl.UserAgent, RequestID: cl.RequestID, ReplaceToken: replaceToken,
 		})
 		if err != nil {
@@ -774,6 +782,19 @@ func (s *Service) LoginFederated(ctx context.Context, realmID string, conn port.
 		s.Sessions.Committed(ctx, realmID, out.Session)
 	}
 	return out, err
+}
+
+// ProvisionFederated は、外部 ID がまだ紐付いていない本人を、ログインと同じ規則（確認済みのメール、Org 専用の connection では
+// Org が証明したドメインに限り、管理ユーザーとメンバーにする。自動リンクはしない）で作り、外部 ID を紐付ける。セッションは作らない
+// （ディレクトリの同期の事前の登録。ADR 0102）。呼び出し側のトランザクションで呼ぶ。
+func (s *Service) ProvisionFederated(ctx context.Context, tx port.Tx, realmID string, conn port.Connection, f Federated, requestID string) (port.Identity, error) {
+	if conn.OwnerOrgID != "" && s.OrgSSO == nil {
+		return port.Identity{}, errors.New("org connections are disabled")
+	}
+	if f.Subject == "" || len(f.Subject) > 255 {
+		return port.Identity{}, errors.New("invalid subject")
+	}
+	return s.signup(ctx, tx, realmID, conn, f, Client{RequestID: requestID}, s.Clock.Now())
 }
 
 // signup はプロバイダが確認済みとしたメールでユーザーを作り、外部 ID を紐付ける。

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	dirldap "github.com/imohiyoko/iam/authn/method/ldap"
 	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/shared/port"
 )
@@ -204,7 +205,8 @@ func (h *hosted) connections(ctx context.Context) ([]string, map[string]string, 
 	err := h.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cs, err := tx.Connections().List(ctx, h.a.realm.ID)
 		for _, c := range cs {
-			if c.OwnerOrgID == "" && h.a.connectionUsable(c) { // Org 専用 SSO はドメインから探す（ADR 0077）
+			// Org 専用 SSO はドメインから探す（ADR 0077）。LDAP は名前とパスワードの画面がまだ無いので出さない（ADR 0102）。
+			if c.OwnerOrgID == "" && h.a.connectionUsable(c) && c.Type != dirldap.Type {
 				out = append(out, c.Slug)
 				types[c.Slug] = c.Type
 			}

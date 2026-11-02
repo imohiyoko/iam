@@ -42,6 +42,7 @@ const (
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 	SAML                = "saml"
+	LDAP                = "ldap"
 	SMSOTP              = "sms_otp"
 	PushAuth            = "push_auth"
 )

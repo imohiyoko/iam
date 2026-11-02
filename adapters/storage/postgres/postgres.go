@@ -255,6 +255,7 @@ func (t *tx) EventSubscriptions() port.EventSubscriptionRepo {
 func (t *tx) Users() port.UserRepo                       { return users{t.q} }
 func (t *tx) Emails() port.EmailRepo                     { return emails{t.q} }
 func (t *tx) Identities() port.IdentityRepo              { return identities{t.q} }
+func (t *tx) DirectoryGroups() port.DirectoryGroupRepo   { return dirGroups{t.q} }
 func (t *tx) Passkeys() port.PasskeyRepo                 { return passkeys{t.q} }
 func (t *tx) TOTP() port.TOTPRepo                        { return totps{t.q} }
 func (t *tx) Credentials() port.CredentialRepo           { return authnCredentials{t.q} }
