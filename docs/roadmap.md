@@ -470,6 +470,20 @@ Group のネスト、Org 階層（M7）。
 - [x] SAN の UPN とプロキシのヘッダーの解析にファジングのテストがある
 - [ ] ホスト型のログイン画面、運営者による証明書の登録、確認済みのメールでの自動の結び付け、OCSP の nonce・デルタ CRL
 
+#### Verifiable Credentials の検証者（OpenID4VP。ADR 0108）
+
+**ゴール**：EUDI Wallet などのウォレットの資格情報（SD-JWT VC）を提示させて、realm ごとの信じる発行者に従ってログイン・2要素目・本人の結び付けができる。
+
+- [x] フィーチャー `openid4vp`（既定オフ）。方式は `authn/method/openid4vp`。設定（`methods.openid4vp.realms.<slug>`）の無い realm では動かず、設定の誤りは起動を止める
+- [x] OpenID4VP 1.0 の要求：`response_type=vp_token`・`direct_post`・DCQL（1 つの資格情報、必要な `claims`）。クライアント ID の接頭辞は `redirect_uri`（値で渡す）と `x509_san_dns`・`x509_hash`（ES256 で署名した要求のオブジェクトを `request_uri` で渡す）
+- [x] 同じ端末（`response_code` を `redirect_uri` で返し、`complete` で照合）と別の端末（`202 pending`）。登録の完了も `202 pending` を返せる（汎用の変更）
+- [x] 方式のエンドポイント（`port.EndpointAuthenticator`。`/v1/login/methods/{method}/endpoints/{endpoint}`）。フォームの本文の上限、CSRF の外、レートリミット、監査ログ
+- [x] SD-JWT VC の確かめ：alg の許可リスト、発行者（JWKS か x5c とトラストアンカー）、`typ`・`vct`・時刻、開示の処理（RFC 9901 7.1。重複・上書き・指されない開示・予約の名前を拒む）、key binding（`cnf.jwk`・`aud`・`nonce`・`sd_hash`・`iat`）は必須。`status` は既定で拒む。拒むテストがある
+- [x] 結び付け：`subject_claim` の値（発行者・path と合わせたブラインドインデックス）で本人が登録したものを引く。発行者の `link_by_email` で確認済みのメールの本人に結び付ける。`attributes` を確かめた属性として暗号化して持ち、ログインのたびに置き換える
+- [x] 確かめた値は、フローの状態にだけある鍵で暗号化して EphemeralStore に置き、1 回だけ受け取れる。トランザクション・要求のオブジェクトも 1 回限りか期限つき
+- [x] SD-JWT の解析・開示の処理と `vp_token` の解析にファジングのテストがある。全部の Storage で動く（新しい表なし。`authn_credentials`）
+- [ ] mdoc（ISO/IEC 18013-5）、Digital Credentials API、`direct_post.jwt`、Token Status List による失効の確認、JWT VC Issuer Metadata・信頼リストの読み込み、確かめた属性の ID トークン・カスタム属性への反映、ホスト型のログイン画面
+
 #### WebAuthn の attestation と AAGUID の許可リスト（ADR 0096）
 
 **ゴール**：企業が承認した認証器だけで passkey を登録・ログインさせられる。
