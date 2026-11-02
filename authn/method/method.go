@@ -97,7 +97,7 @@ func Active(featureActive func(string) bool, extra ...port.Authenticator) (*Set,
 }
 
 // ActiveWith は Active と同じで、設定を持つ方式（port.ConfigurableAuthenticator）に setup の結果を渡して設定する（ADR 0104）。
-// 設定に失敗すればエラー（起動を止める）。
+// 設定に失敗すればエラー（起動を止める）。Setup が nil を返した方式は、その realm の組に入れない。
 func ActiveWith(ctx context.Context, featureActive func(string) bool, setup func(port.MethodInfo) port.MethodSetup, extra ...port.Authenticator) (*Set, error) {
 	s := &Set{m: map[string]port.Authenticator{}}
 	for _, a := range Registered() {
@@ -116,9 +116,25 @@ func ActiveWith(ctx context.Context, featureActive func(string) bool, setup func
 		if err != nil {
 			return nil, err
 		}
+		if c == nil {
+			delete(s.m, n) // その realm では動かさない（設定が無いなど）。
+			continue
+		}
 		s.m[n] = c
 	}
 	return s, nil
+}
+
+// MaxAAL は動いている方式が宣言する AAL の上限の最大（方式が無ければ 0）。
+func (s *Set) MaxAAL() int {
+	n := 0
+	if s == nil {
+		return n
+	}
+	for _, a := range s.m {
+		n = max(n, a.Info().AAL)
+	}
+	return n
 }
 
 // Get は名前の方式を返す。

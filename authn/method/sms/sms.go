@@ -94,7 +94,11 @@ func (Method) Info() port.MethodInfo {
 
 // Setup は設定（methods.sms）と送信のポートを受け取る。sms_sender が無ければエラー（起動を止める）。
 func (Method) Setup(_ context.Context, s port.MethodSetup) (port.Authenticator, error) {
-	o, err := parseOptions(s.Options)
+	m, err := s.StringOptions()
+	if err != nil {
+		return nil, fmt.Errorf("options: %w", err)
+	}
+	o, err := parseOptions(m)
 	if err != nil {
 		return nil, err
 	}

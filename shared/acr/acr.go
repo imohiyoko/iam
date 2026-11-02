@@ -45,10 +45,13 @@ type Method struct {
 //     TOTP と同じに扱う（方式の宣言に置き換えるときに分ける。ADR 0093）
 //   - user・生体は、所持の要素と一緒のときだけ数える（SP 800-63B 5.2.3）
 //   - kba は SP 800-63B が認めないので数えない
+//   - sc は X.509 のクライアント証明書のログイン（ADR 0103）で、発行した CA がハードウェアの鍵だけに発行すると運営者が設定した
+//     ときにだけ出す。TLS のクライアント認証はチャネルに結び付くので検証者のなりすましに強い。設定の無い証明書は pop（鍵の置き場所を問わない）
 var Methods = map[string]Method{
 	"pwd": {Class: Knowledge}, "pin": {Class: Knowledge},
 	"otp": {Class: Possession}, "sms": {Class: Possession, Restricted: true}, "tel": {Class: Possession, Restricted: true},
-	"hwk": {Class: Possession, PhishingResistant: true}, "swk": {Class: Possession}, "sc": {Class: Possession}, "pop": {Class: Possession},
+	"hwk": {Class: Possession, PhishingResistant: true}, "swk": {Class: Possession}, "pop": {Class: Possession},
+	"sc":   {Class: Possession, PhishingResistant: true, HardwareBound: true},
 	"user": {Class: Inherence}, "fpt": {Class: Inherence}, "face": {Class: Inherence}, "iris": {Class: Inherence},
 	"retina": {Class: Inherence}, "vbm": {Class: Inherence},
 	"fed": {Class: Federated},
@@ -186,12 +189,14 @@ func Satisfies(v string, amr []string) bool {
 	return false
 }
 
-// Supported は対応表で届く acr の値（Discovery の acr_values_supported）。届かない値（今は AAL3・phrh）は載せない。
-func Supported() []string {
+// Supported は対応表で届く acr の値（Discovery の acr_values_supported）。届かない値は載せない。hardware は、鍵がハードウェアに
+// あると確かめる方式（AAL3 を宣言する方式。X.509 でハードウェアの CA を設定したものなど。ADR 0103）が動いているか。
+// false なら AAL3・phrh を載せない。
+func Supported(hardware bool) []string {
 	pr, hw := false, false
 	for _, m := range Methods {
 		pr = pr || m.PhishingResistant
-		hw = hw || (m.PhishingResistant && m.HardwareBound)
+		hw = hw || (hardware && m.PhishingResistant && m.HardwareBound)
 	}
 	out := []string{AAL1, AAL2}
 	if hw {
@@ -206,10 +211,10 @@ func Supported() []string {
 	return out
 }
 
-// Requested は要求された acr の値から、対応するもの（Supported）を要求の順に、重複を除いて返す。知らない値は捨てる
+// Requested は要求された acr の値から、対応するもの（Supported(hardware)）を要求の順に、重複を除いて返す。知らない値は捨てる
 // （acr_values は任意の要求。OpenID Connect Core 3.1.2.1）。
-func Requested(values []string) []string {
-	sup := Supported()
+func Requested(values []string, hardware bool) []string {
+	sup := Supported(hardware)
 	var out []string
 	for _, v := range values {
 		if slices.Contains(sup, v) && !slices.Contains(out, v) {

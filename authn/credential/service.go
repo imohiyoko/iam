@@ -139,13 +139,28 @@ func (s *Service) Method(name string, u port.MethodUsage) (port.Authenticator, e
 
 // env は方式に渡す環境。tx が nil なら、認証情報のストアは操作ごとに短いトランザクションで動く（方式の重い計算を、直列にした
 // トランザクションの外で行うため。ADR 0101）。
-func (s *Service) env(tx port.Tx, realmID, userID string, a port.Authenticator, u port.MethodUsage) port.MethodEnv {
+func (s *Service) env(ctx context.Context, tx port.Tx, realmID, userID string, a port.Authenticator, u port.MethodUsage) port.MethodEnv {
 	now := s.Clock.Now()
 	st := &method.Store{Tx: tx, Crypter: s.Crypter, RealmID: realmID, Info: a.Info(), Now: now}
 	if tx == nil {
 		st.Storage = s.Storage
 	}
-	return port.MethodEnv{RealmID: realmID, UserID: userID, Usage: u, Now: now, Issuer: s.Issuer, Credentials: st}
+	return port.MethodEnv{RealmID: realmID, UserID: userID, Usage: u, Now: now, Issuer: s.Issuer, Credentials: st,
+		ClientCertificates: ClientCertificates(ctx)}
+}
+
+type clientCertsKey struct{}
+
+// WithClientCertificates は要求で受け取ったクライアント証明書の連鎖（DER。先頭が本人の証明書）を ctx に載せる。HTTP の層が、
+// mTLS の専用の待ち受けか、信じたプロキシのヘッダーから取り出して呼ぶ（ADR 0103）。方式には MethodEnv.ClientCertificates で渡す。
+func WithClientCertificates(ctx context.Context, chain [][]byte) context.Context {
+	return context.WithValue(ctx, clientCertsKey{}, chain)
+}
+
+// ClientCertificates は WithClientCertificates で載せた連鎖を返す（無ければ nil）。
+func ClientCertificates(ctx context.Context) [][]byte {
+	c, _ := ctx.Value(clientCertsKey{}).([][]byte)
+	return c
 }
 
 // loginUsers は1要素目でログイン ID から本人を引き当てる（port.MethodUsers）。引き当てたメールとユーザーを覚え、発行する
@@ -240,7 +255,7 @@ func (s *Service) Begin(ctx context.Context, realmID, userID, name string, usage
 	} else {
 		userID = ""
 	}
-	env := s.env(nil, realmID, userID, a, usage)
+	env := s.env(ctx, nil, realmID, userID, a, usage)
 	env.ClientIP = c.IP
 	ch, err := a.Begin(ctx, env, port.MethodRequest{Payload: p})
 	// 1要素目の前は、方式が本人の有無を返しても区別しない（4.9）。2要素目は本人確認の後なので、方式の認証情報が無ければ 404。
@@ -339,7 +354,7 @@ func (s *Service) Callback(ctx context.Context, realmID, name string, p json.Raw
 	if !ok {
 		return nil, ErrUnknownMethod
 	}
-	env := s.env(nil, realmID, "", a, "")
+	env := s.env(ctx, nil, realmID, "", a, "")
 	env.ClientIP = c.IP
 	r, err := cb.Callback(ctx, env, port.MethodRequest{Payload: p})
 	if errors.Is(err, errs.AuthenticationFailed) || errors.Is(err, errs.NotFound) {
@@ -476,7 +491,7 @@ func (s *Service) LoginOnce(ctx context.Context, realmID, name string, p json.Ra
 	if err != nil {
 		return session.Issued{}, "", err
 	}
-	ch, err := a.Begin(ctx, s.env(nil, realmID, "", a, port.UsageFirstFactor), port.MethodRequest{})
+	ch, err := a.Begin(ctx, s.env(ctx, nil, realmID, "", a, port.UsageFirstFactor), port.MethodRequest{})
 	if err == nil && len(ch.State) > 0 {
 		err = fmt.Errorf("credential: method %s needs a challenge", name)
 	}
@@ -497,7 +512,7 @@ func (s *Service) login(ctx context.Context, realmID, name string, state []byte,
 		return session.Issued{}, "", err
 	}
 	users := &loginUsers{s: s, realmID: realmID, ip: c.IP}
-	env := s.env(nil, realmID, "", a, port.UsageFirstFactor)
+	env := s.env(ctx, nil, realmID, "", a, port.UsageFirstFactor)
 	env.Users, env.ClientIP = users, c.IP
 	var is session.Issued
 	var publicID string
@@ -650,7 +665,7 @@ func (s *Service) SecondFactorOnce(ctx context.Context, realmID, userID, session
 	if err := s.Lockout.Check(ctx, realmID, lockout.ScopeSecondFactor, userID); err != nil {
 		return session.Issued{}, err
 	}
-	ch, err := a.Begin(ctx, s.env(nil, realmID, userID, a, port.UsageSecondFactor), port.MethodRequest{})
+	ch, err := a.Begin(ctx, s.env(ctx, nil, realmID, userID, a, port.UsageSecondFactor), port.MethodRequest{})
 	switch {
 	case errors.Is(err, errs.NotFound), errors.Is(err, errs.AuthenticationFailed):
 		s.logger().DebugContext(ctx, "second factor rejected", "method", name, "error", err)
@@ -669,7 +684,7 @@ func (s *Service) secondFactor(ctx context.Context, realmID, userID, sessionID, 
 		return session.Issued{}, err
 	}
 	var is session.Issued
-	env := s.env(nil, realmID, userID, a, port.UsageSecondFactor)
+	env := s.env(ctx, nil, realmID, userID, a, port.UsageSecondFactor)
 	env.ClientIP = c.IP
 	r, err := a.Complete(ctx, env, port.MethodRequest{Payload: p, State: state})
 	if lerr := s.lockoutResult(ctx, realmID, lockout.ScopeSecondFactor, userID, userID, err, c); lerr != nil {
@@ -720,7 +735,7 @@ func (s *Service) EnrollBegin(ctx context.Context, realmID, userID, name string,
 			return Challenge{}, err
 		}
 	}
-	e := s.env(nil, realmID, userID, a, "")
+	e := s.env(ctx, nil, realmID, userID, a, "")
 	e.RecentAuth, e.ClientIP = o.RecentAuth, o.Client.IP
 	if o.Recovery {
 		e.Usage = port.UsageRecovery
@@ -798,7 +813,7 @@ func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, in EnrollInput
 		s.logger().DebugContext(ctx, "enrollment rejected", "method", name, "error", err)
 		return Enrolled{}, ErrAuthFailed
 	}
-	e := s.env(tx, realmID, userID, a, "")
+	e := s.env(ctx, tx, realmID, userID, a, "")
 	if f.Recovery {
 		e.Usage = port.UsageRecovery
 	}

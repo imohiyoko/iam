@@ -31,7 +31,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | HOTP・ハードウェアトークン | S（RFC 4226）P | ✅ | フィーチャー `hotp`（ADR 0092）。2要素目 |
 | SMS・音声の OTP | P | ✅ | フィーチャー `sms_otp`（ADR 0104）。2要素目。SP 800-63B の制限付きの認証器で、realm と Org で止められる。送信は `sms_sender`（`twilio`） |
 | プッシュ通知の承認（番号の照合付き） | P | ✅ | フィーチャー `push_auth`（ADR 0104）。2要素目。端末の鍵の署名、番号の照合、拒否が続けば止める。送信は `push_sender`（`webhook`） |
-| X.509 クライアント証明書・スマートカード（PIV、CAC） | S P C | ❌ | |
+| X.509 クライアント証明書・スマートカード（PIV、CAC） | S P C | ✅ | フィーチャー `x509`（ADR 0103）。mTLS の専用の待ち受けかプロキシのヘッダー、OCSP・CRL、ハードウェアの CA で AAL3 |
 | Kerberos／SPNEGO | S P | ❌ | |
 | LDAP のバインド認証 | P | ✅ | フィーチャー `ldap`（ADR 0102）。Active Directory も。ホスト型の画面は後続 |
 | 外部 IdP（OAuth／OIDC） | S P | ✅ | |
@@ -46,7 +46,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | --- | --- | --- | --- |
 | 2 要素目の強制と登録の要求 | P C | ✅ | passkey と TOTP に固定 |
 | step-up（RFC 9470） | S P | ✅ | フィーチャー acr（ADR 0093）。判定の API の `step_up`、公開 API の `WWW-Authenticate` |
-| `acr`・`acr_values`・AAL | S（OIDC、SP 800-63B） | △ | フィーチャー acr（ADR 0093）。AAL3・`phrh` は方式の宣言（0090）を待つ |
+| `acr`・`acr_values`・AAL | S（OIDC、SP 800-63B） | ✅ | フィーチャー acr（ADR 0093）。AAL3・`phrh` は、ハードウェアの CA を設定した X.509（ADR 0103）で届く |
 | リスクに応じた追加認証 | P | ✅ | フィーチャー `login_risk`（ADR 0105）。端末・国・ASN・impossible travel を点数にし、`risk_at_most` と `aal_at_least` で step-up |
 | 新しい端末・異常な場所の検知 | P | ✅ | フィーチャー `device_recognition`・`login_risk`（ADR 0105）。通知 `new_device_login`、警告 `new_device`、端末の一覧と削除。GeoIP の mmdb のアダプタは後続 |
 | ブルートフォース対策・ロックアウト | P C | ✅ | レートリミットと、フィーチャー `account_lockout`（ADR 0105）の接続元を問わない待ち時間とロック、運営者の解除 |

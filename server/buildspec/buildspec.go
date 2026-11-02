@@ -27,6 +27,7 @@ import (
 	"github.com/imohiyoko/iam/authn/method/password"
 	"github.com/imohiyoko/iam/authn/method/push"
 	"github.com/imohiyoko/iam/authn/method/sms"
+	x509method "github.com/imohiyoko/iam/authn/method/x509"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/provider"
@@ -78,6 +79,7 @@ var featureCatalog = map[string]struct {
 	feature.BotProtection:      {botcheck.Feature, module + "/features/botprotection"},
 	feature.SMSOTP:             {sms.Feature, module + "/features/sms"},
 	feature.PushAuth:           {push.Feature, module + "/features/push"},
+	feature.X509:               {x509method.Feature, module + "/features/x509"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

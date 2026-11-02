@@ -223,8 +223,11 @@ func (s *oidcServer) acrValues() []string {
 	if !s.a.acrActive() {
 		return nil
 	}
-	return acr.Supported()
+	return acr.Supported(s.a.hardwareAAL())
 }
+
+// hardwareAAL は、AAL3 を宣言する認証方式（鍵がハードウェアにあると確かめるもの。ADR 0103）が動いているか。
+func (a *App) hardwareAAL() bool { return a.methods.MaxAAL() >= 3 }
 
 // acrActive はフィーチャー acr（ADR 0093）が動いているか。
 func (a *App) acrActive() bool { return a.plan.IsActive(feature.ACR) }
@@ -418,7 +421,7 @@ func (s *oidcServer) Authorize(ctx context.Context, r *op.ClientRequest[oidc.Aut
 		if err != nil {
 			return nil, err
 		}
-		req.ACR = acr.Requested(values)
+		req.ACR = acr.Requested(values, s.a.hardwareAAL())
 	}
 	au, ok := authFrom(ctx)
 	if ok && req.Fresh(au.AuthenticatedAt, now) && acrMet(req, au.AuthMethods) {

@@ -31,6 +31,9 @@ func Configure(ctx context.Context, a port.Authenticator, setup func(port.Method
 	if err != nil {
 		return nil, fmt.Errorf("method %s: %w", a.Info().Name, err)
 	}
+	if out == nil {
+		return nil, nil
+	}
 	if out.Info().Name != a.Info().Name {
 		return nil, fmt.Errorf("method %s: setup returned another method", a.Info().Name)
 	}

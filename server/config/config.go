@@ -46,9 +46,6 @@ type Config struct {
 	SMSSender Adapter `yaml:"sms_sender"`
 	// PushSender は本人の端末へのプッシュの送信（フィーチャー push_auth。ADR 0104）。
 	PushSender Adapter `yaml:"push_sender"`
-
-	// Methods は認証方式のプラグインごとの設定（methods.<方式>.<項目>。ADR 0104）。項目は方式が確かめ、知らない項目は起動を止める。
-	Methods map[string]map[string]string `yaml:"methods"`
 	// GeoIP は接続元の場所を引く（フィーチャー login_risk。ADR 0105）。driver が空なら ip のリスクを評価しない。
 	GeoIP Adapter `yaml:"geoip"`
 	// BotCheck はボットの確認のトークンを確かめる（フィーチャー bot_protection。ADR 0105）。フィーチャーが動いていれば必須。
@@ -82,6 +79,31 @@ type Config struct {
 
 	// Hooks はフロー フック（フィーチャー flow_hooks。design.md 11.8、ADR 0081）。キーはフックの名前。
 	Hooks map[string]Hook `yaml:"hooks"`
+
+	// Methods は認証方式のプラグインの設定（methods.<方式>。ADR 0103、0104）。キーは方式の名前で、中身は方式が読む
+	// （port.MethodSetup の Decode）。知らない項目は起動を止める。
+	Methods map[string]yaml.Node `yaml:"methods"`
+}
+
+// MethodSettings は方式の名前の設定の読み手（port.MethodSetup の Decode）。知らない項目はエラー。設定が無ければ何もしない。
+func (c Config) MethodSettings(name string) func(any) error {
+	n, ok := c.Methods[name]
+	if !ok {
+		return func(any) error { return nil }
+	}
+	return func(v any) error {
+		// yaml.Node.Decode は知らない項目を確かめないので、いったん YAML に戻して KnownFields で読む。
+		b, err := yaml.Marshal(&n)
+		if err != nil {
+			return err
+		}
+		dec := yaml.NewDecoder(bytes.NewReader(b))
+		dec.KnownFields(true)
+		if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) {
+			return fmt.Errorf("methods.%s: %w", name, err)
+		}
+		return nil
+	}
 }
 
 // Hook は1つのフロー フック。url が無ければ、組み込む側が Go のインターフェース（app.Deps.Hooks）で渡す。
@@ -209,6 +231,62 @@ type Server struct {
 	// TrustedProxies は X-Forwarded-For を信じる接続元（リバースプロキシ・ロードバランサー）の IP か CIDR（ADR 0088）。
 	// 空なら X-Forwarded-For を読まず、接続元は RemoteAddr。
 	TrustedProxies []string `yaml:"trusted_proxies"`
+	// ClientCertificates はクライアント証明書の受け取り方（X.509 の認証方式など。ADR 0103）。
+	ClientCertificates ClientCertificates `yaml:"client_certificates"`
+}
+
+// ClientCertificates はクライアント証明書の受け取り方。mTLS の専用の待ち受けと、TLS を終端するプロキシのヘッダーがある。
+// 受け取った証明書の確かめ（連鎖・失効など）は方式が行う。
+type ClientCertificates struct {
+	// MTLSAddr はクライアント証明書を求める TLS の専用の待ち受け。空なら待ち受けない。認証方式のログインと登録の
+	// パス（/v1/login/methods/{method}:…、/v1/login/second-factor/{method}:…、/v1/me/credentials/{method}:enroll-…）だけを通す。
+	MTLSAddr string `yaml:"mtls_addr"`
+	// CertFile と KeyFile はその待ち受けのサーバー証明書と鍵（PEM）。
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
+	// Header は TLS を終端するプロキシが本人の証明書を渡すヘッダーの名前。Proxies から直接つないだ要求でだけ読み、
+	// それ以外の要求では無視する。空なら読まない。
+	Header string `yaml:"header"`
+	// HeaderFormat はヘッダーの形：pem（既定。URL エンコードした PEM。nginx の $ssl_client_escaped_cert、AWS ALB）か
+	// der_base64（DER の Base64 をカンマで区切る。Traefik）。
+	HeaderFormat string `yaml:"header_format"`
+	// Proxies はヘッダーを信じる直接の接続元（RemoteAddr）の IP か CIDR。server.trusted_proxies とは別に、明示して書く。
+	Proxies []string `yaml:"proxies"`
+}
+
+// ProxyPrefixes は Proxies を範囲にする。
+func (c ClientCertificates) ProxyPrefixes() ([]netip.Prefix, error) {
+	ps, err := Server{TrustedProxies: c.Proxies}.TrustedProxyPrefixes()
+	if err != nil {
+		return nil, fmt.Errorf("server.client_certificates.proxies: %w", err)
+	}
+	return ps, nil
+}
+
+func (c ClientCertificates) validate(s Server) []string {
+	var problems []string
+	if c.MTLSAddr != "" {
+		if c.CertFile == "" || c.KeyFile == "" {
+			problems = append(problems, "server.client_certificates.mtls_addr needs cert_file and key_file")
+		}
+		if c.MTLSAddr == s.PublicAddr || c.MTLSAddr == s.AdminAddr {
+			problems = append(problems, "server.client_certificates.mtls_addr must differ from public_addr and admin_addr")
+		}
+	}
+	if c.Header != "" {
+		if len(c.Proxies) == 0 {
+			problems = append(problems, "server.client_certificates.header needs proxies (the addresses of the TLS-terminating proxies)")
+		}
+		if _, err := c.ProxyPrefixes(); err != nil {
+			problems = append(problems, err.Error())
+		}
+		switch c.HeaderFormat {
+		case "", "pem", "der_base64":
+		default:
+			problems = append(problems, "server.client_certificates.header_format must be pem or der_base64")
+		}
+	}
+	return problems
 }
 
 // TrustedProxyPrefixes は TrustedProxies を範囲にする。IP だけなら /32（IPv6 は /128）。誤った値があればエラー。
@@ -707,6 +785,7 @@ func (c Config) Validate() error {
 	if _, err := c.Server.TrustedProxyPrefixes(); err != nil {
 		problems = append(problems, err.Error())
 	}
+	problems = append(problems, c.Server.ClientCertificates.validate(c.Server)...)
 	if c.Server.PublicAddr == "" || c.Server.AdminAddr == "" {
 		problems = append(problems, "server.public_addr and server.admin_addr are required")
 	} else if c.Server.PublicAddr == c.Server.AdminAddr {

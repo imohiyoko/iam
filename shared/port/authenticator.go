@@ -125,6 +125,10 @@ type MethodEnv struct {
 	Users MethodUsers
 	// RecentAuth は、登録で、本人の認証が直近（max_auth_age の内）か。汎用のパスは直近の認証を求めるので常に true。
 	RecentAuth bool
+	// ClientCertificates は要求で受け取ったクライアント証明書の連鎖（DER。先頭が本人の証明書。ADR 0103）。mTLS の専用の
+	// 待ち受け（秘密鍵の所持は TLS のハンドシェイクで確かめてある）か、設定で信じたプロキシのヘッダーから、コアが取り出す。
+	// 無ければ nil。連鎖・用途・失効は方式が確かめる。
+	ClientCertificates [][]byte
 }
 
 // MethodRequest はクライアントからの入力。
@@ -219,7 +223,13 @@ type CallbackAuthenticator interface {
 type MethodSetup struct {
 	// RealmID は方式を使う realm（方式は realm ごとに設定する）。
 	RealmID string
-	// Options は設定ファイルの methods.<方式> の項目。知らない項目はエラーにする。
+	// RealmSlug は realm の slug（設定ファイルで realm ごとの設定を書くときのキー）。
+	RealmSlug string
+	// Decode は設定ファイルの methods.<方式> を v に読む（知らない項目はエラー。設定が無ければ何もしない）。入れ子の設定を
+	// 持つ方式が使う（ADR 0103）。nil なら Options を使う（テスト用）。
+	Decode func(v any) error
+	// Options は methods.<方式> を文字列の項目として読んだもの（Decode が nil のときだけ使う）。StringOptions で読む。
+	// 知らない項目はエラーにする。
 	Options map[string]string
 	// Ephemeral は方式の名前と realm で前置きした EphemeralStore（コアのキーには届かない）。レートリミットや、
 	// 別の経路からの応答の受け渡しに使う。秘密を置くなら方式がハッシュにする。
@@ -235,8 +245,21 @@ type MethodSetup struct {
 	Log   *slog.Logger
 }
 
+// StringOptions は methods.<方式> を文字列の項目として返す（ADR 0104）。入れ子の値があればエラー。
+func (s MethodSetup) StringOptions() (map[string]string, error) {
+	if s.Decode == nil {
+		return s.Options, nil
+	}
+	var m map[string]string
+	if err := s.Decode(&m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // ConfigurableAuthenticator は、起動時に設定と送信のポートを受け取る方式（任意。ADR 0104）。Setup は設定済みの方式を返す。
-// 設定や送信のポートが足りなければエラーにする（起動を止める。fail-closed）。
+// 設定や送信のポートが足りなければエラーにする（起動を止める。fail-closed）。nil を返すと、その realm では方式を動かさない
+// （realm ごとの設定が無いなど。ADR 0103）。
 type ConfigurableAuthenticator interface {
 	Authenticator
 	Setup(ctx context.Context, s MethodSetup) (Authenticator, error)
@@ -246,12 +269,14 @@ type ConfigurableAuthenticator interface {
 // Lookup は方式が宣言した検索キーのブラインドインデックス（無ければ nil）。無効化は削除ではなく RevokedAt を記録する（4.6）。
 // ID は内部 ID で、API に出すのは PublicID（ADR 0045）。
 type Credential struct {
-	ID           string
-	PublicID     string
-	RealmID      string
-	UserID       string
-	Method       string
-	Lookup       []byte
+	ID       string
+	PublicID string
+	RealmID  string
+	UserID   string
+	Method   string
+	Lookup   []byte
+	// LookupKeyID は Lookup を作ったインデックス鍵の ID（Lookup が無ければ空）。鍵を切り替えた後も前の鍵で引くのに使う（ADR 0103）。
+	LookupKeyID  string
 	Data         []byte
 	DataVersion  int
 	CreatedAt    time.Time
@@ -270,6 +295,8 @@ type CredentialRepo interface {
 	GetByPublicID(ctx context.Context, realmID, publicID string) (Credential, error)
 	// GetByLookup は無効化していないものを返す。無ければ errs.NotFound。
 	GetByLookup(ctx context.Context, realmID, method string, lookup []byte) (Credential, error)
+	// LookupKeyIDs は方式の、無効化していない検索キーを持つ認証情報の LookupKeyID を、重複を除いて名前の順に返す。
+	LookupKeyIDs(ctx context.Context, realmID, method string) ([]string, error)
 	// ListByUser はユーザーの認証情報を作成時刻の順（同時刻は ID の順）に返す（無効化したものも含む）。method が空でなければ、その方式だけ。
 	ListByUser(ctx context.Context, realmID, userID, method string) ([]Credential, error)
 	// UpdateData は、今のデータが old と同じで無効化していなければ、データとその形のバージョンを置き換える。

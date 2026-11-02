@@ -3,6 +3,7 @@ package memory
 import (
 	"bytes"
 	"context"
+	"slices"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/errs"
@@ -67,6 +68,17 @@ func (r authnCredentials) GetByLookup(_ context.Context, realmID, method string,
 		}
 	}
 	return port.Credential{}, errs.New(errs.KindNotFound, "credential")
+}
+
+func (r authnCredentials) LookupKeyIDs(_ context.Context, realmID, method string) ([]string, error) {
+	var out []string
+	for _, x := range r.t.s.authnCreds {
+		if x.RealmID == realmID && x.Method == method && len(x.Lookup) > 0 && x.RevokedAt == nil && !slices.Contains(out, x.LookupKeyID) {
+			out = append(out, x.LookupKeyID)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 func (r authnCredentials) ListByUser(_ context.Context, realmID, userID, method string) ([]port.Credential, error) {

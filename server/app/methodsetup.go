@@ -10,11 +10,11 @@ import (
 
 // methodSetup は、設定を持つ認証方式（port.ConfigurableAuthenticator）に渡すものを作る（ADR 0104）。EphemeralStore は方式と
 // realm で前置きし、ブラインドインデックスは方式ごとの用途で作る。
-func (a *App) methodSetup(realmID string) func(port.MethodInfo) port.MethodSetup {
+func (a *App) methodSetup(realmID, realmSlug string) func(port.MethodInfo) port.MethodSetup {
 	return func(i port.MethodInfo) port.MethodSetup {
 		purpose := "authn.method." + i.Name + ".key"
 		return port.MethodSetup{
-			RealmID: realmID, Options: a.cfg.Methods[i.Name], Ephemeral: method.Scoped(a.deps.Ephemeral, i.Name, realmID),
+			RealmID: realmID, RealmSlug: realmSlug, Decode: a.cfg.MethodSettings(i.Name), Ephemeral: method.Scoped(a.deps.Ephemeral, i.Name, realmID),
 			Blind: func(ctx context.Context, value string) (string, error) {
 				ix, err := a.pii.Index(ctx, purpose, value)
 				if err != nil {

@@ -26,7 +26,7 @@ func testCredentials(t *testing.T, h Harness) {
 	r, u, other := id.New(id.Realm), id.New(id.User), id.New(id.User)
 	c := newCredential(r, u, "hotp", nil)
 	keyed := newCredential(r, u, "x509", []byte("lookup-1"))
-	keyed.CreatedAt = T0.Add(time.Second)
+	keyed.CreatedAt, keyed.LookupKeyID = T0.Add(time.Second), "ik_1"
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Credentials()
 		for _, x := range []port.Credential{c, keyed} {
@@ -58,6 +58,24 @@ func testCredentials(t *testing.T, h Harness) {
 		}
 		if got, err = repo.GetByLookup(ctx, r, "x509", []byte("lookup-1")); err != nil || got.ID != keyed.ID {
 			return fmt.Errorf("credentials.GetByLookup = %+v, %v", got, err)
+		}
+		// 検索キーを作った鍵の ID は、別の方式・別の realm・無効化したものを数えない。
+		rotated := newCredential(r, other, "x509", []byte("lookup-2"))
+		rotated.LookupKeyID = "ik_0"
+		if err := repo.Create(ctx, rotated); err != nil {
+			return err
+		}
+		if ids, err := repo.LookupKeyIDs(ctx, r, "x509"); err != nil || !reflect.DeepEqual(ids, []string{"ik_0", "ik_1"}) {
+			return fmt.Errorf("credentials.LookupKeyIDs = %v, %v", ids, err)
+		}
+		if ids, err := repo.LookupKeyIDs(ctx, r, "hotp"); err != nil || len(ids) != 0 {
+			return fmt.Errorf("credentials.LookupKeyIDs(hotp) = %v, %v", ids, err)
+		}
+		if err := repo.Revoke(ctx, r, rotated.ID, T0, "test"); err != nil {
+			return err
+		}
+		if ids, err := repo.LookupKeyIDs(ctx, r, "x509"); err != nil || !reflect.DeepEqual(ids, []string{"ik_1"}) {
+			return fmt.Errorf("credentials.LookupKeyIDs after revoke = %v, %v", ids, err)
 		}
 		for name, err := range map[string]error{
 			"lookup of another method": second(repo.GetByLookup(ctx, r, "hotp", []byte("lookup-1"))),

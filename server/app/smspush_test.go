@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/imohiyoko/iam/authn/method/push"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/feature"
@@ -80,7 +82,7 @@ func newSMSEnv(t *testing.T, edit func(*config.Config)) *loginEnv {
 	return newLoginEnvWith(t, func(c *config.Config) {
 		c.Features = &[]string{feature.Org, feature.Warnings, feature.SMSOTP}
 		c.Security.Login.RateLimit.PerAccount, c.Security.Login.RateLimit.PerAccountTotal = 20, 20
-		c.Methods = map[string]map[string]string{"sms": {"channels": "sms,voice", "allowed_country_codes": "81,1"}}
+		c.Methods = methodOptions(t, map[string]map[string]string{"sms": {"channels": "sms,voice", "allowed_country_codes": "81,1"}})
 		if edit != nil {
 			edit(c)
 		}
@@ -192,7 +194,7 @@ func TestSMSSecondFactor(t *testing.T) {
 
 func TestSMSDeliveryFailureAndLimits(t *testing.T) {
 	l := newSMSEnv(t, func(c *config.Config) {
-		c.Methods["sms"]["per_user"] = "2"
+		setMethodOption(t, c, "sms", "per_user", "2")
 	})
 	_, full := l.login(t, "pat@example.com")
 	l.sms().fail = true
@@ -238,7 +240,7 @@ func TestSMSPushNeedSenders(t *testing.T) {
 	}
 	e := newEnv(t)
 	e.cfg.Features = &[]string{feature.Org, feature.Warnings, feature.SMSOTP}
-	e.cfg.Methods = map[string]map[string]string{"sms": {"nosuch": "1"}}
+	e.cfg.Methods = methodOptions(t, map[string]map[string]string{"sms": {"nosuch": "1"}})
 	if _, err := New(context.Background(), e.cfg, e.deps, feature.Registered()); err == nil {
 		t.Fatal("unknown method option accepted")
 	}
@@ -328,7 +330,7 @@ func newPushEnv(t *testing.T, edit func(*config.Config)) *loginEnv {
 	t.Helper()
 	return newLoginEnvWith(t, func(c *config.Config) {
 		c.Features = &[]string{feature.Org, feature.Warnings, feature.PushAuth}
-		c.Methods = map[string]map[string]string{"push": {"per_user": "20"}}
+		c.Methods = methodOptions(t, map[string]map[string]string{"push": {"per_user": "20"}})
 		if edit != nil {
 			edit(c)
 		}
@@ -457,7 +459,7 @@ func TestPushSecondFactor(t *testing.T) {
 }
 
 func TestPushFatigueLockout(t *testing.T) {
-	l := newPushEnv(t, func(c *config.Config) { c.Methods["push"]["deny_limit"] = "2" })
+	l := newPushEnv(t, func(c *config.Config) { setMethodOption(t, c, "push", "deny_limit", "2") })
 	_, full := l.login(t, "pat@example.com")
 	d := newDevice(t)
 	if status, _ := d.enroll(t, l, full); status != 200 {
@@ -511,4 +513,32 @@ func TestOrgPolicyDeniesRestrictedAuthenticators(t *testing.T) {
 	if code, body, _ := l.post(t, weak, "/v1/me/orgs/"+acme+":switch", nil); code != 403 || reasonsOf(body) != "policy.restricted_authenticator" {
 		t.Fatalf("switch with sms: %d %v", code, body)
 	}
+}
+
+// methodOptions は方式ごとの文字列の項目を設定ファイルの methods（YAML のノード）にする。
+func methodOptions(t *testing.T, m map[string]map[string]string) map[string]yaml.Node {
+	t.Helper()
+	out := make(map[string]yaml.Node, len(m))
+	for name, opts := range m {
+		var n yaml.Node
+		if err := n.Encode(opts); err != nil {
+			t.Fatal(err)
+		}
+		out[name] = n
+	}
+	return out
+}
+
+// setMethodOption は methods.<方式>.<項目> を書き換える。
+func setMethodOption(t *testing.T, c *config.Config, method, key, value string) {
+	t.Helper()
+	var opts map[string]string
+	if err := c.MethodSettings(method)(&opts); err != nil {
+		t.Fatal(err)
+	}
+	if opts == nil {
+		opts = map[string]string{}
+	}
+	opts[key] = value
+	c.Methods[method] = methodOptions(t, map[string]map[string]string{method: opts})[method]
 }

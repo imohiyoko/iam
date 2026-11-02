@@ -65,6 +65,7 @@ type AuthnCredential struct {
 	LastUsedAt   sql.NullString
 	RevokedAt    sql.NullString
 	RevokeReason string
+	LookupKeyID  string
 }
 
 type AuthnDirectoryGroup struct {
