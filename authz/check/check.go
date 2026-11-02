@@ -242,6 +242,7 @@ func (c *Checker) decide(gs []Grant, r Request, src source) (Decision, error) {
 	}
 
 	var unmet []string
+	var step StepUp
 	allow, conditional := false, false
 	for _, g := range gs {
 		if !g.covers(r.Resource, r.Action) {
@@ -261,13 +262,14 @@ func (c *Checker) decide(gs []Grant, r Request, src source) (Decision, error) {
 			break
 		}
 		conditional, unmet = true, append(unmet, u...)
+		g.Condition.stepUp(r.Context, now, b, &step)
 	}
 	if !allow {
 		if !conditional {
 			return Decision{}, nil
 		}
 		slices.Sort(unmet)
-		return Decision{Unmet: slices.Compact(unmet)}, nil
+		return Decision{Unmet: slices.Compact(unmet), StepUp: step}, nil
 	}
 
 	x, err := loadRequirements()
@@ -282,17 +284,18 @@ func (c *Checker) decide(gs []Grant, r Request, src source) (Decision, error) {
 	if err != nil {
 		return Decision{}, err
 	}
-	unmet = nil
+	unmet, step = nil, StepUp{}
 	for _, cond := range conds {
 		if ok, u := cond.EvalRequirement(r.Context, now, b); !ok {
 			unmet = append(unmet, u...)
+			cond.stepUp(r.Context, now, b, &step)
 		}
 	}
 	if len(unmet) == 0 {
 		return Decision{Allow: true}, nil
 	}
 	slices.Sort(unmet)
-	return Decision{Unmet: slices.Compact(unmet)}, nil
+	return Decision{Unmet: slices.Compact(unmet), StepUp: step}, nil
 }
 
 // Holds は主体が範囲全体（リソースを限らない付与）で perms をすべて持つかを返す。ロールの付与や作成で、

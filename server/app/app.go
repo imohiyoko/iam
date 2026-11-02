@@ -307,7 +307,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 				MaxAuthAge: ss.MaxAuthAge.Rule("session.max_auth_age"), Warnings: warnings,
 			}, LoginPolicies: plan.IsActive(feature.OrgLoginPolicy), Quotas: plan.IsActive(feature.Quota),
 			QuotaCount: org.QuotaCount(rs.QuotaCount), ManagedUsers: plan.IsActive(feature.OrgManagedUsers), Resolver: d.DNS,
-			Hierarchy: plan.IsActive(feature.OrgHierarchy)}
+			Hierarchy: plan.IsActive(feature.OrgHierarchy), ACR: plan.IsActive(feature.ACR)}
 		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
 	}
 	// 判定の材料のキャッシュは、セッションの検証と同じ反映の遅れの上限（5.3）まで。
@@ -330,7 +330,8 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.attributes = &attribute.Service{Clock: d.Clock, Crypter: a.pii}
 	}
 	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Attributes: a.attributes, Issuer: a.issuer,
-		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D()}
+		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D(),
+		ACR: plan.IsActive(feature.ACR)}
 	if a.issuer != "" {
 		a.sessions.Lineages = a.tokens
 	}

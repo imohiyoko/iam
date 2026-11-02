@@ -33,6 +33,7 @@ const (
 	CustomAttributes    = "custom_attributes"
 	FlowHooks           = "flow_hooks"
 	OIDCLogout          = "oidc_logout"
+	ACR                 = "acr"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

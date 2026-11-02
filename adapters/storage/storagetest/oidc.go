@@ -118,6 +118,7 @@ func testGrants(t *testing.T, h Harness) {
 			Scopes: []string{"openid", "email"}, AuthMethods: []string{"pwd"}, AuthTime: T0.Add(-time.Minute), CreatedAt: at, ExpiresAt: at.Add(time.Hour)}
 	}
 	g1, g2 := mk(T0.Add(time.Second)), mk(T0)
+	g1.ACR = "urn:iam:aal1" // acr はフィーチャー acr のときだけ（ADR 0093）。g2 は空のまま
 	tok := func(g port.Grant, kind string) port.OIDCToken {
 		return port.OIDCToken{ID: id.NewExternal(id.AccessToken), RealmID: r, GrantID: g.ID, Kind: kind, Hash: []byte{7}, CreatedAt: T0,
 			ExpiresAt: T0.Add(time.Minute)}
@@ -146,7 +147,7 @@ func testGrants(t *testing.T, h Harness) {
 			return err
 		}
 		list, err := repo.ListBySID(ctx, r, sid)
-		if err != nil || len(list) != 2 || list[0].ID != g2.ID {
+		if err != nil || len(list) != 2 || list[0].ID != g2.ID || list[0].ACR != "" || list[1].ACR != g1.ACR {
 			return fmt.Errorf("ListBySID = %+v, %v", list, err)
 		}
 		// 失効の時刻は早まるだけ。

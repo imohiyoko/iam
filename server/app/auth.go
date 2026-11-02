@@ -33,6 +33,7 @@ func (s publicServer) recent(ctx context.Context, au auth, action string) bool {
 		age = s.a.cfg.Security.Session.MaxAuthAge.Default.D()
 	}
 	if s.a.deps.Clock.Now().Sub(au.AuthenticatedAt) > age {
+		noteStepUp(ctx, check.StepUp{MaxAge: max(int(age/time.Second), 1)})
 		return false
 	}
 	return s.meets(ctx, au, action)
@@ -46,6 +47,9 @@ func (s publicServer) meets(ctx context.Context, au auth, action string) bool {
 	if err != nil {
 		s.a.deps.Logger.ErrorContext(ctx, "requirements of a sensitive operation", "action", action, "error", err)
 		return false
+	}
+	if !d.Allow {
+		noteStepUp(ctx, d.StepUp)
 	}
 	return d.Allow
 }

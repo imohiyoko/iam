@@ -58,8 +58,8 @@ func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) erro
 }
 
 const createGrant = `-- name: CreateGrant :exec
-INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateGrantParams struct {
@@ -76,6 +76,7 @@ type CreateGrantParams struct {
 	ExpiresAt    string
 	RevokedAt    sql.NullString
 	RevokeReason string
+	Acr          string
 }
 
 func (q *Queries) CreateGrant(ctx context.Context, arg CreateGrantParams) error {
@@ -93,6 +94,7 @@ func (q *Queries) CreateGrant(ctx context.Context, arg CreateGrantParams) error 
 		arg.ExpiresAt,
 		arg.RevokedAt,
 		arg.RevokeReason,
+		arg.Acr,
 	)
 	return err
 }
@@ -310,7 +312,7 @@ func (q *Queries) GetClientByPublicID(ctx context.Context, arg GetClientByPublic
 }
 
 const getGrant = `-- name: GetGrant :one
-SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason FROM authn_oidc_grants WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr FROM authn_oidc_grants WHERE realm_id = ? AND id = ?
 `
 
 type GetGrantParams struct {
@@ -335,6 +337,7 @@ func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (AuthnOidcGr
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
+		&i.Acr,
 	)
 	return i, err
 }
@@ -409,7 +412,7 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 }
 
 const listGrantsBySID = `-- name: ListGrantsBySID :many
-SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason FROM authn_oidc_grants WHERE realm_id = ? AND sid = ? ORDER BY created_at, id
+SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr FROM authn_oidc_grants WHERE realm_id = ? AND sid = ? ORDER BY created_at, id
 `
 
 type ListGrantsBySIDParams struct {
@@ -440,6 +443,7 @@ func (q *Queries) ListGrantsBySID(ctx context.Context, arg ListGrantsBySIDParams
 			&i.ExpiresAt,
 			&i.RevokedAt,
 			&i.RevokeReason,
+			&i.Acr,
 		); err != nil {
 			return nil, err
 		}
