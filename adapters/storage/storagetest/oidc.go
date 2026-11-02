@@ -55,7 +55,7 @@ func testClients(t *testing.T, h Harness) {
 			return fmt.Errorf("list = %+v, %v", list, err)
 		}
 		a.Name, a.RedirectURIs, a.SecretHash, a.UpdatedAt = "A2", []string{"https://x.example.com/"}, []byte{9}, T0.Add(time.Hour)
-		a.DeviceGrant = true
+		a.DeviceGrant, a.RequirePAR = true, true
 		a.TokenExchange = []byte(`{"impersonation":true}`)
 		a.FrontchannelLogoutURI, a.FrontchannelLogoutSessionRequired = "https://x.example.com/fcl", true
 		if err := repo.Update(ctx, a); err != nil {

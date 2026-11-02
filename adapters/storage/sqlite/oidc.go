@@ -26,7 +26,7 @@ func toClient(r db.AuthnClient) (port.Client, error) {
 	c := port.Client{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Name: r.Name, TrustLevel: r.TrustLevel, AuthMethod: r.AuthMethod,
 		SecretHash: r.SecretHash, JWKS: r.Jwks, IDTokenAlg: r.IDTokenAlg, BackchannelLogoutURI: r.BackchannelLogoutUri, DeviceGrant: r.DeviceGrant != 0,
 		FrontchannelLogoutURI: r.FrontchannelLogoutUri, FrontchannelLogoutSessionRequired: r.FrontchannelLogoutSessionRequired != 0,
-		TokenExchange: r.TokenExchange, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		TokenExchange: r.TokenExchange, RequirePAR: r.RequirePar != 0, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	if p.err != nil {
 		return port.Client{}, p.err
 	}
@@ -49,7 +49,7 @@ func (r clients) Create(ctx context.Context, c port.Client) error {
 		TrustLevel: c.TrustLevel, RedirectUris: redirect, PostLogoutRedirectUris: logout, AuthMethod: c.AuthMethod, SecretHash: c.SecretHash,
 		Jwks: c.JWKS, IDTokenAlg: c.IDTokenAlg, BackchannelLogoutUri: c.BackchannelLogoutURI, DeviceGrant: boolInt(c.DeviceGrant), FrontchannelLogoutUri: c.FrontchannelLogoutURI,
 		FrontchannelLogoutSessionRequired: boolInt(c.FrontchannelLogoutSessionRequired), CreatedAt: formatTime(c.CreatedAt),
-		UpdatedAt: formatTime(c.UpdatedAt), TokenExchange: c.TokenExchange}))
+		UpdatedAt: formatTime(c.UpdatedAt), TokenExchange: c.TokenExchange, RequirePar: boolInt(c.RequirePAR)}))
 }
 
 func (r clients) Get(ctx context.Context, realmID, id string) (port.Client, error) {
@@ -80,7 +80,7 @@ func (r clients) Update(ctx context.Context, c port.Client) error {
 		PostLogoutRedirectUris: logout, AuthMethod: c.AuthMethod, SecretHash: c.SecretHash, Jwks: c.JWKS, IDTokenAlg: c.IDTokenAlg,
 		BackchannelLogoutUri: c.BackchannelLogoutURI, FrontchannelLogoutUri: c.FrontchannelLogoutURI,
 		FrontchannelLogoutSessionRequired: boolInt(c.FrontchannelLogoutSessionRequired), UpdatedAt: formatTime(c.UpdatedAt),
-		TokenExchange: c.TokenExchange, DeviceGrant: boolInt(c.DeviceGrant), RealmID: c.RealmID, ID: c.ID})
+		TokenExchange: c.TokenExchange, DeviceGrant: boolInt(c.DeviceGrant), RequirePar: boolInt(c.RequirePAR), RealmID: c.RealmID, ID: c.ID})
 	return affected(n, err, "client")
 }
 

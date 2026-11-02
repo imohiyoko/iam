@@ -130,6 +130,11 @@ type App struct {
 	// wsfed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。フィーチャー wsfed が動いていないか、
 	// issuer（server.public_url）が無ければ nil。
 	wsfed *wsfed.Service
+	// par は Pushed Authorization Requests（RFC 9126。ADR 0112）が動いているか（フィーチャー par）。
+	par bool
+	// resources は自前の API（リソースサーバー）の登録（RFC 8707。ADR 0112）。フィーチャー resource_indicators が
+	// 動いていなければ nil。
+	resources *provider.Resources
 	// ldap は LDAP / Active Directory のバインド認証と同期（ADR 0102）。フィーチャー ldap が動いていなければ nil。
 	ldap *dirldap.Service
 	// metadata は認証器のメタデータ（フィーチャー passkey_attestation。ADR 0096）。root だけが持ち、全 realm で共有する。
@@ -442,7 +447,8 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.authz.Members, a.authz.Hierarchy = authzMembers{}, a.orgs.Hierarchy
 	}
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
-	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout)}
+	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout),
+		PAR: plan.IsActive(feature.PAR)}
 	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D()}
 	// ID トークンの署名鍵は realm ごとに用意しておく（JWKS が空のまま公開されないように）。
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, realm.ID) }); err != nil {
@@ -451,7 +457,13 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	a.issuer = ep.issuer
 	a.serviceAccounts = &serviceaccount.Service{Clock: d.Clock, Replay: d.Ephemeral, Audience: a.issuer,
 		TokenTTL: cfg.ServiceAccounts.TokenTTL.D(), Authenticator: serviceaccount.Authenticator{Enabled: plan.IsActive(feature.ServiceAccounts), DeliveryOnly: deliveryOnly}}
-	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D()}
+	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D(), PushedTTL: cfg.OIDC.PARRequestURITTL.D()}
+	// PAR と自前の API 向けのトークン（ADR 0112）。
+	a.par, a.resources = plan.IsActive(feature.PAR), nil
+	if plan.IsActive(feature.ResourceIndicators) {
+		a.resources = &provider.Resources{Clock: d.Clock}
+		a.serviceAccounts.Resource = provider.ResourceForServiceAccount
+	}
 	a.device, a.deviceTmpl = nil, nil
 	if plan.IsActive(feature.DeviceFlow) {
 		a.device = &provider.Device{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, TTL: cfg.OIDC.DeviceCodeTTL.D(),
@@ -471,7 +483,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Attributes: a.attributes, Issuer: a.issuer,
 		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D(),
-		ACR: plan.IsActive(feature.ACR)}
+		ACR: plan.IsActive(feature.ACR), ResourceIndicators: a.resources != nil}
 	if a.issuer != "" {
 		a.sessions.Lineages = a.tokens
 	}

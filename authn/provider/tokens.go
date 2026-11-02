@@ -70,6 +70,9 @@ type Tokens struct {
 	Impersonation *Impersonation
 	// ACR はフィーチャー acr が動いているか（ADR 0093）。偽なら、認可に acr があっても載せない（止めた後の認可を含む）。
 	ACR bool
+	// ResourceIndicators はフィーチャー resource_indicators（RFC 8707。ADR 0112）が動いているか。偽なら、自前の API に向けた
+	// 認可（aud を持つ認可コードの認可）のトークンは使えない（fail-closed）。
+	ResourceIndicators bool
 	// Issuer は iss（server.public_url）。
 	Issuer                               string
 	AccessTokenTTL, IDTokenTTL, GrantTTL time.Duration
@@ -118,6 +121,16 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 	g := port.Grant{ID: id.New(id.Grant), RealmID: c.RealmID, ClientID: cl.ID, UserID: c.UserID, OrgID: c.OrgID, SID: c.SID,
 		Scopes: c.Scopes, AuthMethods: c.AMR, AuthTime: c.AuthTime, CreatedAt: now, ExpiresAt: now.Add(ttlOr(t.GrantTTL, DefaultRefreshTTL)),
 		ACR: c.SelectedACR}
+	if c.Resource != "" {
+		// 自前の API に向けた認可（RFC 8707）。アクセストークンの aud はリソースの URI（ADR 0112）。
+		g.Audiences = []string{c.Resource}
+		if err := t.resourceAlive(ctx, tx, g, cl); err != nil {
+			if errors.Is(err, ErrInvalidToken) {
+				return Issued{}, ErrInvalidGrant
+			}
+			return Issued{}, err
+		}
+	}
 	if err := tx.Grants().Create(ctx, g); err != nil {
 		return Issued{}, err
 	}
@@ -134,6 +147,9 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 		return Issued{}, err
 	}
 	details := map[string]any{"client_id": cl.PublicID, "scopes": c.Scopes}
+	if c.Resource != "" {
+		details["resource"] = c.Resource
+	}
 	if c.GrantType != "" {
 		details["grant_type"] = c.GrantType
 	}
@@ -318,6 +334,37 @@ func (t *Tokens) aliveUntil(ctx context.Context, tx port.Tx, realmID, sid, userI
 	return next, nil
 }
 
+// ResourceBound は、認可が自前の API（リソース。RFC 8707）に向けたものかを返す。そのアクセストークンは IAM 自身の
+// UserInfo では使えない（aud が IAM ではない。ADR 0112）。
+func ResourceBound(g port.Grant) bool { return g.Exchange == "" && len(g.Audiences) > 0 }
+
+// SameResource は、要求の resource（RFC 8707）が認可のリソースと同じ 1 つかを返す。token エンドポイントの resource は、
+// 認可要求で指定したものに限る（ここで別のリソースに替えたり、足したりはできない。ADR 0112）。
+func SameResource(g port.Grant, resources []string) bool {
+	return len(resources) == 1 && ResourceBound(g) && len(g.Audiences) == 1 && g.Audiences[0] == resources[0]
+}
+
+// resourceAlive は、自前の API に向けた認可のリソースがまだあり、連携先に許されているかを確かめる。フィーチャーが止まって
+// いれば使えない。そうでなければ ErrInvalidToken。リソースに向けていない認可は何もしない。
+func (t *Tokens) resourceAlive(ctx context.Context, tx port.Tx, g port.Grant, cl port.Client) error {
+	if !ResourceBound(g) {
+		return nil
+	}
+	if !t.ResourceIndicators {
+		return ErrInvalidToken
+	}
+	for _, uri := range g.Audiences {
+		_, err := ResourceForClient(ctx, tx, g.RealmID, uri, cl.PublicID)
+		if errors.Is(err, ErrInvalidTarget) {
+			return ErrInvalidToken
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Access は検証したアクセストークン。
 type Access struct {
 	Token  port.OIDCToken
@@ -412,7 +459,9 @@ func revoked(g port.Grant, now time.Time) bool {
 // Refresh はリフレッシュトークンを使って新しいトークンを発行する（RFC 6749 6、OAuth 2.0 Security BCP 4.14）。
 // リフレッシュトークンは1回限りで、使用済みのものが再び来たら認可（ファミリー）ごと失効させる。ログインの系列の
 // 今のセッションの無操作の期限を延ばす（連携先での利用も利用とみなす）。使えないトークンは ErrInvalidGrant。
-func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refreshToken, requestID string) (Refreshed, error) {
+// resources は要求の resource（RFC 8707。フィーチャー resource_indicators が動いているときだけ渡す）。認可のリソースと
+// 同じ 1 つでなければ、リフレッシュトークンを使わずに ErrInvalidTarget（ADR 0112）。
+func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refreshToken string, resources []string, requestID string) (Refreshed, error) {
 	now := t.Clock.Now()
 	tok, g, err := t.token(ctx, tx, cl.RealmID, refreshToken, port.TokenRefresh)
 	if errors.Is(err, ErrInvalidToken) {
@@ -423,6 +472,9 @@ func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refres
 	}
 	if g.ClientID != cl.ID || revoked(g, now) || !now.Before(tok.ExpiresAt) {
 		return Refreshed{}, ErrInvalidGrant
+	}
+	if len(resources) > 0 && !SameResource(g, resources) {
+		return Refreshed{}, ErrInvalidTarget
 	}
 	fresh, err := tx.OIDCTokens().Use(ctx, cl.RealmID, tok.ID, now)
 	if err != nil {
@@ -442,6 +494,12 @@ func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refres
 		return Refreshed{}, err
 	}
 	if err := t.alive(ctx, tx, g.RealmID, g.SID, g.UserID, g.OrgID, now); err != nil {
+		if errors.Is(err, ErrInvalidToken) {
+			return Refreshed{}, ErrInvalidGrant
+		}
+		return Refreshed{}, err
+	}
+	if err := t.resourceAlive(ctx, tx, g, cl); err != nil {
 		if errors.Is(err, ErrInvalidToken) {
 			return Refreshed{}, ErrInvalidGrant
 		}
@@ -566,6 +624,10 @@ func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token stri
 	out := Introspection{Active: true, Scope: strings.Join(g.Scopes, " "), ClientID: cl.PublicID, TokenType: typ, Exp: tok.ExpiresAt.Unix(),
 		Iat: tok.CreatedAt.Unix(), Sub: u.PublicID, Aud: []string{cl.PublicID}, Iss: t.Issuer, SID: g.SID, OrgID: orgPublicID,
 		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods, ACR: acrValue, Risk: risk}
+	if g.Exchange == "" && len(g.Audiences) > 0 {
+		// 自前の API に向けた認可の aud はリソースの URI（RFC 8707、ADR 0112）。
+		out.Aud = slices.Clone(g.Audiences)
+	}
 	return out, exchangeIntrospection(&out, g)
 }
 

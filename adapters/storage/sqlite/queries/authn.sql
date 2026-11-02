@@ -158,7 +158,8 @@ SELECT * FROM authn_service_account_credentials WHERE realm_id = ? AND service_a
 UPDATE authn_service_account_credentials SET revoked_at = coalesce(revoked_at, sqlc.arg(at)) WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
 
 -- name: CreateServiceAccountToken :exec
-INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at, audience, scopes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetServiceAccountToken :one
 SELECT * FROM authn_service_account_tokens WHERE realm_id = ? AND id = ?;

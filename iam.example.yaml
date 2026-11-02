@@ -73,6 +73,7 @@ realm:
     suspended: true            # 停止中の Membership
   audit_retention: 90d  # 監査ログの保持期間。過ぎたら先頭から切り詰め、チェックポイントを残して SIEM にも送る（0 で切り詰めない）
   ended_retention: 7d   # 失効・期限切れのセッション、配送済みの outbox、発火済みの予約イベントを残す期間（0 で消さない）
+  require_pushed_authorization_requests: false  # すべての連携先に PAR（RFC 9126）を求める（フィーチャー par）
   email_storage: encrypted  # encrypted（暗号文 + インデックス）/ index_only（インデックスのみ。操作起点でない通知の宛先は外部が user_id から解決する）
 
 # passkey の attestation（フィーチャー passkey_attestation。ADR 0096）。フィーチャーがオフなら無視する。
@@ -137,6 +138,7 @@ oidc:
   retired_key_ttl: 7d  # ローテーションした古い署名鍵を JWKS に残す期間
   device_code_ttl: 10m  # Device Authorization Grant の device_code と user_code の寿命（30分以下。フィーチャー device_flow）
   device_poll_interval: 5s  # 端末のポーリングの最短の間隔（1秒から1分）
+  par_request_uri_ttl: 1m  # PAR（RFC 9126）の request_uri の寿命（10分以下。フィーチャー par）
   impersonation:  # 運営者のなりすまし（フィーチャー impersonation。ADR 0099）
     token_ttl: 10m  # なりすましのアクセストークンの寿命（1時間以下）
     max_auth_age: 5m  # 運営者が直近に認証していなければならない時間（step-up）

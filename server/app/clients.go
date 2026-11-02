@@ -16,6 +16,7 @@ import (
 // 連携先（OIDC のクライアント）と署名鍵の管理 API（design.md 5.5、9.3、ADR 0026）。
 
 // clientOut は連携先を返す形にする。deviceFlow はフィーチャー device_flow が動いているか（オフなら許可の有無を返さない）。
+// require_pushed_authorization_requests は PAR を求める連携先だけ返す（求めないなら省く）。
 func clientOut(c port.Client, secret string, deviceFlow bool) (adminapi.Client, error) {
 	out := adminapi.Client{ClientId: c.PublicID, Name: c.Name, TrustLevel: adminapi.ClientTrustLevel(c.TrustLevel),
 		RedirectUris: c.RedirectURIs, PostLogoutRedirectUris: c.PostLogoutRedirectURIs, TokenEndpointAuthMethod: c.AuthMethod,
@@ -46,6 +47,9 @@ func clientOut(c port.Client, secret string, deviceFlow bool) (adminapi.Client, 
 	if deviceFlow {
 		out.DeviceAuthorizationGrant = &c.DeviceGrant
 	}
+	if c.RequirePAR {
+		out.RequirePushedAuthorizationRequests = &c.RequirePAR
+	}
 	return out, nil
 }
 
@@ -68,6 +72,9 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.FrontchannelLogoutSessionRequired != nil {
 		in.FrontchannelLogoutSessionRequired = *b.FrontchannelLogoutSessionRequired
+	}
+	if b.RequirePushedAuthorizationRequests != nil {
+		in.RequirePAR = *b.RequirePushedAuthorizationRequests
 	}
 	if b.Jwks != nil {
 		raw, err := json.Marshal(*b.Jwks)

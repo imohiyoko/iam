@@ -118,6 +118,8 @@ const (
 	AuditKey          Prefix = "ak"
 	// WSFedRelyingParty は WS-Federation の RP（ADR 0110）。
 	WSFedRelyingParty Prefix = "wrp"
+	// OAuthResource は自前の API（リソースサーバー。RFC 8707、ADR 0112）。
+	OAuthResource Prefix = "rsc"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。

@@ -153,6 +153,8 @@ type OIDC struct {
 	DevicePollInterval Duration `yaml:"device_poll_interval"`
 	// Impersonation は Token Exchange による運営者のなりすまし（フィーチャー impersonation。ADR 0099）。
 	Impersonation Impersonation `yaml:"impersonation"`
+	// PARRequestURITTL は PAR（RFC 9126）の request_uri の寿命（10 分以下。フィーチャー par。ADR 0112）。
+	PARRequestURITTL Duration `yaml:"par_request_uri_ttl"`
 }
 
 // Impersonation はなりすましの寿命と step-up の条件。
@@ -363,6 +365,9 @@ type Realm struct {
 	PasskeyPolicy *attestation.Policy `yaml:"passkey_policy"`
 	// DisabledMethods は既定の realm で止める認証方式のプラグイン（方式の名前。ADR 0104）。新しい realm の既定値にもなる。
 	DisabledMethods []string `yaml:"disabled_methods"`
+	// RequirePushedAuthorizationRequests は既定の realm のすべての連携先に PAR（RFC 9126）を求める（フィーチャー par。
+	// ADR 0112）。新しい realm の既定値にもなる。
+	RequirePushedAuthorizationRequests bool `yaml:"require_pushed_authorization_requests"`
 }
 
 // KnownEmailStorage は realm.email_storage の値。
@@ -645,7 +650,7 @@ func Default() Config {
 		OIDC: OIDC{Impersonation: Impersonation{TokenTTL: Duration(10 * time.Minute), MaxAuthAge: Duration(5 * time.Minute), MinFactors: 2},
 			CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
 			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day),
-			DeviceCodeTTL: Duration(10 * time.Minute), DevicePollInterval: Duration(5 * time.Second)},
+			DeviceCodeTTL: Duration(10 * time.Minute), DevicePollInterval: Duration(5 * time.Second), PARRequestURITTL: Duration(time.Minute)},
 		ServiceAccounts:      ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
 		PersonalAccessTokens: PersonalAccessTokens{MaxPerUser: 50},
 	}
@@ -846,6 +851,9 @@ func (c Config) Validate() error {
 	}
 	if o.DevicePollInterval < Duration(time.Second) || o.DevicePollInterval > Duration(time.Minute) {
 		problems = append(problems, "oidc.device_poll_interval must be within [1s, 1m]")
+	}
+	if o.PARRequestURITTL <= 0 || o.PARRequestURITTL > Duration(10*time.Minute) {
+		problems = append(problems, "oidc.par_request_uri_ttl must be positive and at most 10m")
 	}
 	if im := o.Impersonation; im.TokenTTL <= 0 || im.TokenTTL > Duration(time.Hour) || im.MaxAuthAge <= 0 || im.MaxAuthAge > Duration(time.Hour) {
 		problems = append(problems, "oidc.impersonation: token_ttl and max_auth_age must be positive and at most 1h")

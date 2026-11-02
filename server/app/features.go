@@ -201,6 +201,70 @@ var cleaners = map[string]cleaner{
 		}},
 	// 本人の Personal Access Token と realm のポリシーを消す（ADR 0109）。
 	feature.PersonalAccessTokens: patCleaner,
+	// 連携先と realm の PAR の必須を外す（ADR 0112）。預かった request_uri は EphemeralStore にあり、期限で消える。
+	feature.PAR: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		n, err := eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.RequirePAR, nil })
+		if err != nil {
+			return 0, err
+		}
+		r, err := eachRealmRequiringPAR(ctx, tx, -1, time.Time{})
+		return n + r, err
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		n, err := eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
+			if !c.RequirePAR {
+				return false, nil
+			}
+			c.RequirePAR, c.UpdatedAt = false, now
+			return true, tx.Clients().Update(ctx, c)
+		})
+		if err != nil || n >= limit {
+			return n, err
+		}
+		r, err := eachRealmRequiringPAR(ctx, tx, limit-n, now)
+		return n + r, err
+	}},
+	// 自前の API（リソースサーバー）の登録を消す（ADR 0112）。発行済みの aud を持つトークンは、フィーチャーが止まれば
+	// 検証で使えない（fail-closed）ので、期限まで残してよい。
+	feature.ResourceIndicators: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.OAuthResources().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return tx.OAuthResources().Purge(ctx, limit)
+		}},
+}
+
+// eachRealmRequiringPAR は realm の設定の require_pushed_authorization_requests が真の realm を数える。now が零でなければ、
+// 最大 limit 件（負なら全部）を偽にする（ほかの設定はそのまま残す）。
+func eachRealmRequiringPAR(ctx context.Context, tx port.Tx, limit int, now time.Time) (int, error) {
+	realms, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range realms {
+		if limit >= 0 && n >= limit {
+			break
+		}
+		var m map[string]json.RawMessage
+		if len(r.Settings) == 0 || json.Unmarshal(r.Settings, &m) != nil {
+			continue
+		}
+		var on bool
+		if json.Unmarshal(m["require_pushed_authorization_requests"], &on) != nil || !on {
+			continue
+		}
+		n++
+		if now.IsZero() {
+			continue
+		}
+		m["require_pushed_authorization_requests"] = json.RawMessage("false")
+		if r.Settings, err = json.Marshal(m); err != nil {
+			return n, err
+		}
+		r.UpdatedAt = now
+		if err := tx.Realms().Update(ctx, r); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }
 
 // eachClient は全 realm の連携先に fn を呼び、true を返した数を数える。limit が 0 以上なら、その数で止める。

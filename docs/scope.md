@@ -78,7 +78,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | Session Management | S | ❌ | |
 | `profile`・`address`・`phone` スコープ、`claims` パラメーター | S | ⛔ | 適合性メモ |
 | `form_post`・`fragment`、JAR（RFC 9101） | S | ⛔ | 適合性メモ |
-| PAR（RFC 9126） | S | ❌ | |
+| PAR（RFC 9126） | S | ✅ | フィーチャー `par`（ADR 0112）。連携先か realm の単位で必須にできる |
 | RS256 | S | ⛔ | ADR 0005 |
 | JWT アクセストークン（RFC 9068） | S P | ⛔ | ADR 0021 |
 | `offline_access` | S | ⛔ | ADR 0066 |
@@ -87,7 +87,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | SAML 2.0 IdP | S P C | ❌ | |
 | WS-Federation（パッシブ要求者プロファイル。SAML 1.1 / 2.0 のトークン） | P | ✅ | フィーチャー `wsfed`（ADR 0110）。署名は ECDSA だけ（RSA は RS256 のフィーチャーの後） |
 | CAS | P | ❌ | |
-| OAuth AS メタデータ（RFC 8414）、Protected Resource Metadata（RFC 9728） | S | ❌ | |
+| OAuth AS メタデータ（RFC 8414）、Protected Resource Metadata（RFC 9728） | S | ✅ | ADR 0112。9728 は IAM 自身の API（UserInfo）の分 |
 | Device Authorization Grant（RFC 8628） | S P | ✅ | フィーチャー `device_flow`（ADR 0095） |
 | CIBA | S | ❌ | |
 | FAPI 2.0 | S C | ❌ | |
@@ -98,7 +98,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 項目 | 出どころ | 状態 | メモ |
 | --- | --- | --- | --- |
 | サービスアカウント（API キー、client_secret、private_key_jwt） | S P | ✅ | 管理 API 専用 |
-| 自前の API 向けの client credentials（`aud`・スコープ、RFC 8707） | S P | ❌ | |
+| 自前の API 向けの client credentials（`aud`・スコープ、RFC 8707） | S P | ✅ | フィーチャー `resource_indicators`（ADR 0112）。入口は `/v1/admin/token`。認可コードフローの `resource` も |
 | Token Exchange（RFC 8693）・委任・なりすまし | S P | ✅ | ADR 0099 |
 | DPoP（RFC 9449）、mTLS（RFC 8705） | S | ❌ | |
 | Workload Identity Federation（RFC 7523、SPIFFE） | S P | ❌ | |

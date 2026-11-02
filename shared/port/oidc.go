@@ -52,8 +52,10 @@ type Client struct {
 	// TokenExchange は Token Exchange（RFC 8693）で許す交換（JSON。形は authn/provider の ExchangePolicy）。nil なら何も許さない
 	// （フィーチャー token_exchange。ADR 0099）。
 	TokenExchange []byte
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// RequirePAR は認可要求を PAR（RFC 9126）で送らせる（require_pushed_authorization_requests。フィーチャー par。ADR 0112）。
+	RequirePAR bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // ClientRepo は clients の Repository。

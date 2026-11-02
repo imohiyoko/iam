@@ -1301,9 +1301,12 @@ type Client struct {
 	Name                              string                  `json:"name"`
 	PostLogoutRedirectUris            []string                `json:"post_logout_redirect_uris"`
 	RedirectUris                      []string                `json:"redirect_uris"`
-	TokenEndpointAuthMethod           string                  `json:"token_endpoint_auth_method"`
-	TrustLevel                        ClientTrustLevel        `json:"trust_level"`
-	UpdatedAt                         time.Time               `json:"updated_at"`
+
+	// RequirePushedAuthorizationRequests PAR を求める連携先だけ true を返す（求めないなら省く）
+	RequirePushedAuthorizationRequests *bool            `json:"require_pushed_authorization_requests,omitempty"`
+	TokenEndpointAuthMethod            string           `json:"token_endpoint_auth_method"`
+	TrustLevel                         ClientTrustLevel `json:"trust_level"`
+	UpdatedAt                          time.Time        `json:"updated_at"`
 }
 
 // ClientTrustLevel defines model for Client.TrustLevel.
@@ -1331,8 +1334,11 @@ type ClientInput struct {
 	PostLogoutRedirectUris *[]string               `json:"post_logout_redirect_uris,omitempty"`
 
 	// RedirectUris 1 つ以上。`device_authorization_grant` を許す連携先だけは空でよい
-	RedirectUris            []string                           `json:"redirect_uris"`
-	TokenEndpointAuthMethod ClientInputTokenEndpointAuthMethod `json:"token_endpoint_auth_method"`
+	RedirectUris []string `json:"redirect_uris"`
+
+	// RequirePushedAuthorizationRequests 認可要求を PAR（RFC 9126）で送らせる。フィーチャー `par` が動いているときだけ true にできる（ADR 0112）。省けば false
+	RequirePushedAuthorizationRequests *bool                              `json:"require_pushed_authorization_requests,omitempty"`
+	TokenEndpointAuthMethod            ClientInputTokenEndpointAuthMethod `json:"token_endpoint_auth_method"`
 }
 
 // ClientInputIdTokenSignedResponseAlg defines model for ClientInput.IdTokenSignedResponseAlg.
@@ -1701,6 +1707,37 @@ type MembershipRole string
 // MembershipStatus defines model for Membership.Status.
 type MembershipStatus string
 
+// OAuthResource defines model for OAuthResource.
+type OAuthResource struct {
+	Clients         []string  `json:"clients"`
+	CreatedAt       time.Time `json:"created_at"`
+	Id              string    `json:"id"`
+	Name            string    `json:"name"`
+	Scopes          []string  `json:"scopes"`
+	ServiceAccounts []string  `json:"service_accounts"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	Uri             string    `json:"uri"`
+}
+
+// OAuthResourceInput defines model for OAuthResourceInput.
+type OAuthResourceInput struct {
+	// Clients 認可コードフローで `resource` に指定してよい連携先の client_id
+	Clients *[]string `json:"clients,omitempty"`
+	Name    string    `json:"name"`
+	Scopes  []string  `json:"scopes"`
+
+	// ServiceAccounts client credentials で `resource` に指定してよいサービスアカウントの ID
+	ServiceAccounts *[]string `json:"service_accounts,omitempty"`
+
+	// Uri `resource` の値（aud になる）
+	Uri string `json:"uri"`
+}
+
+// OAuthResources defines model for OAuthResources.
+type OAuthResources struct {
+	Resources []OAuthResource `json:"resources"`
+}
+
 // Org defines model for Org.
 type Org struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -1980,9 +2017,10 @@ type Realm struct {
 			Invited   bool `json:"invited"`
 			Suspended bool `json:"suspended"`
 		} `json:"quota_count"`
-		Timezone                 string   `json:"timezone"`
-		UserDeletionGraceSeconds int64    `json:"user_deletion_grace_seconds"`
-		VerifiedVia              []string `json:"verified_via"`
+		RequirePushedAuthorizationRequests *bool    `json:"require_pushed_authorization_requests,omitempty"`
+		Timezone                           string   `json:"timezone"`
+		UserDeletionGraceSeconds           int64    `json:"user_deletion_grace_seconds"`
+		VerifiedVia                        []string `json:"verified_via"`
 	} `json:"settings"`
 	Slug      string    `json:"slug"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -2018,9 +2056,12 @@ type RealmSettings struct {
 		Invited   *bool `json:"invited,omitempty"`
 		Suspended *bool `json:"suspended,omitempty"`
 	} `json:"quota_count,omitempty"`
-	Timezone                 *string                     `json:"timezone,omitempty"`
-	UserDeletionGraceSeconds *int64                      `json:"user_deletion_grace_seconds,omitempty"`
-	VerifiedVia              *[]RealmSettingsVerifiedVia `json:"verified_via,omitempty"`
+
+	// RequirePushedAuthorizationRequests この realm のすべての連携先に PAR（RFC 9126）を求める（フィーチャー `par`。ADR 0112）
+	RequirePushedAuthorizationRequests *bool                       `json:"require_pushed_authorization_requests,omitempty"`
+	Timezone                           *string                     `json:"timezone,omitempty"`
+	UserDeletionGraceSeconds           *int64                      `json:"user_deletion_grace_seconds,omitempty"`
+	VerifiedVia                        *[]RealmSettingsVerifiedVia `json:"verified_via,omitempty"`
 }
 
 // RealmSettingsEmailStorage defines model for RealmSettings.EmailStorage.
@@ -2577,7 +2618,10 @@ type IssueServiceAccountTokenFormdataBody struct {
 	ClientSecret        *string `form:"client_secret,omitempty" json:"client_secret,omitempty"`
 	GrantType           string  `form:"grant_type" json:"grant_type"`
 
-	// Scope 使わない（権限はロールの付与で決まる）
+	// Resource 自前の API の URI（RFC 8707。1 つだけ。フィーチャー `resource_indicators`）
+	Resource *[]string `form:"resource,omitempty" json:"resource,omitempty"`
+
+	// Scope `resource` を付けたときだけ使う（空白区切り）。管理 API 向けのトークンでは使わない（権限はロールの付与で決まる）
 	Scope *string `form:"scope,omitempty" json:"scope,omitempty"`
 }
 
@@ -2710,6 +2754,12 @@ type UpdateMembershipJSONRequestBody = Validity
 
 // SuspendMembershipJSONRequestBody defines body for SuspendMembership for application/json ContentType.
 type SuspendMembershipJSONRequestBody = SuspendRequest
+
+// CreateOAuthResourceJSONRequestBody defines body for CreateOAuthResource for application/json ContentType.
+type CreateOAuthResourceJSONRequestBody = OAuthResourceInput
+
+// UpdateOAuthResourceJSONRequestBody defines body for UpdateOAuthResource for application/json ContentType.
+type UpdateOAuthResourceJSONRequestBody = OAuthResourceInput
 
 // CreateOrgJSONRequestBody defines body for CreateOrg for application/json ContentType.
 type CreateOrgJSONRequestBody CreateOrgJSONBody
@@ -2959,6 +3009,21 @@ type ServerInterface interface {
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(w http.ResponseWriter, r *http.Request, id string)
+	// ListOAuthResources 自前の API（リソースサーバー）の一覧（RFC 8707。ADR 0112）
+	// (GET /v1/admin/oauth/resources)
+	ListOAuthResources(w http.ResponseWriter, r *http.Request)
+	// CreateOAuthResource 自前の API（リソースサーバー）を登録する（RFC 8707。ADR 0112）
+	// (POST /v1/admin/oauth/resources)
+	CreateOAuthResource(w http.ResponseWriter, r *http.Request)
+	// GetOAuthResource 自前の API（リソースサーバー）を返す
+	// (GET /v1/admin/oauth/resources/{id})
+	GetOAuthResource(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateOAuthResource 自前の API（リソースサーバー）の登録を置き換える
+	// (PUT /v1/admin/oauth/resources/{id})
+	UpdateOAuthResource(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteOAuthResource 自前の API（リソースサーバー）を消す
+	// (POST /v1/admin/oauth/resources/{id}:delete)
+	DeleteOAuthResource(w http.ResponseWriter, r *http.Request, id string)
 	// ListOrgs Org の一覧・検索（ADR 0097）
 	// (GET /v1/admin/orgs)
 	ListOrgs(w http.ResponseWriter, r *http.Request, params ListOrgsParams)
@@ -4410,6 +4475,112 @@ func (siw *ServerInterfaceWrapper) ClaimNotification(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ClaimNotification(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOAuthResources operation middleware
+func (siw *ServerInterfaceWrapper) ListOAuthResources(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOAuthResources(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOAuthResource operation middleware
+func (siw *ServerInterfaceWrapper) CreateOAuthResource(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOAuthResource(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOAuthResource operation middleware
+func (siw *ServerInterfaceWrapper) GetOAuthResource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOAuthResource(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateOAuthResource operation middleware
+func (siw *ServerInterfaceWrapper) UpdateOAuthResource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateOAuthResource(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteOAuthResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOAuthResource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteOAuthResource(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7140,6 +7311,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}", wrapper.GetWSFedRelyingParty)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}", wrapper.UpdateWSFedRelyingParty)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}:delete", wrapper.DeleteWSFedRelyingParty)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/oauth/resources", wrapper.ListOAuthResources)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/oauth/resources", wrapper.CreateOAuthResource)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}", wrapper.GetOAuthResource)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}", wrapper.UpdateOAuthResource)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}:delete", wrapper.DeleteOAuthResource)
 
 	return m
 }
@@ -10560,6 +10736,376 @@ func (response ClaimNotification403JSONResponse) VisitClaimNotificationResponse(
 type ClaimNotification404JSONResponse Error
 
 func (response ClaimNotification404JSONResponse) VisitClaimNotificationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOAuthResourcesRequestObject struct {
+}
+
+type ListOAuthResourcesResponseObject interface {
+	VisitListOAuthResourcesResponse(w http.ResponseWriter) error
+}
+
+type ListOAuthResources200JSONResponse OAuthResources
+
+func (response ListOAuthResources200JSONResponse) VisitListOAuthResourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOAuthResources401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListOAuthResources401JSONResponse) VisitListOAuthResourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOAuthResources403JSONResponse Error
+
+func (response ListOAuthResources403JSONResponse) VisitListOAuthResourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOAuthResources404JSONResponse Error
+
+func (response ListOAuthResources404JSONResponse) VisitListOAuthResourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResourceRequestObject struct {
+	Body *CreateOAuthResourceJSONRequestBody
+}
+
+type CreateOAuthResourceResponseObject interface {
+	VisitCreateOAuthResourceResponse(w http.ResponseWriter) error
+}
+
+type CreateOAuthResource201JSONResponse OAuthResource
+
+func (response CreateOAuthResource201JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateOAuthResource400JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource401JSONResponse Error
+
+func (response CreateOAuthResource401JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource403JSONResponse Error
+
+func (response CreateOAuthResource403JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource404JSONResponse Error
+
+func (response CreateOAuthResource404JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource409JSONResponse Error
+
+func (response CreateOAuthResource409JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOAuthResourceRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetOAuthResourceResponseObject interface {
+	VisitGetOAuthResourceResponse(w http.ResponseWriter) error
+}
+
+type GetOAuthResource200JSONResponse OAuthResource
+
+func (response GetOAuthResource200JSONResponse) VisitGetOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOAuthResource401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetOAuthResource401JSONResponse) VisitGetOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOAuthResource403JSONResponse Error
+
+func (response GetOAuthResource403JSONResponse) VisitGetOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOAuthResource404JSONResponse Error
+
+func (response GetOAuthResource404JSONResponse) VisitGetOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResourceRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateOAuthResourceJSONRequestBody
+}
+
+type UpdateOAuthResourceResponseObject interface {
+	VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error
+}
+
+type UpdateOAuthResource200JSONResponse OAuthResource
+
+func (response UpdateOAuthResource200JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateOAuthResource400JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource401JSONResponse Error
+
+func (response UpdateOAuthResource401JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource403JSONResponse Error
+
+func (response UpdateOAuthResource403JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource404JSONResponse Error
+
+func (response UpdateOAuthResource404JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource409JSONResponse Error
+
+func (response UpdateOAuthResource409JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOAuthResourceRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteOAuthResourceResponseObject interface {
+	VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error
+}
+
+type DeleteOAuthResource204Response struct {
+}
+
+func (response DeleteOAuthResource204Response) VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteOAuthResource401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteOAuthResource401JSONResponse) VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOAuthResource403JSONResponse Error
+
+func (response DeleteOAuthResource403JSONResponse) VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOAuthResource404JSONResponse Error
+
+func (response DeleteOAuthResource404JSONResponse) VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -14648,9 +15194,12 @@ type IssueServiceAccountToken200ResponseHeaders struct {
 
 type IssueServiceAccountToken200JSONResponse struct {
 	Body struct {
-		AccessToken string                                               `json:"access_token"`
-		ExpiresIn   int                                                  `json:"expires_in"`
-		TokenType   IssueServiceAccountToken200JSONResponseBodyTokenType `json:"token_type"`
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+
+		// Scope `resource` を付けたときの、許したスコープ（空白区切り）
+		Scope     *string                                              `json:"scope,omitempty"`
+		TokenType IssueServiceAccountToken200JSONResponseBodyTokenType `json:"token_type"`
 	}
 	Headers IssueServiceAccountToken200ResponseHeaders
 }
@@ -17384,6 +17933,21 @@ type StrictServerInterface interface {
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(ctx context.Context, request ClaimNotificationRequestObject) (ClaimNotificationResponseObject, error)
+	// ListOAuthResources 自前の API（リソースサーバー）の一覧（RFC 8707。ADR 0112）
+	// (GET /v1/admin/oauth/resources)
+	ListOAuthResources(ctx context.Context, request ListOAuthResourcesRequestObject) (ListOAuthResourcesResponseObject, error)
+	// CreateOAuthResource 自前の API（リソースサーバー）を登録する（RFC 8707。ADR 0112）
+	// (POST /v1/admin/oauth/resources)
+	CreateOAuthResource(ctx context.Context, request CreateOAuthResourceRequestObject) (CreateOAuthResourceResponseObject, error)
+	// GetOAuthResource 自前の API（リソースサーバー）を返す
+	// (GET /v1/admin/oauth/resources/{id})
+	GetOAuthResource(ctx context.Context, request GetOAuthResourceRequestObject) (GetOAuthResourceResponseObject, error)
+	// UpdateOAuthResource 自前の API（リソースサーバー）の登録を置き換える
+	// (PUT /v1/admin/oauth/resources/{id})
+	UpdateOAuthResource(ctx context.Context, request UpdateOAuthResourceRequestObject) (UpdateOAuthResourceResponseObject, error)
+	// DeleteOAuthResource 自前の API（リソースサーバー）を消す
+	// (POST /v1/admin/oauth/resources/{id}:delete)
+	DeleteOAuthResource(ctx context.Context, request DeleteOAuthResourceRequestObject) (DeleteOAuthResourceResponseObject, error)
 	// ListOrgs Org の一覧・検索（ADR 0097）
 	// (GET /v1/admin/orgs)
 	ListOrgs(ctx context.Context, request ListOrgsRequestObject) (ListOrgsResponseObject, error)
@@ -19012,6 +19576,146 @@ func (sh *strictHandler) ClaimNotification(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ClaimNotificationResponseObject); ok {
 		if err := validResponse.VisitClaimNotificationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOAuthResources operation middleware
+func (sh *strictHandler) ListOAuthResources(w http.ResponseWriter, r *http.Request) {
+	var request ListOAuthResourcesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOAuthResources(ctx, request.(ListOAuthResourcesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOAuthResources")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOAuthResourcesResponseObject); ok {
+		if err := validResponse.VisitListOAuthResourcesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateOAuthResource operation middleware
+func (sh *strictHandler) CreateOAuthResource(w http.ResponseWriter, r *http.Request) {
+	var request CreateOAuthResourceRequestObject
+
+	var body CreateOAuthResourceJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateOAuthResource(ctx, request.(CreateOAuthResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateOAuthResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateOAuthResourceResponseObject); ok {
+		if err := validResponse.VisitCreateOAuthResourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOAuthResource operation middleware
+func (sh *strictHandler) GetOAuthResource(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetOAuthResourceRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOAuthResource(ctx, request.(GetOAuthResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOAuthResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOAuthResourceResponseObject); ok {
+		if err := validResponse.VisitGetOAuthResourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateOAuthResource operation middleware
+func (sh *strictHandler) UpdateOAuthResource(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateOAuthResourceRequestObject
+
+	request.Id = id
+
+	var body UpdateOAuthResourceJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateOAuthResource(ctx, request.(UpdateOAuthResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateOAuthResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateOAuthResourceResponseObject); ok {
+		if err := validResponse.VisitUpdateOAuthResourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteOAuthResource operation middleware
+func (sh *strictHandler) DeleteOAuthResource(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteOAuthResourceRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteOAuthResource(ctx, request.(DeleteOAuthResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteOAuthResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteOAuthResourceResponseObject); ok {
+		if err := validResponse.VisitDeleteOAuthResourceResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

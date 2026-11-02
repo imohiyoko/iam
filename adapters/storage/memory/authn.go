@@ -607,14 +607,14 @@ func (r accounts) CreateToken(_ context.Context, t port.ServiceAccountToken) err
 	if _, ok := r.t.s.saTokens[t.ID]; ok {
 		return errs.New(errs.KindConflict, "token %s exists", t.ID)
 	}
-	t.Hash = bytes.Clone(t.Hash)
+	t.Hash, t.Scopes = bytes.Clone(t.Hash), slices.Clone(t.Scopes)
 	setKey(r.t, r.t.s.saTokens, t.ID, t)
 	return nil
 }
 
 func (r accounts) GetToken(_ context.Context, realmID, id string) (port.ServiceAccountToken, error) {
 	t, err := get(r.t.s.saTokens, realmID, id, func(t port.ServiceAccountToken) string { return t.RealmID }, "token")
-	t.Hash = bytes.Clone(t.Hash)
+	t.Hash, t.Scopes = bytes.Clone(t.Hash), slices.Clone(t.Scopes)
 	return t, err
 }
 

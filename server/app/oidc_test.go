@@ -166,7 +166,7 @@ func (l *loginEnv) userinfo(t *testing.T, token string) (int, map[string]any) {
 	w := l.oidcDo(t, "GET", oidcUserinfo, nil, "", "Authorization", "Bearer "+token)
 	var out map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &out)
-	if w.Code == 401 && w.Header().Get("WWW-Authenticate") != `Bearer error="invalid_token"` {
+	if w.Code == 401 && w.Header().Get("WWW-Authenticate") != `Bearer error="invalid_token", resource_metadata="`+testIssuer+wellKnownResource+`"` {
 		t.Fatalf("WWW-Authenticate = %q", w.Header().Get("WWW-Authenticate"))
 	}
 	return w.Code, out

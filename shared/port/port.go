@@ -78,6 +78,8 @@ type Tx interface {
 	OIDCTokens() OIDCTokenRepo
 	// WSFed は WS-Federation の RP と署名の証明書（フィーチャー wsfed。ADR 0110）。
 	WSFed() WSFedRepo
+	// OAuthResources は自前の API（リソースサーバー）の登録（フィーチャー resource_indicators。ADR 0112）。
+	OAuthResources() OAuthResourceRepo
 }
 
 // Realm はユーザー集合の単位（design.md 3.1）。

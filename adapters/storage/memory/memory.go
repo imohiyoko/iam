@@ -100,6 +100,8 @@ type state struct {
 	// wsfedRPs と wsfedCerts は WS-Federation の RP と署名の証明書（ADR 0110）。キーは realm_id + ID / key_id。
 	wsfedRPs   map[string]port.WSFedRelyingParty
 	wsfedCerts map[string]port.WSFedCertificate
+	// oauthResources は自前の API（リソースサーバー）の登録（ADR 0112）。キーは realm_id + ID。
+	oauthResources map[string]port.OAuthResource
 	// pats は本人の Personal Access Token、patPolicies は realm ごとのポリシー（キーは realm_id。ADR 0109）。
 	pats        map[string]port.PersonalAccessToken
 	patPolicies map[string]port.PersonalAccessTokenPolicy
@@ -133,6 +135,7 @@ func New(clk clock.Clock) *Storage {
 		dirGroups: map[string]port.DirectoryGroup{},
 		wsfedRPs:  map[string]port.WSFedRelyingParty{}, wsfedCerts: map[string]port.WSFedCertificate{},
 		pats: map[string]port.PersonalAccessToken{}, patPolicies: map[string]port.PersonalAccessTokenPolicy{},
+		oauthResources: map[string]port.OAuthResource{},
 	}}
 }
 
@@ -209,6 +212,9 @@ func (t *tx) SigningKeys() port.SigningKeyRepo           { return signingKeys{t}
 func (t *tx) Grants() port.GrantRepo                     { return grants{t} }
 func (t *tx) OIDCTokens() port.OIDCTokenRepo             { return oidcTokens{t} }
 func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t} }
+
+// OAuthResources は自前の API（リソースサーバー）の登録（ADR 0112）。
+func (t *tx) OAuthResources() port.OAuthResourceRepo { return oauthResources{t} }
 
 // PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t} }

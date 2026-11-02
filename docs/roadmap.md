@@ -604,6 +604,23 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] なりすましは権限 `users:impersonate`・outranks・step-up・レートリミットを満たしたときだけ。短い寿命、監査ログ、本人への通知
 - [x] Discovery の `grant_types_supported` に載せ、フィーチャーの無効化で許可と交換の認可を片付ける
 
+#### PAR・メタデータ・自前の API に向けたトークン（ADR 0112）
+
+**ゴール**：認可要求をバックチャネルで送らせられ、OAuth のクライアントが AS とリソースを見つけられる。ホスト先は自分の API に
+`aud` とスコープを付けたトークンを、人と機械の両方に出せる。
+
+- [x] フィーチャー `par`（既定オフ）。`POST /oauth2/par` が token エンドポイントと同じ連携先の認証と authorize と同じ確かめの後に
+  `request_uri` を返し、authorize は預けたパラメーターだけを 1 回だけ使う。別の連携先・期限切れ・使用済みを拒むテストがある
+- [x] 連携先と realm（設定ファイルを含む）の単位で PAR を必須にでき、PAR を通らない認可要求を戻り先に転送せずに拒む。Discovery に載せる
+- [x] `/.well-known/oauth-authorization-server`（RFC 8414）と `/.well-known/oauth-protected-resource`（RFC 9728）。パスのある issuer の
+  差し込み、UserInfo の `401` の `resource_metadata`
+- [x] フィーチャー `resource_indicators`（既定オフ）。管理 API でリソース（URI・スコープ・許す連携先とサービスアカウント）を登録する
+- [x] 認可コードフローの `resource`（1 つ）で `aud` がリソースの URI になり、token エンドポイント・リフレッシュでは同じ resource だけを受ける。
+  許していない連携先・知らないリソース・2 つ以上は `invalid_target`
+- [x] サービスアカウントの `POST /v1/admin/token` の `resource` と `scope`。そのトークンは管理 API では使えず、イントロスペクションで `aud` とスコープを返す
+- [x] リソースの削除・許可の取り消し・無効化が発行済みのトークンにも次の検証から効く。memory・SQLite・PostgreSQL の契約テスト
+- Device Authorization Grant の `resource`、1 つの認可で複数のリソース、主体ごとのスコープの絞り込み、`/oauth2/token` での client credentials
+
 ### M12 認可の拡張
 
 - 一括判定、権限の一覧、OpenID AuthZEN、ReBAC、ポリシー言語、時限付きの付与と棚卸し

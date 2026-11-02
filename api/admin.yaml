@@ -2228,6 +2228,12 @@ paths:
         発行するのは不透明なトークンで、`Authorization: Bearer` で管理 API に使う。寿命は `service_accounts.token_ttl`。
         認証の失敗は理由を区別せず `401 invalid_client`。`service_account.token_issued` を監査ログに残す。
         フィーチャー service_accounts が動いていなければ `404 service_accounts_disabled`。
+
+        `resource`（RFC 8707。フィーチャー `resource_indicators`。ADR 0112）を付けると、自前の API に向けたトークンを発行する。
+        `resource` は登録したリソースの URI（1 つだけ）で、そのリソースがこのサービスアカウントを許していること。aud はその URI、
+        スコープは `scope`（リソースのスコープの中から。省けばリソースのスコープのすべて）。このトークンは管理 API では使えず、
+        リソースサーバーが `/oauth2/introspect` で確かめる。リソースが使えなければ `400 invalid_target`、スコープが許されて
+        いなければ `400 invalid_scope`。フィーチャーが動いていないときに `resource` を付ければ `400 invalid_target`。
       security: []
       parameters:
         - { name: Authorization, in: header, schema: { type: string } }
@@ -2244,7 +2250,13 @@ paths:
                 client_secret: { type: string }
                 client_assertion_type: { type: string }
                 client_assertion: { type: string }
-                scope: { type: string, description: 使わない（権限はロールの付与で決まる） }
+                scope:
+                  type: string
+                  description: "`resource` を付けたときだけ使う（空白区切り）。管理 API 向けのトークンでは使わない（権限はロールの付与で決まる）"
+                resource:
+                  type: array
+                  items: { type: string }
+                  description: 自前の API の URI（RFC 8707。1 つだけ。フィーチャー `resource_indicators`）
       responses:
         "200":
           description: 発行した
@@ -2259,6 +2271,7 @@ paths:
                   access_token: { type: string }
                   token_type: { type: string, enum: [Bearer] }
                   expires_in: { type: integer }
+                  scope: { type: string, description: "`resource` を付けたときの、許したスコープ（空白区切り）" }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -3139,6 +3152,102 @@ paths:
       operationId: deleteWSFedRelyingParty
       summary: WS-Federation の RP を消す
       description: 権限 `clients:manage`。`wsfed.relying_party.deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 消した
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/oauth/resources:
+    get:
+      operationId: listOAuthResources
+      summary: 自前の API（リソースサーバー）の一覧（RFC 8707。ADR 0112）
+      description: 権限 `clients:manage`。作成の順。フィーチャー `resource_indicators` が動いていなければ `404 resource_indicators_disabled`。
+      responses:
+        "200":
+          description: リソース
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OAuthResources" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createOAuthResource
+      summary: 自前の API（リソースサーバー）を登録する（RFC 8707。ADR 0112）
+      description: |
+        権限 `clients:manage`。`uri` は `resource` の値で、発行するアクセストークンの aud になる（https の絶対 URI か URN。
+        フラグメント・クエリ・userinfo なし。realm の中で一意。完全一致で比べる）。`scopes` はこのリソースで使えるスコープ
+        （OIDC のスコープの名前は使えない）。`clients` は認可コードフローで `resource` に指定してよい連携先の client_id、
+        `service_accounts` は client credentials（`POST /v1/admin/token`）で指定してよいサービスアカウントの ID。
+        内容が正しくなければ `400 invalid_resource`、`uri` が重複すれば `409 resource_exists`。
+        `oauth_resource.created` を監査ログに残す。フィーチャー `resource_indicators` が動いていなければ `404 resource_indicators_disabled`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OAuthResourceInput" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OAuthResource" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/oauth/resources/{id}:
+    get:
+      operationId: getOAuthResource
+      summary: 自前の API（リソースサーバー）を返す
+      description: 権限 `clients:manage`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: リソース
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OAuthResource" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateOAuthResource
+      summary: 自前の API（リソースサーバー）の登録を置き換える
+      description: |
+        権限 `clients:manage`。許可から外した連携先・サービスアカウントと、URI を変えたリソースに向けて発行済みのトークンは、
+        次の検証（イントロスペクション・リフレッシュ）から使えない。`oauth_resource.updated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OAuthResourceInput" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OAuthResource" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/oauth/resources/{id}:delete:
+    post:
+      operationId: deleteOAuthResource
+      summary: 自前の API（リソースサーバー）を消す
+      description: 権限 `clients:manage`。発行済みのトークンは次の検証から使えない。`oauth_resource.deleted` を監査ログに残す。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -4053,6 +4162,10 @@ components:
         frontchannel_logout_session_required:
           type: boolean
           description: "`frontchannel_logout_uri` に `iss` と `sid` を付けるか（既定 false）"
+        require_pushed_authorization_requests:
+          type: boolean
+          description: |
+            認可要求を PAR（RFC 9126）で送らせる。フィーチャー `par` が動いているときだけ true にできる（ADR 0112）。省けば false
     Client:
       type: object
       required: [client_id, name, redirect_uris, post_logout_redirect_uris, token_endpoint_auth_method, id_token_signed_response_alg, trust_level, created_at, updated_at]
@@ -4075,6 +4188,7 @@ components:
         device_authorization_grant: { type: boolean, description: フィーチャー `device_flow` が動いているときだけ返す }
         frontchannel_logout_uri: { type: string }
         frontchannel_logout_session_required: { type: boolean, description: "`frontchannel_logout_uri` があるときだけ" }
+        require_pushed_authorization_requests: { type: boolean, description: PAR を求める連携先だけ true を返す（求めないなら省く） }
         client_secret: { type: string, description: 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す） }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -4135,6 +4249,9 @@ components:
             この realm で止める認証方式のプラグインの名前（`sms` など。ADR 0104）。止めた方式はこの realm で 404 になる。
             登録済みの認証情報は残る
           items: { type: string }
+        require_pushed_authorization_requests:
+          type: boolean
+          description: この realm のすべての連携先に PAR（RFC 9126）を求める（フィーチャー `par`。ADR 0112）
     Realm:
       type: object
       required: [id, slug, hosts, default, settings, created_at, updated_at]
@@ -4172,6 +4289,7 @@ components:
             disabled_methods:
               type: array
               items: { type: string }
+            require_pushed_authorization_requests: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     RealmInput:
@@ -4390,3 +4508,42 @@ components:
         host_max_lifetime_seconds: { type: integer, format: int64, description: ホスト先の上限（0 なら上限なし） }
         effective_max_lifetime_seconds: { type: integer, format: int64, description: 今効く上限（0 なら上限なし） }
         updated_at: { type: string, format: date-time, description: 最後に変えた時刻（置いていなければ無い） }
+    OAuthResourceInput:
+      type: object
+      required: [uri, name, scopes]
+      properties:
+        uri: { type: string, maxLength: 2000, description: "`resource` の値（aud になる）" }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        scopes:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 128 }
+        clients:
+          type: array
+          maxItems: 100
+          items: { type: string }
+          description: 認可コードフローで `resource` に指定してよい連携先の client_id
+        service_accounts:
+          type: array
+          maxItems: 100
+          items: { type: string }
+          description: client credentials で `resource` に指定してよいサービスアカウントの ID
+    OAuthResource:
+      type: object
+      required: [id, uri, name, scopes, clients, service_accounts, created_at, updated_at]
+      properties:
+        id: { type: string }
+        uri: { type: string }
+        name: { type: string }
+        scopes: { type: array, items: { type: string } }
+        clients: { type: array, items: { type: string } }
+        service_accounts: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    OAuthResources:
+      type: object
+      required: [resources]
+      properties:
+        resources:
+          type: array
+          items: { $ref: "#/components/schemas/OAuthResource" }
