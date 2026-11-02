@@ -100,6 +100,9 @@ type state struct {
 	eventSubs map[string]port.EventSubscription
 	// dirGroups はディレクトリの同期が管理する Group の対応（ADR 0102）。キーは realm_id + connection_id + external_key。
 	dirGroups map[string]port.DirectoryGroup
+	// pats は本人の Personal Access Token、patPolicies は realm ごとのポリシー（キーは realm_id。ADR 0109）。
+	pats        map[string]port.PersonalAccessToken
+	patPolicies map[string]port.PersonalAccessTokenPolicy
 }
 
 // Storage はインメモリの Storage。
@@ -130,6 +133,7 @@ func New(clk clock.Clock) *Storage {
 		invitations: map[string]port.Invitation{}, quotaGrants: map[string]port.QuotaGrant{}, orgDomains: map[string]port.OrgDomain{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
 		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{}, eventSubs: map[string]port.EventSubscription{},
 		dirGroups: map[string]port.DirectoryGroup{},
+		pats:      map[string]port.PersonalAccessToken{}, patPolicies: map[string]port.PersonalAccessTokenPolicy{},
 	}}
 }
 
@@ -208,6 +212,9 @@ func (t *tx) Clients() port.ClientRepo                   { return clients{t} }
 func (t *tx) SigningKeys() port.SigningKeyRepo           { return signingKeys{t} }
 func (t *tx) Grants() port.GrantRepo                     { return grants{t} }
 func (t *tx) OIDCTokens() port.OIDCTokenRepo             { return oidcTokens{t} }
+
+// PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
+func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t} }
 
 // setKey は map の値を設定し、取り消し方を記録する。
 func setKey[K comparable, V any](t *tx, m map[K]V, k K, v V) {

@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/check"
@@ -180,6 +181,16 @@ func (s publicServer) CheckMyAuthz(ctx context.Context, req publicapi.CheckMyAut
 // トークン・系列が使えないか主体のものでなければ、文脈なし（条件は満たさない）。
 func (s adminServer) checkContext(ctx context.Context, tx port.Tx, caller adminPrincipal, userID string, b *adminapi.CheckRequest) (*check.AuthContext, error) {
 	switch {
+	case b.AccessToken != nil && pat.Looks(*b.AccessToken):
+		// 本人の Personal Access Token（ADR 0109）。主体と同じユーザーのものなら、スコープで絞った文脈にする。
+		au, err := s.a.authenticatePAT(ctx, tx, *b.AccessToken)
+		if errors.Is(err, pat.ErrInvalid) || (err == nil && au.User.ID != userID) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return patContext(au), nil
 	case b.AccessToken != nil:
 		if s.a.tokens == nil {
 			return nil, nil

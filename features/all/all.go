@@ -26,6 +26,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/orgmanagedusers"
 	_ "github.com/imohiyoko/iam/features/passkeyattestation"
 	_ "github.com/imohiyoko/iam/features/password"
+	_ "github.com/imohiyoko/iam/features/personalaccesstokens"
 	_ "github.com/imohiyoko/iam/features/push"
 	_ "github.com/imohiyoko/iam/features/quota"
 	_ "github.com/imohiyoko/iam/features/saml"
