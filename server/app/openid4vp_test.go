@@ -85,7 +85,7 @@ func postForm(l *loginEnv, path string, form url.Values) *httptest.ResponseRecor
 func TestOpenID4VPEnrollAndLogin(t *testing.T) {
 	w := &vpWallet{issuer: sdjwttest.NewIssuer("https://pid.example", "k1"), holder: sdjwttest.NewHolder()}
 	l := newVPEnv(t, w)
-	_, full := l.login(t, "pat@example.com")
+	enrolled, full := l.login(t, "pat@example.com")
 
 	// 登録（別の端末）。ウォレットの応答の前は 202。
 	status, st := l.mePost(t, full, "/v1/me/credentials/openid4vp:enroll-begin", map[string]any{})
@@ -123,8 +123,8 @@ func TestOpenID4VPEnrollAndLogin(t *testing.T) {
 		t.Fatalf("wrong response_code: %d", status)
 	}
 	status, login, cookie := l.post(t, "", "/v1/login/methods/openid4vp:complete", map[string]any{"flow_id": ch["flow_id"], "payload": map[string]any{"response_code": code}})
-	if status != 200 || cookie == "" {
-		t.Fatalf("login: %d %v", status, login)
+	if status != 200 || cookie == "" || login["user_id"] == nil || login["user_id"] != enrolled["user_id"] {
+		t.Fatalf("login: %d %v (enrolled by %v)", status, login, enrolled["user_id"])
 	}
 	if got := amr(t, l, cookie); !slices.Contains(got, any("swk")) {
 		t.Fatalf("amr: %v", got)

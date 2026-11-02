@@ -477,12 +477,29 @@ func TestLinkByEmail(t *testing.T) {
 			t.Fatal(err)
 		}
 		r, _ := f.read(ch)
-		var q map[string]any
-		_ = json.Unmarshal(r.DCQL, &q)
-		if !strings.Contains(string(r.DCQL), `["email"]`) {
-			t.Fatalf("dcql without email: %s", r.DCQL)
+		// メールアドレスは任意（claim_sets の 1 つ目が含む組、2 つ目が含まない組）。
+		var q struct {
+			Credentials []struct {
+				Claims []struct {
+					ID   string `json:"id"`
+					Path []any  `json:"path"`
+				} `json:"claims"`
+				ClaimSets [][]string `json:"claim_sets"`
+			} `json:"credentials"`
 		}
-		if _, err := f.post(f.present(r, map[string]any{"given_name": "P", "email": email})); err != nil {
+		if err := json.Unmarshal(r.DCQL, &q); err != nil || len(q.Credentials) != 1 {
+			t.Fatalf("dcql: %s", r.DCQL)
+		}
+		c := q.Credentials[0]
+		if len(c.Claims) != 3 || c.Claims[2].ID != "c2" || c.Claims[2].Path[0] != "email" ||
+			fmt.Sprint(c.ClaimSets) != "[[c0 c1 c2] [c0 c1]]" {
+			t.Fatalf("email must be optional: %s", r.DCQL)
+		}
+		sd := map[string]any{"given_name": "P"}
+		if email != "" {
+			sd["email"] = email
+		}
+		if _, err := f.post(f.present(r, sd)); err != nil {
 			t.Fatal(err)
 		}
 		env := f.env("", port.UsageFirstFactor)
@@ -499,6 +516,32 @@ func TestLinkByEmail(t *testing.T) {
 	// 2 回目からは結び付けで引く（メールは見ない）。
 	if res, err := login("changed@example.com", users{}); err != nil || res.Credential.UserID != "u9" {
 		t.Fatalf("second login: %v", err)
+	}
+	// メールアドレスを開示しない提示も受ける（結び付けがあればログインでき、無ければ引き当てないだけ）。
+	if res, err := login("", users{}); err != nil || res.Credential.UserID != "u9" {
+		t.Fatalf("login without email: %v", err)
+	}
+	f.store.creds, f.store.lookups = nil, nil
+	if _, err := login("", users{"pat@example.com": "u9"}); !errors.Is(err, errs.AuthenticationFailed) {
+		t.Fatalf("link without email: %v", err)
+	}
+}
+
+func TestDCQLWithoutLinkByEmail(t *testing.T) {
+	f := setupWith(t, nil)
+	q := f.m.rt.p.dcqlQuery()
+	b, _ := json.Marshal(q)
+	if strings.Contains(string(b), "email") || strings.Contains(string(b), "claim_sets") {
+		t.Fatalf("dcql = %s", b)
+	}
+	// メールアドレスの path が必須の値と同じなら、組を分けない（既に必須）。
+	f = setupWith(t, func(rc *RealmConfig, _ *sdjwttest.Issuer) {
+		rc.Issuers[0].LinkByEmail = true
+		rc.EmailClaim = []any{"sub"}
+	})
+	b, _ = json.Marshal(f.m.rt.p.dcqlQuery())
+	if strings.Contains(string(b), "claim_sets") {
+		t.Fatalf("dcql = %s", b)
 	}
 }
 
@@ -611,6 +654,21 @@ func TestSetup(t *testing.T) {
 	if _, err := setup("r1", "", map[string]RealmConfig{"r1": good}); err == nil {
 		t.Fatal("no public_url")
 	}
+	// realm ごとにホスト名が違う（multi_realm のホスト名の振り分け）とき、別のホストの realm の x509_san_dns は、この realm の
+	// URL で確かめない。その realm 自身の URL では確かめる。
+	key2, cert2 := testCA(t, "other.example")
+	other := realmConfig(iss)
+	other.ClientIDPrefix, other.SigningKey, other.CertificateChain = PrefixX509SANDNS, key2, cert2
+	both := map[string]RealmConfig{"r1": good, "r2": other}
+	if a, err := setup("r1", base, both); err != nil || a == nil {
+		t.Fatalf("realm on another host blocks startup: %v", err)
+	}
+	if a, err := setup("r2", "https://other.example", both); err != nil || a == nil {
+		t.Fatalf("realm on its own host: %v", err)
+	}
+	if _, err := setup("r2", "https://id.example/realms/r2", both); err == nil {
+		t.Fatal("x509_san_dns accepted for another host")
+	}
 	if _, err := setup("r1", "http://id.example", map[string]RealmConfig{"r1": good}); err == nil {
 		t.Fatal("http public_url outside dev")
 	}
@@ -650,7 +708,10 @@ func TestSetup(t *testing.T) {
 			if _, err := setup("r1", base, map[string]RealmConfig{"r1": rc}); err == nil {
 				t.Fatal("accepted")
 			}
-			// 他の realm の誤りでも起動を止める。
+			// 他の realm の誤りでも起動を止める（SAN とホストの一致は、realm ごとにホスト名が違いうるので、その realm だけで確かめる）。
+			if name == "san mismatch" {
+				return
+			}
 			if _, err := setup("r2", base, map[string]RealmConfig{"r1": rc}); err == nil {
 				t.Fatal("accepted in another realm")
 			}

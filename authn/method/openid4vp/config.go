@@ -262,13 +262,19 @@ func webURL(v string, dev bool) (*url.URL, error) {
 }
 
 // newPolicy は realm の設定を確かめる。誤りがあれば起動を止める（設定の誤りで黙って緩めない）。responseURI は応答を受ける URL。
+// 空なら URL に関わる確かめ（response_uri の形、x509_san_dns の SAN と response_uri のホストの一致）をしない（他の realm の設定を
+// 確かめるとき。realm ごとにホスト名が違いうるので、それは各 realm の Setup で確かめる）。
 func newPolicy(rc RealmConfig, responseURI string, dev bool) (*policy, error) {
 	p := &policy{prefix: rc.ClientIDPrefix, authzEndpoint: rc.AuthorizationEndpoint, flows: slices.Clone(rc.Flows),
 		maxCredentials: rc.MaxCredentials, attributes: map[string][]any{}, issuers: map[string]*issuer{}}
-	ru, err := webURL(responseURI, dev)
-	if err != nil {
-		return nil, fmt.Errorf("response_uri: %w (set server.public_url)", err)
+	var ru *url.URL
+	if responseURI != "" {
+		var err error
+		if ru, err = webURL(responseURI, dev); err != nil {
+			return nil, fmt.Errorf("response_uri: %w (set server.public_url)", err)
+		}
 	}
+	var err error
 	if p.prefix == "" {
 		p.prefix = PrefixRedirectURI
 	}
@@ -369,7 +375,8 @@ func newPolicy(rc RealmConfig, responseURI string, dev bool) (*policy, error) {
 	return p, nil
 }
 
-// loadSigner は要求に署名する鍵と証明書を読み、クライアント ID の接頭辞と合うかを確かめる。
+// loadSigner は要求に署名する鍵と証明書を読み、クライアント ID の接頭辞と合うかを確かめる。responseURI が nil なら SAN と
+// ホストの一致は確かめない。
 func (p *policy) loadSigner(rc RealmConfig, responseURI *url.URL) error {
 	if rc.SigningKey == "" || rc.CertificateChain == "" {
 		return fmt.Errorf("%s needs signing_key and certificate_chain", p.prefix)
@@ -387,7 +394,7 @@ func (p *policy) loadSigner(rc RealmConfig, responseURI *url.URL) error {
 	if !ok || !pub.Equal(key.Public()) {
 		return errors.New("certificate_chain: the first certificate does not match signing_key")
 	}
-	if p.prefix == PrefixX509SANDNS && !slices.Contains(leaf.DNSNames, responseURI.Hostname()) {
+	if p.prefix == PrefixX509SANDNS && responseURI != nil && !slices.Contains(leaf.DNSNames, responseURI.Hostname()) {
 		return fmt.Errorf("certificate_chain: x509_san_dns needs a DNS SAN equal to the response_uri host %q", responseURI.Hostname())
 	}
 	x5c := make([]string, len(chain))

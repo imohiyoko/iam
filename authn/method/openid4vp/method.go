@@ -106,8 +106,8 @@ func (Method) Setup(_ context.Context, s port.MethodSetup) (port.Authenticator, 
 		if name == s.RealmSlug {
 			continue
 		}
-		// 他の realm の URL は分からないので、形の確かめには既定の realm の URL を使う。
-		if _, err := newPolicy(rc, base+endpointPath(EndpointResponse), s.Dev); err != nil {
+		// 他の realm の URL（ホスト名）は分からないので、URL に関わらない確かめだけをする。
+		if _, err := newPolicy(rc, "", s.Dev); err != nil {
 			return nil, fmt.Errorf("openid4vp: realm %s: %w", name, err)
 		}
 	}

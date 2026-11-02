@@ -2,7 +2,9 @@ package openid4vp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
+	"slices"
 	"time"
 
 	"github.com/imohiyoko/iam/authn/method/openid4vp/sdjwt"
@@ -17,30 +19,42 @@ const FormatSDJWTVC = "dc+sd-jwt"
 // selfIssuedAudience は、ウォレットのメタデータを事前に知らないとき（静的な発見）の要求のオブジェクトの aud（OpenID4VP 5.8）。
 const selfIssuedAudience = "https://self-issued.me/v2"
 
-// dcqlQuery は求める資格情報（1 つ）。claims は結び付けの値・属性・（link_by_email の発行者があれば）メールアドレス。
+// dcqlQuery は求める資格情報（1 つ）。claims は結び付けの値と属性（必須）。link_by_email の発行者があれば、メールアドレスを
+// 任意として足す（claim_sets の 1 つ目がメールアドレスを含む組、2 つ目が含まない組。ウォレットは満たせる最初の組で答える）。
+// メールアドレスは link_by_email の発行者の、結び付けの無いときにだけ使う（verify も無ければ引き当てないだけにする）。
 func (p *policy) dcqlQuery() map[string]any {
 	var claims []map[string]any
+	var ids []any
 	var seen []string
-	add := func(path []any) {
+	add := func(path []any) (string, bool) {
 		b, _ := json.Marshal(path)
 		for _, s := range seen {
 			if s == string(b) {
-				return
+				return "", false
 			}
 		}
 		seen = append(seen, string(b))
-		claims = append(claims, map[string]any{"path": path})
+		id := fmt.Sprintf("c%d", len(claims))
+		claims = append(claims, map[string]any{"id": id, "path": path})
+		return id, true
 	}
-	add(p.subject)
+	if id, ok := add(p.subject); ok {
+		ids = append(ids, id)
+	}
 	for _, name := range sortedKeys(p.attributes) {
-		add(p.attributes[name])
+		if id, ok := add(p.attributes[name]); ok {
+			ids = append(ids, id)
+		}
 	}
+	q := map[string]any{"id": QueryID, "format": FormatSDJWTVC, "meta": map[string]any{"vct_values": p.vcts}, "claims": claims}
 	if p.linkByEmail {
-		add(p.email)
+		// 必須の値と同じ path なら、既に必須なので組を分けない。
+		if id, ok := add(p.email); ok {
+			q["claims"] = claims
+			q["claim_sets"] = []any{append(slices.Clone(ids), id), ids}
+		}
 	}
-	return map[string]any{"credentials": []any{map[string]any{
-		"id": QueryID, "format": FormatSDJWTVC, "meta": map[string]any{"vct_values": p.vcts}, "claims": claims,
-	}}}
+	return map[string]any{"credentials": []any{q}}
 }
 
 // clientMetadata は検証者のメタデータ（受ける形式と alg）。

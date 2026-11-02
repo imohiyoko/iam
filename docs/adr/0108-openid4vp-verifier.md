@@ -33,7 +33,8 @@ OpenID for Verifiable Presentations 1.0（以下 OpenID4VP）は、検証者（i
   key binding で確かめる）、1要素目と2要素目に使える。amr は `swk`、AAL の上限は 2。ウォレットの鍵がハードウェアにあるか（WSCD）と、
   ウォレットが本人の PIN・生体を確かめたかは、検証者からは確かめられないので数えない（0093）
 - 設定は `methods.openid4vp.realms.<realm の slug>`（0103 と同じ `port.ConfigurableAuthenticator`）。realm の設定が無ければ方式を動かさない（404）。
-  設定の誤り（読めない鍵・発行者、知らない項目）は起動を止める
+  設定の誤り（読めない鍵・発行者、知らない項目）は起動を止める。他の realm の設定も起動時に確かめるが、URL に関わる確かめ
+  （`x509_san_dns` の SAN と `response_uri` のホストの一致）は、realm ごとにホスト名が違いうる（0083）ので、その realm 自身の設定のときだけ行う
 - 認証情報（本人の結び付け）は 0092 の `authn_credentials` に置く。新しい表もマイグレーションも足さない。消去・統合・書き出しと読み込み・
   フィーチャーの無効化（データを消す）は 0092 のまま効く
 - 応答は別の経路（ウォレット）から届くので `OutOfBand`（0104）。届くまで `complete` は `202 pending`
@@ -65,7 +66,9 @@ OpenID for Verifiable Presentations 1.0（以下 OpenID4VP）は、検証者（i
     `x509_san_dns` は証明書の DNS の SAN と `response_uri` のホストが合わなければ起動を止める。`x509_hash` は証明書の SHA-256
   - `openid_federation`・`decentralized_identifier`・`verifier_attestation` は後続
 - 求める資格情報は DCQL で 1 つだけ（`id: credential`、`format: dc+sd-jwt`、`meta.vct_values`、`claims` は結び付けと属性に使う値の `path`）。
-  `claim_sets` を使わないので、書いた値は全部必須になる。`require_cryptographic_holder_binding` は既定（true）のまま
+  結び付けと属性の値は必須。`link_by_email` の発行者があればメールアドレスを任意として足し、`claim_sets` を「メールアドレスを含む組」・
+  「含まない組」の順にする（メールアドレスを持たない資格情報や、`link_by_email` でない発行者の資格情報も提示できる）。
+  `require_cryptographic_holder_binding` は既定（true）のまま
 - トランザクションは方式の EphemeralStore（0104）に、`state` のハッシュをキーに置く（期限 `request_ttl`、既定 5 分、10 分以下）。
   中身は `nonce`、流れ、用途、応答を暗号化する鍵（下記）。要求のオブジェクトは要求の ID のハッシュをキーに置き、期限まで何度でも取れる
 
