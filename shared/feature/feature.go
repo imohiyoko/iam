@@ -51,6 +51,8 @@ const (
 	DeviceRecognition = "device_recognition"
 	LoginRisk         = "login_risk"
 	BotProtection     = "bot_protection"
+	// ADR 0107。
+	Kerberos = "kerberos"
 	// WSFed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。
 	WSFed = "wsfed"
 )

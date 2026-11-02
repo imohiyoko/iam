@@ -531,6 +531,8 @@ paths:
       description: |
         フローを確かめ、セッションを発行する。2要素目が要れば制限つきのセッション（`next: second_factor`）。
         フローは1回限りで、照合に失敗しても回数の上限（`security.second_factor.max_attempts`）までは同じフロー ID を使える。
+        HTTP の Negotiate で確かめる方式（`kerberos`。ADR 0107）は `Authorization: Negotiate <トークン>` を読む。無ければ 401
+        （`negotiate`）と `WWW-Authenticate: Negotiate` を返し（回数に数えない）、ブラウザがトークンを付けて同じ要求を送り直す。
       parameters:
         - $ref: "#/components/parameters/BotToken"
         - { name: method, in: path, required: true, schema: { type: string } }
@@ -554,6 +556,7 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/DirectoryUnavailable" }
 
   /v1/login/second-factor/{method}:begin:
     post:
@@ -1619,6 +1622,8 @@ paths:
         今のパスワードが要り（違えば 409 `current_password_mismatch`）、復旧専用のセッションでは要らない。長さと漏洩の確認で
         400 `password_too_short`・`password_too_long`・`password_breached`。完了は payload なしで、今のセッション以外を失効させる）。
         知識の要素（パスワード）は、始めで今の秘密を照合するので、本人ごとの回数の上限を超えれば 429。
+        HTTP の Negotiate で確かめる方式（`kerberos`。ADR 0107）は、Cookie のセッションと `Authorization: Negotiate` で呼ぶ。
+        トークンが無ければ 401（`negotiate`）と `WWW-Authenticate: Negotiate` を返す。
       security:
         - cookieAuth: []
         - bearerAuth: []

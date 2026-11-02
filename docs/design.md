@@ -271,6 +271,7 @@ Group に入れるのは、その Org の active な Membership を持つユー�
 | メール + パスワード | 不要 | フィーチャー（`password`。認証方式のプラグインの方式 `password`。ADR 0101） |
 | SMS・音声の OTP | 必要（SMSSender。番号とコードを事業者に渡す） | 2要素目。フィーチャー（`sms_otp`。ADR 0104）。SP 800-63B の制限付きの認証器 |
 | プッシュの承認（番号の照合付き） | 必要（PushSender。端末の宛先を中継に渡す） | 2要素目。フィーチャー（`push_auth`。ADR 0104） |
+| Kerberos / SPNEGO（HTTP の Negotiate） | 不要（keytab で確かめる。`ldap` の結び付けではディレクトリを引く） | 1要素目。フィーチャー（`kerberos`。ADR 0107）。`Authorization: Negotiate` は汎用のログインの完了と登録のパスでだけ読む。プリンシパルは本人の登録・確認済みのメール・LDAP の connection でユーザーに結び付ける |
 
 - 2段階認証は passkey / TOTP（と、2要素目に使える認証方式のプラグイン。ADR 0092）。要否は設定（2.8）。1要素目がメールなら、メールのコードは2要素目にしない（設定で外せない。13.5）
 - SMS・音声の OTP は制限付きの認証器（SP 800-63B）として扱う。登録の応答で `restricted: true` を返し、realm の `disabled_methods` で止められ、
@@ -832,6 +833,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | ログインのリスクの点数（11.17） | オフ | 端末の記憶 | 組み込みのリスク `device`・`ip` を付けない（フックの点数はそのまま） |
 | ボット対策（11.17） | オフ | ― | ログインの入口で人の確認を求めない |
 | LDAP / Active Directory（11.3、ADR 0102） | オフ | ― | LDAP の connection を使わない・同期しない（Org 専用には Org 管理ユーザーも要る） |
+| Kerberos / SPNEGO（4.1、ADR 0107） | オフ | ― | Negotiate のログインと登録なし（設定の無い realm でも）。無効化は認証情報が 0 件になって完了 |
 | WS-Federation（5.8、ADR 0110） | オフ | ― | `/wsfed` とメタデータは 404、RP の管理 API は `404 wsfed_disabled`。無効化は RP と署名の証明書を消して完了 |
 
 ### 11.1 複数 realm

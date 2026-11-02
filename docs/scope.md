@@ -32,7 +32,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | SMS・音声の OTP | P | ✅ | フィーチャー `sms_otp`（ADR 0104）。2要素目。SP 800-63B の制限付きの認証器で、realm と Org で止められる。送信は `sms_sender`（`twilio`） |
 | プッシュ通知の承認（番号の照合付き） | P | ✅ | フィーチャー `push_auth`（ADR 0104）。2要素目。端末の鍵の署名、番号の照合、拒否が続けば止める。送信は `push_sender`（`webhook`） |
 | X.509 クライアント証明書・スマートカード（PIV、CAC） | S P C | ✅ | フィーチャー `x509`（ADR 0103）。mTLS の専用の待ち受けかプロキシのヘッダー、OCSP・CRL、ハードウェアの CA で AAL3 |
-| Kerberos／SPNEGO | S P | ❌ | |
+| Kerberos／SPNEGO | S P | ✅ | フィーチャー `kerberos`（ADR 0107）。HTTP の Negotiate、realm ごとの keytab、結び付けは本人の登録・確認済みのメール・LDAP の connection。1要素目（`wia`、AAL1） |
 | LDAP のバインド認証 | P | ✅ | フィーチャー `ldap`（ADR 0102）。Active Directory も。ホスト型の画面は後続 |
 | 外部 IdP（OAuth／OIDC） | S P | ✅ | |
 | 外部 IdP（SAML 2.0） | S P C | ✅ | ADR 0098。Single Logout・暗号化された Assertion は後続 |
