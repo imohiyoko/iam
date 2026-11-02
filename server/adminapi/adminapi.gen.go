@@ -1710,6 +1710,9 @@ type OrgDomainStatus string
 
 // OrgLoginPolicy Org のログインポリシー（フィーチャー org_login_policy）。ログインと Org の切り替えで判定し、満たさなければその Org に入れない （理由は policy.<種類>）。空の項目は判定しない
 type OrgLoginPolicy struct {
+	// DenyRestrictedAuthenticators amr に SP 800-63B の制限付きの認証器（SMS・音声の OTP。sms・tel）があるセッションを入れない（理由は policy.restricted_authenticator。ADR 0104）
+	DenyRestrictedAuthenticators *bool `json:"deny_restricted_authenticators,omitempty"`
+
 	// IpAllowlist 要求の IP がこのどれか（CIDR）に入ること
 	IpAllowlist *[]string `json:"ip_allowlist,omitempty"`
 
@@ -1877,10 +1880,11 @@ type Realm struct {
 	// Issuer OIDC の iss（server.public_url が無ければ無い）
 	Issuer   *string `json:"issuer,omitempty"`
 	Settings struct {
-		DeclaredContextClients  []string `json:"declared_context_clients"`
-		EmailStorage            string   `json:"email_storage"`
-		OrgCreation             string   `json:"org_creation"`
-		OrgDeletionGraceSeconds int64    `json:"org_deletion_grace_seconds"`
+		DeclaredContextClients  []string  `json:"declared_context_clients"`
+		DisabledMethods         *[]string `json:"disabled_methods,omitempty"`
+		EmailStorage            string    `json:"email_storage"`
+		OrgCreation             string    `json:"org_creation"`
+		OrgDeletionGraceSeconds int64     `json:"org_deletion_grace_seconds"`
 
 		// PasskeyPolicy 認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。登録とログインのたびに判定し、外れれば passkey_not_allowed（どの条件に外れたかは監査ログにだけ残す）。空の項目は判定しない。require_attestation が無ければ AAGUID は認証器の自己申告
 		PasskeyPolicy *PasskeyPolicy `json:"passkey_policy,omitempty"`
@@ -1912,7 +1916,10 @@ type RealmInput struct {
 // RealmSettings realm ごとの設定（ADR 0083）。省いた項目は設定ファイルの `realm` の値
 type RealmSettings struct {
 	// DeclaredContextClients 判定（authz:check）で認証の文脈を申告できるサービスアカウントの ID（ADR 0084）。申告は attested でない
-	DeclaredContextClients  *[]string                  `json:"declared_context_clients,omitempty"`
+	DeclaredContextClients *[]string `json:"declared_context_clients,omitempty"`
+
+	// DisabledMethods この realm で止める認証方式のプラグインの名前（`sms` など。ADR 0104）。止めた方式はこの realm で 404 になる。 登録済みの認証情報は残る
+	DisabledMethods         *[]string                  `json:"disabled_methods,omitempty"`
 	EmailStorage            *RealmSettingsEmailStorage `json:"email_storage,omitempty"`
 	OrgCreation             *RealmSettingsOrgCreation  `json:"org_creation,omitempty"`
 	OrgDeletionGraceSeconds *int64                     `json:"org_deletion_grace_seconds,omitempty"`

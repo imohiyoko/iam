@@ -344,6 +344,20 @@ func TestRevocationOCSP(t *testing.T) {
 	}
 }
 
+// 委ねた署名者は id-kp-OCSPSigning を持たなければならない（同じ CA の別の証明書の鍵で作った Good を通さない。RFC 6960 4.2.2.2）。
+func TestRevocationOCSPDelegatedSigner(t *testing.T) {
+	f := newFixture(t)
+	m := f.method(t, func(rc *RealmConfig) { rc.Revocation.Mode = RevocationOCSP; rc.Revocation.LeafOnly = true })
+	f.resp.signer = newOCSPSigner(t, f.inter, x509.ExtKeyUsageOCSPSigning)
+	if err := preflight(m, chainOf(f.leaf(t, leafOpts{}), f.inter.cert)); err != nil {
+		t.Fatalf("delegated signer = %v", err)
+	}
+	f.resp.signer = newOCSPSigner(t, f.inter, x509.ExtKeyUsageClientAuth)
+	if err := preflight(m, chainOf(f.leaf(t, leafOpts{}), f.inter.cert)); !failed(err) {
+		t.Fatalf("signer without OCSPSigning = %v", err)
+	}
+}
+
 func TestRevocationCRL(t *testing.T) {
 	f := newFixture(t)
 	good, bad := f.leaf(t, leafOpts{ocsp: []string{}}), f.leaf(t, leafOpts{ocsp: []string{}})
@@ -433,17 +447,17 @@ func TestEnrollLimitAndInvalid(t *testing.T) {
 
 func TestConfigure(t *testing.T) {
 	f := newFixture(t)
-	decode := func(c Config) func(any) error {
-		return func(v any) error { *(v.(*Config)) = c; return nil }
+	setup := func(realm string, c Config) port.MethodSetup {
+		return port.MethodSetup{RealmSlug: realm, Decode: func(v any) error { *(v.(*Config)) = c; return nil }}
 	}
-	a, err := (&Method{}).Configure("other", decode(Config{Realms: map[string]RealmConfig{"default": {TrustAnchors: []string{pemOf(f.root.cert)}}}}))
+	a, err := (&Method{}).Setup(context.Background(), setup("other", Config{Realms: map[string]RealmConfig{"default": {TrustAnchors: []string{pemOf(f.root.cert)}}}}))
 	if err != nil || a != nil {
 		t.Fatalf("realm without settings = %v, %v", a, err)
 	}
-	if a, err = (&Method{}).Configure("default", decode(Config{Realms: map[string]RealmConfig{"default": {TrustAnchors: []string{pemOf(f.root.cert)}}}})); err != nil || a == nil {
+	if a, err = (&Method{}).Setup(context.Background(), setup("default", Config{Realms: map[string]RealmConfig{"default": {TrustAnchors: []string{pemOf(f.root.cert)}}}})); err != nil || a == nil {
 		t.Fatalf("configured realm = %v, %v", a, err)
 	}
-	if _, err := (&Method{}).Configure("default", decode(Config{Realms: map[string]RealmConfig{
+	if _, err := (&Method{}).Setup(context.Background(), setup("default", Config{Realms: map[string]RealmConfig{
 		"default": {TrustAnchors: []string{pemOf(f.root.cert)}}, "other": {}}})); err == nil {
 		t.Fatal("invalid settings of another realm accepted")
 	}

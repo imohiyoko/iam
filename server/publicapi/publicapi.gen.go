@@ -118,6 +118,21 @@ func (e MeActiveOrgRole) Valid() bool {
 	}
 }
 
+// Defines values for MethodPendingStatus.
+const (
+	MethodPendingStatusPending MethodPendingStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the MethodPendingStatus enum.
+func (e MethodPendingStatus) Valid() bool {
+	switch e {
+	case MethodPendingStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MyOrgKind.
 const (
 	MyOrgKindPersonal MyOrgKind = "personal"
@@ -731,6 +746,12 @@ type MethodBeginRequest struct {
 	Payload *map[string]interface{} `json:"payload,omitempty"`
 }
 
+// MethodCallbackResult defines model for MethodCallbackResult.
+type MethodCallbackResult struct {
+	// Payload 方式ごとの応答
+	Payload map[string]interface{} `json:"payload"`
+}
+
 // MethodChallenge defines model for MethodChallenge.
 type MethodChallenge struct {
 	ExpiresAt time.Time `json:"expires_at"`
@@ -748,6 +769,16 @@ type MethodCompleteRequest struct {
 	Payload     *map[string]interface{} `json:"payload,omitempty"`
 	ReturnToken *bool                   `json:"return_token,omitempty"`
 }
+
+// MethodPending defines model for MethodPending.
+type MethodPending struct {
+	// Interval 呼び直すまでの秒数
+	Interval int                 `json:"interval"`
+	Status   MethodPendingStatus `json:"status"`
+}
+
+// MethodPendingStatus defines model for MethodPending.Status.
+type MethodPendingStatus string
 
 // MyAttributes defines model for MyAttributes.
 type MyAttributes struct {
@@ -978,6 +1009,9 @@ type OrgInvitationStatus string
 
 // OrgLoginPolicy Org のログインポリシー（フィーチャー org_login_policy）。ログインと Org の切り替えで判定し、満たさなければその Org に入れない （理由は policy.<種類>）。空の項目は判定しない
 type OrgLoginPolicy struct {
+	// DenyRestrictedAuthenticators amr に SP 800-63B の制限付きの認証器（SMS・音声の OTP。sms・tel）があるセッションを入れない（理由は policy.restricted_authenticator。ADR 0104）
+	DenyRestrictedAuthenticators *bool `json:"deny_restricted_authenticators,omitempty"`
+
 	// IpAllowlist 要求の IP がこのどれか（CIDR）に入ること
 	IpAllowlist *[]string `json:"ip_allowlist,omitempty"`
 
@@ -1653,6 +1687,9 @@ type RedeemLoginLinkJSONRequestBody RedeemLoginLinkJSONBody
 // BeginMethodLoginJSONRequestBody defines body for BeginMethodLogin for application/json ContentType.
 type BeginMethodLoginJSONRequestBody = MethodBeginRequest
 
+// MethodCallbackJSONRequestBody defines body for MethodCallback for application/json ContentType.
+type MethodCallbackJSONRequestBody = MethodBeginRequest
+
 // CompleteMethodLoginJSONRequestBody defines body for CompleteMethodLogin for application/json ContentType.
 type CompleteMethodLoginJSONRequestBody = MethodCompleteRequest
 
@@ -1835,6 +1872,9 @@ type ServerInterface interface {
 	// BeginMethodLogin 認証方式のプラグインでログインを始める（1要素目）
 	// (POST /v1/login/methods/{method}:begin)
 	BeginMethodLogin(w http.ResponseWriter, r *http.Request, method string)
+	// MethodCallback 認証方式のプラグインが、別の経路（本人の端末など）からの応答を受ける
+	// (POST /v1/login/methods/{method}:callback)
+	MethodCallback(w http.ResponseWriter, r *http.Request, method string)
 	// CompleteMethodLogin 認証方式のプラグインでログインを完了する（1要素目）
 	// (POST /v1/login/methods/{method}:complete)
 	CompleteMethodLogin(w http.ResponseWriter, r *http.Request, method string, params CompleteMethodLoginParams)
@@ -2315,6 +2355,32 @@ func (siw *ServerInterfaceWrapper) BeginMethodLogin(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.BeginMethodLogin(w, r, method)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MethodCallback operation middleware
+func (siw *ServerInterfaceWrapper) MethodCallback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "method" -------------
+	var method string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "method", r.PathValue("method"), &method, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "method", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MethodCallback(w, r, method)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5169,6 +5235,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor/passkey:start", wrapper.StartSecondFactorPasskey)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor:verify", wrapper.VerifySecondFactor)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/methods/{method}:begin", wrapper.BeginMethodLogin)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/methods/{method}:callback", wrapper.MethodCallback)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/methods/{method}:complete", wrapper.CompleteMethodLogin)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor/{method}:begin", wrapper.BeginSecondFactorMethod)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/login/second-factor/{method}:complete", wrapper.CompleteSecondFactorMethod)
@@ -5834,6 +5901,100 @@ func (response BeginMethodLogin429JSONResponse) VisitBeginMethodLoginResponse(w 
 	return err
 }
 
+type BeginMethodLogin503JSONResponse Error
+
+func (response BeginMethodLogin503JSONResponse) VisitBeginMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MethodCallbackRequestObject struct {
+	Method string `json:"method"`
+	Body   *MethodCallbackJSONRequestBody
+}
+
+type MethodCallbackResponseObject interface {
+	VisitMethodCallbackResponse(w http.ResponseWriter) error
+}
+
+type MethodCallback200JSONResponse MethodCallbackResult
+
+func (response MethodCallback200JSONResponse) VisitMethodCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MethodCallback400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response MethodCallback400JSONResponse) VisitMethodCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MethodCallback401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response MethodCallback401JSONResponse) VisitMethodCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MethodCallback404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response MethodCallback404JSONResponse) VisitMethodCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MethodCallback429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response MethodCallback429JSONResponse) VisitMethodCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CompleteMethodLoginRequestObject struct {
 	Method string `json:"method"`
 	Params CompleteMethodLoginParams
@@ -5854,6 +6015,20 @@ func (response CompleteMethodLogin200JSONResponse) VisitCompleteMethodLoginRespo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteMethodLogin202JSONResponse MethodPending
+
+func (response CompleteMethodLogin202JSONResponse) VisitCompleteMethodLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -6531,6 +6706,35 @@ func (response BeginSecondFactorMethod404JSONResponse) VisitBeginSecondFactorMet
 	return err
 }
 
+type BeginSecondFactorMethod429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response BeginSecondFactorMethod429JSONResponse) VisitBeginSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginSecondFactorMethod503JSONResponse Error
+
+func (response BeginSecondFactorMethod503JSONResponse) VisitBeginSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CompleteSecondFactorMethodRequestObject struct {
 	Method string `json:"method"`
 	Body   *CompleteSecondFactorMethodJSONRequestBody
@@ -6550,6 +6754,20 @@ func (response CompleteSecondFactorMethod200JSONResponse) VisitCompleteSecondFac
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSecondFactorMethod202JSONResponse MethodPending
+
+func (response CompleteSecondFactorMethod202JSONResponse) VisitCompleteSecondFactorMethodResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7172,6 +7390,20 @@ func (response BeginEnrollCredential429JSONResponse) VisitBeginEnrollCredentialR
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
 	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginEnrollCredential503JSONResponse Error
+
+func (response BeginEnrollCredential503JSONResponse) VisitBeginEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -13147,6 +13379,9 @@ type StrictServerInterface interface {
 	// BeginMethodLogin 認証方式のプラグインでログインを始める（1要素目）
 	// (POST /v1/login/methods/{method}:begin)
 	BeginMethodLogin(ctx context.Context, request BeginMethodLoginRequestObject) (BeginMethodLoginResponseObject, error)
+	// MethodCallback 認証方式のプラグインが、別の経路（本人の端末など）からの応答を受ける
+	// (POST /v1/login/methods/{method}:callback)
+	MethodCallback(ctx context.Context, request MethodCallbackRequestObject) (MethodCallbackResponseObject, error)
 	// CompleteMethodLogin 認証方式のプラグインでログインを完了する（1要素目）
 	// (POST /v1/login/methods/{method}:complete)
 	CompleteMethodLogin(ctx context.Context, request CompleteMethodLoginRequestObject) (CompleteMethodLoginResponseObject, error)
@@ -13739,6 +13974,39 @@ func (sh *strictHandler) BeginMethodLogin(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(BeginMethodLoginResponseObject); ok {
 		if err := validResponse.VisitBeginMethodLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MethodCallback operation middleware
+func (sh *strictHandler) MethodCallback(w http.ResponseWriter, r *http.Request, method string) {
+	var request MethodCallbackRequestObject
+
+	request.Method = method
+
+	var body MethodCallbackJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MethodCallback(ctx, request.(MethodCallbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MethodCallback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MethodCallbackResponseObject); ok {
+		if err := validResponse.VisitMethodCallbackResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

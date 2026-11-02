@@ -76,6 +76,10 @@ func (s adminServer) realmView(r port.Realm) (adminapi.Realm, error) {
 		v.Settings.DeclaredContextClients = []string{}
 	}
 	v.Settings.PasskeyPolicy = passkeyPolicyOut[adminapi.PasskeyPolicy](rs.PasskeyPolicy)
+	if len(rs.DisabledMethods) > 0 {
+		d := slices.Clone(rs.DisabledMethods)
+		v.Settings.DisabledMethods = &d
+	}
 	return v, nil
 }
 
@@ -119,6 +123,11 @@ func applySettings(rs realmSettings, in *adminapi.RealmSettings) realmSettings {
 	}
 	if in.PasskeyPolicy != nil {
 		rs.PasskeyPolicy = passkeyPolicyIn(in.PasskeyPolicy)
+	}
+	if in.DisabledMethods != nil {
+		rs.DisabledMethods = slices.Clone(*in.DisabledMethods)
+		slices.Sort(rs.DisabledMethods)
+		rs.DisabledMethods = slices.Compact(rs.DisabledMethods)
 	}
 	if q := in.QuotaCount; q != nil {
 		if q.Invited != nil {

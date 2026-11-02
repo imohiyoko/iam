@@ -189,6 +189,24 @@ func build(ctx context.Context, cfg config.Config, log *slog.Logger, stdout io.W
 			return fail(err)
 		}
 	}
+	if cfg.SMSSender.Driver != "" {
+		sf, err := plugin.SMSSender(cfg.SMSSender.Driver)
+		if err != nil {
+			return fail(err)
+		}
+		if d.SMS, err = sf(ctx, pc(cfg.SMSSender)); err != nil {
+			return fail(err)
+		}
+	}
+	if cfg.PushSender.Driver != "" {
+		pf, err := plugin.PushSender(cfg.PushSender.Driver)
+		if err != nil {
+			return fail(err)
+		}
+		if d.Push, err = pf(ctx, pc(cfg.PushSender)); err != nil {
+			return fail(err)
+		}
+	}
 	if cfg.GeoIP.Driver != "" {
 		gf, err := plugin.GeoIP(cfg.GeoIP.Driver)
 		if err != nil {

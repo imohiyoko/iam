@@ -493,6 +493,36 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: 方式の送信（SMS・プッシュなど）に失敗した（`delivery_failed`。ADR 0104）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/login/methods/{method}:callback:
+    post:
+      operationId: methodCallback
+      summary: 認証方式のプラグインが、別の経路（本人の端末など）からの応答を受ける
+      description: |
+        プッシュの承認（`push`）の端末の応答や、端末の宛先の更新に使う（ADR 0104）。セッションを要さず、本人の確認は方式が行う
+        （端末の鍵の署名など）。方式が応答を受けなければ 404。失敗の理由は返さない（4.9）。
+      parameters:
+        - { name: method, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MethodBeginRequest" }
+      responses:
+        "200":
+          description: 受け付けた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MethodCallbackResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/login/methods/{method}:complete:
     post:
@@ -515,6 +545,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LoginResult" }
+        "202":
+          description: 別の経路からの応答を待っている（応答が端末から届く方式。ADR 0104）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MethodPending" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -544,6 +579,12 @@ paths:
               schema: { $ref: "#/components/schemas/MethodChallenge" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: 方式の送信（SMS・プッシュなど）に失敗した（`delivery_failed`。ADR 0104）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /v1/login/second-factor/{method}:complete:
     post:
@@ -552,6 +593,8 @@ paths:
       description: |
         成功すると制限つきのセッションを失効させ、通常のセッションを発行する（amr に方式の amr と `mfa` を加える。ADR 0050）。
         失敗の理由は返さない（4.9）。照合はユーザーごとにレートリミットする。
+        別の経路から応答が届く方式（プッシュの承認。ADR 0104）は、届くまで 202（`status: pending`）を返す。同じフロー ID で
+        `interval` 秒ごとに呼び直す（回数の上限とユーザーごとの照合の回数には数えない）。
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -568,6 +611,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LoginResult" }
+        "202":
+          description: 別の経路からの応答を待っている
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MethodPending" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1591,6 +1639,11 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: 方式の送信（SMS・プッシュなど）に失敗した（`delivery_failed`。ADR 0104）
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /v1/me/credentials/{method}:enroll-complete:
     post:
@@ -3339,6 +3392,11 @@ components:
           maximum: 3
           description: >-
             amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（理由は policy.min_aal）。フィーチャー acr も要る（ADR 0093）
+        deny_restricted_authenticators:
+          type: boolean
+          description: >-
+            amr に SP 800-63B の制限付きの認証器（SMS・音声の OTP。sms・tel）があるセッションを入れない（理由は
+            policy.restricted_authenticator。ADR 0104）
     PasskeyPolicy:
       type: object
       description: >-
@@ -3578,6 +3636,17 @@ components:
         flow_id: { type: string }
         payload: { type: object, additionalProperties: true, description: 方式ごとの入力 }
         return_token: { type: boolean }
+    MethodPending:
+      type: object
+      required: [status, interval]
+      properties:
+        status: { type: string, enum: [pending] }
+        interval: { type: integer, description: 呼び直すまでの秒数 }
+    MethodCallbackResult:
+      type: object
+      required: [payload]
+      properties:
+        payload: { type: object, additionalProperties: true, description: 方式ごとの応答 }
     MethodChallenge:
       type: object
       required: [flow_id, payload, expires_at]

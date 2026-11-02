@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/port"
@@ -53,8 +52,8 @@ type Method struct {
 }
 
 var (
-	_ port.Authenticator  = (*Method)(nil)
-	_ method.Configurable = (*Method)(nil)
+	_ port.Authenticator             = (*Method)(nil)
+	_ port.ConfigurableAuthenticator = (*Method)(nil)
 )
 
 // New は realm の設定から方式を作る。client は OCSP・CRL の取得に使う（nil なら既定）。
@@ -66,11 +65,14 @@ func New(rc RealmConfig, client *http.Client) (*Method, error) {
 	return &Method{p: p, rev: newRevoker(p.revocation, client)}, nil
 }
 
-// Configure は `methods.x509.realms.<realm>` を読む。その realm の設定が無ければ nil（方式を動かさない）。
-func (*Method) Configure(realm string, decode func(any) error) (port.Authenticator, error) {
+// Setup は `methods.x509.realms.<realm の slug>` を読む。その realm の設定が無ければ nil（方式を動かさない）。
+func (*Method) Setup(_ context.Context, s port.MethodSetup) (port.Authenticator, error) {
+	realm := s.RealmSlug
 	var c Config
-	if err := decode(&c); err != nil {
-		return nil, fmt.Errorf("x509: %w", err)
+	if s.Decode != nil {
+		if err := s.Decode(&c); err != nil {
+			return nil, fmt.Errorf("x509: %w", err)
+		}
 	}
 	// 他の realm の設定も確かめる（realm を後から作ったときに初めて誤りに気づかないように）。
 	for name, rc := range c.Realms {

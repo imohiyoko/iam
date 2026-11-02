@@ -95,8 +95,20 @@ func TestMethodSettings(t *testing.T) {
 	var v struct {
 		Realms map[string]struct{ Mapping string } `yaml:"realms"`
 	}
-	if err := c.MethodSettings()["x509"](&v); err != nil || v.Realms["default"].Mapping != "san_upn" {
+	if err := c.MethodSettings("x509")(&v); err != nil || v.Realms["default"].Mapping != "san_upn" {
 		t.Fatalf("method settings = %+v, %v", v, err)
+	}
+	// 知らない項目はエラー（綴りの誤りで黙って既定値にしない）。
+	c, err = Parse([]byte("dev: true\nmethods:\n  x509: {realms: {default: {mappnig: san_upn}}}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.MethodSettings("x509")(&v); err == nil {
+		t.Fatal("unknown field accepted")
+	}
+	var m map[string]string
+	if err := c.MethodSettings("sms")(&m); err != nil || m != nil {
+		t.Fatalf("absent settings = %v, %v", m, err)
 	}
 }
 

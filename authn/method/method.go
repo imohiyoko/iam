@@ -6,6 +6,7 @@
 package method
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"slices"
@@ -89,53 +90,37 @@ type Set struct {
 	m map[string]port.Authenticator
 }
 
-// Configurable は設定ファイルの `methods.<name>` を読む方式が実装する（任意。ADR 0103）。
-type Configurable interface {
-	// Configure は realm（slug）の設定を読んだ方式を返す。decode は `methods.<name>` を v に読む（設定が無ければ何もしない）。
-	// nil を返すと、その realm では方式を動かさない（設定が無いなど）。返す方式の名前は登録したものと同じでなければならない。
-	Configure(realm string, decode func(v any) error) (port.Authenticator, error)
-}
-
 // Active は登録した方式のうち、宣言したフィーチャーが動いているもの（featureActive が true）と、extra（組み込み用。
-// フィーチャーを問わない）の組を返す。名前が重なれば extra を優先する。設定を読む方式（Configurable）は設定なしで組み立てる。
+// フィーチャーを問わない）の組を返す。名前が重なれば extra を優先する。
 func Active(featureActive func(string) bool, extra ...port.Authenticator) (*Set, error) {
-	return ActiveIn(featureActive, "", nil, extra...)
+	return ActiveWith(context.Background(), featureActive, nil, extra...)
 }
 
-// ActiveIn は realm（slug）の方式の組を返す。settings は方式の名前ごとの設定の読み手（`methods.<name>`）。
-func ActiveIn(featureActive func(string) bool, realm string, settings map[string]func(any) error, extra ...port.Authenticator) (*Set, error) {
+// ActiveWith は Active と同じで、設定を持つ方式（port.ConfigurableAuthenticator）に setup の結果を渡して設定する（ADR 0104）。
+// 設定に失敗すればエラー（起動を止める）。Setup が nil を返した方式は、その realm の組に入れない。
+func ActiveWith(ctx context.Context, featureActive func(string) bool, setup func(port.MethodInfo) port.MethodSetup, extra ...port.Authenticator) (*Set, error) {
 	s := &Set{m: map[string]port.Authenticator{}}
 	for _, a := range Registered() {
-		if !featureActive(a.Info().Feature) {
-			continue
+		if featureActive(a.Info().Feature) {
+			s.m[a.Info().Name] = a
 		}
-		if c, ok := a.(Configurable); ok {
-			decode := settings[a.Info().Name]
-			if decode == nil {
-				decode = func(any) error { return nil }
-			}
-			ca, err := c.Configure(realm, decode)
-			if err != nil {
-				return nil, fmt.Errorf("method: %s: %w", a.Info().Name, err)
-			}
-			if ca == nil {
-				continue
-			}
-			if err := Check(ca); err != nil {
-				return nil, err
-			}
-			if ca.Info().Name != a.Info().Name || ca.Info().Feature != a.Info().Feature {
-				return nil, fmt.Errorf("method: %s configured as another method", a.Info().Name)
-			}
-			a = ca
-		}
-		s.m[a.Info().Name] = a
 	}
 	for _, a := range extra {
 		if err := Check(a); err != nil {
 			return nil, err
 		}
 		s.m[a.Info().Name] = a
+	}
+	for n, a := range s.m {
+		c, err := Configure(ctx, a, setup)
+		if err != nil {
+			return nil, err
+		}
+		if c == nil {
+			delete(s.m, n) // その realm では動かさない（設定が無いなど）。
+			continue
+		}
+		s.m[n] = c
 	}
 	return s, nil
 }

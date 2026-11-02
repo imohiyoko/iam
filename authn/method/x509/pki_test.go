@@ -133,10 +133,21 @@ func pemOf(c *x509.Certificate) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw}))
 }
 
+// newOCSPSigner は issuer が OCSP の署名を委ねる証明書を作る（eku が空なら委ねていない証明書）。応答の producedAt は
+// x/crypto/ocsp が実の時刻で入れるので、有効期間は広く取る。
+func newOCSPSigner(t *testing.T, issuer *ca, eku ...x509.ExtKeyUsage) *ca {
+	t.Helper()
+	k := newKey(t)
+	tmpl := &x509.Certificate{SerialNumber: nextSerial(), Subject: pkix.Name{CommonName: "OCSP"}, NotBefore: time.Unix(0, 0),
+		NotAfter: time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: eku}
+	return &ca{cert: create(t, tmpl, issuer, k.Public(), nil), key: k}
+}
+
 // responder は OCSP のレスポンダーと CRL の配布点。
 type responder struct {
 	mu       sync.Mutex
 	issuer   *ca
+	signer   *ca // nil なら発行者が署名する。そうでなければ委ねた署名者（証明書を応答に埋め込む）
 	revoked  map[string]bool
 	unknown  bool
 	down     bool
@@ -187,7 +198,11 @@ func (r *responder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.unknown {
 		tmpl.Status = ocsp.Unknown
 	}
-	der, err := ocsp.CreateResponse(r.issuer.cert, r.issuer.cert, tmpl, r.issuer.key)
+	signer := r.issuer
+	if r.signer != nil {
+		signer, tmpl.Certificate = r.signer, r.signer.cert
+	}
+	der, err := ocsp.CreateResponse(r.issuer.cert, signer.cert, tmpl, signer.key)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return

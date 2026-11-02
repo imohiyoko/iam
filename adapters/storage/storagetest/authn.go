@@ -38,6 +38,7 @@ var authnTests = []struct {
 	{"CredentialUpdateConcurrent", testCredentialUpdateConcurrent},
 	{"CredentialLookupConcurrent", testCredentialLookupConcurrent},
 	{"CredentialCountPurge", testCredentialCountPurge},
+	{"CredentialDeliveryMethods", testCredentialDeliveryMethods},
 	{"KnownDevices", testKnownDevices},
 	{"KnownDeviceLookupConcurrent", testKnownDeviceLookupConcurrent},
 	{"Passwords", testPasswords},

@@ -240,7 +240,8 @@ func rejectedByUser(err error) bool {
 }
 
 // Begin はログインのフローを始める。usage が 2要素目なら userID（内部 ID）の本人のフロー、1要素目なら userID は空。
-func (s *Service) Begin(ctx context.Context, realmID, userID, name string, usage port.MethodUsage, p json.RawMessage) (Challenge, error) {
+// 方式が送信（Deliver）を返せば送り、失敗すれば port.ErrDeliveryFailed を返す（ADR 0104）。
+func (s *Service) Begin(ctx context.Context, realmID, userID, name string, usage port.MethodUsage, p json.RawMessage, c Client) (Challenge, error) {
 	a, err := s.Method(name, usage)
 	if err != nil {
 		return Challenge{}, err
@@ -254,7 +255,9 @@ func (s *Service) Begin(ctx context.Context, realmID, userID, name string, usage
 	} else {
 		userID = ""
 	}
-	ch, err := a.Begin(ctx, s.env(ctx, nil, realmID, userID, a, usage), port.MethodRequest{Payload: p})
+	env := s.env(ctx, nil, realmID, userID, a, usage)
+	env.ClientIP = c.IP
+	ch, err := a.Begin(ctx, env, port.MethodRequest{Payload: p})
 	// 1要素目の前は、方式が本人の有無を返しても区別しない（4.9）。2要素目は本人確認の後なので、方式の認証情報が無ければ 404。
 	if errors.Is(err, errs.AuthenticationFailed) || (err != nil && usage == port.UsageFirstFactor && errors.Is(err, errs.NotFound)) {
 		return Challenge{}, ErrAuthFailed
@@ -262,7 +265,107 @@ func (s *Service) Begin(ctx context.Context, realmID, userID, name string, usage
 	if err != nil {
 		return Challenge{}, err
 	}
+	if err := s.deliver(ctx, realmID, name, ch, c); err != nil {
+		return Challenge{}, err
+	}
 	return s.start(ctx, flow{RealmID: realmID, UserID: userID, Method: name, Purpose: purpose, State: ch.State}, ch.Payload)
+}
+
+// deliver は方式の送信を行い、方式の監査ログを記録する。送信に失敗すれば method.delivery_failed を記録して
+// port.ErrDeliveryFailed を返す（理由は外に返さない）。
+func (s *Service) deliver(ctx context.Context, realmID, name string, ch port.MethodChallenge, c Client) error {
+	if ch.Deliver != nil {
+		if err := ch.Deliver(ctx); err != nil {
+			s.logger().WarnContext(ctx, "method delivery failed", "method", name, "error", err)
+			var userID string
+			if len(ch.Events) > 0 {
+				userID = ch.Events[0].UserID
+			}
+			s.record(ctx, realmID, "", c, []port.MethodEvent{{Type: "delivery_failed", UserID: userID, Failure: true,
+				Details: map[string]any{"method": name}}})
+			return fmt.Errorf("%w: %w", port.ErrDeliveryFailed, err)
+		}
+	}
+	s.record(ctx, realmID, name, c, ch.Events)
+	return nil
+}
+
+// record は方式の監査ログを記録する（ADR 0104）。種類は method.<方式>.<出来事>（name が空なら method.<出来事>）。
+// 記録の失敗はログに残すだけにする（送信は済んでいる）。
+func (s *Service) record(ctx context.Context, realmID, name string, c Client, events []port.MethodEvent) {
+	if len(events) == 0 {
+		return
+	}
+	err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		return s.recordTx(ctx, tx, realmID, name, c, events)
+	})
+	if err != nil {
+		s.logger().WarnContext(ctx, "could not record method events", "method", name, "error", err)
+	}
+}
+
+func (s *Service) recordTx(ctx context.Context, tx port.Tx, realmID, name string, c Client, events []port.MethodEvent) error {
+	for _, e := range events {
+		typ := "method." + e.Type
+		if name != "" {
+			typ = method.EventType(name, e.Type)
+		}
+		if typ == "" || (name == "" && !method.ValidName(e.Type)) {
+			return fmt.Errorf("credential: method %s returned an invalid event type %q", name, e.Type)
+		}
+		actor := audit.Actor{Type: "anonymous"}
+		if e.UserID != "" {
+			u, err := tx.Users().Get(ctx, realmID, e.UserID)
+			if err != nil {
+				return err
+			}
+			actor = audit.Actor{Type: "user", ID: u.PublicID}
+		}
+		result := audit.ResultSuccess
+		if e.Failure {
+			result = audit.ResultFailure
+		}
+		if _, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{
+			Type: typ, Result: result, RealmID: realmID, Actor: actor, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+			Details: e.Details,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pending は、別の経路からの応答を待っているフローを、回数を数えずに置き直す（ADR 0104）。
+func (s *Service) pending(ctx context.Context, flowID string, f flow) error {
+	if err := s.put(ctx, flowID, f); err != nil {
+		return err
+	}
+	return port.ErrMethodPending
+}
+
+// Callback は別の経路（本人の端末など）からの応答を方式に渡す（ADR 0104）。方式が port.CallbackAuthenticator でなければ
+// ErrUnknownMethod。照合の失敗は ErrAuthFailed。方式はトランザクションの外で呼び、監査ログは後で記録する。
+func (s *Service) Callback(ctx context.Context, realmID, name string, p json.RawMessage, c Client) (json.RawMessage, error) {
+	a, err := s.Method(name, "")
+	if err != nil {
+		return nil, err
+	}
+	cb, ok := a.(port.CallbackAuthenticator)
+	if !ok {
+		return nil, ErrUnknownMethod
+	}
+	env := s.env(ctx, nil, realmID, "", a, "")
+	env.ClientIP = c.IP
+	r, err := cb.Callback(ctx, env, port.MethodRequest{Payload: p})
+	if errors.Is(err, errs.AuthenticationFailed) || errors.Is(err, errs.NotFound) {
+		s.logger().DebugContext(ctx, "method callback rejected", "method", name, "error", err)
+		return nil, ErrAuthFailed
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.record(ctx, realmID, name, c, r.Events)
+	return payload(r.Payload), nil
 }
 
 func (s *Service) start(ctx context.Context, f flow, p json.RawMessage) (Challenge, error) {
@@ -369,6 +472,9 @@ func (s *Service) Login(ctx context.Context, realmID, name, flowID string, p jso
 		return session.Issued{}, "", s.fail(ctx, realmID, name, c, err)
 	}
 	is, publicID, err := s.login(ctx, realmID, name, f.State, p, c, replaceToken)
+	if errors.Is(err, port.ErrMethodPending) {
+		return session.Issued{}, "", s.pending(ctx, flowID, f)
+	}
 	if rejectedByUser(err) {
 		s.retry(ctx, flowID, f)
 	}
@@ -407,7 +513,7 @@ func (s *Service) login(ctx context.Context, realmID, name string, state []byte,
 	}
 	users := &loginUsers{s: s, realmID: realmID, ip: c.IP}
 	env := s.env(ctx, nil, realmID, "", a, port.UsageFirstFactor)
-	env.Users = users
+	env.Users, env.ClientIP = users, c.IP
 	var is session.Issued
 	var publicID string
 	r, err := a.Complete(ctx, env, port.MethodRequest{Payload: p, State: state})
@@ -518,11 +624,15 @@ func (s *Service) fail(ctx context.Context, realmID, name string, c Client, caus
 // SecondFactor は2要素目のフローを完了し、制限つきのセッション sessionID を通常のセッションに替える（ADR 0050）。
 // 失敗は ErrAuthFailed（上限を超えれば *ratelimit.ExceededError、停止などは errs.Denial）。
 func (s *Service) SecondFactor(ctx context.Context, realmID, userID, sessionID, name, flowID string, p json.RawMessage, c Client) (session.Issued, error) {
-	if _, err := s.Method(name, port.UsageSecondFactor); err != nil {
+	a, err := s.Method(name, port.UsageSecondFactor)
+	if err != nil {
 		return session.Issued{}, err
 	}
-	if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
-		return session.Issued{}, err
+	// 別の経路から応答が届く方式は、クライアントの入力を照合しないので照合の回数で数えない（ADR 0104）。
+	if !a.Info().OutOfBand {
+		if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
+			return session.Issued{}, err
+		}
 	}
 	if err := s.Lockout.Check(ctx, realmID, lockout.ScopeSecondFactor, userID); err != nil {
 		return session.Issued{}, err
@@ -533,6 +643,9 @@ func (s *Service) SecondFactor(ctx context.Context, realmID, userID, sessionID, 
 		return session.Issued{}, ErrAuthFailed
 	}
 	is, err := s.secondFactor(ctx, realmID, userID, sessionID, name, f.State, p, c)
+	if errors.Is(err, port.ErrMethodPending) {
+		return session.Issued{}, s.pending(ctx, flowID, f)
+	}
 	if rejectedByUser(err) {
 		s.retry(ctx, flowID, f)
 	}
@@ -571,7 +684,9 @@ func (s *Service) secondFactor(ctx context.Context, realmID, userID, sessionID, 
 		return session.Issued{}, err
 	}
 	var is session.Issued
-	r, err := a.Complete(ctx, s.env(ctx, nil, realmID, userID, a, port.UsageSecondFactor), port.MethodRequest{Payload: p, State: state})
+	env := s.env(ctx, nil, realmID, userID, a, port.UsageSecondFactor)
+	env.ClientIP = c.IP
+	r, err := a.Complete(ctx, env, port.MethodRequest{Payload: p, State: state})
 	if lerr := s.lockoutResult(ctx, realmID, lockout.ScopeSecondFactor, userID, userID, err, c); lerr != nil {
 		return session.Issued{}, lerr
 	}
@@ -604,6 +719,8 @@ type EnrollOptions struct {
 	Recovery bool
 	// RecentAuth は本人の認証が直近（max_auth_age の内）か。
 	RecentAuth bool
+	// Client は要求の接続元（方式の接続元ごとの制限と、送信の監査ログ。ADR 0104）。
+	Client Client
 }
 
 // EnrollBegin は本人（内部 ID）の、方式 name の登録を始める。方式はトランザクションの外で呼ぶ（パスワードのハッシュなど）。
@@ -619,7 +736,7 @@ func (s *Service) EnrollBegin(ctx context.Context, realmID, userID, name string,
 		}
 	}
 	e := s.env(ctx, nil, realmID, userID, a, "")
-	e.RecentAuth = o.RecentAuth
+	e.RecentAuth, e.ClientIP = o.RecentAuth, o.Client.IP
 	if o.Recovery {
 		e.Usage = port.UsageRecovery
 	}
@@ -632,6 +749,9 @@ func (s *Service) EnrollBegin(ctx context.Context, realmID, userID, name string,
 	}
 	ch, err := a.EnrollBegin(ctx, e, port.MethodRequest{Payload: p})
 	if err != nil {
+		return Challenge{}, err
+	}
+	if err := s.deliver(ctx, realmID, name, ch, o.Client); err != nil {
 		return Challenge{}, err
 	}
 	return s.start(ctx, flow{RealmID: realmID, UserID: userID, Method: name, Purpose: purposeEnroll, State: ch.State, Recovery: o.Recovery}, ch.Payload)

@@ -27,8 +27,11 @@ X.509 をその上に載せるには、次を決める必要がある。
 - フィーチャー `x509`（依存なし、既定オフ）。方式は `authn/method/x509`、名前は `x509`、所持の要素、1要素目と2要素目に使える
 - 方式の設定は設定ファイルの `methods.x509.realms.<realm の slug>`。realm の設定が無ければ、その realm では方式を動かさない（404）。
   設定の誤り（読めない CA、未知の規則など）は起動を止める
-  - 汎用の仕組みとして、方式が任意で `Configurable`（`authn/method`）を実装すれば、コアは `methods.<name>` を realm ごとに渡して
-    方式を組み立てる。コアは中身を知らない
+  - 仕組みは ADR 0104 の `port.ConfigurableAuthenticator` を使う。`port.MethodSetup` に realm の slug と、`methods.<name>` を
+    入れ子のまま読む `Decode`（知らない項目はエラー）を足した。`Setup` が nil を返した方式は、その realm の組に入れない。
+    文字列の項目だけの方式（sms・push）は `StringOptions` で読む。コアは中身を知らない
+  - OCSP の応答を委ねた署名者が作ったときは、署名者の証明書が `id-kp-OCSPSigning` を持ち、応答を作った時刻に有効であることを
+    確かめる（RFC 6960 4.2.2.2。x/crypto/ocsp はこれを確かめない）
 
 ### 証明書の受け取り（コア）
 

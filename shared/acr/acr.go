@@ -34,6 +34,8 @@ type Method struct {
 	PhishingResistant bool
 	// HardwareBound は鍵が取り出せないハードウェアの中にあることを確かめた。AAL3 と phrh に要る。
 	HardwareBound bool
+	// Restricted は SP 800-63B の制限付きの認証器（公衆電話網の OTP）。AAL の数え方は変えず、realm・Org が止める材料にする（ADR 0104）。
+	Restricted bool
 }
 
 // Methods は amr の値ごとの対応表。載っていない値（mfa・link・rec・kba・サービスアカウントの手段など）は AAL に数えない。
@@ -47,12 +49,22 @@ type Method struct {
 //     ときにだけ出す。TLS のクライアント認証はチャネルに結び付くので検証者のなりすましに強い。設定の無い証明書は pop（鍵の置き場所を問わない）
 var Methods = map[string]Method{
 	"pwd": {Class: Knowledge}, "pin": {Class: Knowledge},
-	"otp": {Class: Possession}, "sms": {Class: Possession}, "tel": {Class: Possession},
+	"otp": {Class: Possession}, "sms": {Class: Possession, Restricted: true}, "tel": {Class: Possession, Restricted: true},
 	"hwk": {Class: Possession, PhishingResistant: true}, "swk": {Class: Possession}, "pop": {Class: Possession},
 	"sc":   {Class: Possession, PhishingResistant: true, HardwareBound: true},
 	"user": {Class: Inherence}, "fpt": {Class: Inherence}, "face": {Class: Inherence}, "iris": {Class: Inherence},
 	"retina": {Class: Inherence}, "vbm": {Class: Inherence},
 	"fed": {Class: Federated},
+}
+
+// Restricted は amr に制限付きの認証器（SMS・音声の OTP。SP 800-63B）があるかを返す（ADR 0104）。
+func Restricted(amr []string) bool {
+	for _, a := range amr {
+		if Methods[a].Restricted {
+			return true
+		}
+	}
+	return false
 }
 
 // FedPrefix は信じる上流の手段の接頭辞（fed:otp など。ADR 0084）。上流の手段は分類としてだけ数え、

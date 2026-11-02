@@ -42,6 +42,10 @@ type Config struct {
 	// FIDOMDS は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation。ADR 0096）。driver が空なら
 	// MDS を読まない（設定した信頼の起点だけで確かめる）。
 	FIDOMDS Adapter `yaml:"fido_mds"`
+	// SMSSender は SMS・音声のコードの送信（フィーチャー sms_otp。ADR 0104）。フィーチャーが動いていて driver が空なら起動しない。
+	SMSSender Adapter `yaml:"sms_sender"`
+	// PushSender は本人の端末へのプッシュの送信（フィーチャー push_auth。ADR 0104）。
+	PushSender Adapter `yaml:"push_sender"`
 	// GeoIP は接続元の場所を引く（フィーチャー login_risk。ADR 0105）。driver が空なら ip のリスクを評価しない。
 	GeoIP Adapter `yaml:"geoip"`
 	// BotCheck はボットの確認のトークンを確かめる（フィーチャー bot_protection。ADR 0105）。フィーチャーが動いていれば必須。
@@ -76,17 +80,30 @@ type Config struct {
 	// Hooks はフロー フック（フィーチャー flow_hooks。design.md 11.8、ADR 0081）。キーはフックの名前。
 	Hooks map[string]Hook `yaml:"hooks"`
 
-	// Methods は認証方式のプラグインの設定（ADR 0103）。キーは方式の名前で、中身は方式が読む（authn/method の Configurable）。
+	// Methods は認証方式のプラグインの設定（methods.<方式>。ADR 0103、0104）。キーは方式の名前で、中身は方式が読む
+	// （port.MethodSetup の Decode）。知らない項目は起動を止める。
 	Methods map[string]yaml.Node `yaml:"methods"`
 }
 
-// MethodSettings は方式ごとの設定の読み手（authn/method の ActiveIn に渡す）。
-func (c Config) MethodSettings() map[string]func(any) error {
-	out := make(map[string]func(any) error, len(c.Methods))
-	for name, n := range c.Methods {
-		out[name] = n.Decode
+// MethodSettings は方式の名前の設定の読み手（port.MethodSetup の Decode）。知らない項目はエラー。設定が無ければ何もしない。
+func (c Config) MethodSettings(name string) func(any) error {
+	n, ok := c.Methods[name]
+	if !ok {
+		return func(any) error { return nil }
 	}
-	return out
+	return func(v any) error {
+		// yaml.Node.Decode は知らない項目を確かめないので、いったん YAML に戻して KnownFields で読む。
+		b, err := yaml.Marshal(&n)
+		if err != nil {
+			return err
+		}
+		dec := yaml.NewDecoder(bytes.NewReader(b))
+		dec.KnownFields(true)
+		if err := dec.Decode(v); err != nil && !errors.Is(err, io.EOF) {
+			return fmt.Errorf("methods.%s: %w", name, err)
+		}
+		return nil
+	}
 }
 
 // Hook は1つのフロー フック。url が無ければ、組み込む側が Go のインターフェース（app.Deps.Hooks）で渡す。
@@ -333,6 +350,8 @@ type Realm struct {
 	DeclaredContextClients []string `yaml:"declared_context_clients"`
 	// PasskeyPolicy は認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。登録とログインのたびに判定する。
 	PasskeyPolicy *attestation.Policy `yaml:"passkey_policy"`
+	// DisabledMethods は既定の realm で止める認証方式のプラグイン（方式の名前。ADR 0104）。新しい realm の既定値にもなる。
+	DisabledMethods []string `yaml:"disabled_methods"`
 }
 
 // KnownEmailStorage は realm.email_storage の値。
@@ -682,6 +701,25 @@ func (c Config) validatePasskey() []string {
 	return problems
 }
 
+// methodNameRE は認証方式のプラグインの名前（authn/method と同じ）。
+var methodNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+
+// validateMethods は methods と realm.disabled_methods の方式の名前の形を確かめる（項目は起動時に方式が確かめる。ADR 0104）。
+func (c Config) validateMethods() []string {
+	var problems []string
+	for name := range c.Methods {
+		if !methodNameRE.MatchString(name) {
+			problems = append(problems, fmt.Sprintf("methods: invalid method name %q", name))
+		}
+	}
+	for _, name := range c.Realm.DisabledMethods {
+		if !methodNameRE.MatchString(name) {
+			problems = append(problems, fmt.Sprintf("realm.disabled_methods: invalid method name %q", name))
+		}
+	}
+	return problems
+}
+
 func (c Config) validateAttestation() []string {
 	var problems []string
 	a := c.Passkey.Attestation
@@ -889,6 +927,7 @@ func (c Config) Validate() error {
 	problems = append(problems, c.validatePasskey()...)
 	problems = append(problems, c.validateAttestation()...)
 	problems = append(problems, c.validateHooks()...)
+	problems = append(problems, c.validateMethods()...)
 	problems = append(problems, c.validateLoginProtection()...)
 	if len(problems) > 0 {
 		return fmt.Errorf("config: %s", strings.Join(problems, "; "))

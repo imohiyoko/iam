@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -165,6 +166,12 @@ func (r *revoker) checkOCSP(ctx context.Context, cert, issuer *x509.Certificate,
 			last = err
 			continue
 		}
+		// x/crypto/ocsp は委ねた署名者の拡張鍵用途を確かめないので、ここで確かめる（RFC 6960 4.2.2.2）。同じ CA が発行した
+		// 別の証明書の鍵で作った応答（経路を書き換えた攻撃者の Good）を通さない。有効期間は応答を作った時刻で見る。
+		if err := ocspSignerAuthorized(resp, issuer); err != nil {
+			last = err
+			continue
+		}
 		if resp.ThisUpdate.After(now.Add(clockSkew)) || (!resp.NextUpdate.IsZero() && now.After(resp.NextUpdate.Add(clockSkew))) {
 			last = errors.New("stale OCSP response")
 			continue
@@ -179,6 +186,21 @@ func (r *revoker) checkOCSP(ctx context.Context, cert, issuer *x509.Certificate,
 		return ocspResult(resp.Status)
 	}
 	return fmt.Errorf("%w: ocsp: %v", errUnknown, last)
+}
+
+// ocspSignerAuthorized は応答の署名者が発行者自身か、発行者が id-kp-OCSPSigning で委ねた有効な証明書かを確かめる。
+func ocspSignerAuthorized(resp *ocsp.Response, issuer *x509.Certificate) error {
+	rc := resp.Certificate
+	if rc == nil || bytes.Equal(rc.Raw, issuer.Raw) {
+		return nil
+	}
+	if !slices.Contains(rc.ExtKeyUsage, x509.ExtKeyUsageOCSPSigning) {
+		return errors.New("OCSP responder not authorized")
+	}
+	if resp.ProducedAt.Before(rc.NotBefore) || resp.ProducedAt.After(rc.NotAfter) {
+		return errors.New("OCSP responder certificate expired")
+	}
+	return nil
 }
 
 func ocspResult(status int) error {
