@@ -51,6 +51,8 @@ const (
 	DeviceRecognition = "device_recognition"
 	LoginRisk         = "login_risk"
 	BotProtection     = "bot_protection"
+	// PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
+	PersonalAccessTokens = "personal_access_tokens"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

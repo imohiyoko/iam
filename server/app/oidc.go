@@ -14,6 +14,7 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/op"
 	"golang.org/x/text/language"
 
+	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -670,6 +671,11 @@ func (s *oidcServer) Introspect(ctx context.Context, r *op.Request[op.Introspect
 	var out provider.Introspection
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
+		if pat.Looks(r.Data.Token) {
+			// 本人の Personal Access Token（ADR 0109）。フィーチャーが動いていなければ active: false。
+			out, err = s.a.patIntrospection(ctx, tx, r.Data.Token)
+			return err
+		}
 		out, err = s.a.tokens.Introspect(ctx, tx, s.a.realm.ID, r.Data.Token)
 		return err
 	})

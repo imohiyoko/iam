@@ -2980,6 +2980,80 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /v1/admin/users/{id}/personal-access-tokens:
+    get:
+      operationId: listUserPersonalAccessTokens
+      summary: ユーザーの Personal Access Token の一覧（フィーチャー personal_access_tokens。ADR 0109）
+      description: 権限 `credentials:revoke`。フィーチャーが動いていなければ 404。取り消した・期限切れも含む。秘密は返さない。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 作成時刻の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [personal_access_tokens]
+                properties:
+                  personal_access_tokens:
+                    type: array
+                    items: { $ref: "#/components/schemas/PersonalAccessToken" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/personal-access-tokens/{token_id}:revoke:
+    post:
+      operationId: revokeUserPersonalAccessToken
+      summary: ユーザーの Personal Access Token を取り消す（ADR 0109）
+      description: |
+        権限 `credentials:revoke` と、対象のロールの権限をすべて持つこと（4.11）。もう取り消していても 204。
+        監査ログ `personal_access_token.revoked`（`reason: operator`）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: token_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 取り消した }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/personal-access-token-policy:
+    get:
+      operationId: getPersonalAccessTokenPolicy
+      summary: realm の Personal Access Token のポリシー（ADR 0109）
+      description: 権限 `personal_access_tokens:manage`。フィーチャーが動いていなければ 404。
+      responses:
+        "200":
+          description: 今のポリシー
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PersonalAccessTokenPolicy" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: putPersonalAccessTokenPolicy
+      summary: realm の Personal Access Token のポリシーを置き換える（ADR 0109）
+      description: |
+        権限 `personal_access_tokens:manage`。寿命の上限は秒の単位で、ホスト先の上限（`personal_access_tokens.max_lifetime`）を
+        超えられない（`400 invalid_policy`）。厳しくしたポリシーは既存のトークンにもすぐ効く。監査ログ `personal_access_token.policy_updated`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PersonalAccessTokenPolicyInput" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PersonalAccessTokenPolicy" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 
 components:
   securitySchemes:
@@ -3438,6 +3512,7 @@ components:
         password: { type: boolean }
         recovery_codes: { type: integer, description: 消した未使用のリカバリーコードの数 }
         sessions: { type: integer, description: 失効させたセッションの数 }
+        personal_access_tokens: { type: integer, description: 取り消した Personal Access Token の数（ADR 0109） }
     Validity:
       type: object
       properties:
@@ -4135,3 +4210,37 @@ components:
           items: { type: string }
         pii: { type: string, enum: [omit, pseudonymize] }
         enabled: { type: boolean }
+    PersonalAccessToken:
+      type: object
+      required: [id, name, scopes, created_at]
+      description: Personal Access Token（秘密は含めない。ADR 0109）
+      properties:
+        id: { type: string, description: "トークン ID（`pat_…`）" }
+        name: { type: string }
+        scopes: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+        revoke_reason: { type: string, enum: [user, operator, revoke_all, merged] }
+    PersonalAccessTokenPolicyInput:
+      type: object
+      required: [max_lifetime_seconds, allowed_scopes, require_expiry]
+      properties:
+        max_lifetime_seconds: { type: integer, format: int64, minimum: 0, description: realm の寿命の上限（0 なら realm では決めない） }
+        allowed_scopes:
+          type: array
+          maxItems: 100
+          items: { type: string, maxLength: 130 }
+          description: 作れるスコープ（権限の名前。`x:*` も可）。空なら形だけを確かめる
+        require_expiry: { type: boolean, description: 期限の無いトークンを作れない・使えない }
+    PersonalAccessTokenPolicy:
+      type: object
+      required: [max_lifetime_seconds, allowed_scopes, require_expiry, host_max_lifetime_seconds, effective_max_lifetime_seconds]
+      properties:
+        max_lifetime_seconds: { type: integer, format: int64 }
+        allowed_scopes: { type: array, items: { type: string } }
+        require_expiry: { type: boolean }
+        host_max_lifetime_seconds: { type: integer, format: int64, description: ホスト先の上限（0 なら上限なし） }
+        effective_max_lifetime_seconds: { type: integer, format: int64, description: 今効く上限（0 なら上限なし） }
+        updated_at: { type: string, format: date-time, description: 最後に変えた時刻（置いていなければ無い） }

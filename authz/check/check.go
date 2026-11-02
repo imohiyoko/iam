@@ -202,7 +202,8 @@ type source struct {
 // 付与で許すなら、操作に当たる名前空間の要件と Org の要件をすべて AND する（ADR 0084）。
 // 境界は r.Bands（無ければ realm の一覧）に名前空間の境界を重ねたもの。
 func (c *Checker) decide(gs []Grant, r Request, src source) (Decision, error) {
-	if r.Action == "" {
+	if r.Action == "" || !r.Context.allows(r.Action) {
+		// スコープの外の操作は、付与が無いのと同じに理由なしで拒む（ADR 0109）。
 		return Decision{}, nil
 	}
 	now := c.Clock.Now()
@@ -325,7 +326,7 @@ func (c *Checker) Holds(ctx context.Context, tx port.Tx, realmID string, p Princ
 		}
 	}
 	for _, want := range perms {
-		if !role.Covered(have, want) {
+		if !role.Covered(have, want) || !ac.allows(want) {
 			return false, nil
 		}
 	}

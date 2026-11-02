@@ -30,6 +30,7 @@ import (
 	x509method "github.com/imohiyoko/iam/authn/method/x509"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
+	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
@@ -80,6 +81,9 @@ var featureCatalog = map[string]struct {
 	feature.SMSOTP:             {sms.Feature, module + "/features/sms"},
 	feature.PushAuth:           {push.Feature, module + "/features/push"},
 	feature.X509:               {x509method.Feature, module + "/features/x509"},
+
+	// ADR 0109。
+	feature.PersonalAccessTokens: {pat.Feature, module + "/features/personalaccesstokens"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

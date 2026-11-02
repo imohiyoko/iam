@@ -3067,6 +3067,91 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
 
+  /v1/me/personal-access-tokens:
+    get:
+      operationId: listMyPersonalAccessTokens
+      summary: 本人の Personal Access Token の一覧（フィーチャー personal_access_tokens。ADR 0109）
+      description: 動いていなければ 404。取り消した・期限切れのものも含む。秘密は返さない。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 作成時刻の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [personal_access_tokens]
+                properties:
+                  personal_access_tokens:
+                    type: array
+                    items: { $ref: "#/components/schemas/PersonalAccessToken" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createMyPersonalAccessToken
+      summary: 本人の Personal Access Token を作る（トークンは1回だけ返す。ADR 0109）
+      description: |
+        直近の本人確認が要る（`max_auth_age` と名前空間 `me` の要件。満たさなければ `401 reauthentication_required`）。
+        スコープは権限の名前（`<リソース>:<操作>`、`x:*` も可）で、本人の権限をそれに絞る（本人の持たない権限は効かない）。
+        realm のポリシーに合わなければ `400`（`invalid_name`・`invalid_scope`・`scope_not_allowed`・`invalid_expiry`・
+        `expiry_required`）。有効なトークンの数の上限で `409 token_limit`。トークンは公開 API では使えない。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePersonalAccessToken" }
+      responses:
+        "201":
+          description: 作った
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, personal_access_token]
+                properties:
+                  token: { type: string, description: "トークン（`iampat_…`）。この応答でだけ返す" }
+                  personal_access_token: { $ref: "#/components/schemas/PersonalAccessToken" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/personal-access-tokens/{id}:revoke:
+    post:
+      operationId: revokeMyPersonalAccessToken
+      summary: 本人の Personal Access Token を取り消す
+      description: もう取り消していても 204。取り消しは次の要求から効く。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 取り消した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/personal-access-token-policy:
+    get:
+      operationId: getMyPersonalAccessTokenPolicy
+      summary: realm の Personal Access Token のポリシー（作る前に上限と許すスコープを知るため）
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 今効くポリシー
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PersonalAccessTokenPolicyView" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -3815,3 +3900,38 @@ components:
             `condition.risk.<種類>`・`condition.attested`・`condition.aal`。ADR 0084、0093）。付与の条件だけで拒み、その付与が
             条件を満たせば許されたときに限って返す。連携先はこれを見て step-up を促せる
         step_up: { $ref: "#/components/schemas/StepUp" }
+    PersonalAccessToken:
+      type: object
+      required: [id, name, scopes, created_at]
+      description: Personal Access Token（秘密は含めない。ADR 0109）
+      properties:
+        id: { type: string, description: "トークン ID（`pat_…`）" }
+        name: { type: string }
+        scopes: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time, description: 期限（無ければ期限なし） }
+        last_used_at: { type: string, format: date-time, description: 最後に使った時刻（1 分の粒度） }
+        revoked_at: { type: string, format: date-time }
+        revoke_reason: { type: string, enum: [user, operator, revoke_all, merged] }
+    CreatePersonalAccessToken:
+      type: object
+      required: [name, scopes]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100, description: 本人が見分けるための名前 }
+        scopes:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { type: string, maxLength: 130 }
+          description: 権限の名前（`<リソース>:<操作>`、`x:*` も可）
+        expires_at:
+          type: string
+          format: date-time
+          description: 期限。省けば、寿命の上限があれば上限の期限、無ければ期限なし（ポリシーの `require_expiry` なら省けない）
+    PersonalAccessTokenPolicyView:
+      type: object
+      required: [max_lifetime_seconds, allowed_scopes, require_expiry]
+      properties:
+        max_lifetime_seconds: { type: integer, format: int64, description: 今効く寿命の上限（realm とホスト先の短い方。0 なら上限なし） }
+        allowed_scopes: { type: array, items: { type: string }, description: 作れるスコープ（空なら形だけを確かめる） }
+        require_expiry: { type: boolean }

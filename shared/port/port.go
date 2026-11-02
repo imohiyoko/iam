@@ -73,6 +73,8 @@ type Tx interface {
 	Attributes() AttributeRepo
 	RiskTypes() RiskTypeRepo
 	ActionNamespaces() ActionNamespaceRepo
+	// PersonalAccessTokens は本人の Personal Access Token と realm のポリシー（フィーチャー personal_access_tokens。ADR 0109）。
+	PersonalAccessTokens() PersonalAccessTokenRepo
 	Clients() ClientRepo
 	SigningKeys() SigningKeyRepo
 	Grants() GrantRepo
