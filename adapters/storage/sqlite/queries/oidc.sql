@@ -33,8 +33,8 @@ UPDATE authn_signing_keys SET retired_at = ? WHERE realm_id = ? AND id = ?;
 DELETE FROM authn_signing_keys WHERE realm_id = ? AND id = ?;
 
 -- name: CreateGrant :exec
-INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetGrant :one
 SELECT * FROM authn_oidc_grants WHERE realm_id = ? AND id = ?;

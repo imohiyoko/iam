@@ -2,7 +2,7 @@
 
 - 状態: 承認
 - 日付: 2026-11-02
-- 関連: [design.md](../design.md) 5.1、5.5、11.15、[0010](0010-feature-toggles.md)、[0011](0011-build-time-features.md)、[0022](0022-deny-reason-disclosure.md)、
+- 関連: [design.md](../design.md) 5.1、5.5、11.16、[0010](0010-feature-toggles.md)、[0011](0011-build-time-features.md)、[0022](0022-deny-reason-disclosure.md)、
   [0065](0065-oidc-clients-and-signing-keys.md)、[0066](0066-oidc-authorization-code-flow.md)、[0073](0073-build-and-feature-toggle.md)、
   [0089](0089-enterprise-full-scope.md)、[0091](0091-process-roles.md)
 

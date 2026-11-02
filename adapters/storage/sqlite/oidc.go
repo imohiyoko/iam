@@ -130,7 +130,7 @@ func toGrant(r db.AuthnOidcGrant) (port.Grant, error) {
 	var p times
 	g := port.Grant{ID: r.ID, RealmID: r.RealmID, ClientID: r.ClientID, UserID: r.UserID, OrgID: r.OrgID, SID: r.Sid,
 		AuthTime: p.at(r.AuthTime), CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.at(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt),
-		RevokeReason: r.RevokeReason}
+		RevokeReason: r.RevokeReason, ACR: r.Acr}
 	if p.err != nil {
 		return g, p.err
 	}
@@ -143,7 +143,8 @@ func toGrant(r db.AuthnOidcGrant) (port.Grant, error) {
 func (r grants) Create(ctx context.Context, g port.Grant) error {
 	return mapErr(r.q.CreateGrant(ctx, db.CreateGrantParams{ID: g.ID, RealmID: g.RealmID, ClientID: g.ClientID, UserID: g.UserID, OrgID: g.OrgID,
 		Sid: g.SID, Scopes: jsonList(g.Scopes), AuthMethods: jsonList(g.AuthMethods), AuthTime: formatTime(g.AuthTime),
-		CreatedAt: formatTime(g.CreatedAt), ExpiresAt: formatTime(g.ExpiresAt), RevokedAt: nullTime(g.RevokedAt), RevokeReason: g.RevokeReason}))
+		CreatedAt: formatTime(g.CreatedAt), ExpiresAt: formatTime(g.ExpiresAt), RevokedAt: nullTime(g.RevokedAt), RevokeReason: g.RevokeReason,
+		Acr: g.ACR}))
 }
 
 func (r grants) Get(ctx context.Context, realmID, id string) (port.Grant, error) {
