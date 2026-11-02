@@ -6,6 +6,7 @@ package port
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -50,6 +51,8 @@ type Tx interface {
 	TOTP() TOTPRepo
 	// Credentials は認証方式のプラグインの汎用の認証情報（ADR 0090、0092）。
 	Credentials() CredentialRepo
+	// KnownDevices は本人がログインした端末（フィーチャー device_recognition。ADR 0105）。
+	KnownDevices() KnownDeviceRepo
 	Passwords() PasswordRepo
 	RecoveryCodes() RecoveryCodeRepo
 	Suspensions() SuspensionRepo
@@ -269,7 +272,8 @@ type Notification struct {
 	UserID    string     `json:"user_id,omitempty"` // 公開 ID（ADR 0045）
 	OrgID     string     `json:"org_id,omitempty"`
 	Locale    string     `json:"locale,omitempty"`
-	Category  string     `json:"category,omitempty"` // suspended の種別
+	Category  string     `json:"category,omitempty"`  // suspended の種別
+	DeviceID  string     `json:"device_id,omitempty"` // new_device_login の端末（公開 ID。ADR 0105）
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	HasSecret bool       `json:"has_secret"`
 }
@@ -320,6 +324,33 @@ type BreachChecker interface {
 	// Breached は SHA-1（大文字の16進 40 文字）のパスワードが漏洩済みかを返す。
 	Breached(ctx context.Context, sha1Hex string) (bool, error)
 }
+
+// GeoLocation は接続元の場所（ADR 0105）。分からない項目は零値。
+type GeoLocation struct {
+	// Country は ISO 3166-1 alpha-2（大文字）。
+	Country string
+	// ASN は自律システムの番号。0 なら分からない。
+	ASN uint32
+	// HasCoordinates は Latitude・Longitude があるか。
+	HasCoordinates      bool
+	Latitude, Longitude float64
+}
+
+// GeoIP は接続元の IP から場所を引く（フィーチャー login_risk。ADR 0105）。ログインの経路で呼ぶので、外部に問い合わせない
+// （手元のデータベースを引く）実装にする。見つからなければ ok=false。
+type GeoIP interface {
+	Lookup(ctx context.Context, ip string) (loc GeoLocation, ok bool, err error)
+}
+
+// BotVerifier はボットの確認（CAPTCHA・Turnstile など）のトークンを確かめる（フィーチャー bot_protection。ADR 0105）。
+// 人と確かめられなければ ErrBotRejected、確かめられなかった（外部の障害など）ならそのほかのエラーを返す。呼び出し側はどちらも
+// 通さない（fail-closed）。
+type BotVerifier interface {
+	Verify(ctx context.Context, token, remoteIP string) error
+}
+
+// ErrBotRejected はボットの確認のトークンが通らなかったこと。
+var ErrBotRejected = errors.New("bot check rejected")
 
 // FIDOMetadataSource は FIDO Metadata Service（MDS3）の BLOB（署名付きの JWT）を取ってくる（フィーチャー passkey_attestation、
 // ADR 0096）。署名はコアが設定したルートで確かめるので、アダプタは取り方だけを持つ（ファイル、HTTP など）。

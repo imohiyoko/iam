@@ -567,5 +567,6 @@ func (r users) Erase(ctx context.Context, realmID, id string, at time.Time) erro
 			return mapErr(err)
 		}
 	}
-	return nil
+	_, err = q.DeleteKnownDevicesByUser(ctx, db.DeleteKnownDevicesByUserParams{RealmID: realmID, UserID: id})
+	return mapErr(err)
 }

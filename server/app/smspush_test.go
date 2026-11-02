@@ -261,14 +261,14 @@ func TestDisableSMSAndPushWithData(t *testing.T) {
 	disableWithData(t, l, feature.PushAuth, 1)
 }
 
-// device はテスト用の端末（P-256 の鍵）。
-type device struct {
+// pushDevice はテスト用の端末（P-256 の鍵）。
+type pushDevice struct {
 	key *ecdsa.PrivateKey
 	pub string
 	id  string
 }
 
-func newDevice(t *testing.T) *device {
+func newDevice(t *testing.T) *pushDevice {
 	t.Helper()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -278,10 +278,10 @@ func newDevice(t *testing.T) *device {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &device{key: k, pub: base64.RawURLEncoding.EncodeToString(der)}
+	return &pushDevice{key: k, pub: base64.RawURLEncoding.EncodeToString(der)}
 }
 
-func (d *device) sign(t *testing.T, kind string, fields ...string) string {
+func (d *pushDevice) sign(t *testing.T, kind string, fields ...string) string {
 	t.Helper()
 	msg, ok := push.Message(kind, fields...)
 	if !ok {
@@ -295,7 +295,7 @@ func (d *device) sign(t *testing.T, kind string, fields ...string) string {
 	return base64.RawURLEncoding.EncodeToString(sig)
 }
 
-func (d *device) enroll(t *testing.T, l *loginEnv, cookie string) (int, map[string]any) {
+func (d *pushDevice) enroll(t *testing.T, l *loginEnv, cookie string) (int, map[string]any) {
 	t.Helper()
 	status, st := l.mePost(t, cookie, "/v1/me/credentials/push:enroll-begin", nil)
 	if status != 200 {
@@ -313,7 +313,7 @@ func (d *device) enroll(t *testing.T, l *loginEnv, cookie string) (int, map[stri
 	return status, res
 }
 
-func (d *device) respond(t *testing.T, l *loginEnv, challengeID, decision, number string) (int, map[string]any) {
+func (d *pushDevice) respond(t *testing.T, l *loginEnv, challengeID, decision, number string) (int, map[string]any) {
 	t.Helper()
 	w := l.do(t, l.a.PublicHandler(), "POST", "/v1/login/methods/push:callback", map[string]any{"payload": map[string]any{
 		"action": "respond", "device_id": d.id, "challenge_id": challengeID, "decision": decision, "number": number,

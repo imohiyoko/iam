@@ -207,6 +207,24 @@ func build(ctx context.Context, cfg config.Config, log *slog.Logger, stdout io.W
 			return fail(err)
 		}
 	}
+	if cfg.GeoIP.Driver != "" {
+		gf, err := plugin.GeoIP(cfg.GeoIP.Driver)
+		if err != nil {
+			return fail(err)
+		}
+		if d.GeoIP, err = gf(ctx, pc(cfg.GeoIP)); err != nil {
+			return fail(err)
+		}
+	}
+	if cfg.BotCheck.Driver != "" {
+		bf, err := plugin.BotCheck(cfg.BotCheck.Driver)
+		if err != nil {
+			return fail(err)
+		}
+		if d.BotVerifier, err = bf(ctx, pc(cfg.BotCheck)); err != nil {
+			return fail(err)
+		}
+	}
 	return d, closeFn, nil
 }
 

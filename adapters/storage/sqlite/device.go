@@ -1,0 +1,54 @@
+package sqlite
+
+import (
+	"context"
+	"time"
+
+	"github.com/imohiyoko/iam/adapters/storage/sqlite/db"
+	"github.com/imohiyoko/iam/shared/port"
+)
+
+// knownDevices は本人がログインした端末（authn_known_devices。ADR 0105）。
+type knownDevices struct{ q *db.Queries }
+
+func toKnownDevice(r db.AuthnKnownDevice) (port.KnownDevice, error) {
+	var p times
+	d := port.KnownDevice{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, UserID: r.UserID, Lookup: r.Lookup, Data: r.Data,
+		CreatedAt: p.at(r.CreatedAt), LastSeenAt: p.at(r.LastSeenAt)}
+	return d, p.err
+}
+
+func (r knownDevices) Create(ctx context.Context, d port.KnownDevice) error {
+	return mapErr(r.q.CreateKnownDevice(ctx, db.CreateKnownDeviceParams{ID: d.ID, PublicID: d.PublicID, RealmID: d.RealmID, UserID: d.UserID,
+		Lookup: nonNil(d.Lookup), Data: nonNil(d.Data), CreatedAt: formatTime(d.CreatedAt), LastSeenAt: formatTime(d.LastSeenAt)}))
+}
+
+func (r knownDevices) ListByUser(ctx context.Context, realmID, userID string) ([]port.KnownDevice, error) {
+	rs, err := r.q.ListKnownDevicesByUser(ctx, db.ListKnownDevicesByUserParams{RealmID: realmID, UserID: userID})
+	return rows(rs, err, toKnownDevice)
+}
+
+func (r knownDevices) Seen(ctx context.Context, realmID, id string, data []byte, at time.Time) error {
+	n, err := r.q.SeeKnownDevice(ctx, db.SeeKnownDeviceParams{Data: nonNil(data), LastSeenAt: formatTime(at), RealmID: realmID, ID: id})
+	return affected(n, err, "device")
+}
+
+func (r knownDevices) Delete(ctx context.Context, realmID, id string) error {
+	n, err := r.q.DeleteKnownDevice(ctx, db.DeleteKnownDeviceParams{RealmID: realmID, ID: id})
+	return affected(n, err, "device")
+}
+
+func (r knownDevices) DeleteByUser(ctx context.Context, realmID, userID string) (int, error) {
+	n, err := r.q.DeleteKnownDevicesByUser(ctx, db.DeleteKnownDevicesByUserParams{RealmID: realmID, UserID: userID})
+	return int(n), mapErr(err)
+}
+
+func (r knownDevices) Count(ctx context.Context) (int, error) {
+	n, err := r.q.CountKnownDevices(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r knownDevices) Purge(ctx context.Context, limit int) (int, error) {
+	n, err := r.q.PurgeKnownDevices(ctx, int64(limit))
+	return int(n), mapErr(err)
+}

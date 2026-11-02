@@ -58,6 +58,10 @@ type (
 	// SMSSenderFactory と PushSenderFactory は送信（フィーチャー sms_otp・push_auth。ADR 0104）。
 	SMSSenderFactory  func(context.Context, Config) (port.SMSSender, error)
 	PushSenderFactory func(context.Context, Config) (port.PushSender, error)
+	// GeoIPFactory は接続元の場所を引く（フィーチャー login_risk で使う。ADR 0105）。
+	GeoIPFactory func(context.Context, Config) (port.GeoIP, error)
+	// BotCheckFactory はボットの確認のトークンを確かめる（フィーチャー bot_protection で使う。ADR 0105）。
+	BotCheckFactory func(context.Context, Config) (port.BotVerifier, error)
 )
 
 // Kind はアダプタの種類。
@@ -73,6 +77,8 @@ const (
 	KindFIDOMDS     Kind = "fido_mds"
 	KindSMSSender   Kind = "sms_sender"
 	KindPushSender  Kind = "push_sender"
+	KindGeoIP       Kind = "geoip"
+	KindBotCheck    Kind = "bot_check"
 )
 
 var (
@@ -106,6 +112,11 @@ func RegisterSMSSender(name string, f SMSSenderFactory) {
 }
 func RegisterPushSender(name string, f PushSenderFactory) {
 	register(KindPushSender, name, f)
+}
+
+func RegisterGeoIP(name string, f GeoIPFactory) { register(KindGeoIP, name, f) }
+func RegisterBotCheck(name string, f BotCheckFactory) {
+	register(KindBotCheck, name, f)
 }
 
 func lookup[F any](k Kind, name string) (F, error) {
@@ -145,6 +156,12 @@ func SMSSender(name string) (SMSSenderFactory, error) {
 
 func PushSender(name string) (PushSenderFactory, error) {
 	return lookup[PushSenderFactory](KindPushSender, name)
+}
+
+func GeoIP(name string) (GeoIPFactory, error) { return lookup[GeoIPFactory](KindGeoIP, name) }
+
+func BotCheck(name string) (BotCheckFactory, error) {
+	return lookup[BotCheckFactory](KindBotCheck, name)
 }
 
 // Registered はバイナリに含まれるアダプタを種類ごとに名前順で返す（マニフェスト用）。

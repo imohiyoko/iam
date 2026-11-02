@@ -202,6 +202,10 @@ func (s *Service) Merge(ctx context.Context, tx port.Tx, into port.User, token s
 		return Merged{}, err
 	}
 	now := s.Clock.Now()
+	// 統合元の端末は忘れる（ADR 0105。統合先で次に入れば新しい端末になる）。
+	if _, err := tx.KnownDevices().DeleteByUser(ctx, from.RealmID, from.ID); err != nil {
+		return Merged{}, err
+	}
 	if err := tx.Users().SetMerged(ctx, from.RealmID, from.ID, into.ID, now); err != nil {
 		return Merged{}, err
 	}
