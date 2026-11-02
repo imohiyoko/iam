@@ -998,16 +998,20 @@ type Client struct {
 	ClientId             string  `json:"client_id"`
 
 	// ClientSecret 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す）
-	ClientSecret             *string                 `json:"client_secret,omitempty"`
-	CreatedAt                time.Time               `json:"created_at"`
-	IdTokenSignedResponseAlg string                  `json:"id_token_signed_response_alg"`
-	Jwks                     *map[string]interface{} `json:"jwks,omitempty"`
-	Name                     string                  `json:"name"`
-	PostLogoutRedirectUris   []string                `json:"post_logout_redirect_uris"`
-	RedirectUris             []string                `json:"redirect_uris"`
-	TokenEndpointAuthMethod  string                  `json:"token_endpoint_auth_method"`
-	TrustLevel               ClientTrustLevel        `json:"trust_level"`
-	UpdatedAt                time.Time               `json:"updated_at"`
+	ClientSecret *string   `json:"client_secret,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+
+	// FrontchannelLogoutSessionRequired `frontchannel_logout_uri` があるときだけ
+	FrontchannelLogoutSessionRequired *bool                   `json:"frontchannel_logout_session_required,omitempty"`
+	FrontchannelLogoutUri             *string                 `json:"frontchannel_logout_uri,omitempty"`
+	IdTokenSignedResponseAlg          string                  `json:"id_token_signed_response_alg"`
+	Jwks                              *map[string]interface{} `json:"jwks,omitempty"`
+	Name                              string                  `json:"name"`
+	PostLogoutRedirectUris            []string                `json:"post_logout_redirect_uris"`
+	RedirectUris                      []string                `json:"redirect_uris"`
+	TokenEndpointAuthMethod           string                  `json:"token_endpoint_auth_method"`
+	TrustLevel                        ClientTrustLevel        `json:"trust_level"`
+	UpdatedAt                         time.Time               `json:"updated_at"`
 }
 
 // ClientTrustLevel defines model for Client.TrustLevel.
@@ -1015,7 +1019,15 @@ type ClientTrustLevel string
 
 // ClientInput defines model for ClientInput.
 type ClientInput struct {
-	BackchannelLogoutUri     *string                              `json:"backchannel_logout_uri,omitempty"`
+	BackchannelLogoutUri *string `json:"backchannel_logout_uri,omitempty"`
+
+	// FrontchannelLogoutSessionRequired `frontchannel_logout_uri` に `iss` と `sid` を付けるか（既定 false）
+	FrontchannelLogoutSessionRequired *bool `json:"frontchannel_logout_session_required,omitempty"`
+
+	// FrontchannelLogoutUri Front-Channel Logout の送り先（OIDC Front-Channel Logout 1.0。フィーチャー `oidc_logout`。ADR 0094）。ログアウトの
+	// 完了画面で iframe で開く。scheme・ホスト・ポートは `redirect_uris` のどれかと同じであること。フィーチャーが
+	// 動いていなければ、今の値から変えられない（`invalid_client_metadata`）
+	FrontchannelLogoutUri    *string                              `json:"frontchannel_logout_uri,omitempty"`
 	IdTokenSignedResponseAlg *ClientInputIdTokenSignedResponseAlg `json:"id_token_signed_response_alg,omitempty"`
 
 	// Jwks `private_key_jwt` の公開鍵（JWKS）

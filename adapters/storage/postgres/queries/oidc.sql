@@ -2,8 +2,8 @@
 
 -- name: CreateClient :exec
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
-    id_token_alg, backchannel_logout_uri, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
+    id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);
 
 -- name: GetClient :one
 SELECT * FROM authn_clients WHERE realm_id = $1 AND id = $2;
@@ -16,8 +16,8 @@ SELECT * FROM authn_clients WHERE realm_id = $1 ORDER BY created_at, id;
 
 -- name: UpdateClient :execrows
 UPDATE authn_clients SET name = $1, trust_level = $2, redirect_uris = $3, post_logout_redirect_uris = $4, auth_method = $5, secret_hash = $6, jwks = $7,
-    id_token_alg = $8, backchannel_logout_uri = $9, updated_at = $10
-WHERE realm_id = $11 AND id = $12;
+    id_token_alg = $8, backchannel_logout_uri = $9, frontchannel_logout_uri = $10, frontchannel_logout_session_required = $11, updated_at = $12
+WHERE realm_id = $13 AND id = $14;
 
 -- name: DeleteClient :execrows
 DELETE FROM authn_clients WHERE realm_id = $1 AND id = $2;

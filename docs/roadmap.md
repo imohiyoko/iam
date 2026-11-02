@@ -354,7 +354,18 @@ Group のネスト、Org 階層（M7）。
 - 認証方式のプラグイン（ADR 0090）：`Authenticator` のポート、`authn_credentials`、汎用の HTTP、外部 Authenticator のアダプタ
 - 既存の方式（passkey・TOTP・パスワード・メール・ログインリンク・OAuth）を 1 方式ずつ移す
 - `acr` と AAL、step-up（RFC 9470）、Org のログインポリシーと `acr_values` を強さで書く
-- RP-Initiated Logout、Front-Channel Logout
+- RP-Initiated Logout、Front-Channel Logout（下）
+
+#### RP-Initiated Logout と Front-Channel Logout（ADR 0094）
+
+**ゴール**：連携先の画面でのログアウトで IAM のセッションも終わり、同じブラウザのほかの連携先にも知らせる。
+
+- [x] `end_session_endpoint`（GET と POST）。`id_token_hint`（期限切れも可。署名・`iss`・`aud` を確かめる）、`client_id`、
+  登録と完全一致の `post_logout_redirect_uri`、`state`、`ui_locales`、`logout_hint`
+- [x] `id_token_hint` がセッションと合わない・無いときはホスト型の確認の画面（1回限り・同じセッションだけ・同一オリジン）
+- [x] セッションの失効で Back-Channel Logout を送り、完了の画面で `frontchannel_logout_uri` を iframe で開く（`iss`・`sid`、CSP）
+- [x] 連携先の登録と Discovery、フィーチャーの無効化で登録を外す、複数 realm、標準の RP（zitadel/oidc）での E2E
+- OpenID Connect Session Management（`check_session_iframe`）
 
 #### acr・AAL と step-up（ADR 0093）
 

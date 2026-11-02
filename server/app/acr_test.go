@@ -71,7 +71,7 @@ func (l *loginEnv) strongLogin(t *testing.T, email string, secret []byte) string
 	return full
 }
 
-func discovery(t *testing.T, l *loginEnv) map[string]any {
+func fetchDiscovery(t *testing.T, l *loginEnv) map[string]any {
 	t.Helper()
 	w := l.oidcDo(t, "GET", "/.well-known/openid-configuration", nil, "")
 	var disc map[string]any
@@ -87,7 +87,7 @@ func TestACRFeatureOff(t *testing.T) {
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
 
-	disc := discovery(t, l)
+	disc := fetchDiscovery(t, l)
 	if disc["acr_values_supported"] != nil || slices.Contains(disc["claims_supported"].([]any), any("acr")) {
 		t.Fatalf("discovery: %v", disc)
 	}
@@ -129,7 +129,7 @@ func TestACRIDTokenAndStepUp(t *testing.T) {
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
 
-	disc := discovery(t, l)
+	disc := fetchDiscovery(t, l)
 	if got := disc["acr_values_supported"]; !slices.Equal(anys(got), []any{acr.AAL1, acr.AAL2, acr.PHR}) ||
 		!slices.Contains(disc["claims_supported"].([]any), any("acr")) {
 		t.Fatalf("discovery: %v", disc)
