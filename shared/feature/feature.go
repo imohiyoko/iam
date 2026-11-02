@@ -38,6 +38,7 @@ const (
 	EventSubscriptions  = "event_subscriptions"
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
+	SAML                = "saml"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

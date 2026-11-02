@@ -659,6 +659,52 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/connections:saml:
+    post:
+      operationId: createSAMLConnection
+      summary: IdP 接続（SAML 2.0）を登録する（ADR 0098）
+      description: |
+        権限 `connections:manage`。フィーチャー `saml` が動いていなければ `404 saml_disabled`。IdP のメタデータを XML か URL で渡す
+        （URL は https に限り、公開のアドレスに限って登録のときに一度だけ取得する。内部の IdP は XML で渡す）。
+        IdP には応答の `sp_entity_id`・`acs_url` か、SP のメタデータ（`sp_entity_id` の URL）を登録する。
+        `trust_email` なら IdP が返すメールを確認済みとみなし、未登録の人を登録する（無ければ登録には使わず、連携だけに使える）。
+        SP の署名鍵は封をして保存し、応答にも監査ログにも出さない。`server.public_url` が無ければ `400 public_url_required`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug]
+              properties:
+                slug: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$" }
+                metadata_xml: { type: string, maxLength: 1048576 }
+                metadata_url: { type: string, maxLength: 2048 }
+                entity_id: { type: string, maxLength: 1024, description: メタデータに IdP が複数あるときに選ぶ }
+                sign_requests: { type: boolean }
+                name_id_format: { type: string, maxLength: 256 }
+                email_attribute: { type: string, maxLength: 256 }
+                trust_email: { type: boolean }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, slug, idp_entity_id, sp_entity_id, acs_url]
+                properties:
+                  id: { type: string }
+                  slug: { type: string }
+                  idp_entity_id: { type: string }
+                  sp_entity_id: { type: string, description: SP の Entity ID。SP のメタデータの URL でもある }
+                  acs_url: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
   /v1/admin/orgs:
     get:
       operationId: listOrgs

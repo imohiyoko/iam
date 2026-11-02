@@ -33,7 +33,7 @@ Org の IdP は任意の `sub` とメールを返せるので、何もしなけ�
 - connection を消すと、紐付けた外部 ID を無効化する。Org の削除では connection とドメインを消す
 - 監査ログ：`org.connection.added`・`removed`、`org.member.joined_sso`
 - フィーチャーを無効にするときは、connection を消し（外部 ID を無効化）、ログインポリシーの `require_sso` を外す
-- SAML は扱わない（design.md 15章。別に決める）
+- SAML は扱わない（design.md 15章。別に決める）→ ADR 0098 で SAML 2.0 の connection を足した
 
 ## 理由
 

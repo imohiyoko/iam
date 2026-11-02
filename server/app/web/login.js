@@ -50,7 +50,7 @@
     let r = app.dataset.returnTo || "";
     try {
       if (r) sessionStorage.setItem("iam_return_to", r);
-      else if (app.dataset.page === "oauth_callback") r = sessionStorage.getItem("iam_return_to") || "";
+      else if (app.dataset.page === "oauth_callback" || app.dataset.page === "saml_callback") r = sessionStorage.getItem("iam_return_to") || "";
       else sessionStorage.removeItem("iam_return_to"); // 放棄した往復の戻り先を後のログインで使わない
     } catch (_) {}
     return r;
@@ -132,6 +132,13 @@
 
   for (const b of document.querySelectorAll(".provider")) {
     b.addEventListener("click", async () => {
+      if (b.dataset.type === "saml") {
+        // SAML（ADR 0098）：IdP の応答は ACS（/login/saml/acs）に POST される。
+        const r = await post("/v1/login/saml/" + encodeURIComponent(b.dataset.connection) + ":start", {});
+        if (!r.ok) return fail(r);
+        window.location.assign(r.data.redirect_url);
+        return;
+      }
       const redirect = window.location.origin + base + "/login/oauth/callback";
       const r = await post("/v1/login/oauth/" + encodeURIComponent(b.dataset.connection) + ":start", { redirect_uri: redirect });
       if (!r.ok) return fail(r);
@@ -146,6 +153,32 @@
       if (q.get("error") || !q.get("state") || !q.get("code")) { show("email"); say("authentication_failed", true); break; }
       show("pending");
       post("/v1/login/oauth:complete", { state: q.get("state"), code: q.get("code") }).then((r) => {
+        if (!r.ok) show("email");
+        done(r);
+      });
+      break;
+    }
+    case "saml_callback": {
+      // ACS に POST された応答を、同じオリジンから完了の API に渡す（フローの Cookie はここで届く）。
+      // RelayState が "link." で始まるものは連携のフロー。
+      const response = app.dataset.samlResponse || "";
+      const relay = app.dataset.relayState || "";
+      delete app.dataset.samlResponse;
+      history.replaceState(null, "", window.location.pathname);
+      if (!response || !relay) { show("email"); say("authentication_failed", true); break; }
+      show("pending");
+      if (relay.startsWith("link.")) {
+        post("/v1/me/identities/saml:complete", { saml_response: response, relay_state: relay }).then((r) => {
+          show("done");
+          if (!r.ok) return fail(r);
+          say("linked", false);
+          const to = safeReturnTo();
+          try { sessionStorage.removeItem("iam_return_to"); } catch (_) {}
+          if (to) window.location.assign(to);
+        });
+        break;
+      }
+      post("/v1/login/saml:complete", { saml_response: response, relay_state: relay }).then((r) => {
         if (!r.ok) show("email");
         done(r);
       });
