@@ -15,6 +15,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/orghierarchy"
 	_ "github.com/imohiyoko/iam/features/orgloginpolicy"
 	_ "github.com/imohiyoko/iam/features/orgmanagedusers"
+	_ "github.com/imohiyoko/iam/features/passkeyattestation"
 	_ "github.com/imohiyoko/iam/features/password"
 	_ "github.com/imohiyoko/iam/features/quota"
 	_ "github.com/imohiyoko/iam/features/serviceaccounts"

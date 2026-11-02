@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for AdminSigningKeyState.
@@ -498,6 +499,36 @@ func (e OrgSettingsViewEffectiveWarnings) Valid() bool {
 	case OrgSettingsViewEffectiveWarningsIgnore:
 		return true
 	case OrgSettingsViewEffectiveWarningsWarn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PasskeyPolicyMinCertificationLevel.
+const (
+	L1     PasskeyPolicyMinCertificationLevel = "L1"
+	L1plus PasskeyPolicyMinCertificationLevel = "L1plus"
+	L2     PasskeyPolicyMinCertificationLevel = "L2"
+	L2plus PasskeyPolicyMinCertificationLevel = "L2plus"
+	L3     PasskeyPolicyMinCertificationLevel = "L3"
+	L3plus PasskeyPolicyMinCertificationLevel = "L3plus"
+)
+
+// Valid indicates whether the value is a known member of the PasskeyPolicyMinCertificationLevel enum.
+func (e PasskeyPolicyMinCertificationLevel) Valid() bool {
+	switch e {
+	case L1:
+		return true
+	case L1plus:
+		return true
+	case L2:
+		return true
+	case L2plus:
+		return true
+	case L3:
+		return true
+	case L3plus:
 		return true
 	default:
 		return false
@@ -1509,6 +1540,9 @@ type OrgLoginPolicy struct {
 	// MinAal amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（理由は policy.min_aal）。フィーチャー acr も要る（ADR 0093）
 	MinAal *int `json:"min_aal,omitempty"`
 
+	// Passkey Org の段の認証器のポリシー（ADR 0096）。認証に使った passkey が realm の段に加えてこれも満たすこと（理由は policy.passkey_authenticator）。passkey を使わない認証には効かない。フィーチャー passkey_attestation も要る
+	Passkey *PasskeyPolicy `json:"passkey,omitempty"`
+
 	// RequirePasskey passkey で本人確認したセッションだけを入れる
 	RequirePasskey *bool `json:"require_passkey,omitempty"`
 
@@ -1569,6 +1603,24 @@ type OrgSettingsView struct {
 
 // OrgSettingsViewEffectiveWarnings defines model for OrgSettingsView.Effective.Warnings.
 type OrgSettingsViewEffectiveWarnings string
+
+// PasskeyPolicy 認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。登録とログインのたびに判定し、外れれば passkey_not_allowed（どの条件に外れたかは監査ログにだけ残す）。空の項目は判定しない。require_attestation が無ければ AAGUID は認証器の自己申告
+type PasskeyPolicy struct {
+	// AllowedAaguids 許可する認証器の AAGUID。空でなければ、このどれかであること
+	AllowedAaguids *[]openapi_types.UUID `json:"allowed_aaguids,omitempty"`
+
+	// DeniedAaguids 拒否する認証器の AAGUID
+	DeniedAaguids *[]openapi_types.UUID `json:"denied_aaguids,omitempty"`
+
+	// MinCertificationLevel 求める FIDO の認定レベル（FIDO Metadata Service の status report）
+	MinCertificationLevel *PasskeyPolicyMinCertificationLevel `json:"min_certification_level,omitempty"`
+
+	// RequireAttestation 登録のときに信頼の起点（MDS か設定）に連なる attestation を確かめた passkey だけを通す。既存の passkey は確かめていない
+	RequireAttestation *bool `json:"require_attestation,omitempty"`
+}
+
+// PasskeyPolicyMinCertificationLevel 求める FIDO の認定レベル（FIDO Metadata Service の status report）
+type PasskeyPolicyMinCertificationLevel string
 
 // PrincipalGroup defines model for PrincipalGroup.
 type PrincipalGroup struct {
@@ -1650,7 +1702,10 @@ type Realm struct {
 		EmailStorage            string   `json:"email_storage"`
 		OrgCreation             string   `json:"org_creation"`
 		OrgDeletionGraceSeconds int64    `json:"org_deletion_grace_seconds"`
-		QuotaCount              struct {
+
+		// PasskeyPolicy 認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。登録とログインのたびに判定し、外れれば passkey_not_allowed（どの条件に外れたかは監査ログにだけ残す）。空の項目は判定しない。require_attestation が無ければ AAGUID は認証器の自己申告
+		PasskeyPolicy *PasskeyPolicy `json:"passkey_policy,omitempty"`
+		QuotaCount    struct {
 			Future    bool `json:"future"`
 			Invited   bool `json:"invited"`
 			Suspended bool `json:"suspended"`
@@ -1682,7 +1737,10 @@ type RealmSettings struct {
 	EmailStorage            *RealmSettingsEmailStorage `json:"email_storage,omitempty"`
 	OrgCreation             *RealmSettingsOrgCreation  `json:"org_creation,omitempty"`
 	OrgDeletionGraceSeconds *int64                     `json:"org_deletion_grace_seconds,omitempty"`
-	QuotaCount              *struct {
+
+	// PasskeyPolicy realm の段の認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。空のオブジェクトで外す
+	PasskeyPolicy *PasskeyPolicy `json:"passkey_policy,omitempty"`
+	QuotaCount    *struct {
 		Future    *bool `json:"future,omitempty"`
 		Invited   *bool `json:"invited,omitempty"`
 		Suspended *bool `json:"suspended,omitempty"`
@@ -1978,10 +2036,21 @@ type UserIdentity struct {
 
 // UserPasskey defines model for UserPasskey.
 type UserPasskey struct {
-	CreatedAt  time.Time  `json:"created_at"`
-	Id         string     `json:"id"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	Name       string     `json:"name"`
+	// Aaguid 認証器のモデルの ID（attested でなければ認証器の自己申告）
+	Aaguid *openapi_types.UUID `json:"aaguid,omitempty"`
+
+	// AttestationFormat 登録のときの attestation の形式（none、packed など。ADR 0096 の前に登録したものは無い）
+	AttestationFormat *string `json:"attestation_format,omitempty"`
+
+	// Attested 登録のときに attestation を信頼の起点まで確かめたか
+	Attested bool `json:"attested"`
+
+	// AuthenticatorName 認証器の名前（設定した信頼の起点か FIDO Metadata Service。フィーチャー passkey_attestation が動いていて分かるときだけ）
+	AuthenticatorName *string    `json:"authenticator_name,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	Id                string     `json:"id"`
+	LastUsedAt        *time.Time `json:"last_used_at,omitempty"`
+	Name              string     `json:"name"`
 }
 
 // UserPassword 設定したパスワード（無ければ省略）

@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-webauthn/webauthn/protocol"
+
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/emailflow"
@@ -31,6 +33,7 @@ import (
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
+	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/recovery"
@@ -61,6 +64,8 @@ type Deps struct {
 	EventSink port.EventSink
 	// BreachCheck は漏洩済みパスワードの確認。nil なら確認しない。
 	BreachCheck port.BreachChecker
+	// FIDOMDS は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation。ADR 0096）。nil なら MDS を読まない。
+	FIDOMDS port.FIDOMetadataSource
 	// DNS は Org のドメインの証明で TXT を引く。nil なら net.DefaultResolver。
 	DNS org.TXTResolver
 	// Hooks は Go のインターフェースで実装したフロー フック（11.8）。設定の hooks で url の無いものに使う。
@@ -103,6 +108,9 @@ type App struct {
 	oauth  *oauth.Service
 	// passkeys は passkey の登録とログイン。Relying Party が決まらない構成（public_url も rp_id も無い）では nil。
 	passkeys *passkey.Service
+	// metadata は認証器のメタデータ（フィーチャー passkey_attestation。ADR 0096）。root だけが持ち、全 realm で共有する。
+	// フィーチャーが動いていなければ nil。
+	metadata *attestation.Metadata
 	// totp は TOTP の登録と照合（2要素目）。
 	totp *totp.Service
 	// password はメール + パスワード。フィーチャー password が動いていなければ nil。
@@ -214,6 +222,13 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		if a.hookSecrets, err = hookSecrets(cfg); err != nil {
 			return nil, err
 		}
+	}
+	if plan.IsActive(feature.PasskeyAttestation) {
+		if a.metadata, err = newMetadata(ctx, cfg, d); err != nil {
+			return nil, err
+		}
+	} else if !cfg.Realm.PasskeyPolicy.Empty() || cfg.Passkey.Attestation.Conveyance != "" {
+		d.Logger.Warn("passkey attestation settings are configured but the passkey_attestation feature is not active")
 	}
 	if err := a.assemble(ctx, realm, defaultRealmSettings(cfg.Realm), endpointFor(cfg, realm, true)); err != nil {
 		return nil, err
@@ -375,14 +390,22 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.oauth.OrgSSO = a.orgs
 	}
 	a.passkeys = nil
+	var pa *passkey.Attestation
+	if m := a.root.metadata; m != nil {
+		pa = &passkey.Attestation{Metadata: m, Conveyance: protocol.ConveyancePreference(cfg.Passkey.Attestation.Conveyance), Policy: rs.PasskeyPolicy}
+	}
 	if ep.rpOK {
 		var err error
 		a.passkeys, err = passkey.New(passkey.Config{RPID: ep.rpID, RPName: ep.rpName, Origins: ep.origins}, passkey.Service{
 			Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Log: d.Logger,
+			Attestation: pa,
 		})
 		if err != nil {
 			return err
 		}
+	}
+	if a.orgs != nil {
+		a.orgs.Passkeys = pa
 	}
 	issuer := cfg.Security.SecondFactor.Issuer
 	if issuer == "" || a.root != a {
@@ -626,6 +649,10 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	if a.realms != nil {
 		// 他のインスタンスで作った・変えた realm を、要求が無くても読み直す（ADR 0083）。
 		go a.watchRealms(ctx)
+	}
+	if a.metadata != nil && a.deps.FIDOMDS != nil {
+		// 認証器のメタデータはバックグラウンドで読み直す（ログインの経路では取りに行かない。ADR 0096）。
+		go a.metadata.Run(ctx, a.deps.FIDOMDS, metadataRefresh(a.cfg))
 	}
 
 	a.deps.Logger.Info("iam started", "public", pubL.Addr().String(), "admin", admL.Addr().String(),

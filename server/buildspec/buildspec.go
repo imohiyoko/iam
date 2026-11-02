@@ -20,6 +20,7 @@ import (
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/org"
+	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
@@ -52,10 +53,11 @@ var featureCatalog = map[string]struct {
 	feature.FlowHooks:          {hook.Feature, module + "/features/flowhooks"},
 	feature.AccountMerge:       {merge.Feature, module + "/features/accountmerge"},
 	feature.MultiRealm:         {realm.Feature, module + "/features/multirealm"},
+	feature.PasskeyAttestation: {passkey.AttestationFeature, module + "/features/passkeyattestation"},
+	feature.ACR:                {acr.Feature, module + "/features/acr"},
+	feature.OIDCLogout:         {provider.LogoutFeature, module + "/features/oidclogout"},
 	feature.OrgAuditLog:        {eventlog.OrgAuditLogFeature, module + "/features/orgauditlog"},
 	feature.EventSubscriptions: {eventsub.Feature, module + "/features/eventsubscriptions"},
-	feature.OIDCLogout:         {provider.LogoutFeature, module + "/features/oidclogout"},
-	feature.ACR:                {acr.Feature, module + "/features/acr"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。
@@ -71,9 +73,10 @@ var adapterCatalog = map[plugin.Kind]map[string]string{
 	},
 	plugin.KindNotifier:    {"dev": module + "/adapters/notifier/dev", "webhook": module + "/adapters/notifier/webhook"},
 	plugin.KindBreachCheck: {"hibp": module + "/adapters/breachcheck/hibp"},
+	plugin.KindFIDOMDS:     {"file": module + "/adapters/fidomds/file", "http": module + "/adapters/fidomds/http"},
 }
 
-// requiredKinds は起動に必ず要るアダプタの種類（breach_check は任意）。
+// requiredKinds は起動に必ず要るアダプタの種類（breach_check と fido_mds は任意）。
 var requiredKinds = []plugin.Kind{plugin.KindStorage, plugin.KindEphemeral, plugin.KindKeyStore, plugin.KindEventSink, plugin.KindNotifier}
 
 // Spec は build.yaml。
