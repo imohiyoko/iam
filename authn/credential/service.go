@@ -77,7 +77,10 @@ type Service struct {
 	// Lockout はアカウント単位のロックアウト（フィーチャー account_lockout。ADR 0105）。ログイン ID で本人を決める1要素目は
 	// メールアドレスごと、2要素目はユーザーごとに、接続元を問わず失敗を数える。nil なら数えない。
 	Lockout *lockout.Guard
-	Log     *slog.Logger
+	// Directory は LDAP の connection で本人を引く（port.MethodPrincipals の DirectoryUser。フィーチャー ldap。ADR 0107）。
+	// nil ならディレクトリでの引き当てはできない（errs.Unavailable）。
+	Directory func(ctx context.Context, realmID, connection, attribute, value string) (string, error)
+	Log       *slog.Logger
 }
 
 // Client は要求の接続元（監査ログとセッション）。
@@ -146,7 +149,78 @@ func (s *Service) env(ctx context.Context, tx port.Tx, realmID, userID string, a
 		st.Storage = s.Storage
 	}
 	return port.MethodEnv{RealmID: realmID, UserID: userID, Usage: u, Now: now, Issuer: s.Issuer, Credentials: st,
-		ClientCertificates: ClientCertificates(ctx)}
+		ClientCertificates: ClientCertificates(ctx), Negotiate: NegotiateToken(ctx)}
+}
+
+type negotiateKey struct{}
+
+// WithNegotiateToken は要求の `Authorization: Negotiate` のトークン（Base64 を戻したもの）を ctx に載せる。HTTP の層が、汎用の
+// ログインの完了と登録のパスでだけ呼ぶ（ADR 0107）。方式には MethodEnv.Negotiate で渡す。
+func WithNegotiateToken(ctx context.Context, token []byte) context.Context {
+	return context.WithValue(ctx, negotiateKey{}, token)
+}
+
+// NegotiateToken は WithNegotiateToken で載せたトークンを返す（無ければ nil）。
+func NegotiateToken(ctx context.Context) []byte {
+	t, _ := ctx.Value(negotiateKey{}).([]byte)
+	return t
+}
+
+// principals は、方式が確かめた外部の名前から本人を引き当てる（port.MethodPrincipals。ADR 0107）。
+type principals struct {
+	s       *Service
+	realmID string
+}
+
+func notFoundUser() error { return errs.New(errs.KindNotFound, "user") }
+
+// EmailUser は確認済みのメールアドレスの、ログインできる状態のユーザーを返す。それ以外は errs.NotFound（理由を区別しない）。
+func (p principals) EmailUser(ctx context.Context, email string) (string, error) {
+	addr, err := account.NormalizeEmail(email)
+	if err != nil {
+		return "", notFoundUser()
+	}
+	var userID string
+	err = p.s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		e, err := p.s.Accounts.FindByEmail(ctx, tx, p.realmID, addr)
+		if err != nil {
+			return err
+		}
+		if e.VerifiedAt == nil {
+			return notFoundUser()
+		}
+		userID, err = activeUser(ctx, tx, p.realmID, e.UserID)
+		return err
+	})
+	return userID, err
+}
+
+// DirectoryUser は LDAP の connection で本人を引き、ログインできる状態のユーザーだけを返す。
+func (p principals) DirectoryUser(ctx context.Context, connection, attribute, value string) (string, error) {
+	if p.s.Directory == nil {
+		return "", errs.New(errs.KindUnavailable, "directory lookup is not available (feature ldap)")
+	}
+	id, err := p.s.Directory(ctx, p.realmID, connection, attribute, value)
+	if err != nil {
+		return "", err
+	}
+	var userID string
+	err = p.s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		userID, err = activeUser(ctx, tx, p.realmID, id)
+		return err
+	})
+	return userID, err
+}
+
+func activeUser(ctx context.Context, tx port.Tx, realmID, userID string) (string, error) {
+	u, err := tx.Users().Get(ctx, realmID, userID)
+	if err != nil {
+		return "", err
+	}
+	if u.Status != port.UserActive {
+		return "", notFoundUser()
+	}
+	return u.ID, nil
 }
 
 type clientCertsKey struct{}
@@ -475,6 +549,13 @@ func (s *Service) Login(ctx context.Context, realmID, name, flowID string, p jso
 	if errors.Is(err, port.ErrMethodPending) {
 		return session.Issued{}, "", s.pending(ctx, flowID, f)
 	}
+	// Negotiate のトークンが無い（チャレンジの前の 1 回目の要求）。照合していないので数えず、失敗の監査ログにも残さない（ADR 0107）。
+	if errors.Is(err, port.ErrNegotiate) {
+		if perr := s.put(ctx, flowID, f); perr != nil {
+			return session.Issued{}, "", perr
+		}
+		return session.Issued{}, "", port.ErrNegotiate
+	}
 	if rejectedByUser(err) {
 		s.retry(ctx, flowID, f)
 	}
@@ -514,6 +595,7 @@ func (s *Service) login(ctx context.Context, realmID, name string, state []byte,
 	users := &loginUsers{s: s, realmID: realmID, ip: c.IP}
 	env := s.env(ctx, nil, realmID, "", a, port.UsageFirstFactor)
 	env.Users, env.ClientIP = users, c.IP
+	env.Principals = principals{s: s, realmID: realmID}
 	var is session.Issued
 	var publicID string
 	r, err := a.Complete(ctx, env, port.MethodRequest{Payload: p, State: state})
