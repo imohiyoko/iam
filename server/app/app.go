@@ -46,6 +46,7 @@ import (
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/recovery"
 	"github.com/imohiyoko/iam/authn/saml"
+	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
@@ -130,6 +131,8 @@ type App struct {
 	// wsfed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。フィーチャー wsfed が動いていないか、
 	// issuer（server.public_url）が無ければ nil。
 	wsfed *wsfed.Service
+	// samlIdP は SAML 2.0 の IdP（iam が IdP。ADR 0115）。フィーチャー saml_idp が動いていないか、issuer（server.public_url）が無ければ nil。
+	samlIdP *samlidp.Service
 	// par は Pushed Authorization Requests（RFC 9126。ADR 0112）が動いているか（フィーチャー par）。
 	par bool
 	// resources は自前の API（リソースサーバー）の登録（RFC 8707。ADR 0112）。フィーチャー resource_indicators が
@@ -502,6 +505,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		// RP に渡すトークンは realm の issuer と ES256 の鍵で署名する（ADR 0110）。
 		a.wsfed = &wsfed.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Tokens: a.tokens,
 			Issuer: a.issuer, Attributes: a.attributes != nil, Log: d.Logger}
+	}
+	a.samlIdP = nil
+	if plan.IsActive(feature.SAMLIdP) && a.issuer != "" {
+		// SP に渡す Response は realm の issuer と ES256 の鍵で署名する（ADR 0115）。
+		a.samlIdP = &samlidp.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Tokens: a.tokens,
+			Issuer: a.issuer, Attributes: a.attributes != nil, HardwareAAL: a.hardwareAAL(), Log: d.Logger}
 	}
 	if plan.IsActive(feature.Impersonation) {
 		a.impersonationLimit = a.limiter(cfg.Security.Login.RateLimit.PerAccount)

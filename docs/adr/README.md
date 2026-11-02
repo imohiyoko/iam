@@ -124,3 +124,4 @@
 | [0110](0110-wsfed-passive-idp.md) | WS-Federation のパッシブ要求者プロファイルを IdP として持ち、トークンは realm の ES256 の鍵で XML 署名する | 承認 |
 | [0112](0112-par-and-resource-indicators.md) | PAR・AS メタデータ・Protected Resource Metadata を足し、自前の API に向けたトークンは realm に登録したリソースに限って resource で 1 つ選ぶ | 承認 |
 | [0114](0114-ciba.md) | CIBA は状態を EphemeralStore に置き、本人の承認はプッシュの端末と本人の API で受ける | 承認 |
+| [0115](0115-saml-idp.md) | SAML 2.0 の IdP を持ち、要求は登録した SP の完全一致と署名で確かめ、応答は realm の ES256 の鍵で XML 署名する | 承認 |

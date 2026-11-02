@@ -1,0 +1,113 @@
+package sqlite
+
+import (
+	"context"
+
+	"github.com/imohiyoko/iam/adapters/storage/sqlite/db"
+	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/port"
+)
+
+// samlIdP は SAML の SP の登録と IdP の署名の証明書（authn_saml_service_providers・authn_saml_idp_certificates。ADR 0115）。
+type samlIdP struct{ q *db.Queries }
+
+func toSAMLServiceProvider(r db.AuthnSamlServiceProvider) (port.SAMLServiceProvider, error) {
+	var p times
+	sp := port.SAMLServiceProvider{ID: r.ID, RealmID: r.RealmID, EntityID: r.EntityID, Name: r.Name, Config: r.Config,
+		CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+	return sp, p.err
+}
+
+func toSAMLIdPCertificate(r db.AuthnSamlIdpCertificate) (port.SAMLIdPCertificate, error) {
+	var p times
+	c := port.SAMLIdPCertificate{RealmID: r.RealmID, KeyID: r.KeyID, DER: r.Der, CreatedAt: p.at(r.CreatedAt)}
+	return c, p.err
+}
+
+func (r samlIdP) CreateServiceProvider(ctx context.Context, sp port.SAMLServiceProvider) error {
+	return mapErr(r.q.CreateSAMLServiceProvider(ctx, db.CreateSAMLServiceProviderParams{ID: sp.ID, RealmID: sp.RealmID, EntityID: sp.EntityID,
+		Name: sp.Name, Config: nonNil(sp.Config), CreatedAt: formatTime(sp.CreatedAt), UpdatedAt: formatTime(sp.UpdatedAt)}))
+}
+
+func (r samlIdP) GetServiceProvider(ctx context.Context, realmID, id string) (port.SAMLServiceProvider, error) {
+	x, err := r.q.GetSAMLServiceProvider(ctx, db.GetSAMLServiceProviderParams{RealmID: realmID, ID: id})
+	if err != nil {
+		return port.SAMLServiceProvider{}, mapErr(err)
+	}
+	return toSAMLServiceProvider(x)
+}
+
+func (r samlIdP) GetServiceProviderByEntityID(ctx context.Context, realmID, entityID string) (port.SAMLServiceProvider, error) {
+	x, err := r.q.GetSAMLServiceProviderByEntityID(ctx, db.GetSAMLServiceProviderByEntityIDParams{RealmID: realmID, EntityID: entityID})
+	if err != nil {
+		return port.SAMLServiceProvider{}, mapErr(err)
+	}
+	return toSAMLServiceProvider(x)
+}
+
+func (r samlIdP) ListServiceProviders(ctx context.Context, realmID string) ([]port.SAMLServiceProvider, error) {
+	rs, err := r.q.ListSAMLServiceProviders(ctx, realmID)
+	return rows(rs, err, toSAMLServiceProvider)
+}
+
+func (r samlIdP) UpdateServiceProvider(ctx context.Context, sp port.SAMLServiceProvider) error {
+	n, err := r.q.UpdateSAMLServiceProvider(ctx, db.UpdateSAMLServiceProviderParams{EntityID: sp.EntityID, Name: sp.Name, Config: nonNil(sp.Config),
+		UpdatedAt: formatTime(sp.UpdatedAt), RealmID: sp.RealmID, ID: sp.ID})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return errs.New(errs.KindNotFound, "saml service provider")
+	}
+	return nil
+}
+
+func (r samlIdP) DeleteServiceProvider(ctx context.Context, realmID, id string) error {
+	n, err := r.q.DeleteSAMLServiceProvider(ctx, db.DeleteSAMLServiceProviderParams{RealmID: realmID, ID: id})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return errs.New(errs.KindNotFound, "saml service provider")
+	}
+	return nil
+}
+
+func (r samlIdP) CreateCertificate(ctx context.Context, c port.SAMLIdPCertificate) error {
+	return mapErr(r.q.CreateSAMLIdPCertificate(ctx, db.CreateSAMLIdPCertificateParams{RealmID: c.RealmID, KeyID: c.KeyID, Der: nonNil(c.DER),
+		CreatedAt: formatTime(c.CreatedAt)}))
+}
+
+func (r samlIdP) ListCertificates(ctx context.Context, realmID string) ([]port.SAMLIdPCertificate, error) {
+	rs, err := r.q.ListSAMLIdPCertificates(ctx, realmID)
+	return rows(rs, err, toSAMLIdPCertificate)
+}
+
+func (r samlIdP) DeleteCertificate(ctx context.Context, realmID, keyID string) error {
+	n, err := r.q.DeleteSAMLIdPCertificate(ctx, db.DeleteSAMLIdPCertificateParams{RealmID: realmID, KeyID: keyID})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		return errs.New(errs.KindNotFound, "saml idp certificate")
+	}
+	return nil
+}
+
+func (r samlIdP) Count(ctx context.Context) (int, error) {
+	n, err := r.q.CountSAMLServiceProviders(ctx)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	c, err := r.q.CountSAMLIdPCertificates(ctx)
+	return int(n + c), mapErr(err)
+}
+
+func (r samlIdP) Purge(ctx context.Context, limit int) (int, error) {
+	n, err := r.q.PurgeSAMLServiceProviders(ctx, int64(limit))
+	if err != nil || int(n) >= limit {
+		return int(n), mapErr(err)
+	}
+	c, err := r.q.PurgeSAMLIdPCertificates(ctx, int64(limit)-n)
+	return int(n + c), mapErr(err)
+}

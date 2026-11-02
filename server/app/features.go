@@ -241,6 +241,11 @@ var cleaners = map[string]cleaner{
 			return true, tx.Clients().Update(ctx, c)
 		})
 	}},
+	// SAML の SP の登録と IdP の署名の証明書を消す（ADR 0115）。ログイン画面で待つ間の要求は EphemeralStore にあり、期限で消える。
+	feature.SAMLIdP: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.SAMLIdP().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return tx.SAMLIdP().Purge(ctx, limit)
+		}},
 }
 
 // eachRealmRequiringPAR は realm の設定の require_pushed_authorization_requests が真の realm を数える。now が零でなければ、

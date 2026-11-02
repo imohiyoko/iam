@@ -195,7 +195,7 @@ service_accounts     id, realm_id, org_id, name, valid_from, valid_until, create
 service_account_credentials  id, service_account_id, type（client_secret / private_key_jwt / api_key）
                      secret_hash or public_key, expires_at, revoked_*
 service_account_tokens  id, service_account_id, credential_id, hash, audience, scopes, expires_at
-                     audience が空なら管理 API 向け、あれば自前の API 向け（5.9、ADR 0112）
+                     audience が空なら管理 API 向け、あれば自前の API 向け（5.10、ADR 0112）
 
 orgs                 id, realm_id, kind（personal / shared）, personal_owner_id, parent_org_id（11.4）
                      slug, name, valid_from, valid_until, timezone（NULL=realm の既定）, session_settings, created_at
@@ -225,8 +225,11 @@ clients              id, realm_id, name, trust_level（first_party / third_party
 wsfed_relying_parties  id, realm_id, realm（wtrealm）, name, reply_urls, token_type（saml11 / saml20）, claims, token_lifetime
                      UNIQUE (realm_id, realm)。WS-Federation の RP（5.8、ADR 0110）
 wsfed_certificates   realm_id, key_id（signing_keys の ID）, der, PK (realm_id, key_id)。署名鍵の自己署名の証明書
+saml_service_providers  id, realm_id, entity_id, name, config（ACS・SLO・証明書・NameID・属性・署名と暗号化。JSON）
+                     UNIQUE (realm_id, entity_id)。SAML の SP（5.9、ADR 0115）
+saml_idp_certificates  realm_id, key_id, der, PK (realm_id, key_id)。SAML の IdP の署名鍵の自己署名の証明書
 oauth_resources      id, realm_id, uri（resource の値で aud になる）, name, scopes, clients, service_accounts
-                     UNIQUE (realm_id, uri)。自前の API（RFC 8707。5.9、ADR 0112）
+                     UNIQUE (realm_id, uri)。自前の API（RFC 8707。5.10、ADR 0112）
 
 user_attributes      user_id, key, value, PK (user_id, key)（11.7 の汎用形。アダプタが別の持ち方を選んでもよい）
 
@@ -608,7 +611,7 @@ GET    /v1/admin/signing-keys
 - ログアウトに関わる登録：`post_logout_redirect_uris`（完全一致）、`backchannel_logout_uri`（5.2）、`frontchannel_logout_uri` と
   `frontchannel_logout_session_required`（5.6。フィーチャー `oidc_logout`）
 - 機密の連携先ごとに、Token Exchange で許す aud・受け付ける元の連携先・なりすましの可否を管理 API で置く（既定は何も許さない。5.7）
-- 連携先ごとに、認可要求を PAR で送らせられる（`require_pushed_authorization_requests`。フィーチャー `par`。5.9）
+- 連携先ごとに、認可要求を PAR で送らせられる（`require_pushed_authorization_requests`。フィーチャー `par`。5.10）
 
 ### 5.6 連携先からのログアウト
 
@@ -649,7 +652,24 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 - `wa=wsignout1.0`：登録済みの `wtrealm` と `wreply` のときだけ、確かめずにセッションを失効させて戻す（`POST /v1/logout` と同じ）
 - RP は管理 API（`/v1/admin/wsfed/relying-parties`、`clients:manage`）で realm ごとに登録する
 
-### 5.9 PAR・メタデータ・自前の API に向けたトークン
+### 5.9 SAML 2.0 の IdP
+
+フィーチャー `saml_idp`（既定オフ。ADR 0115）。SAML 2.0 の Web Browser SSO と Single Logout で、iam が IdP になる。Entity ID は realm の issuer。
+
+- `/saml/idp/sso`：AuthnRequest を HTTP-Redirect（GET）と HTTP-POST（POST）で受ける。Issuer が登録した SP で、ACS（URL・番号）が登録と完全一致し、
+  署名（あれば必ず確かめる。SP ごとに必須にできる）が SP の証明書で確かめられるときだけ受け、どの誤りも SP に戻さずに 400 の画面にする。
+  署名を確かめた後は署名を確かめた要素からだけ読む（XML Signature Wrapping を防ぐ）。要求の ID は 1 回だけ
+- HTTP-POST の要求は Lax の Cookie が届かないので、封をして預けて `/saml/idp/sso/resume` へ 303 で回す。ForceAuthn・RequestedAuthnContext
+  （acr。11.15）をセッションが満たさなければログイン画面へ回し、IsPassive なら NoPassive を返す。応えられない内容は ACS へ失敗の Response で返す
+- 応答は ACS へ自動で POST する画面（CSP の `form-action` は ACS のオリジンだけ）。bearer の Assertion（Audience は SP の Entity ID、NameID は
+  公開のユーザー ID・確認済みのメール・属性・transient、属性は SP ごとの対応）を realm の ES256 の鍵で XML 署名する（Assertion・Response。9.3）。
+  SP の RSA の証明書があれば AES-128-GCM と RSA-OAEP で暗号化する
+- IdP-initiated（`/saml/idp/init`）は SP ごとに許したときだけ
+- `/saml/idp/slo`：署名した LogoutRequest の本人（NameID・SessionIndex）がブラウザのセッションの本人ならセッションを失効させ（`POST /v1/logout` と同じ）、
+  SP の SLO へ署名した LogoutResponse を返す。ほかの SP への伝播はしない
+- SP は管理 API（`/v1/admin/saml/service-providers`、`clients:manage`）で realm ごとに登録する。メタデータは `/saml/idp/metadata`（署名付き）
+
+### 5.10 PAR・メタデータ・自前の API に向けたトークン
 
 ADR 0112。
 
@@ -750,6 +770,8 @@ ADR 0112。
 - 実装：zitadel/oidc の go-jose に `OpaqueSigner` で `crypto/mldsa` を差し込む。JWKS の AKP 出力は jwx で組み立てる（ADR 0038）
 - RS256 を出さないため、OIDC Discovery には厳密には適合しない（既知の差異）
 - WS-Federation（5.8）の Assertion とメタデータは、同じ realm の ES256 の鍵で XML 署名する（ECDSA-SHA256、Exclusive C14N、署名の値は `r||s`）。鍵ごとの自己署名の証明書を `wsfed_certificates` に置いて同じものを出す。RSA しか読めない RP とはつながらない
+- SAML の IdP（5.9）の Assertion・Response・LogoutResponse・メタデータも同じ鍵と形で署名し、証明書は `saml_idp_certificates` に置く。受け取った XML 署名の検証は、
+  ECDSA の `r||s` の値も受ける（SAML の SP の側も同じ。ADR 0115）
 
 ### 9.4 外部の RSA
 
@@ -864,8 +886,9 @@ ADR 0112。
 | 本人の Personal Access Token（11.18、ADR 0109） | オフ | ― | PAT の API は 404。`iampat_` のトークンはどの経路でも通らない。無効化でトークンと realm のポリシーを消す |
 | WS-Federation（5.8、ADR 0110） | オフ | ― | `/wsfed` とメタデータは 404、RP の管理 API は `404 wsfed_disabled`。無効化は RP と署名の証明書を消して完了 |
 | CIBA（11.19、ADR 0114） | オフ | ― | backchannel authentication エンドポイントと本人の API は 404、CIBA の grant は `unsupported_grant_type`。Discovery に出さない。無効化は連携先の登録を外して完了 |
-| PAR（5.9、ADR 0112） | オフ | ― | `/oauth2/par` は 404、`request_uri` は `request_uri_not_supported`、PAR の必須は効かず新しく置けない。無効化で連携先と realm の必須を外して完了 |
-| 自前の API に向けたトークン（5.9、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
+| SAML 2.0 の IdP（5.9、ADR 0115） | オフ | ― | `/saml/idp/*` は 404、SP の管理 API は `404 saml_idp_disabled`。無効化は SP の登録と署名の証明書を消して完了 |
+| PAR（5.10、ADR 0112） | オフ | ― | `/oauth2/par` は 404、`request_uri` は `request_uri_not_supported`、PAR の必須は効かず新しく置けない。無効化で連携先と realm の必須を外して完了 |
+| 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
 
 ### 11.1 複数 realm
 
@@ -890,7 +913,7 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 
 - 管理 API の `/v1/admin/service-accounts` で作る（権限 `service_accounts:manage`）。realm か Org（`org_id`）に属し、有効期間・停止（4.7）・論理削除を持つ。Org が削除・停止・有効期間の外なら使えない
 - `POST /v1/admin/token`（管理 API）が client credentials で不透明なアクセストークン（`sat_…`、既定 10 分）を発行する。検証のたびに状態を確かめるので、停止・削除・認証情報の無効化は次の要求から効く
-- `resource`（と `scope`）を付ければ、管理 API ではなく登録した自前の API に向けたトークンになる（フィーチャー `resource_indicators`。5.9、ADR 0112）
+- `resource`（と `scope`）を付ければ、管理 API ではなく登録した自前の API に向けたトークンになる（フィーチャー `resource_indicators`。5.10、ADR 0112）
 - 配信用（2.4）は `iam service-account create` で作る。フィーチャーがオフでも作れ、認証できるのは配信用だけ
 - Org の管理者が公開 API で扱う口は後に回す
 

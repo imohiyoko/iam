@@ -3161,6 +3161,99 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/saml/service-providers:
+    get:
+      operationId: listSAMLServiceProviders
+      summary: SAML の SP の一覧（iam が IdP。ADR 0115）
+      description: 権限 `clients:manage`。作成の順。フィーチャー `saml_idp` が動いていなければ `404 saml_idp_disabled`。
+      responses:
+        "200":
+          description: SP
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SAMLServiceProviders" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSAMLServiceProvider
+      summary: SAML の SP を登録する（ADR 0115）
+      description: |
+        権限 `clients:manage`。`entity_id` は SP の Entity ID（絶対 URI。realm の中で一意。完全一致で比べる）。`acs` は
+        AssertionConsumerService（https の絶対 URL、HTTP-POST バインディングだけ。AuthnRequest の URL・番号と完全一致したものにだけ返す）。
+        内容が正しくなければ `400 invalid_service_provider`、`entity_id` が重複すれば `409 entity_id_exists`。
+        `saml_idp.service_provider.created` を監査ログに残す。フィーチャー `saml_idp` が動いていなければ `404 saml_idp_disabled`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SAMLServiceProviderInput" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SAMLServiceProvider" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/saml/service-providers/{id}:
+    get:
+      operationId: getSAMLServiceProvider
+      summary: SAML の SP を返す
+      description: 権限 `clients:manage`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: SP
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SAMLServiceProvider" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateSAMLServiceProvider
+      summary: SAML の SP の登録を置き換える
+      description: |
+        権限 `clients:manage`。省いた項目は既定に戻る。`saml_idp.service_provider.updated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SAMLServiceProviderInput" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SAMLServiceProvider" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/saml/service-providers/{id}:delete:
+    post:
+      operationId: deleteSAMLServiceProvider
+      summary: SAML の SP を消す
+      description: 権限 `clients:manage`。`saml_idp.service_provider.deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 消した
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/oauth/resources:
     get:
       operationId: listOAuthResources
@@ -4519,6 +4612,107 @@ components:
         host_max_lifetime_seconds: { type: integer, format: int64, description: ホスト先の上限（0 なら上限なし） }
         effective_max_lifetime_seconds: { type: integer, format: int64, description: 今効く上限（0 なら上限なし） }
         updated_at: { type: string, format: date-time, description: 最後に変えた時刻（置いていなければ無い） }
+    SAMLEndpoint:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, maxLength: 2048, description: https の絶対 URL（フラグメント・利用者情報なし） }
+        binding:
+          type: string
+          description: |
+            バインディングの URN。ACS は `urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST` だけ（省略時も同じ）。
+            SLO は HTTP-Redirect か HTTP-POST（必須）
+        index: { type: integer, minimum: 0, maximum: 65535, description: ACS の番号（AssertionConsumerServiceIndex。SLO では使わない） }
+        default: { type: boolean, description: 既定の ACS（AuthnRequest が ACS を指さないときと IdP-initiated）。無ければ最初のもの }
+    SAMLAttribute:
+      type: object
+      required: [source, name]
+      properties:
+        source:
+          type: string
+          description: "`user_id`・`email`（確認済みのものだけ出す）・`org_id`・`amr`・`attribute:<キー>`（フィーチャー `custom_attributes`）"
+        name: { type: string, maxLength: 256, description: 属性の名前（`name_format` が uri なら絶対 URI） }
+        name_format:
+          type: string
+          description: "`urn:oasis:names:tc:SAML:2.0:attrname-format:uri`（既定）・`basic`・`unspecified` の URN"
+        friendly_name: { type: string, maxLength: 100 }
+    SAMLServiceProviderInput:
+      type: object
+      required: [entity_id, name, acs]
+      properties:
+        entity_id: { type: string, maxLength: 1024, description: SP の Entity ID（絶対 URI） }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        acs:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { $ref: "#/components/schemas/SAMLEndpoint" }
+        slo:
+          type: array
+          maxItems: 2
+          description: SingleLogoutService（LogoutResponse を返す先）。登録するには `signing_certificates` が要る（LogoutRequest はいつも署名を求める）
+          items: { $ref: "#/components/schemas/SAMLEndpoint" }
+        signing_certificates:
+          type: array
+          maxItems: 3
+          description: AuthnRequest・LogoutRequest の署名を確かめる SP の証明書（PEM か base64 の DER。RSA 2048 bit 以上か ECDSA。期限切れは受けない）
+          items: { type: string, maxLength: 16384 }
+        require_signed_requests: { type: boolean, description: 署名の無い AuthnRequest を受けない（既定 false。署名があればいつも確かめる） }
+        encryption_certificate:
+          type: string
+          maxLength: 16384
+          description: Assertion を暗号化する SP の証明書（PEM か base64 の DER。RSA 2048 bit 以上）。あれば必ず暗号化する（AES-128-GCM と RSA-OAEP）
+        name_id_format:
+          type: string
+          description: NameID の形式の URN（persistent（既定）・emailAddress・unspecified・transient）
+        name_id_source:
+          type: string
+          description: NameID の値の出どころ（`user_id`・`email`・`attribute:<キー>`）。既定は emailAddress なら `email`、ほかは `user_id`。transient では使わない
+        attributes:
+          type: array
+          maxItems: 32
+          items: { $ref: "#/components/schemas/SAMLAttribute" }
+        sign_assertion: { type: boolean, description: Assertion に署名する（既定 true） }
+        sign_response: { type: boolean, description: Response に署名する（既定 false。どちらかは true） }
+        allow_idp_initiated: { type: boolean, description: IdP-initiated の SSO を許す（既定 false） }
+        assertion_lifetime: { type: integer, minimum: 60, maximum: 3600, description: Assertion の有効期間（秒。既定 300） }
+    SAMLServiceProvider:
+      type: object
+      required: [id, entity_id, name, acs, slo, signing_certificates, require_signed_requests, name_id_format, attributes, sign_assertion, sign_response, allow_idp_initiated, assertion_lifetime, created_at, updated_at]
+      properties:
+        id: { type: string }
+        entity_id: { type: string }
+        name: { type: string }
+        acs:
+          type: array
+          items: { $ref: "#/components/schemas/SAMLEndpoint" }
+        slo:
+          type: array
+          items: { $ref: "#/components/schemas/SAMLEndpoint" }
+        signing_certificates:
+          type: array
+          description: base64 の DER
+          items: { type: string }
+        require_signed_requests: { type: boolean }
+        encryption_certificate: { type: string, description: base64 の DER（無ければ無い） }
+        name_id_format: { type: string }
+        name_id_source: { type: string }
+        attributes:
+          type: array
+          items: { $ref: "#/components/schemas/SAMLAttribute" }
+        sign_assertion: { type: boolean }
+        sign_response: { type: boolean }
+        allow_idp_initiated: { type: boolean }
+        assertion_lifetime: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SAMLServiceProviders:
+      type: object
+      required: [service_providers]
+      properties:
+        service_providers:
+          type: array
+          items: { $ref: "#/components/schemas/SAMLServiceProvider" }
     OAuthResourceInput:
       type: object
       required: [uri, name, scopes]

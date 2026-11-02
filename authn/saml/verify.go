@@ -1,20 +1,14 @@
 package saml
 
 import (
-	"bytes"
-	"crypto/subtle"
 	"crypto/x509"
-	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
-	"strings"
 	"time"
 
 	"github.com/beevik/etree"
-	xrv "github.com/mattermost/xml-roundtrip-validator"
-	dsig "github.com/russellhaering/goxmldsig"
-	"github.com/russellhaering/goxmldsig/etreeutils"
+
+	"github.com/imohiyoko/iam/authn/samlxml"
 )
 
 // SAML の応答（samlp:Response）の検証（ADR 0098）。セキュリティ上もっとも重要な部分で、不変条件は次のとおり。
@@ -42,9 +36,7 @@ const (
 	nameIDEntity     = "urn:oasis:names:tc:SAML:2.0:nameid-format:entity"
 	bindingRedirect  = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
 	bindingPOST      = "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
-	algExcC14N       = "http://www.w3.org/2001/10/xml-exc-c14n#"
-	algEnveloped     = "http://www.w3.org/2000/09/xmldsig#enveloped-signature"
-	algECDSASHA256   = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"
+	algECDSASHA256   = samlxml.AlgECDSA256
 	maxResponseBytes = 256 << 10
 	maxDepth         = 32
 	maxElements      = 4096
@@ -52,23 +44,6 @@ const (
 
 // MaxSkew は IdP との時刻のずれとして許す幅。
 const MaxSkew = 3 * time.Minute
-
-// 受け付ける署名とダイジェストのアルゴリズム（SHA-1 は受けない）。
-var (
-	allowedSignatureMethods = map[string]bool{
-		"http://www.w3.org/2001/04/xmldsig-more#rsa-sha256": true,
-		"http://www.w3.org/2001/04/xmldsig-more#rsa-sha384": true,
-		"http://www.w3.org/2001/04/xmldsig-more#rsa-sha512": true,
-		algECDSASHA256: true,
-		"http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha384": true,
-		"http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512": true,
-	}
-	allowedDigestMethods = map[string]bool{
-		"http://www.w3.org/2001/04/xmlenc#sha256":       true,
-		"http://www.w3.org/2001/04/xmldsig-more#sha384": true,
-		"http://www.w3.org/2001/04/xmlenc#sha512":       true,
-	}
-)
 
 // Expect は応答に求める値。
 type Expect struct {
@@ -161,51 +136,6 @@ func Verify(raw []byte, e Expect) (Assertion, error) {
 	return readAssertion(verified, e)
 }
 
-// scan は文書の字句を確かめる：コメント・処理命令（XML 宣言を除く）・DOCTYPE を拒み、深さと要素の数を限る。
-// encoding/xml の往復で意味が変わる入力（名前空間の扱いの不具合）も拒む。
-func scan(raw []byte) error {
-	if err := xrv.Validate(bytes.NewReader(raw)); err != nil {
-		return fmt.Errorf("saml: xml round trip: %w", err)
-	}
-	d := xml.NewDecoder(bytes.NewReader(raw))
-	d.Strict = true
-	depth, elements := 0, 0
-	for {
-		tok, err := d.Token()
-		if errors.Is(err, io.EOF) {
-			if depth != 0 || elements == 0 {
-				return errors.New("saml: truncated document")
-			}
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("saml: xml: %w", err)
-		}
-		switch t := tok.(type) {
-		case xml.StartElement:
-			depth++
-			elements++
-			if depth > maxDepth || elements > maxElements {
-				return errors.New("saml: document too deep or too large")
-			}
-		case xml.EndElement:
-			depth--
-		case xml.Comment:
-			return errors.New("saml: comments are not allowed")
-		case xml.Directive:
-			return errors.New("saml: directives are not allowed")
-		case xml.ProcInst:
-			if t.Target != "xml" || elements > 0 {
-				return errors.New("saml: processing instructions are not allowed")
-			}
-		case xml.CharData:
-			if depth == 0 && len(bytes.TrimSpace(t)) > 0 {
-				return errors.New("saml: text outside the root element")
-			}
-		}
-	}
-}
-
 // checkDocument は文書全体を見る：Assertion はちょうど 1 つ（入れ子も数える）、暗号化された要素は受けない、ID は重ならない、
 // 署名のアルゴリズムは許したものだけ。
 func checkDocument(root *etree.Element) error {
@@ -244,93 +174,6 @@ func checkDocument(root *etree.Element) error {
 		return errors.New("saml: the document must contain exactly one assertion")
 	}
 	return nil
-}
-
-// checkAlgorithm は XML 署名の要素のアルゴリズムを許したものに限る。
-func checkAlgorithm(el *etree.Element) error {
-	alg := el.SelectAttrValue("Algorithm", "")
-	switch el.Tag {
-	case "SignatureMethod":
-		if !allowedSignatureMethods[alg] {
-			return fmt.Errorf("saml: signature method %q is not allowed", alg)
-		}
-	case "DigestMethod":
-		if !allowedDigestMethods[alg] {
-			return fmt.Errorf("saml: digest method %q is not allowed", alg)
-		}
-	case "CanonicalizationMethod":
-		if alg != algExcC14N {
-			return fmt.Errorf("saml: canonicalization %q is not allowed", alg)
-		}
-	case "Transform":
-		if alg != algExcC14N && alg != algEnveloped {
-			return fmt.Errorf("saml: transform %q is not allowed", alg)
-		}
-	case "SignedInfo":
-		if len(children(el, nsDSig, "Reference")) != 1 {
-			return errors.New("saml: a signature must have exactly one reference")
-		}
-	}
-	return nil
-}
-
-// validate は el に包まれた署名 sig（el の直下）を確かめ、署名を確かめたバイト列から作り直した要素を返す。
-// Reference は el の ID を指すこと（空の URI で文書全体を指すものは受けない）。証明書は 1 つずつ試す
-// （KeyInfo に証明書があれば、それが登録した証明書と一致すること。無ければ登録した証明書で確かめる）。
-func validate(e Expect, el, sig *etree.Element) (*etree.Element, error) {
-	elID := el.SelectAttrValue("ID", "")
-	if elID == "" {
-		return nil, errors.New("missing ID")
-	}
-	si, err := oneChild(sig, nsDSig, "SignedInfo")
-	if err != nil {
-		return nil, err
-	}
-	refs := children(si, nsDSig, "Reference")
-	if len(refs) != 1 || refs[0].SelectAttrValue("URI", "") != "#"+elID {
-		return nil, errors.New("the reference does not point to the signed element")
-	}
-	nsctx, err := etreeutils.NSBuildParentContext(el)
-	if err != nil {
-		return nil, err
-	}
-	if nsctx, err = nsctx.SubContext(el); err != nil {
-		return nil, err
-	}
-	detached, err := etreeutils.NSDetatch(nsctx, el)
-	if err != nil {
-		return nil, err
-	}
-	// 証明書の無い KeyInfo（KeyName・KeyValue だけのもの）は使わない。KeyInfo は SignedInfo の外にあり、外しても署名の範囲は変わらない。
-	for _, s := range detached.ChildElements() {
-		if !is(s, nsDSig, "Signature") {
-			continue
-		}
-		for _, ki := range children(s, nsDSig, "KeyInfo") {
-			if len(descendants(ki, nsDSig, "X509Certificate")) == 0 {
-				s.RemoveChild(ki)
-			}
-		}
-	}
-	var last error
-	for _, cert := range e.Certs {
-		ctx := dsig.NewDefaultValidationContext(&dsig.MemoryX509CertificateStore{Roots: []*x509.Certificate{cert}})
-		ctx.IdAttribute = "ID"
-		ctx.Clock = dsig.NewFakeClockAt(e.Now)
-		verified, err := ctx.Validate(detached)
-		if err != nil {
-			last = err
-			continue
-		}
-		if verified == nil || verified.Tag != el.Tag || verified.NamespaceURI() != el.NamespaceURI() || verified.SelectAttrValue("ID", "") != elID {
-			return nil, errors.New("the verified element differs from the signed one")
-		}
-		return verified, nil
-	}
-	if last == nil {
-		last = errors.New("no certificate")
-	}
-	return nil, last
 }
 
 // readAssertion は署名を確かめた Assertion の中身を確かめて読む。
@@ -527,85 +370,25 @@ func checkStatus(root *etree.Element) error {
 	return nil
 }
 
-// is は el が名前空間 ns の tag かを返す。
-func is(el *etree.Element, ns, tag string) bool {
-	return el != nil && el.Tag == tag && el.NamespaceURI() == ns
-}
+// 共通の XML の扱い（authn/samlxml。SAML の IdP・WS-Federation と同じもの）。
+var (
+	is            = samlxml.Is
+	children      = samlxml.Children
+	descendants   = samlxml.Descendants
+	optionalChild = samlxml.OptionalChild
+	oneChild      = samlxml.OneChild
+	textOf        = samlxml.TextOf
+	timeAttr      = samlxml.TimeAttr
+	same          = samlxml.Same
+)
 
-// children は el の直下の、名前空間 ns の tag の要素を返す。
-func children(el *etree.Element, ns, tag string) []*etree.Element {
-	var out []*etree.Element
-	for _, c := range el.ChildElements() {
-		if is(c, ns, tag) {
-			out = append(out, c)
-		}
-	}
-	return out
-}
+// scan は文書の字句を確かめる（samlxml.Scan）。
+func scan(raw []byte) error { return samlxml.Scan(raw, "saml") }
 
-// descendants は el の子孫（el を含まない）のうち、名前空間 ns の tag の要素を返す。
-func descendants(el *etree.Element, ns, tag string) []*etree.Element {
-	var out []*etree.Element
-	for _, c := range el.ChildElements() {
-		if is(c, ns, tag) {
-			out = append(out, c)
-		}
-		out = append(out, descendants(c, ns, tag)...)
-	}
-	return out
-}
+// checkAlgorithm は XML 署名の要素のアルゴリズムを許したものに限る（samlxml.CheckAlgorithm）。
+func checkAlgorithm(el *etree.Element) error { return samlxml.CheckAlgorithm(el, "saml") }
 
-// optionalChild は直下の要素を返す（無ければ nil、2 つ以上ならエラー）。
-func optionalChild(el *etree.Element, ns, tag string) (*etree.Element, error) {
-	cs := children(el, ns, tag)
-	if len(cs) > 1 {
-		return nil, fmt.Errorf("saml: more than one %s", tag)
-	}
-	if len(cs) == 0 {
-		return nil, nil
-	}
-	return cs[0], nil
-}
-
-// oneChild は直下にちょうど 1 つある要素を返す。
-func oneChild(el *etree.Element, ns, tag string) (*etree.Element, error) {
-	c, err := optionalChild(el, ns, tag)
-	if err == nil && c == nil {
-		err = fmt.Errorf("saml: missing %s", tag)
-	}
-	return c, err
-}
-
-// textOf は要素の文字列を返す。子の要素・コメントなどを含むものは受けない（一部の文字列だけを読むことの無いように）。
-func textOf(el *etree.Element) (string, error) {
-	var b strings.Builder
-	for _, t := range el.Child {
-		cd, ok := t.(*etree.CharData)
-		if !ok {
-			return "", fmt.Errorf("saml: %s must contain only text", el.Tag)
-		}
-		b.WriteString(cd.Data)
-	}
-	return strings.TrimSpace(b.String()), nil
-}
-
-// timeAttr は xs:dateTime の属性を読む。required で無ければ空を許す。
-func timeAttr(el *etree.Element, name string, required bool) (time.Time, error) {
-	v := el.SelectAttrValue(name, "")
-	if v == "" {
-		if required {
-			return time.Time{}, fmt.Errorf("saml: missing %s", name)
-		}
-		return time.Time{}, nil
-	}
-	t, err := time.Parse(time.RFC3339Nano, v)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("saml: invalid %s", name)
-	}
-	return t, nil
-}
-
-// same は a と b が等しく、空でないかを返す。
-func same(a, b string) bool {
-	return a != "" && len(a) == len(b) && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+// validate は el に包まれた署名 sig を IdP の証明書で確かめ、署名を確かめたバイト列から作り直した要素を返す（samlxml.ValidateEnveloped）。
+func validate(e Expect, el, sig *etree.Element) (*etree.Element, error) {
+	return samlxml.ValidateEnveloped(el, sig, e.Certs, e.Now)
 }

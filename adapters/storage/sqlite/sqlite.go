@@ -223,6 +223,9 @@ func (t *tx) OAuthResources() port.OAuthResourceRepo { return oauthResources{t.q
 // PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t.q} }
 
+// SAMLIdP は SAML の SP の登録と IdP の署名の証明書（ADR 0115）。
+func (t *tx) SAMLIdP() port.SAMLIdPRepo { return samlIdP{t.q} }
+
 // ---------------------------------------------------------------------------
 
 type realms struct{ q *db.Queries }

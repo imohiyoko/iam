@@ -2,7 +2,7 @@
 
 - 状態: 承認
 - 日付: 2026-11-02
-- 関連: [design.md](../design.md) 5.5、5.9、11.0、11.2、[0021](0021-opaque-access-tokens.md)、[0074](0074-service-accounts.md)、
+- 関連: [design.md](../design.md) 5.5、5.10、11.0、11.2、[0021](0021-opaque-access-tokens.md)、[0074](0074-service-accounts.md)、
   [0089](0089-enterprise-full-scope.md)、[0099](0099-token-exchange.md)
 
 ## 背景

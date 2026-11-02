@@ -191,6 +191,23 @@ type AuthnRetiredCredentialLookup struct {
 	RetiredAt   string
 }
 
+type AuthnSamlIdpCertificate struct {
+	RealmID   string
+	KeyID     string
+	Der       []byte
+	CreatedAt string
+}
+
+type AuthnSamlServiceProvider struct {
+	ID        string
+	RealmID   string
+	EntityID  string
+	Name      string
+	Config    []byte
+	CreatedAt string
+	UpdatedAt string
+}
+
 type AuthnServiceAccount struct {
 	ID         string
 	RealmID    string

@@ -588,6 +588,27 @@ realm ごとの規則で iam のユーザーに結び付く。
   memory・SQLite・PostgreSQL の契約テスト、要求の値の検査と端末の要求のファジング
 - push モード、`login_hint_token`・署名した要求（JAR）、`user_code`、ping の通知の再送、ホスト型の承認の画面、FAPI-CIBA
 
+#### SAML 2.0 の IdP（ADR 0115）
+
+**ゴール**：SAML の SP（ECDSA の署名を読めるもの）が、ADFS・Okta などの代わりに iam でサインインでき、SP からのログアウトで iam のセッションも終わる。
+
+- [x] フィーチャー `saml_idp`（既定オフ）。実装は `authn/samlidp`。オフならエンドポイントは 404、管理 API は `404 saml_idp_disabled`
+- [x] 管理 API（`/v1/admin/saml/service-providers`、`clients:manage`）で realm ごとに SP を登録できる：Entity ID、ACS（HTTP-POST、番号・既定）、
+  SLO、SP の署名の証明書と署名の必須、暗号化の証明書、NameID の形式と出どころ、属性の対応、Assertion・Response の署名、IdP-initiated の許可、有効期間
+- [x] AuthnRequest を HTTP-Redirect と HTTP-POST で受ける。知らない SP・登録と完全一致でない ACS・確かめられない署名（鍵違い・書き換え・SHA-1・
+  必須なのに無い）・Destination の違い・古い要求・同じ ID の再利用を、SP に戻さずに 400 で拒むテストがある
+- [x] XML Signature Wrapping（同じ ID の外側の書き換え、外側の署名が中を指す、外側に署名が無い）を拒むテストがある。コメント・DOCTYPE も拒む
+- [x] ForceAuthn・IsPassive（NoPassive）・RequestedAuthnContext（acr に対応させ、満たさなければ step-up、届かなければ NoAuthnContext）を守るテストがある
+- [x] Assertion（bearer。Audience・Recipient・InResponseTo・SessionIndex・AuthnContextClassRef）を realm の ES256 の鍵で XML 署名し、iam の SAML の SP の
+  検証（ADR 0098）に通るテストがある。Response の署名、AES-128-GCM と RSA-OAEP の暗号化、transient の NameID、IdP-initiated（SP ごとの opt-in）
+- [x] Single Logout：署名した LogoutRequest の本人のセッションを失効させ、署名した LogoutResponse（HTTP-Redirect・HTTP-POST）を返す。署名の無いもの・
+  別の本人のものではセッションを終えないテストがある
+- [x] `/saml/idp/metadata`（署名付き）。鍵ごとの証明書を置いて同じものを返す
+- [x] 監査ログ（`saml_idp.assertion_issued`・`saml_idp.logged_out`・SP の作成・変更・削除）、無効化で SP と証明書を消す、memory・SQLite・PostgreSQL の
+  契約テスト、AuthnRequest・HTTP-Redirect のクエリ・LogoutRequest のファジング
+- RSA-SHA256 の署名（RS256 のフィーチャーの後）、ほかの SP への SLO の伝播と IdP から始める SLO、HTTP-Artifact、SP のメタデータからの登録、
+  `pre_token` フックでの属性、Scoping（IdP のプロキシ）
+
 ### M10 エンタープライズの運用
 
 - [x] 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作（ADR 0097）
