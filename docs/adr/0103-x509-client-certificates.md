@@ -42,6 +42,8 @@ X.509 をその上に載せるには、次を決める必要がある。
     だけを通し、それ以外は 404。公開 API の待ち受けで常に証明書を求めると、ブラウザが全部の画面で証明書の選択を出すため分ける
   - **TLS を終えるプロキシのヘッダー**（`server.client_certificates.header`・`header_format`・`proxies`）：直接の接続元（RemoteAddr）が
     `proxies` に含まれる要求でだけ読む。`server.trusted_proxies`（0088）とは別に明示して書かせ、ヘッダーを書いて `proxies` が空なら起動を止める。
+    `proxies` に書くプロキシは、利用者が送った同じ名前のヘッダーを必ず消すか上書きし、自分が TLS で（CertificateVerify で秘密鍵の所持を）
+    確かめた証明書だけを載せること。
     それ以外の接続元からのヘッダーと、mTLS の待ち受けに届いたヘッダーは読まずに消す。形は URL エンコードした PEM（nginx の
     `$ssl_client_escaped_cert`、AWS ALB）か、DER の Base64 のカンマ区切り（Traefik）。連鎖は 8 個、1 つ 16 KiB まで
 - ネットワークを使う確かめ（失効）は、コアが Storage のトランザクションの外で呼ぶ `Complete` と `EnrollBegin`（0101）で行う。

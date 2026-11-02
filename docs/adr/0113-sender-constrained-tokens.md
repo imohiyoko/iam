@@ -64,7 +64,8 @@ mTLS（RFC 8705）」。S）。決めることは次のとおり。
 ### OAuth の mTLS（RFC 8705）
 
 - 証明書は ADR 0103 のコアの経路でだけ受ける（mTLS の専用の待ち受けか、`proxies` に書いたプロキシのヘッダー）。秘密鍵の所持は TLS の
-  CertificateVerify で確かめてある。フィーチャーが動いていれば、専用の待ち受けは token・introspect・revoke・userinfo・device_authorization・bc-authorize（CIBA）・par（PAR）も通す
+  CertificateVerify で確かめてある。TLS を終えるプロキシは、利用者が送った証明書のヘッダーを必ず消すか上書きし、自分が TLS の
+  CertificateVerify で秘密鍵の所持を確かめた証明書だけを載せなければならない（そうでないプロキシを `proxies` に書いてはならない）。フィーチャーが動いていれば、専用の待ち受けは token・introspect・revoke・userinfo・device_authorization・bc-authorize（CIBA）・par（PAR）も通す
   （オフなら今までどおり方式のパスだけ）
 - `tls_client_auth`（2.1）：`oidc.mtls.trust_anchors`（と `intermediates`）までの連鎖、`clientAuth` の用途、期限（Clock）を確かめ、
   登録した 1 つの項目（`tls_client_auth_subject_dn`・`_san_dns`・`_san_uri`・`_san_ip`・`_san_email`）と照合する。DN は RFC 4514 の文字列の完全一致

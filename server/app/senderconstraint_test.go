@@ -666,3 +666,52 @@ func TestDPoPResourceIndicators(t *testing.T) {
 		t.Fatalf("introspect bearer: %v", in)
 	}
 }
+
+// Device Authorization Grant でも、nonce を求められた再試行が通る（承認済みの結果を use_dpop_nonce で消費しない）。
+func TestDPoPDeviceNonce(t *testing.T) {
+	l := senderEnv(t, func(c *config.Config) { c.OIDC.DPoP.RequireNonce = true }, feature.DPoP, feature.DeviceFlow)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.deviceRP(t, owner, map[string]any{"token_endpoint_auth_method": "none"})
+	status, dev := p.startDevice(t, "openid email")
+	if status != 200 {
+		t.Fatalf("device authorization: %d %v", status, dev)
+	}
+	_, cookie := l.login(t, "alice@example.com")
+	if w := l.oidcDo(t, "POST", oidcDevice, url.Values{"user_code": {dev["user_code"].(string)}, "action": {"approve"}}, cookie); w.Code != 200 {
+		t.Fatalf("approve: %d %s", w.Code, w.Body)
+	}
+	l.advance(time.Minute)
+	k := dpoptest.NewKey(t)
+	h := l.a.PublicHandler()
+	form := url.Values{"grant_type": {provider.GrantTypeDeviceCode}, "device_code": {dev["device_code"].(string)}, "client_id": {p.clientID}}
+	w, out := l.form(t, h, "POST", oidcToken, form, nil, "DPoP", l.proof(t, k, "POST", testIssuer+oidcToken, "", ""))
+	nonce := w.Header().Get("DPoP-Nonce")
+	if w.Code != 400 || out["error"] != "use_dpop_nonce" || nonce == "" {
+		t.Fatalf("nonce challenge: %d %v %v", w.Code, out, w.Header())
+	}
+	if w, out := l.form(t, h, "POST", oidcToken, form, nil, "DPoP", l.proof(t, k, "POST", testIssuer+oidcToken, "", nonce)); w.Code != 200 ||
+		out["token_type"] != "DPoP" {
+		t.Fatalf("retry with nonce: %d %v", w.Code, out)
+	}
+}
+
+// 管理 API の nonce のチャレンジにも DPoP-Nonce が付き、その nonce で続けられる。
+func TestDPoPAdminNonce(t *testing.T) {
+	l := senderEnv(t, func(c *config.Config) { c.OIDC.DPoP.RequireNonce = true }, feature.DPoP, feature.ServiceAccounts)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	_, out := l.admin(t, "/v1/admin/service-accounts", owner, map[string]any{"name": "ci"})
+	sa := out["id"].(string)
+	_, out = l.admin(t, "/v1/admin/service-accounts/"+sa+"/credentials", owner, map[string]any{"type": "client_secret"})
+	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {sa}, "client_secret": {out["secret"].(string)}}
+	k := dpoptest.NewKey(t)
+	h := l.a.AdminHandler()
+	w, out := l.form(t, h, "POST", adminTokenPath, form, nil, "DPoP", l.proof(t, k, "POST", testAdminURL+adminTokenPath, "", ""))
+	nonce := w.Header().Get("DPoP-Nonce")
+	if w.Code != 400 || out["error"] != "use_dpop_nonce" || nonce == "" {
+		t.Fatalf("nonce challenge: %d %v %v", w.Code, out, w.Header())
+	}
+	if w, out := l.form(t, h, "POST", adminTokenPath, form, nil, "DPoP", l.proof(t, k, "POST", testAdminURL+adminTokenPath, "", nonce)); w.Code != 200 ||
+		out["token_type"] != "DPoP" {
+		t.Fatalf("retry with nonce: %d %v", w.Code, out)
+	}
+}
