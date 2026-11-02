@@ -285,6 +285,7 @@ Org のポリシーで受け入れる経路を絞れる。
 
 argon2id。パスワードのみのログインには警告 `single_factor`。レートリミットはアカウント単位と IP 単位。アカウント単位はアドレスと接続元の組で数え（`per_account`）、アドレス全体には
 高めの上限（`per_account_total`）を置く。第三者が上限を使い切って本人を締め出すのを難しくする。
+リバースプロキシの後ろでは `server.trusted_proxies` にプロキシの範囲を書き、接続元を X-Forwarded-For から求める（ADR 0088）。
 
 #### メールのコード・リンクの安全策
 
@@ -585,7 +586,7 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 - EventSink で出す（標準出力 JSON Lines / syslog RFC 5424 / OTLP / Webhook）。独自 JSON か OCSF を選べる
 - outbox 経由（少なくとも1回。イベント ID で重複排除）
 - 個人情報の出し方を出力先ごとに選ぶ：そのまま / 仮名化（既定）/ 出さない（ADR 0071）
-- Storage の監査ログはハッシュチェーンにする
+- Storage の監査ログはハッシュチェーンにする。KeyStore に監査の鍵があれば HMAC-SHA-256 で作り、DB を書き換えられる人でも鍵が無ければ作り直せない。鍵付きの範囲は KeyStore の `audit_unkeyed_until` で決め、鍵なしに戻したレコードも改ざんとみなす（ADR 0086）
 
 ### 6.4 アプリケーションログ
 

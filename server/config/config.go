@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -148,6 +149,35 @@ type Server struct {
 	// LoginTemplates はホスト型ログイン画面のテンプレート（login.html。フィーチャー oidc_logout ならあれば logout.html も）を置いた
 	// ディレクトリ。空なら組み込みのもの。
 	LoginTemplates string `yaml:"login_templates"`
+	// TrustedProxies は X-Forwarded-For を信じる接続元（リバースプロキシ・ロードバランサー）の IP か CIDR（ADR 0088）。
+	// 空なら X-Forwarded-For を読まず、接続元は RemoteAddr。
+	TrustedProxies []string `yaml:"trusted_proxies"`
+}
+
+// TrustedProxyPrefixes は TrustedProxies を範囲にする。IP だけなら /32（IPv6 は /128）。誤った値があればエラー。
+func (s Server) TrustedProxyPrefixes() ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(s.TrustedProxies))
+	for _, v := range s.TrustedProxies {
+		if p, err := netip.ParsePrefix(v); err == nil {
+			if p.Addr().Is4In6() {
+				// 照合は Unmap した IPv4 で行うので、IPv4 射影の CIDR は IPv4 の CIDR に直す。
+				// /96 より短いと IPv4 射影の外の IPv6 まで含むので受け付けない。
+				if p.Bits() < 96 {
+					return nil, fmt.Errorf("server.trusted_proxies: %q is an IPv4-mapped prefix shorter than /96", v)
+				}
+				p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+			}
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(v)
+		if err != nil {
+			return nil, fmt.Errorf("server.trusted_proxies: %q is not an IP or CIDR", v)
+		}
+		a = a.Unmap()
+		out = append(out, netip.PrefixFrom(a, a.BitLen()))
+	}
+	return out, nil
 }
 
 // Adapter はアダプタの選択とその設定。driver 以外の項目はアダプタに渡す。
@@ -508,6 +538,9 @@ func (c Config) WarningActions() map[string]warning.Action {
 // Validate は設定の矛盾を検出する。危険な構成は起動を拒否する（design.md 2.5）。
 func (c Config) Validate() error {
 	var problems []string
+	if _, err := c.Server.TrustedProxyPrefixes(); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if c.Server.PublicAddr == "" || c.Server.AdminAddr == "" {
 		problems = append(problems, "server.public_addr and server.admin_addr are required")
 	} else if c.Server.PublicAddr == c.Server.AdminAddr {
