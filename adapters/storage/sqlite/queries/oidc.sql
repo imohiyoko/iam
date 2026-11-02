@@ -1,7 +1,7 @@
 -- name: CreateClient :exec
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
-    id_token_alg, backchannel_logout_uri, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetClient :one
 SELECT * FROM authn_clients WHERE realm_id = ? AND id = ?;
@@ -14,7 +14,7 @@ SELECT * FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id;
 
 -- name: UpdateClient :execrows
 UPDATE authn_clients SET name = ?, trust_level = ?, redirect_uris = ?, post_logout_redirect_uris = ?, auth_method = ?, secret_hash = ?, jwks = ?,
-    id_token_alg = ?, backchannel_logout_uri = ?, updated_at = ?
+    id_token_alg = ?, backchannel_logout_uri = ?, frontchannel_logout_uri = ?, frontchannel_logout_session_required = ?, updated_at = ?
 WHERE realm_id = ? AND id = ?;
 
 -- name: DeleteClient :execrows

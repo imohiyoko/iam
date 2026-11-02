@@ -323,6 +323,17 @@ Group のネスト、Org 階層（M7）。
 - realm の削除、realm ごとのセキュリティの階層
 - SCIM、管理画面（design.md 1章では当面やらないとしている。必要になったら検討）
 
+### RP-Initiated Logout と Front-Channel Logout（ADR 0094）
+
+**ゴール**：連携先の画面でのログアウトで IAM のセッションも終わり、同じブラウザのほかの連携先にも知らせる。
+
+- [x] `end_session_endpoint`（GET と POST）。`id_token_hint`（期限切れも可。署名・`iss`・`aud` を確かめる）、`client_id`、
+  登録と完全一致の `post_logout_redirect_uri`、`state`、`ui_locales`、`logout_hint`
+- [x] `id_token_hint` がセッションと合わない・無いときはホスト型の確認の画面（1回限り・同じセッションだけ・同一オリジン）
+- [x] セッションの失効で Back-Channel Logout を送り、完了の画面で `frontchannel_logout_uri` を iframe で開く（`iss`・`sid`、CSP）
+- [x] 連携先の登録と Discovery、フィーチャーの無効化で登録を外す、複数 realm、標準の RP（zitadel/oidc）での E2E
+- OpenID Connect Session Management（`check_session_iframe`）
+
 ---
 
 ## v1.0 の条件

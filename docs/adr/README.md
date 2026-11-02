@@ -97,3 +97,4 @@
 | [0083](0083-multi-realm.md) | 複数 realm は1つの App のまま要求ごとに realm を決め、realm ごとのサービスの組に渡す | 承認 |
 | [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |
 | [0085](0085-my-groups-and-group-scoped-read.md) | 本人の Group の一覧と、Group に限った所属の参照 | 承認 |
+| [0094](0094-oidc-rp-initiated-and-front-channel-logout.md) | RP-Initiated Logout はセッションと合う id_token_hint のときだけ確かめずに終え、Front-Channel Logout は完了の画面の iframe で知らせる | 承認 |

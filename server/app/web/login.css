@@ -13,3 +13,5 @@ button.link { background: none; color: var(--accent); width: auto; padding: 0; }
 .or { text-align: center; color: var(--muted); margin-top: 1.5rem; }
 #message { min-height: 1.5em; }
 #message.error { color: var(--error); }
+.client { color: var(--muted); }
+p.error { color: var(--error); }

@@ -142,7 +142,8 @@ type Server struct {
 	ClockSkewWarn Duration `yaml:"clock_skew_warn"`
 	// PublicURL は公開 API の外から見た URL（https://id.example.com）。CLI がログイン画面のリンクを示すのに使う。
 	PublicURL string `yaml:"public_url"`
-	// LoginTemplates はホスト型ログイン画面のテンプレート（login.html）を置いたディレクトリ。空なら組み込みのもの。
+	// LoginTemplates はホスト型ログイン画面のテンプレート（login.html。フィーチャー oidc_logout ならあれば logout.html も）を置いた
+	// ディレクトリ。空なら組み込みのもの。
 	LoginTemplates string `yaml:"login_templates"`
 }
 

@@ -28,6 +28,10 @@ func clientOut(c port.Client, secret string) (adminapi.Client, error) {
 	if c.BackchannelLogoutURI != "" {
 		out.BackchannelLogoutUri = &c.BackchannelLogoutURI
 	}
+	if c.FrontchannelLogoutURI != "" {
+		out.FrontchannelLogoutUri = &c.FrontchannelLogoutURI
+		out.FrontchannelLogoutSessionRequired = &c.FrontchannelLogoutSessionRequired
+	}
 	if len(c.JWKS) > 0 {
 		var m map[string]any
 		if err := json.Unmarshal(c.JWKS, &m); err != nil {
@@ -51,6 +55,12 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.BackchannelLogoutUri != nil {
 		in.BackchannelLogoutURI = *b.BackchannelLogoutUri
+	}
+	if b.FrontchannelLogoutUri != nil {
+		in.FrontchannelLogoutURI = *b.FrontchannelLogoutUri
+	}
+	if b.FrontchannelLogoutSessionRequired != nil {
+		in.FrontchannelLogoutSessionRequired = *b.FrontchannelLogoutSessionRequired
 	}
 	if b.Jwks != nil {
 		raw, err := json.Marshal(*b.Jwks)

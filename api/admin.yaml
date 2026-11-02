@@ -2681,6 +2681,15 @@ components:
           description: "`private_key_jwt` の公開鍵（JWKS）"
         id_token_signed_response_alg: { type: string, enum: [ES256, ML-DSA-65] }
         backchannel_logout_uri: { type: string }
+        frontchannel_logout_uri:
+          type: string
+          description: |
+            Front-Channel Logout の送り先（OIDC Front-Channel Logout 1.0。フィーチャー `oidc_logout`。ADR 0094）。ログアウトの
+            完了画面で iframe で開く。scheme・ホスト・ポートは `redirect_uris` のどれかと同じであること。フィーチャーが
+            動いていなければ、今の値から変えられない（`invalid_client_metadata`）
+        frontchannel_logout_session_required:
+          type: boolean
+          description: "`frontchannel_logout_uri` に `iss` と `sid` を付けるか（既定 false）"
     Client:
       type: object
       required: [client_id, name, redirect_uris, post_logout_redirect_uris, token_endpoint_auth_method, id_token_signed_response_alg, trust_level, created_at, updated_at]
@@ -2700,6 +2709,8 @@ components:
           additionalProperties: true
         id_token_signed_response_alg: { type: string }
         backchannel_logout_uri: { type: string }
+        frontchannel_logout_uri: { type: string }
+        frontchannel_logout_session_required: { type: boolean, description: "`frontchannel_logout_uri` があるときだけ" }
         client_secret: { type: string, description: 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す） }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
