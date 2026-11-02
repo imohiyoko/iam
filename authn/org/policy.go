@@ -44,6 +44,8 @@ const (
 	PolicyPasskeyAuthenticator = "passkey_authenticator"
 	// PolicyMinAAL は amr から求めた AAL の下限（ADR 0093）。フィーチャー acr も要る。
 	PolicyMinAAL = "min_aal"
+	// PolicyRestrictedAuthenticator は SP 800-63B の制限付きの認証器（SMS・音声の OTP）を使った認証を入れないこと（ADR 0104）。
+	PolicyRestrictedAuthenticator = "restricted_authenticator"
 )
 
 // EventPasskeyPolicyDenied は、Org の段の認証器のポリシーでその Org に入れなかったことの監査ログの種類（ADR 0096）。
@@ -70,10 +72,12 @@ type LoginPolicy struct {
 	Passkey *attestation.Policy `json:"passkey,omitempty"`
 	// MinAAL は amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（ADR 0093）。0 は判定しない。
 	MinAAL int `json:"min_aal,omitempty"`
+	// DenyRestrictedAuthenticators は amr に制限付きの認証器（sms・tel）がある認証を入れない（ADR 0104）。
+	DenyRestrictedAuthenticators bool `json:"deny_restricted_authenticators,omitempty"`
 }
 
 func (p *LoginPolicy) empty() bool {
-	return p == nil || (!p.RequirePasskey && !p.RequireSSO && len(p.MembershipEmailDomains) == 0 && len(p.IPAllowlist) == 0 && p.Passkey.Empty() && p.MinAAL == 0)
+	return p == nil || (!p.RequirePasskey && !p.RequireSSO && len(p.MembershipEmailDomains) == 0 && len(p.IPAllowlist) == 0 && p.Passkey.Empty() && p.MinAAL == 0 && !p.DenyRestrictedAuthenticators)
 }
 
 // checkPolicy は設定しようとするポリシー p を確かめ、正規化したものを返す。フィーチャーが止まっていても、
@@ -110,7 +114,8 @@ func normalizePolicy(p *LoginPolicy) (*LoginPolicy, error) {
 	if p.empty() {
 		return nil, nil
 	}
-	out := &LoginPolicy{RequirePasskey: p.RequirePasskey, RequireSSO: p.RequireSSO, MinAAL: p.MinAAL}
+	out := &LoginPolicy{RequirePasskey: p.RequirePasskey, RequireSSO: p.RequireSSO, MinAAL: p.MinAAL,
+		DenyRestrictedAuthenticators: p.DenyRestrictedAuthenticators}
 	if p.MinAAL < 0 || p.MinAAL > acr.MaxAAL {
 		return nil, settingInvalid("login_policy.min_aal: must be within [1, %d]", acr.MaxAAL)
 	}
@@ -196,6 +201,9 @@ func (s *Service) policyDenied(ctx context.Context, tx port.Tx, o port.Org, m po
 	}
 	if p.MinAAL > 0 && s.ACR && acr.AAL(in.AuthMethods) < p.MinAAL { // フィーチャーがオフなら判定しない（無効化の片付けで外す）
 		codes = append(codes, "policy."+PolicyMinAAL)
+	}
+	if p.DenyRestrictedAuthenticators && acr.Restricted(in.AuthMethods) {
+		codes = append(codes, "policy."+PolicyRestrictedAuthenticator)
 	}
 	if len(codes) == 0 {
 		return nil

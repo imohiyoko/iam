@@ -3,7 +3,11 @@ package port
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"time"
+
+	"github.com/imohiyoko/iam/shared/clock"
+	"github.com/imohiyoko/iam/shared/errs"
 )
 
 // 認証方式のプラグイン（ADR 0090、0092）。
@@ -46,6 +50,9 @@ type MethodInfo struct {
 	Usages []MethodUsage
 	// DataVersion は方式固有のデータ（Credential.Data）の形のバージョン。前進のみ。
 	DataVersion int
+	// OutOfBand は応答が別の経路（本人の端末など）から届く方式（ADR 0104）。Complete は届くまで ErrMethodPending を返し、
+	// クライアントの入力では照合しないので、コアはユーザーごとの照合の回数で数えない。
+	OutOfBand bool
 }
 
 // Supports は用途 u に使えるかを返す。
@@ -99,6 +106,8 @@ type MethodEnv struct {
 	Now time.Time
 	// Issuer と Account は登録のときに認証器に表示する名前（発行者と、本人のメールアドレスか公開 ID）。
 	Issuer, Account string
+	// ClientIP は要求の接続元（接続元ごとの制限に使う。ADR 0104）。分からなければ空。
+	ClientIP string
 }
 
 // MethodRequest はクライアントからの入力。
@@ -115,7 +124,30 @@ type MethodChallenge struct {
 	Payload json.RawMessage
 	// State は Complete に渡す状態。コアが封をして EphemeralStore に置く（秘密を含めてよい）。
 	State []byte
+	// Deliver は、コアがトランザクションを確定した後に呼ぶ送信（SMS・プッシュなど。ADR 0104）。エラーならフローを置かず、
+	// 送信の失敗（ErrDeliveryFailed）として返す。nil なら送らない。
+	Deliver func(ctx context.Context) error
+	// Events は、送信の後にコアが記録する監査ログ。
+	Events []MethodEvent
 }
+
+// MethodEvent は方式が残したい監査ログ（ADR 0104）。コアが種類を "method.<方式>.<Type>" にして、本人の公開 ID と一緒に記録する。
+// Details に電話番号・宛先・コードなどの個人情報と秘密を入れない。
+type MethodEvent struct {
+	// Type は出来事の名前（小文字の英数字と `_`）。
+	Type string
+	// UserID は本人の内部 ID。空なら主体は anonymous。
+	UserID  string
+	Failure bool
+	Details map[string]any
+}
+
+// ErrMethodPending は、別の経路からの応答がまだ届いていないこと（MethodInfo.OutOfBand の方式の Complete）。コアはフローを、
+// 回数を数えずに置き直す。
+var ErrMethodPending = errs.WithCode(errs.KindFailedPrecondition, "authorization_pending", "method: authorization pending")
+
+// ErrDeliveryFailed は送信（Deliver）の失敗。
+var ErrDeliveryFailed = errs.WithCode(errs.KindUnavailable, "delivery_failed", "method: delivery failed")
 
 // MethodResult はログイン（Complete）の結果。
 type MethodResult struct {
@@ -147,6 +179,48 @@ type Authenticator interface {
 	EnrollComplete(ctx context.Context, env MethodEnv, in MethodRequest) (MethodEnrollment, error)
 	// Revoke は無効化の前に呼ぶ（方式の外の片付け）。エラーなら無効化しない。
 	Revoke(ctx context.Context, env MethodEnv, c MethodCredential) error
+}
+
+// MethodCallbackResult は Callback の結果。
+type MethodCallbackResult struct {
+	// Payload は呼び出し元に返す JSON（object）。nil なら {}。
+	Payload json.RawMessage
+	Events  []MethodEvent
+}
+
+// CallbackAuthenticator は、別の経路（本人の端末など）からの応答を受ける方式（任意。ADR 0104）。
+// POST /v1/login/methods/{method}:callback で、セッションを要さずに呼ぶ。本人の確認（端末の鍵の署名など）は方式が行う。
+// env.UserID と env.Usage は空。照合の失敗は errs.AuthenticationFailed、入力の誤りは errs.Invalid で返す。
+type CallbackAuthenticator interface {
+	Authenticator
+	Callback(ctx context.Context, env MethodEnv, in MethodRequest) (MethodCallbackResult, error)
+}
+
+// MethodSetup は、設定を持つ方式（ConfigurableAuthenticator）に起動時に渡すもの（ADR 0104）。
+type MethodSetup struct {
+	// RealmID は方式を使う realm（方式は realm ごとに設定する）。
+	RealmID string
+	// Options は設定ファイルの methods.<方式> の項目。知らない項目はエラーにする。
+	Options map[string]string
+	// Ephemeral は方式の名前と realm で前置きした EphemeralStore（コアのキーには届かない）。レートリミットや、
+	// 別の経路からの応答の受け渡しに使う。秘密を置くなら方式がハッシュにする。
+	Ephemeral EphemeralStore
+	// Blind は値のブラインドインデックス（base64url）を返す。個人情報（電話番号など）をキーにするときに使う。
+	Blind func(ctx context.Context, value string) (string, error)
+	// SMS と Push は送信のポート。設定されていなければ nil。
+	SMS  SMSSender
+	Push PushSender
+	// Dev は開発モードか。
+	Dev   bool
+	Clock clock.Clock
+	Log   *slog.Logger
+}
+
+// ConfigurableAuthenticator は、起動時に設定と送信のポートを受け取る方式（任意。ADR 0104）。Setup は設定済みの方式を返す。
+// 設定や送信のポートが足りなければエラーにする（起動を止める。fail-closed）。
+type ConfigurableAuthenticator interface {
+	Authenticator
+	Setup(ctx context.Context, s MethodSetup) (Authenticator, error)
 }
 
 // Credential は authn_credentials の1行（ADR 0090、0092）。Data はユーザーのデータ鍵で暗号化した、方式固有のデータ。

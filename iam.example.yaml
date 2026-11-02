@@ -81,6 +81,23 @@ realm:
 #   driver: http
 # realm.passkey_policy に realm の段の認証器のポリシーを置ける（allowed_aaguids・denied_aaguids・min_certification_level・require_attestation）
 
+# SMS・音声の OTP とプッシュの承認（フィーチャー sms_otp・push_auth。ADR 0104）。フィーチャーがオンなら送信のアダプタが要る。
+# SMS の事業者には宛先の番号とコードを入れた本文を、プッシュの中継には端末の宛先を渡す（0031 の例外）。
+# sms_sender:                       # driver: dev（開発モードのみ）/ twilio
+#   driver: twilio
+#   options:
+#     account_sid: ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#     auth_token_env: IAM_TWILIO_AUTH_TOKEN   # 読んだ後に消す。api_key_sid を置けば API Key の Secret
+#     from: "+15005550006"                    # か messaging_service_sid（音声は from が要る）
+#     sms_body: "Your verification code is {code}"
+# push_sender:                      # driver: dev（開発モードのみ）/ webhook（運用者のプッシュの中継へ署名付きで POST）
+#   driver: webhook
+#   options: { url: https://push-relay.internal.example/iam, secret_env: IAM_PUSH_WEBHOOK_SECRET }
+# methods:
+#   sms:  { code_ttl: 5m, digits: "6", channels: "sms,voice", allowed_country_codes: "81,1", per_user: "5", per_number: "5", per_ip: "20", resend_interval: 30s }
+#   push: { challenge_ttl: 2m, per_user: "5", per_ip: "20", deny_limit: "3", deny_window: 30m }
+# realm.disabled_methods: [sms] で、realm ごとに方式を止められる
+
 security:
   session:
     absolute_lifetime: { default: 30d, min: 1h, max: 90d }

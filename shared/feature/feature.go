@@ -42,6 +42,8 @@ const (
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 	SAML                = "saml"
+	SMSOTP              = "sms_otp"
+	PushAuth            = "push_auth"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

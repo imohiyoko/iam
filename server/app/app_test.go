@@ -56,6 +56,7 @@ func newEnv(t *testing.T) *env {
 	return &env{cfg: cfg, out: out, logs: logs, deps: Deps{
 		Storage: memory.New(clk), Ephemeral: ephemeral.New(clk), KeyStore: ks,
 		EventSink: stdout.New(out), Notifier: &dev.Notifier{Log: log}, Clock: clk, Logger: log,
+		SMS: &smsOutbox{}, Push: &pushOutbox{},
 	}}
 }
 

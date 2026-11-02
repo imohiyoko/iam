@@ -69,6 +69,9 @@ type Deps struct {
 	BreachCheck port.BreachChecker
 	// FIDOMDS は FIDO Metadata Service の BLOB の取得（フィーチャー passkey_attestation。ADR 0096）。nil なら MDS を読まない。
 	FIDOMDS port.FIDOMetadataSource
+	// SMS と Push は認証方式の送信（フィーチャー sms_otp・push_auth。ADR 0104）。フィーチャーが動いていて nil なら起動しない。
+	SMS  port.SMSSender
+	Push port.PushSender
 	// DNS は Org のドメインの証明で TXT を引く。nil なら net.DefaultResolver。
 	DNS org.TXTResolver
 	// Hooks は Go のインターフェースで実装したフロー フック（11.8）。設定の hooks で url の無いものに使う。
@@ -338,10 +341,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	for _, v := range rs.VerifiedVia {
 		via = append(via, port.VerifiedVia(v))
 	}
-	methods, err := method.Active(plan.IsActive, d.Methods...)
+	methods, err := method.ActiveWith(ctx, plan.IsActive, a.methodSetup(realm.ID), d.Methods...)
 	if err != nil {
 		return err
 	}
+	// realm の設定で止めた方式（ADR 0104）は、この realm では無いものとして扱う。
+	methods = methods.Without(rs.DisabledMethods)
 	a.methods, a.sessions.Methods = methods, methods
 	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via, ExtraCategories: cfg.Security.SuspensionCategories,
 		DeletionGrace: rs.userDeletionGrace(), IndexOnly: rs.EmailStorage == "index_only", Roles: authzRoles{}, Methods: methods}
