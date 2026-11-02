@@ -33,6 +33,7 @@ const (
 	CustomAttributes    = "custom_attributes"
 	FlowHooks           = "flow_hooks"
 	ACR                 = "acr"
+	SAML                = "saml"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

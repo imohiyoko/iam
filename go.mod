@@ -3,12 +3,15 @@ module github.com/imohiyoko/iam
 go 1.27.3
 
 require (
+	github.com/beevik/etree v1.7.0
 	github.com/fxamacker/cbor/v2 v2.9.4
 	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/google/uuid v1.6.0
 	github.com/lestrrat-go/jwx/v4 v4.6.0
+	github.com/mattermost/xml-roundtrip-validator v0.1.0
 	github.com/oapi-codegen/runtime v1.8.0
+	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/zitadel/oidc/v3 v3.51.16
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.58.0
@@ -28,6 +31,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/lestrrat-go/dsig v1.4.0 // indirect
 	github.com/lestrrat-go/option/v3 v3.0.0-alpha1 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect

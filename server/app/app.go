@@ -32,6 +32,7 @@ import (
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/recovery"
+	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/totp"
@@ -99,6 +100,8 @@ type App struct {
 	notify *notify.Service
 	email  *emailflow.Service
 	oauth  *oauth.Service
+	// saml は外部 IdP としての SAML 2.0（ADR 0098）。フィーチャー saml が動いていなければ nil。
+	saml *saml.Service
 	// passkeys は passkey の登録とログイン。Relying Party が決まらない構成（public_url も rp_id も無い）では nil。
 	passkeys *passkey.Service
 	// totp は TOTP の登録と照合（2要素目）。
@@ -355,6 +358,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	if a.orgs != nil && a.orgs.ManagedUsers {
 		a.oauth.OrgSSO = a.orgs
+	}
+	a.saml = nil
+	if plan.IsActive(feature.SAML) {
+		// ACS と SP の Entity ID は realm の公開の URL から作る（Org は選べない）。
+		a.saml = &saml.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, OAuth: a.oauth, BaseURL: a.issuer,
+			Dev: cfg.Dev, TTL: cfg.Security.EmailFlow.TTL.D(), Log: d.Logger}
 	}
 	a.passkeys = nil
 	if ep.rpOK {

@@ -362,6 +362,17 @@ Group のネスト、Org 階層（M7）。
 - リスクに応じた追加認証、新しい端末の検知、ボット対策、アカウント単位のロックアウト
 - Device Authorization Grant、本人の Personal Access Token
 
+#### 外部 IdP としての SAML 2.0（ADR 0098）
+
+- [x] Org の owner と運営者が、IdP のメタデータ（XML か URL）から SAML の connection を登録できる。URL の取得は公開のアドレスに限る
+- [x] SP のメタデータを公開し、AuthnRequest（HTTP-Redirect、ECDSA-SHA256 の署名は任意）を送り、ACS（HTTP-POST）で応答を受ける
+- [x] 署名を確かめた Assertion だけを受ける。XML Signature Wrapping・コメントの挿入・複数の Assertion・SHA-1・暗号化された Assertion を拒むテストがある
+- [x] Audience・Recipient・Destination・InResponseTo（フローに結び付けて 1 回だけ）・時刻（Clock）・Assertion の ID の再利用を確かめる
+- [x] ログイン・登録・連携は Org 専用 SSO の OIDC と同じ（管理ユーザーだけ、証明済みドメイン、`require_sso`）
+- [x] 応答の検証と IdP のメタデータの解析にファジングのテストがある
+- [x] フィーチャー `saml`（既定オフ）。無効化で connection を消し、外部 ID を無効化する
+- [ ] Single Logout、暗号化された Assertion、メタデータの定期的な取り直し
+
 ### M10 エンタープライズの運用
 
 - 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作と Org への追加

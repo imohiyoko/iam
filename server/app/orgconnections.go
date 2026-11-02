@@ -7,6 +7,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/oauth"
+	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -16,9 +17,27 @@ import (
 // Org 専用 SSO（design.md 11.3、ADR 0077）。Org の owner（org:settings）が connection を扱う。フィーチャー org_managed_users。
 
 func orgConnectionOut(c port.Connection) (publicapi.OrgConnection, error) {
+	if c.Type == saml.Type {
+		in, err := saml.InfoOf(c)
+		info := &publicapi.SAMLConnectionInfo{IdpEntityId: in.IdPEntityID, SsoUrl: in.SSOURL, SpEntityId: in.SPEntityID, AcsUrl: in.ACSURL,
+			SignRequests: in.SignRequests, MetadataUrl: optional(in.MetadataURL), NameIdFormat: optional(in.NameIDFormat),
+			EmailAttribute: optional(in.EmailAttribute)}
+		if !in.IdPCertExpiresAt.IsZero() {
+			info.IdpCertificateExpiresAt = &in.IdPCertExpiresAt
+		}
+		return publicapi.OrgConnection{Id: c.ID, Type: publicapi.OrgConnectionTypeSaml, Saml: info, Scopes: []string{}, CreatedAt: c.CreatedAt}, err
+	}
 	in, err := oauth.Info(c)
-	return publicapi.OrgConnection{Id: c.ID, Issuer: in.Issuer, AuthorizationEndpoint: in.AuthURL, TokenEndpoint: in.TokenURL,
+	return publicapi.OrgConnection{Id: c.ID, Type: publicapi.OrgConnectionTypeOidc, Issuer: in.Issuer, AuthorizationEndpoint: in.AuthURL, TokenEndpoint: in.TokenURL,
 		ClientId: in.ClientID, Scopes: in.Scopes, RedirectUri: in.RedirectURI, CreatedAt: c.CreatedAt}, err
+}
+
+// optional は空なら nil を返す。
+func optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func (s publicServer) ListOrgConnections(ctx context.Context, req publicapi.ListOrgConnectionsRequestObject) (publicapi.ListOrgConnectionsResponseObject, error) {
@@ -147,7 +166,10 @@ func (s publicServer) DiscoverSSO(ctx context.Context, req publicapi.DiscoverSSO
 	if err != nil {
 		return publicapi.DiscoverSSO400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_email"}}, nil
 	}
-	out := publicapi.DiscoverSSO200JSONResponse{Connections: []string{}}
+	out := publicapi.DiscoverSSO200JSONResponse{Connections: []string{}, Entries: []struct {
+		Connection string                                              `json:"connection"`
+		Type       publicapi.DiscoverSSO200JSONResponseBodyEntriesType `json:"type"`
+	}{}}
 	if !s.domainsOn() {
 		return out, nil
 	}
@@ -162,7 +184,14 @@ func (s publicServer) DiscoverSSO(ctx context.Context, req publicapi.DiscoverSSO
 		}
 		cs, err := tx.Connections().ListByOwner(ctx, s.a.realm.ID, d.OrgID)
 		for _, c := range cs {
+			if !s.a.connectionUsable(c) {
+				continue
+			}
 			out.Connections = append(out.Connections, c.Slug)
+			out.Entries = append(out.Entries, struct {
+				Connection string                                              `json:"connection"`
+				Type       publicapi.DiscoverSSO200JSONResponseBodyEntriesType `json:"type"`
+			}{Connection: c.Slug, Type: publicapi.DiscoverSSO200JSONResponseBodyEntriesType(c.Type)})
 		}
 		return err
 	})

@@ -14,6 +14,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/orgmanagedusers"
 	_ "github.com/imohiyoko/iam/features/password"
 	_ "github.com/imohiyoko/iam/features/quota"
+	_ "github.com/imohiyoko/iam/features/saml"
 	_ "github.com/imohiyoko/iam/features/serviceaccounts"
 	_ "github.com/imohiyoko/iam/features/warnings"
 )

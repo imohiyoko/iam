@@ -20,6 +20,7 @@ import (
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/password"
+	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authz/manage"
@@ -50,6 +51,7 @@ var featureCatalog = map[string]struct {
 	feature.AccountMerge:     {merge.Feature, module + "/features/accountmerge"},
 	feature.MultiRealm:       {realm.Feature, module + "/features/multirealm"},
 	feature.ACR:              {acr.Feature, module + "/features/acr"},
+	feature.SAML:             {saml.Feature, module + "/features/saml"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

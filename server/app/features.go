@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/org"
+	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/feature"
@@ -108,6 +109,12 @@ var cleaners = map[string]cleaner{
 		rs, err := tx.Realms().List(ctx)
 		return max(len(rs)-1, 0), err
 	}, Hint: "realms other than the default cannot be deleted yet: keep multi_realm enabled while they exist"},
+	// SAML の connection（realm 共通と Org 専用）を消し、紐付けた外部 ID を無効化する（ADR 0098）。
+	feature.SAML: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachSAMLConnection(ctx, tx, -1, time.Time{}, false)
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachSAMLConnection(ctx, tx, limit, now, true)
+	}},
 	feature.Password: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.Passwords().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Passwords().Purge(ctx, limit)
@@ -148,6 +155,39 @@ func eachOwnedConnections(ctx context.Context, tx port.Tx, limit int, now time.T
 			if n += c; err != nil {
 				return n, err
 			}
+		}
+	}
+	return n, nil
+}
+
+// eachSAMLConnection は全 realm の SAML の connection を数える。purge なら limit（0 以上なら）まで、外部 ID を無効化して消す。
+func eachSAMLConnection(ctx context.Context, tx port.Tx, limit int, now time.Time, purge bool) (int, error) {
+	realms, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range realms {
+		cs, err := tx.Connections().List(ctx, r.ID)
+		if err != nil {
+			return n, err
+		}
+		for _, c := range cs {
+			if c.Type != saml.Type {
+				continue
+			}
+			if limit >= 0 && n >= limit {
+				return n, nil
+			}
+			if purge {
+				if _, err := tx.Identities().RevokeByConnection(ctx, r.ID, c.ID, now, org.RevokeConnectionDeleted); err != nil {
+					return n, err
+				}
+				if err := tx.Connections().Delete(ctx, r.ID, c.ID); err != nil {
+					return n, err
+				}
+			}
+			n++
 		}
 	}
 	return n, nil
