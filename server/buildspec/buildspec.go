@@ -32,6 +32,7 @@ import (
 	x509method "github.com/imohiyoko/iam/authn/method/x509"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
+	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
@@ -83,7 +84,10 @@ var featureCatalog = map[string]struct {
 	feature.PushAuth:           {push.Feature, module + "/features/push"},
 	feature.X509:               {x509method.Feature, module + "/features/x509"},
 	feature.Kerberos:           {kerberosmethod.Feature, module + "/features/kerberos"},
-	feature.OpenID4VP:          {openid4vp.Feature, module + "/features/openid4vp"},
+
+	// ADR 0109。
+	feature.PersonalAccessTokens: {pat.Feature, module + "/features/personalaccesstokens"},
+	feature.OpenID4VP:            {openid4vp.Feature, module + "/features/openid4vp"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

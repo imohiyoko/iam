@@ -557,6 +557,7 @@ GET    /v1/admin/signing-keys
 - 連携先：**ID トークンは JWT**（9.3）。**アクセストークンは不透明**で、イントロスペクション（RFC 7662）で確認する（ADR 0021）。リソースサーバーは結果を 5.3 の上限以内でキャッシュしてよい
 - ID トークンのクレーム：`sub`、`org_id`（Org オンのみ）、`amr`、`sid`、`email`（4.4）、`acr`（フィーチャー acr。11.15）。Group / Role は載せない
 - リフレッシュトークンはローテーションし、再利用を検知したらファミリーごと失効
+- 本人の Personal Access Token（`iampat_…`）も不透明で、イントロスペクションで確かめる（連携先に結び付かない。11.18）
 
 ### 5.2 セッション ID
 
@@ -823,6 +824,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | ボット対策（11.17） | オフ | ― | ログインの入口で人の確認を求めない |
 | LDAP / Active Directory（11.3、ADR 0102） | オフ | ― | LDAP の connection を使わない・同期しない（Org 専用には Org 管理ユーザーも要る） |
 | Kerberos / SPNEGO（4.1、ADR 0107） | オフ | ― | Negotiate のログインと登録なし（設定の無い realm でも）。無効化は認証情報が 0 件になって完了 |
+| 本人の Personal Access Token（11.18、ADR 0109） | オフ | ― | PAT の API は 404。`iampat_` のトークンはどの経路でも通らない。無効化でトークンと realm のポリシーを消す |
 
 ### 11.1 複数 realm
 
@@ -1035,6 +1037,25 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - `bot_protection`：ログインと復旧の入口で、`always` ならいつも、`suspicious` なら接続元の失敗（401・429）が続いた後に
   `IAM-Bot-Token` ヘッダーを求め、ポート `BotVerifier`（汎用の siteverify の HTTP、開発用）で確かめる。無いか通らなければ
   `403 bot_check_required`。確かめられないときも通さない
+
+### 11.18 本人の Personal Access Token
+
+人が CLI やスクリプトから自分として API を呼ぶためのトークン。フィーチャー `personal_access_tokens`（既定オフ）。
+
+実装（ADR 0109）：
+
+- 形は `iampat_<トークン ID の 26 文字>_<秘密 43 文字><検査 6 文字>`（83 文字。秘密の走査の正規表現
+  `iampat_[0-9A-HJKMNP-TV-Z]{26}_[0-9A-Za-z]{49}`）。秘密は約 256 bit で、DB には SHA-256 だけを持つ。作ったときに 1 回だけ返す。
+  検査の文字（CRC32）が合わなければ DB を引かない
+- スコープは権限の名前（1〜20 個）。判定の認証の文脈 `Scopes` が付与で許す操作を絞るだけで、本人の権限を超えない（`Holds` も同じ）
+- 受け付けるのは、管理 API の Bearer（`amr: [pat]`。max_auth_age は見ない）、判定の API の `access_token`、イントロスペクション
+  （`token_type: personal_access_token`。`client_id`・`aud` なし）。公開 API と UserInfo では受け付けない
+- 使うたびにトークン・本人（作成からの停止も）・realm の今のポリシーを確かめる。`last_used_at` は 1 分ごとに書く
+- realm のポリシー（`max_lifetime`・`allowed_scopes`・`require_expiry`）は表に持ち、`personal_access_tokens:manage` で変える。
+  ホスト先の `personal_access_tokens.max_lifetime` を超えられない。ユーザーごとの数の上限は `max_per_user`
+- 本人は `/v1/me/personal-access-tokens` で作る（直近の認証が要る）・一覧・取り消し。運営者は `credentials:revoke` で一覧・取り消し、
+  侵害時の一括の無効化でも取り消す。消去で消し、統合で統合元のものを取り消す
+- 監査ログ `personal_access_token.created`・`revoked`・`policy_updated`
 
 ## 12. テスト
 

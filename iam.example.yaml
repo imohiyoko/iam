@@ -145,6 +145,10 @@ oidc:
 service_accounts:  # 汎用サービスアカウント（フィーチャー service_accounts。ADR 0074）
   token_ttl: 10m  # client credentials で発行するアクセストークンの寿命（1時間以下）
 
+personal_access_tokens:  # 本人の Personal Access Token（フィーチャー personal_access_tokens。ADR 0109）
+  max_per_user: 50  # ユーザーごとの有効なトークンの上限
+  max_lifetime: 0s  # 寿命の上限（0 なら上限なし。realm のポリシーはこれより長くできない）
+
 # hooks:  # フロー フック（フィーチャー flow_hooks。ADR 0081）。url の無いフックは Go の実装（app.Deps.Hooks）で渡す
 #   pre_registration:
 #     url: https://hooks.example.com/iam  # 署名は X-IAM-Signature（通知の Webhook と同じ形）

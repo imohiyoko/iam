@@ -98,6 +98,9 @@ const (
 	PermSigningKeysRead = "signing_keys:read"
 	// PermUsersEmails は運営者によるメールの追加（確認の経路 admin）・削除・primary の変更（ADR 0097）。
 	PermUsersEmails = "users:emails"
+	// PermPersonalAccessTokensManage は realm の Personal Access Token のポリシーの参照と変更（ADR 0109）。ユーザーのトークンの
+	// 一覧と取り消しは PermCredentialsRevoke。
+	PermPersonalAccessTokensManage = "personal_access_tokens:manage"
 )
 
 // 本人の重要な操作の名前（ADR 0084）。付与は要らず、直近の認証（max_auth_age）に加えて、名前空間 `me` と active な Org の
@@ -111,6 +114,8 @@ const (
 	ActionMeAcceptManagement = "me:accept_management" // Org の管理下に入る（ADR 0077）
 	ActionMeDeleteOrg        = "me:delete_org"        // 共有 Org の削除（4.10）
 	ActionMeDeleteManaged    = "me:delete_managed"    // 管理ユーザーのアカウントの削除（11.3、ADR 0076）
+	// ActionMePersonalAccessTokens は Personal Access Token の作成（ADR 0109）。
+	ActionMePersonalAccessTokens = "me:personal_access_tokens"
 )
 
 // SuspensionPerm は停止の種別ごとの停止・解除の権限（`suspensions:<category>`。4.11）。
@@ -128,7 +133,7 @@ func suspend(categories ...string) []string {
 var builtin = map[string][]string{
 	RealmOwner: append([]string{PermAuditRead, PermAuditReadClientData, PermEventSubscriptionsManage, PermRealmsManage, PermRiskTypesManage, PermRiskWrite, PermRequirementsManage, PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
 		PermCredentialsRevoke, PermSuspensionsAny, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermSigningKeysRead, PermUsersEmails,
-		PermUsersImpersonate},
+		PermUsersImpersonate, PermPersonalAccessTokensManage},
 		suspend("tos_violation", "customer_request", "security_risk", "billing")...),
 	RealmAdmin: append([]string{PermAuditRead, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke,
 		PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermUsersEmails},
