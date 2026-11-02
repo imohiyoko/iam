@@ -571,6 +571,24 @@ func testOrgDomains(t *testing.T, h Harness) {
 		if got, err := repo.GetVerified(ctx, r, "example.com"); err != nil || !reflect.DeepEqual(got, a) {
 			return fmt.Errorf("GetVerified = %+v, %v", got, err)
 		}
+		// 確かめ直すのは証明済みで、確かめた時刻が before 以前（または無い）もの。確かめていないものが先（ADR 0087）。
+		c.VerifiedAt = ptr(T0)
+		if err := repo.Update(ctx, c); err != nil {
+			return err
+		}
+		if list, err := repo.ListToRecheck(ctx, T0.Add(time.Hour), 10); err != nil || len(list) != 2 || list[0].ID != c.ID || list[1].ID != a.ID {
+			return fmt.Errorf("ListToRecheck = %+v, %v", list, err)
+		}
+		if list, err := repo.ListToRecheck(ctx, T0.Add(time.Hour-time.Second), 1); err != nil || len(list) != 1 || list[0].ID != c.ID {
+			return fmt.Errorf("ListToRecheck before check = %+v, %v", list, err)
+		}
+		a.MissingSince = ptr(T0.Add(90 * time.Minute))
+		if err := repo.Update(ctx, a); err != nil {
+			return err
+		}
+		if got, err := repo.GetByPublicID(ctx, r, a.PublicID); err != nil || !reflect.DeepEqual(got, a) {
+			return fmt.Errorf("missing since = %+v, %v", got, err)
+		}
 		// 証明済みのドメインは realm で1つの Org だけ。
 		b.VerifiedAt, b.CheckedAt = ptr(T0.Add(2*time.Hour)), ptr(T0.Add(2*time.Hour))
 		if err := conflict("verified by another org", repo.Update(ctx, b)); err != nil {

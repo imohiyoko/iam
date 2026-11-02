@@ -97,6 +97,7 @@
 | [0083](0083-multi-realm.md) | 複数 realm は1つの App のまま要求ごとに realm を決め、realm ごとのサービスの組に渡す | 承認 |
 | [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |
 | [0085](0085-my-groups-and-group-scoped-read.md) | 本人の Group の一覧と、Group に限った所属の参照 | 承認 |
+| [0087](0087-org-domain-recheck.md) | 証明済みのドメインは定期的に TXT を確かめ直し、猶予の間ずっと無ければ証明を外す | 承認 |
 | [0089](0089-enterprise-full-scope.md) | エンタープライズ向けに全部入りを目指し、以前に除外した機能もフィーチャーとして含める | 承認 |
 | [0090](0090-authenticator-plugins.md) | 認証方式を共通のポートを持つプラグインにし、1 方式 1 ディレクトリで持つ | 承認 |
 | [0091](0091-process-roles.md) | 同じバイナリを役割ごとに別のプロセスで動かせるようにする | 承認 |
