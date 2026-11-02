@@ -1,6 +1,6 @@
 # 0074. 汎用サービスアカウントは管理 API で作り、API キーか client credentials の短命トークンで管理 API を使う
 
-- 状態: 承認
+- 状態: 一部置き換え: 0089
 - 日付: 2026-10-27
 - 関連: [design.md](../design.md) 2.4、4.7、11.2、[0045](0045-internal-and-external-ids.md)
 

@@ -12,6 +12,11 @@
 | M5 OIDC Provider | ほかのアプリが標準の OIDC でログインを任せられる |
 | M6 本番運用 | ホスト先が本番で運用・監視・移行・構成変更できる |
 | M7 拡張 | 必要になったフィーチャーを順に足す |
+| M8 認証の土台 | 認証方式をプラグインで足せ、ポリシーを方式の強さ（AAL）で書ける |
+| M9 認証方式の拡張 | 社内のディレクトリ・SaaS・企業の端末で使われる認証方式がすべて選べる |
+| M10 エンタープライズの運用 | 運用者が管理 API だけでユーザー・Org・セッション・監査ログを調べて操作でき、役割ごとにプロセスを分けられる |
+| M11 OAuth / OIDC とプロビジョニングの拡張 | 標準の OAuth / OIDC の拡張と SCIM を、既定オフのフィーチャーとしてすべて選べる |
+| M12 認可の拡張 | 認可の標準 API と ReBAC・ポリシーが揃う |
 | v1.0 | 外部の基準と第三者の監査で安全性を確かめた状態 |
 
 ---
@@ -323,7 +328,21 @@ Group のネスト、Org 階層（M7）。
 - realm の削除、realm ごとのセキュリティの階層
 - SCIM、管理画面（design.md 1章では当面やらないとしている。必要になったら検討）
 
-### acr・AAL と step-up（ADR 0093。M8 認証の土台）
+---
+
+## M8〜M12 全部入り（ADR 0089）
+
+範囲は [scope.md](scope.md)。新しいフィーチャーはすべて既定オフにする。認証を最優先にし、M8・M9 を先に進める。
+各フェーズは、着手するときにゴールと完了条件を書き足す。
+
+### M8 認証の土台
+
+- 認証方式のプラグイン（ADR 0090）：`Authenticator` のポート、`authn_credentials`、汎用の HTTP、外部 Authenticator のアダプタ
+- 既存の方式（passkey・TOTP・パスワード・メール・ログインリンク・OAuth）を 1 方式ずつ移す
+- `acr` と AAL、step-up（RFC 9470）、Org のログインポリシーと `acr_values` を強さで書く
+- RP-Initiated Logout、Front-Channel Logout
+
+#### acr・AAL と step-up（ADR 0093）
 
 **ゴール**：ポリシーと条件を認証の強さ（AAL）で書け、足りなければ連携先と API が step-up を求められる。
 
@@ -335,11 +354,41 @@ Group のネスト、Org 階層（M7）。
 - [x] フィーチャー `acr`（既定オフ）。オフなら今の動作と同じ
 - AAL3 と `phrh`（attestation で鍵がハードウェアにあると確かめる方式。ADR 0090 の方式の宣言で足す）、メールのコードと TOTP の区別
 
+### M9 認証方式の拡張
+
+- 外部 IdP：SAML 2.0（Org 専用 SSO と realm の connection）、WS-Federation
+- ディレクトリ：LDAP / AD のバインド認証と同期、Kerberos / SPNEGO
+- 方式：WebAuthn の attestation と AAGUID の許可リスト、HOTP、SMS・音声、プッシュ、X.509・スマートカード、Verifiable Credentials（OpenID4VP）
+- リスクに応じた追加認証、新しい端末の検知、ボット対策、アカウント単位のロックアウト
+- Device Authorization Grant、本人の Personal Access Token
+
+### M10 エンタープライズの運用
+
+- 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作と Org への追加
+- 監査ログの照会 API、イベントの Webhook の購読の API
+- 一括インポート（パスワードハッシュ付き）、運営者のなりすまし（記録付き）
+- 役割ごとのプロセス（ADR 0091）と、`org`・`authz`・`authz-manage` を分けるための依存の整理
+- メトリクス・トレース、HSM・クラウド KMS の KeyStore、Helm チャート
+- Org ごとのブランディングとカスタムドメイン、委任管理、管理画面、本人のデータの書き出し、同意の記録
+
+### M11 OAuth / OIDC とプロビジョニングの拡張
+
+- RS256、JWT のアクセストークン、`offline_access`、`profile` などのスコープ、`claims`、`form_post`、JAR、PAR
+- サードパーティの連携先、同意画面、動的クライアント登録、本人による許可の一覧と取り消し
+- SAML 2.0 IdP、Token Exchange、CIBA、DPoP、mTLS、FAPI 2.0、RFC 8414・9728
+- サービスアカウントの自前の API 向けトークン（RFC 8707）、Workload Identity Federation
+- ロール・Group のクレーム、Shared Signals（CAEP・RISC）
+- SCIM 2.0（サーバーとクライアント）
+
+### M12 認可の拡張
+
+- 一括判定、権限の一覧、OpenID AuthZEN、ReBAC、ポリシー言語、時限付きの付与と棚卸し
+
 ---
 
 ## v1.0 の条件
 
-- [ ] OIDC の適合試験と WebAuthn の適合試験に合格（既知の差異を明記）
+- [ ] OIDC の適合試験と WebAuthn の適合試験に合格（既知の差異を明記）。M8 以降の範囲は、v1.0 の時点で完成しているフィーチャーに限る（ADR 0089）
 - [ ] 脅威モデルと不変条件のテストが揃っている（13.5）
 - [ ] 第三者のセキュリティ監査を完了し、指摘に対応した
 - [ ] 公開 API・Webhook・トークンのクレーム・Go ライブラリのポートの v1 を凍結した（11.10）
