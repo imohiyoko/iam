@@ -180,8 +180,9 @@ user_identities      id, realm_id, user_id, connection_id, provider_subject
 
 connections          id, realm_id, owner_org_id（NULL=realm 共通 / 値=Org 専用 SSO）, type（oauth2 / oidc / saml）, config
 
-password_credentials id, user_id, hash（argon2id）, created_at, revoked_*
-totp_credentials     id, user_id, secret_ciphertext, key_id, created_at, last_used_step, revoked_*
+password_credentials id, user_id, hash（argon2id）, created_at, revoked_*（ADR 0101 で authn_credentials の方式 password へ移す。
+                     起動時に移して空になる。次のリリースで消す）
+totp_credentials     id, user_id, secret_ciphertext, key_id, created_at, last_used_step, revoked_*（ADR 0101 で方式 totp へ移す。同上）
 recovery_codes       user_id, code_hash（argon2id）, used_at, created_at
 passkeys             id, user_id, credential_id, public_key, alg（ES256 / EdDSA / RS256）
                      sign_count, transports, name, preferred_org_id（4.4）, created_at, last_used_at, revoked_*
@@ -190,7 +191,8 @@ passkeys             id, user_id, credential_id, public_key, alg（ES256 / EdDSA
 revoked_passkey_credentials  realm_id, credential_id, revoked_at（再登録の拒否）, PK (realm_id, credential_id)
 authn_credentials    id, realm_id, user_id, method, lookup（検索キーのブラインドインデックス。任意）
                      data（方式固有のデータ。ユーザーのデータ鍵で暗号化）, data_version, created_at, last_used_at, revoked_*
-                     UNIQUE (realm_id, method, lookup)（無効化していないもの）。認証方式のプラグインの汎用の認証情報（ADR 0090、0092）
+                     UNIQUE (realm_id, method, lookup)（無効化していないもの）。認証方式のプラグインの汎用の認証情報（ADR 0090、0092）。
+                     TOTP（method totp。otp_ の ID を保つ）とパスワード（method password）もここに置く（ADR 0101）
 
 service_accounts     id, realm_id, org_id, name, valid_from, valid_until, created_at
 service_account_credentials  id, service_account_id, type（client_secret / private_key_jwt / api_key）
@@ -254,11 +256,11 @@ Group に入れるのは、その Org の active な Membership を持つユー�
 | 要素 | 外部への送信 | 位置づけ |
 |---|---|---|
 | passkey | 不要 | 1要素目・2要素目。最も推奨 |
-| TOTP | 不要 | 2要素目 |
+| TOTP | 不要 | 2要素目。認証方式のプラグインのコアの方式（`totp`。フィーチャーに属さず、いつも動く。ADR 0101） |
 | HOTP（RFC 4226） | 不要 | 2要素目。フィーチャー（`hotp`。認証方式のプラグイン。ADR 0092） |
 | OAuth / SSO | 不要 | 識別は `(connection, provider_subject)` |
 | メールのコード・マジックリンク | 必要（Notifier） | 所有確認、パスワードなしのログイン、復旧 |
-| メール + パスワード | 不要 | フィーチャー（`password`） |
+| メール + パスワード | 不要 | フィーチャー（`password`。認証方式のプラグインの方式 `password`。ADR 0101） |
 | SMS | ― | 対応しない |
 
 - 2段階認証は passkey / TOTP（と、2要素目に使える認証方式のプラグイン。ADR 0092）。要否は設定（2.8）。1要素目がメールなら、メールのコードは2要素目にしない（設定で外せない。13.5）
@@ -773,7 +775,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | Org（11.13） | オン | ― | Org の概念を使わない。認可は realm 範囲 |
 | 認証の警告（10章） | オン | ― | 評価器を通さない |
 | リソース単位の権限（11.5） | オン | ― | Org・realm 単位の RBAC のみ |
-| パスワード（4.1） | オフ | ― | パスワードでの登録・ログインなし |
+| パスワード（4.1） | オフ | ― | パスワードでの登録・ログインなし。無効化は `authn_credentials` の方式 `password` が 0 件になって完了（ADR 0101） |
 | Quota（11.14） | オフ | Org | 数えない・判定しない（無制限） |
 | Org のログインポリシー（4.4） | オフ | Org | ポリシーの判定をしない |
 | passkey の attestation（9.4） | オフ | ― | attestation を求めず、認証器のポリシーを判定しない |
@@ -855,7 +857,7 @@ Group のネストの実装（ADR 0079）：フィーチャー `nested_groups`�
 
 A にログインした状態で B の所有を証明すると、B のメール・外部 ID・passkey・Membership・ロール・個人 Org のデータを A に移す（Org 管理ユーザーが絡む場合はその Org の許可が必要）。B は `status = merged`、`merged_into = A` になり、セッションとトークンを失効する。`sub` が変わるため `user.merged` イベントを出す。取り消し不可。
 
-実装（ADR 0082）：フィーチャー `account_merge`。B でログインして発行した1回限りの統合トークンを、A でログインして使う（どちらも直近の本人確認が要る）。メールと passkey は同じ ID のまま移し、外部 ID・ロールの付与・Group の所属は付け直す。TOTP・パスワード・属性の値は A に無いものだけ移す。認証方式のプラグインの認証情報（ADR 0092）は、A のデータ鍵で暗号化し直してすべて移す。B の個人 Org は残し、A を owner にした新しい共有 Org に中身（ロールの付与を除く）を移す。Org 管理ユーザーの統合は未実装（`409 managed_user`）。
+実装（ADR 0082）：フィーチャー `account_merge`。B でログインして発行した1回限りの統合トークンを、A でログインして使う（どちらも直近の本人確認が要る）。メールと passkey は同じ ID のまま移し、外部 ID・ロールの付与・Group の所属は付け直す。TOTP・パスワード・属性の値は A に無いものだけ移す（TOTP とパスワードは汎用の認証情報として同じ ID で移し、A にあれば B のものを無効化する。ADR 0101）。認証方式のプラグインの認証情報（ADR 0092）は、A のデータ鍵で暗号化し直してすべて移す。B の個人 Org は残し、A を owner にした新しい共有 Org に中身（ロールの付与を除く）を移す。Org 管理ユーザーの統合は未実装（`409 managed_user`）。
 
 ### 11.7 カスタム属性
 
@@ -916,6 +918,9 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - `iam features disable [-purge]`：依存するものが台帳にあれば拒否。データ（パスワード、Quota の付与、ログインポリシー、認証器のポリシー（realm の設定と Org のログインポリシーの `passkey`）、共有 Org）が 0 件になれば台帳から消す。共有 Org は管理 API で削除し、個人 Org は残す（ADR 0073）
 - 本体の更新と構成の変更は別のデプロイで行うことを推奨する
 - データ形式は前進のみで移行する。互換性の保証は「1つ前のバージョンのバイナリが同じデータで動く」こと
+- 例外：フィーチャーに属さないコアのデータの移行（名前は `migration:…`）は、台帳に記録し、知らないバイナリ（移す前のもの）の起動を拒む。
+  移す前のサーバーを止めてから移した後のサーバーを起動し、戻すときは移す前の `iam storage export` を読み込む
+  （TOTP とパスワードの `authn_credentials` への移行。ADR 0101）
 
 ### 11.13 Org と個人 Org
 
