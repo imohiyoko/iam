@@ -1617,6 +1617,19 @@ type LiftRequest struct {
 	Reason string `json:"reason"`
 }
 
+// LockoutState defines model for LockoutState.
+type LockoutState struct {
+	// Failures 今の窓の失敗の回数
+	Failures int `json:"failures"`
+
+	// Level 続けてロックされた回数（ロックの長さを倍にする）
+	Level       int        `json:"level"`
+	LockedUntil *time.Time `json:"locked_until,omitempty"`
+
+	// WaitUntil 次に試せるまでの待ち時間の終わり
+	WaitUntil *time.Time `json:"wait_until,omitempty"`
+}
+
 // LoginLink defines model for LoginLink.
 type LoginLink struct {
 	ExpiresAt time.Time `json:"expires_at"`
@@ -2224,6 +2237,14 @@ type UserIdentity struct {
 	Connection string    `json:"connection"`
 	CreatedAt  time.Time `json:"created_at"`
 	Id         string    `json:"id"`
+}
+
+// UserLockout defines model for UserLockout.
+type UserLockout struct {
+	// Locked どちらかがロックか待ち時間の間か
+	Locked       bool         `json:"locked"`
+	LoginId      LockoutState `json:"login_id"`
+	SecondFactor LockoutState `json:"second_factor"`
 }
 
 // UserPasskey defines model for UserPasskey.
@@ -2980,6 +3001,9 @@ type ServerInterface interface {
 	// ListUserGroups ユーザーが所属する Group の逆引き（ADR 0097）
 	// (GET /v1/admin/users/{id}/groups)
 	ListUserGroups(w http.ResponseWriter, r *http.Request, id string)
+	// GetUserLockout ユーザーのアカウント単位のロックアウトの状態（フィーチャー account_lockout。ADR 0105）
+	// (GET /v1/admin/users/{id}/lockout)
+	GetUserLockout(w http.ResponseWriter, r *http.Request, id string)
 	// ListUserMemberships ユーザーの Membership の一覧（終了したものも含む。ADR 0097）
 	// (GET /v1/admin/users/{id}/memberships)
 	ListUserMemberships(w http.ResponseWriter, r *http.Request, id string)
@@ -3019,6 +3043,9 @@ type ServerInterface interface {
 	// SetUserRisk ユーザーのすべてのセッションのリスクの点数を更新する（ADR 0084）
 	// (POST /v1/admin/users/{id}:risk)
 	SetUserRisk(w http.ResponseWriter, r *http.Request, id string)
+	// UnlockUser ユーザーのロック・待ち時間・失敗の回数を消す（フィーチャー account_lockout。ADR 0105）
+	// (POST /v1/admin/users/{id}:unlock)
+	UnlockUser(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -6093,6 +6120,32 @@ func (siw *ServerInterfaceWrapper) ListUserGroups(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetUserLockout operation middleware
+func (siw *ServerInterfaceWrapper) GetUserLockout(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUserLockout(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUserMemberships operation middleware
 func (siw *ServerInterfaceWrapper) ListUserMemberships(w http.ResponseWriter, r *http.Request) {
 
@@ -6431,6 +6484,32 @@ func (siw *ServerInterfaceWrapper) SetUserRisk(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// UnlockUser operation middleware
+func (siw *ServerInterfaceWrapper) UnlockUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UnlockUser(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -6557,6 +6636,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users", wrapper.CreateUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:login_link", wrapper.IssueLoginLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:recovery_link", wrapper.IssueRecoveryLink)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/lockout", wrapper.GetUserLockout)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:unlock", wrapper.UnlockUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/credentials", wrapper.ListUserCredentials)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials/{credential_id}:revoke", wrapper.RevokeUserCredential)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/password:revoke", wrapper.RevokeUserPassword)
@@ -15048,6 +15129,70 @@ func (response ListUserGroups404JSONResponse) VisitListUserGroupsResponse(w http
 	return err
 }
 
+type GetUserLockoutRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetUserLockoutResponseObject interface {
+	VisitGetUserLockoutResponse(w http.ResponseWriter) error
+}
+
+type GetUserLockout200JSONResponse UserLockout
+
+func (response GetUserLockout200JSONResponse) VisitGetUserLockoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserLockout401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetUserLockout401JSONResponse) VisitGetUserLockoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserLockout403JSONResponse Error
+
+func (response GetUserLockout403JSONResponse) VisitGetUserLockoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserLockout404JSONResponse Error
+
+func (response GetUserLockout404JSONResponse) VisitGetUserLockoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListUserMembershipsRequestObject struct {
 	Id string `json:"id"`
 }
@@ -16015,6 +16160,70 @@ func (response SetUserRisk404JSONResponse) VisitSetUserRiskResponse(w http.Respo
 	return err
 }
 
+type UnlockUserRequestObject struct {
+	Id string `json:"id"`
+}
+
+type UnlockUserResponseObject interface {
+	VisitUnlockUserResponse(w http.ResponseWriter) error
+}
+
+type UnlockUser200JSONResponse UserLockout
+
+func (response UnlockUser200JSONResponse) VisitUnlockUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnlockUser401JSONResponse struct{ ErrorJSONResponse }
+
+func (response UnlockUser401JSONResponse) VisitUnlockUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnlockUser403JSONResponse Error
+
+func (response UnlockUser403JSONResponse) VisitUnlockUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnlockUser404JSONResponse Error
+
+func (response UnlockUser404JSONResponse) VisitUnlockUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealth ヘルスチェック
@@ -16350,6 +16559,9 @@ type StrictServerInterface interface {
 	// ListUserGroups ユーザーが所属する Group の逆引き（ADR 0097）
 	// (GET /v1/admin/users/{id}/groups)
 	ListUserGroups(ctx context.Context, request ListUserGroupsRequestObject) (ListUserGroupsResponseObject, error)
+	// GetUserLockout ユーザーのアカウント単位のロックアウトの状態（フィーチャー account_lockout。ADR 0105）
+	// (GET /v1/admin/users/{id}/lockout)
+	GetUserLockout(ctx context.Context, request GetUserLockoutRequestObject) (GetUserLockoutResponseObject, error)
 	// ListUserMemberships ユーザーの Membership の一覧（終了したものも含む。ADR 0097）
 	// (GET /v1/admin/users/{id}/memberships)
 	ListUserMemberships(ctx context.Context, request ListUserMembershipsRequestObject) (ListUserMembershipsResponseObject, error)
@@ -16389,6 +16601,9 @@ type StrictServerInterface interface {
 	// SetUserRisk ユーザーのすべてのセッションのリスクの点数を更新する（ADR 0084）
 	// (POST /v1/admin/users/{id}:risk)
 	SetUserRisk(ctx context.Context, request SetUserRiskRequestObject) (SetUserRiskResponseObject, error)
+	// UnlockUser ユーザーのロック・待ち時間・失敗の回数を消す（フィーチャー account_lockout。ADR 0105）
+	// (POST /v1/admin/users/{id}:unlock)
+	UnlockUser(ctx context.Context, request UnlockUserRequestObject) (UnlockUserResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -19629,6 +19844,32 @@ func (sh *strictHandler) ListUserGroups(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+// GetUserLockout operation middleware
+func (sh *strictHandler) GetUserLockout(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetUserLockoutRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUserLockout(ctx, request.(GetUserLockoutRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUserLockout")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUserLockoutResponseObject); ok {
+		if err := validResponse.VisitGetUserLockoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListUserMemberships operation middleware
 func (sh *strictHandler) ListUserMemberships(w http.ResponseWriter, r *http.Request, id string) {
 	var request ListUserMembershipsRequestObject
@@ -20008,6 +20249,32 @@ func (sh *strictHandler) SetUserRisk(w http.ResponseWriter, r *http.Request, id 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetUserRiskResponseObject); ok {
 		if err := validResponse.VisitSetUserRiskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UnlockUser operation middleware
+func (sh *strictHandler) UnlockUser(w http.ResponseWriter, r *http.Request, id string) {
+	var request UnlockUserRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UnlockUser(ctx, request.(UnlockUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UnlockUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UnlockUserResponseObject); ok {
+		if err := validResponse.VisitUnlockUserResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

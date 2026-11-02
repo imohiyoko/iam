@@ -402,7 +402,7 @@ Group のネスト、Org 階層（M7）。
 - 外部 IdP：SAML 2.0（Org 専用 SSO と realm の connection）、WS-Federation
 - ディレクトリ：LDAP / AD のバインド認証と同期、Kerberos / SPNEGO
 - 方式：WebAuthn の attestation と AAGUID の許可リスト、HOTP、SMS・音声、プッシュ、X.509・スマートカード、Verifiable Credentials（OpenID4VP）
-- リスクに応じた追加認証、新しい端末の検知、ボット対策、アカウント単位のロックアウト
+- リスクに応じた追加認証、新しい端末の検知、ボット対策、アカウント単位のロックアウト（下記）
 - Device Authorization Grant（下記）、本人の Personal Access Token
 
 #### Device Authorization Grant（ADR 0095）
@@ -454,6 +454,24 @@ Group のネスト、Org 階層（M7）。
 - [x] 拒否はコードだけ返し、AAGUID と判定を監査ログに残す。管理 API の passkey の一覧に AAGUID と認証器の名前を出す
 - [x] 既存の passkey は自己申告の AAGUID で判定し、`require_attestation` では登録し直しを求める。無効化でポリシーを片付ける
 - MDS の BLOB の永続化（再起動の直後に取得できないときの備え）、ポリシーに外れた既存の passkey の一覧と通知
+
+#### ログインの守り：ロックアウト・端末・リスク・ボット対策（ADR 0105）
+
+**ゴール**：接続元を変えた総当たりをアカウント単位で止め、知らない端末や場所からのログインを本人に知らせてポリシーで step-up を
+求められ、ボットには人の確認を求められる。どれも既定オフで、アカウントの有無を漏らさない。
+
+- [x] フィーチャー `account_lockout`：ログイン ID で本人を決める1要素目（パスワードなど）はメールアドレスのブラインドインデックス、
+  2要素目はユーザーごとに、接続元を問わず失敗を数え（方式専用のパスと汎用のパスで同じ）、待ち時間を倍々にかけ、しきい値でロックする（続けてロックされるたびに長く）。無いアドレスも同じ応答（`429`）
+- [x] ロックを監査ログ `account.locked` に残し、運営者が `GET /v1/admin/users/{id}/lockout` で見て `POST …:unlock` で解ける（`account.unlocked`）
+- [x] フィーチャー `device_recognition`：`__Host-` の HttpOnly の Cookie（256 bit の乱数）で端末を覚え、記録は暗号化してブラインドインデックスで引く
+- [x] 前に端末を持っていたユーザーの新しい端末からのログインを、ID だけの通知 `new_device_login` と警告 `new_device` で知らせる
+- [x] 本人が `GET /v1/me/devices` で端末を見て `DELETE /v1/me/devices/{id}` で忘れられる。統合・消去・フィーチャーの無効化で片付ける
+- [x] フィーチャー `login_risk`：新しい端末・確かめていない端末・新しい国と ASN・impossible travel をリスク `device`・`ip` の点数にし、
+  条件 `risk_at_most` と `aal_at_least` の組み合わせで step-up（ADR 0093）を求められる。GeoIP はポート（CSV のアダプタ `static`）
+- [x] フィーチャー `bot_protection`：ポート `BotVerifier`（汎用の siteverify の HTTP と開発用のアダプタ）。ログインと復旧の入口で、
+  いつも（`always`）か接続元の失敗が続いた後（`suspicious`）に `IAM-Bot-Token` を求め、確かめられなければ `403`（fail closed）
+- [x] memory・SQLite・PostgreSQL の契約テスト、GeoIP の CSV の解析のファジング、HTTP の通しのテスト
+- ホスト型のログイン画面の CAPTCHA のウィジェット、MaxMind の mmdb の GeoIP のアダプタ、ロックの本人への通知
 
 ### M10 エンタープライズの運用
 

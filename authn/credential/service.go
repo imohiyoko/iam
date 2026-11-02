@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/lockout"
 	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
@@ -73,7 +74,10 @@ type Service struct {
 	// PerLogin はログイン ID（メールアドレス）ごと・接続元ごとの照合の回数の上限（ログイン ID で本人を決める方式。ADR 0101）。
 	// nil なら制限しない。
 	PerLogin *ratelimit.Limiter
-	Log      *slog.Logger
+	// Lockout はアカウント単位のロックアウト（フィーチャー account_lockout。ADR 0105）。ログイン ID で本人を決める1要素目は
+	// メールアドレスごと、2要素目はユーザーごとに、接続元を問わず失敗を数える。nil なら数えない。
+	Lockout *lockout.Guard
+	Log     *slog.Logger
 }
 
 // Client は要求の接続元（監査ログとセッション）。
@@ -152,6 +156,8 @@ type loginUsers struct {
 	ip      string
 	userID  string
 	emailID string
+	// subject はロックアウトの対象（メールアドレスのブラインドインデックス）。ロックアウトが無いか、ログイン ID を引かない方式なら空。
+	subject string
 }
 
 // LoginUser は確認済みのメールの、ログインできる状態のユーザーを返す。それ以外は errs.NotFound（理由を区別しない。4.9）。
@@ -161,13 +167,23 @@ func (l *loginUsers) LoginUser(ctx context.Context, identifier string) (string, 
 	if err != nil {
 		return "", errs.New(errs.KindNotFound, "user")
 	}
-	if l.s.PerLogin != nil {
+	if l.s.PerLogin != nil || l.s.Lockout != nil {
 		ix, err := l.s.Crypter.EmailIndex(ctx, email)
 		if err != nil {
 			return "", err
 		}
-		if err := l.s.PerLogin.AllowFrom(ctx, "login:"+l.realmID+":"+base64.RawURLEncoding.EncodeToString(ix.Value), l.ip); err != nil {
-			return "", err
+		subject := base64.RawURLEncoding.EncodeToString(ix.Value)
+		if l.s.PerLogin != nil {
+			if err := l.s.PerLogin.AllowFrom(ctx, "login:"+l.realmID+":"+subject, l.ip); err != nil {
+				return "", err
+			}
+		}
+		// ロックアウトは無いアドレスも同じに数える（有無を漏らさない。ADR 0105）。待ち時間とロックの間は照合しない。
+		if l.s.Lockout != nil {
+			if err := l.s.Lockout.Check(ctx, l.realmID, lockout.ScopeLoginID, subject); err != nil {
+				return "", err
+			}
+			l.subject = subject
 		}
 	}
 	err = l.s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
@@ -380,6 +396,12 @@ func (s *Service) login(ctx context.Context, realmID, name string, state []byte,
 	var is session.Issued
 	var publicID string
 	r, err := a.Complete(ctx, env, port.MethodRequest{Payload: p, State: state})
+	// ロックアウトは方式の照合の結果で数える（停止・有効期間の外などの、照合が通った後の拒否は数えない）。
+	if users.subject != "" {
+		if lerr := s.lockoutResult(ctx, realmID, lockout.ScopeLoginID, users.subject, users.userID, err, c); lerr != nil {
+			return session.Issued{}, "", lerr
+		}
+	}
 	if err == nil {
 		err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 			cred, err := s.used(ctx, tx, realmID, users.userID, name, r)
@@ -426,6 +448,35 @@ func (s *Service) login(ctx context.Context, realmID, name string, state []byte,
 	return is, publicID, nil
 }
 
+// lockoutResult は方式の照合の結果（cause）をロックアウトに数える。利用者の入力による失敗なら数え、成功なら失敗の回数を消す
+// （基盤の障害は数えない）。この失敗でロックし、ユーザー（内部 ID。無いアドレスなら空）が分かれば監査ログに残す。
+func (s *Service) lockoutResult(ctx context.Context, realmID, scope, subject, userID string, cause error, c Client) error {
+	switch {
+	case s.Lockout == nil:
+		return nil
+	case cause == nil:
+		return s.Lockout.Succeeded(ctx, realmID, scope, subject)
+	case !rejectedByUser(cause):
+		return nil
+	}
+	l, err := s.Lockout.Failed(ctx, realmID, scope, subject)
+	if err != nil || l == nil || userID == "" {
+		return err
+	}
+	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		u, err := tx.Users().Get(ctx, realmID, userID)
+		if err != nil {
+			return err
+		}
+		return lockout.RecordLocked(ctx, tx, s.Clock, realmID, u.PublicID, scope, l, c.IP, c.UserAgent, c.RequestID)
+	})
+	if err != nil {
+		// ロックはかかっている。記録できなかったことだけを残す。
+		s.logger().WarnContext(ctx, "could not record account lock", "error", err)
+	}
+	return nil
+}
+
 // fail は1要素目の失敗を監査ログに残し、利用者の入力による失敗を ErrAuthFailed にする。
 func (s *Service) fail(ctx context.Context, realmID, name string, c Client, cause error) error {
 	_, denied := errors.AsType[errs.Denial](cause)
@@ -458,6 +509,9 @@ func (s *Service) SecondFactor(ctx context.Context, realmID, userID, sessionID, 
 	if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
 		return session.Issued{}, err
 	}
+	if err := s.Lockout.Check(ctx, realmID, lockout.ScopeSecondFactor, userID); err != nil {
+		return session.Issued{}, err
+	}
 	f, err := s.take(ctx, flowID, realmID, userID, name, purposeSecondFactor)
 	if err != nil {
 		s.logger().DebugContext(ctx, "second factor rejected", "method", name, "error", err)
@@ -480,6 +534,9 @@ func (s *Service) SecondFactorOnce(ctx context.Context, realmID, userID, session
 	if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
 		return session.Issued{}, err
 	}
+	if err := s.Lockout.Check(ctx, realmID, lockout.ScopeSecondFactor, userID); err != nil {
+		return session.Issued{}, err
+	}
 	ch, err := a.Begin(ctx, s.env(nil, realmID, userID, a, port.UsageSecondFactor), port.MethodRequest{})
 	switch {
 	case errors.Is(err, errs.NotFound), errors.Is(err, errs.AuthenticationFailed):
@@ -500,6 +557,9 @@ func (s *Service) secondFactor(ctx context.Context, realmID, userID, sessionID, 
 	}
 	var is session.Issued
 	r, err := a.Complete(ctx, s.env(nil, realmID, userID, a, port.UsageSecondFactor), port.MethodRequest{Payload: p, State: state})
+	if lerr := s.lockoutResult(ctx, realmID, lockout.ScopeSecondFactor, userID, userID, err, c); lerr != nil {
+		return session.Issued{}, lerr
+	}
 	if err == nil {
 		err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 			cred, err := s.used(ctx, tx, realmID, userID, name, r)

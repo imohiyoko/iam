@@ -102,6 +102,7 @@ const (
 	Passkey        Prefix = "psk"
 	TOTP           Prefix = "otp"
 	Credential     Prefix = "crd" // 汎用の認証情報（authn_credentials。ADR 0090）
+	KnownDevice    Prefix = "dev" // 本人がログインした端末（authn_known_devices。ADR 0105）
 	Password       Prefix = "pwd"
 	RecoveryCode   Prefix = "rcv"
 	Notification   Prefix = "ntf"

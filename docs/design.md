@@ -766,7 +766,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | `oauth_email_unverified` | プロバイダ側でメール未確認 | warn |
 | `password_breached` | 漏洩済みパスワード | warn |
 | `recovered_via_email` | メールによる復旧の直後 | warn |
-| `new_device` | 初めての端末・IP | ignore（将来 warn） |
+| `new_device` | 前に端末を持っていたユーザーの、知らない端末からのログイン（フィーチャー `device_recognition`。11.17）。`deny` にはできない | ignore |
 
 ## 11. フィーチャー
 
@@ -798,6 +798,10 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | Org の監査ログ（6.6） | オフ | Org | Org の管理者は監査ログを読めない（運営者の照会は常にある） |
 | イベントの Webhook の購読（6.7） | オフ | ― | 購読の API なし・配送しない（EventSink はそのまま） |
 | SAML 2.0 の外部 IdP（11.3、ADR 0098） | オフ | ― | SAML の connection を使わない（Org 専用には Org 管理ユーザーも要る） |
+| アカウント単位のロックアウト（11.17） | オフ | ― | 接続元とアカウントのレートリミットだけ。ロックの管理 API は 404 |
+| 端末の記憶（11.17） | オフ | ― | 端末の Cookie を置かない。警告 `new_device` と通知 `new_device_login` なし。端末の API は 404 |
+| ログインのリスクの点数（11.17） | オフ | 端末の記憶 | 組み込みのリスク `device`・`ip` を付けない（フックの点数はそのまま） |
+| ボット対策（11.17） | オフ | ― | ログインの入口で人の確認を求めない |
 | LDAP / Active Directory（11.3、ADR 0102） | オフ | ― | LDAP の connection を使わない・同期しない（Org 専用には Org 管理ユーザーも要る） |
 
 ### 11.1 複数 realm
@@ -988,6 +992,29 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - 端末は token エンドポイントを `urn:ietf:params:oauth:grant-type:device_code` でポーリングする（`authorization_pending`・
   `slow_down`・`access_denied`・`expired_token`）。承認の後は認可コードフローと同じトークン（ログインの系列に結び付く。5.2）
 - 途中の状態は EphemeralStore に置く（認可コードと同じ。複数インスタンスでは共有できるものが要る）
+
+### 11.17 ログインの守り
+
+接続元を変えた総当たり、知らない端末・場所からのログイン、ボットに備える。4 つのフィーチャーに分け、どれも既定オフ。
+
+実装（ADR 0105）：
+
+- `account_lockout`：ログイン ID で本人を決める1要素目（パスワードなど）の失敗はメールアドレスのブラインドインデックスごと、
+  2要素目の失敗はユーザーごとに、接続元を問わず数える（認証方式のコアのサービスで数え、方式専用のパスと汎用のパスで同じ）。`delay_after` 回からは待ち時間（倍々で `max_delay` まで）、`threshold` 回でロック（続けてロックされるたびに倍で
+  `max_lock_duration` まで）。待ち時間とロックの間は正しいパスワードも照合せずに `429 rate_limited`（`Retry-After`）。
+  無いアドレスも同じに数えて同じ応答にする。状態は EphemeralStore。ロックは `account.locked`（アカウントがあるときだけ）、
+  運営者の `GET /v1/admin/users/{id}/lockout` と `POST /v1/admin/users/{id}:unlock`（`credentials:revoke`）は `account.unlocked`
+- `device_recognition`：制限の無いセッションの発行で、`__Host-iam_device`（HttpOnly・Secure・SameSite=None、256 bit の乱数）の
+  端末を記録する（`authn_known_devices`。Cookie の値はブラインドインデックスで引き、User-Agent・場所は本人のデータ鍵で暗号化）。
+  前に端末を持っていたユーザーの知らない端末なら警告 `new_device` と通知 `new_device_login`（ID だけ。2.4）。
+  本人は `GET /v1/me/devices`・`DELETE /v1/me/devices/{id}`。AAL2 以上でログインした端末を「確かめた」端末にする
+- `login_risk`：ログインの前の記録から、リスク `device`（確かめた端末 0・確かめていない端末・新しい端末）と `ip`（新しい ASN・
+  新しい国・impossible travel）の点数を付け、フックの点数と種類ごとに大きい方をとる（ADR 0084、`session.risk_updated`）。
+  step-up は条件で書く（例：`any(risk_at_most(device, low), aal_at_least(2))` は AAL2 を `acr_values` で求める。11.15）。
+  場所はポート `GeoIP`（CSV のアダプタ `static`）
+- `bot_protection`：ログインと復旧の入口で、`always` ならいつも、`suspicious` なら接続元の失敗（401・429）が続いた後に
+  `IAM-Bot-Token` ヘッダーを求め、ポート `BotVerifier`（汎用の siteverify の HTTP、開発用）で確かめる。無いか通らなければ
+  `403 bot_check_required`。確かめられないときも通さない
 
 ## 12. テスト
 

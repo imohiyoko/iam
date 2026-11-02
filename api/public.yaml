@@ -51,6 +51,8 @@ paths:
   /v1/login/email:start:
     post:
       operationId: startEmailLogin
+      parameters:
+        - $ref: "#/components/parameters/BotToken"
       summary: メールのコード・マジックリンクによる登録・ログインを始める
       description: |
         登録済みのアドレスならログイン、未登録なら登録のコードとリンクを通知する。どちらも同じ応答を返す（4.9）。
@@ -76,6 +78,7 @@ paths:
                   flow_id: { type: string }
                   expires_at: { type: string, format: date-time }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/BotCheckRequired" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/login/email:verify:
@@ -389,6 +392,8 @@ paths:
   /v1/login/password:
     post:
       operationId: passwordLogin
+      parameters:
+        - $ref: "#/components/parameters/BotToken"
       summary: メールとパスワードでログインする（フィーチャー password）
       description: |
         失敗の理由（アカウントの有無、メールの未確認、パスワードの違い）は返さない（4.9）。アドレスと接続元ごとに
@@ -497,6 +502,7 @@ paths:
         フローを確かめ、セッションを発行する。2要素目が要れば制限つきのセッション（`next: second_factor`）。
         フローは1回限りで、照合に失敗しても回数の上限（`security.second_factor.max_attempts`）までは同じフロー ID を使える。
       parameters:
+        - $ref: "#/components/parameters/BotToken"
         - { name: method, in: path, required: true, schema: { type: string } }
       requestBody:
         required: true
@@ -570,6 +576,8 @@ paths:
   /v1/recovery/code:redeem:
     post:
       operationId: redeemRecoveryCode
+      parameters:
+        - $ref: "#/components/parameters/BotToken"
       summary: 確認済みのメールアドレスとリカバリーコードで復旧を始める（4.12）
       description: |
         成功すると復旧専用のセッション（`next: recovery`）を発行する。そのセッションでは新しい認証手段の登録と
@@ -599,6 +607,8 @@ paths:
   /v1/recovery/email:start:
     post:
       operationId: startEmailRecovery
+      parameters:
+        - $ref: "#/components/parameters/BotToken"
       summary: 確認済みのメールによる復旧を始める（4.12）
       description: |
         確認済みのアドレスにだけコードとリンクを通知する。応答はアカウントの有無で変えない（4.9）。
@@ -625,6 +635,7 @@ paths:
                   expires_at: { type: string, format: date-time }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "403": { $ref: "#/components/responses/BotCheckRequired" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/recovery/email:verify:
@@ -847,6 +858,43 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
         "204": { description: 失効した（既に失効していても 204） }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/devices:
+    get:
+      operationId: listMyDevices
+      summary: 本人がログインした端末の一覧（フィーチャー device_recognition。ADR 0105）
+      description: 動いていなければ 404。端末は端末の Cookie（`__Host-iam_device`）で見分け、本人確認を終えたログインのときに記録する。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 最後に使った時刻の新しい順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items: { $ref: "#/components/schemas/MyDevice" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/devices/{id}:
+    delete:
+      operationId: forgetMyDevice
+      summary: 本人の端末を忘れる（次にその端末で入れば新しい端末になる）
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 忘れた }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
 
@@ -2975,7 +3023,21 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+  parameters:
+    BotToken:
+      name: IAM-Bot-Token
+      in: header
+      required: false
+      description: |
+        ボットの確認（CAPTCHA・Turnstile など）のトークン（フィーチャー bot_protection。ADR 0105）。求められたときに無いか
+        通らなければ `403 bot_check_required`。
+      schema: { type: string, maxLength: 4096 }
   responses:
+    BotCheckRequired:
+      description: ボットの確認が要り、`IAM-Bot-Token` が無いか通らなかった（`bot_check_required`。フィーチャー bot_protection）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     BadRequest:
       description: 要求の形式の誤り
       content:
@@ -2997,7 +3059,9 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     Denied:
-      description: 本人確認の後の拒否。`reasons` に拒否理由のコード（`warning_denied.<code>`、`suspended.<category>`、`outside_validity` など。4.9）
+      description: |
+        本人確認の後の拒否。`reasons` に拒否理由のコード（`warning_denied.<code>`、`suspended.<category>`、`outside_validity` など。4.9）。
+        ログインの入口では、ボットの確認が要り通らなかったとき（`bot_check_required`。ADR 0105）にも返す
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -3113,6 +3177,17 @@ components:
         severity: { type: string, enum: [low, medium, high] }
         action: { type: string, enum: [warn, deny] }
         params: { type: object, additionalProperties: true }
+    MyDevice:
+      type: object
+      required: [id, created_at, last_seen_at, confirmed, current]
+      properties:
+        id: { type: string }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        user_agent: { type: string, description: 最後のログインの User-Agent }
+        country: { type: string, description: 最後のログインの国（ISO 3166-1 alpha-2。フィーチャー login_risk と GeoIP があるときだけ） }
+        confirmed: { type: boolean, description: 強い認証（AAL2 以上）のログインに使われたか }
+        current: { type: boolean, description: 今のリクエストの端末か }
     Session:
       type: object
       required: [id, authenticated_at, last_seen_at, expires_at, auth_methods, current]

@@ -174,6 +174,44 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/users/{id}/lockout:
+    get:
+      operationId: getUserLockout
+      summary: ユーザーのアカウント単位のロックアウトの状態（フィーチャー account_lockout。ADR 0105）
+      description: |
+        権限 `credentials:revoke`。フィーチャーが動いていなければ 404。`login_id`（パスワードなどログイン ID で本人を決める
+        1要素目）はユーザーのすべてのメールアドレスのうちいちばん厳しい状態を返す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 今の状態
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserLockout" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}:unlock:
+    post:
+      operationId: unlockUser
+      summary: ユーザーのロック・待ち時間・失敗の回数を消す（フィーチャー account_lockout。ADR 0105）
+      description: |
+        権限 `credentials:revoke`。ユーザーのすべてのメールアドレスのパスワードと、2 要素目のコードの状態を消す。
+        監査ログ `account.unlocked`。消す前の状態を返す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 消す前の状態
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserLockout" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/users/{id}/credentials:
     get:
       operationId: listUserCredentials
@@ -3310,6 +3348,21 @@ components:
       properties:
         token: { type: string, description: 1回限り。本人以外に渡さない }
         expires_at: { type: string, format: date-time }
+    UserLockout:
+      type: object
+      required: [locked, login_id, second_factor]
+      properties:
+        locked: { type: boolean, description: どちらかがロックか待ち時間の間か }
+        login_id: { $ref: "#/components/schemas/LockoutState" }
+        second_factor: { $ref: "#/components/schemas/LockoutState" }
+    LockoutState:
+      type: object
+      required: [failures, level]
+      properties:
+        failures: { type: integer, description: 今の窓の失敗の回数 }
+        level: { type: integer, description: 続けてロックされた回数（ロックの長さを倍にする） }
+        locked_until: { type: string, format: date-time }
+        wait_until: { type: string, format: date-time, description: 次に試せるまでの待ち時間の終わり }
     UserCredentials:
       type: object
       required: [passkeys, identities, totp, credentials]
