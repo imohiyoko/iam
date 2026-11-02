@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
@@ -807,6 +808,12 @@ func (s publicServer) SwitchMyOrg(ctx context.Context, req publicapi.SwitchMyOrg
 	}
 	is, err := s.a.sessions.SwitchOrg(ctx, s.a.realm.ID, au.SessionID, orgID, s.a.clientOf(ctx).IP, requestID(ctx))
 	if d, ok := errors.AsType[errs.Denial](err); ok {
+		if slices.Contains(d.Reasons(), "policy."+org.PolicyPasskeyAuthenticator) {
+			// 拒否はトランザクションごと戻るので、認証器の判定は別に記録する（ADR 0096）。
+			if rerr := s.a.orgs.RecordPasskeyDenied(ctx, s.a.deps.Storage, s.a.realm.ID, au.SessionID, orgID, requestID(ctx)); rerr != nil {
+				s.a.deps.Logger.Warn("org: could not record the passkey policy decision", "error", rerr)
+			}
+		}
 		return publicapi.SwitchMyOrg403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
 	switch {

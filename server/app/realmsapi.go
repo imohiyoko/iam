@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"slices"
 	"time"
 
@@ -74,7 +75,17 @@ func (s adminServer) realmView(r port.Realm) (adminapi.Realm, error) {
 	if v.Settings.DeclaredContextClients == nil {
 		v.Settings.DeclaredContextClients = []string{}
 	}
+	v.Settings.PasskeyPolicy = passkeyPolicyOut[adminapi.PasskeyPolicy](rs.PasskeyPolicy)
 	return v, nil
+}
+
+// checkPasskeyPolicy は、フィーチャー passkey_attestation が止まっているときに認証器のポリシーを新しく置く・変える設定を拒む
+// （保存済みのものをそのまま残す・外す更新は受ける。Org のログインポリシーと同じ）。
+func (s adminServer) checkPasskeyPolicy(prev, next realmSettings) error {
+	if s.a.plan.IsActive(feature.PasskeyAttestation) || next.PasskeyPolicy.Empty() || reflect.DeepEqual(normalizedPolicy(prev.PasskeyPolicy), normalizedPolicy(next.PasskeyPolicy)) {
+		return nil
+	}
+	return errs.WithCode(errs.KindInvalid, "invalid_realm_settings", "invalid realm settings: passkey_policy requires the passkey_attestation feature")
 }
 
 // applySettings は API の設定を rs に重ねる（渡した項目だけ）。
@@ -105,6 +116,9 @@ func applySettings(rs realmSettings, in *adminapi.RealmSettings) realmSettings {
 	}
 	if in.DeclaredContextClients != nil {
 		rs.DeclaredContextClients = slices.Clone(*in.DeclaredContextClients)
+	}
+	if in.PasskeyPolicy != nil {
+		rs.PasskeyPolicy = passkeyPolicyIn(in.PasskeyPolicy)
 	}
 	if q := in.QuotaCount; q != nil {
 		if q.Invited != nil {
@@ -220,6 +234,9 @@ func (s adminServer) createRealm(ctx context.Context, p adminPrincipal, body *ad
 	if err := rs.validate(); err != nil {
 		return err
 	}
+	if err := s.checkPasskeyPolicy(defaultRealmSettings(s.a.cfg.Realm), rs); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(rs)
 	if err != nil {
 		return err
@@ -326,8 +343,12 @@ func (s adminServer) updateRealm(ctx context.Context, p adminPrincipal, realmID 
 		if err != nil {
 			return err
 		}
+		prev := rs
 		rs = applySettings(rs, body.Settings)
 		if err := rs.validate(); err != nil {
+			return err
+		}
+		if err := s.checkPasskeyPolicy(prev, rs); err != nil {
 			return err
 		}
 		if r.Settings, err = json.Marshal(rs); err != nil {

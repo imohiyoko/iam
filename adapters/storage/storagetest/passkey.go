@@ -15,7 +15,8 @@ import (
 func newPasskey(realmID, userID, credentialID string) port.Passkey {
 	return port.Passkey{ID: id.New(id.Passkey), PublicID: id.NewExternal(id.Passkey), RealmID: realmID, UserID: userID,
 		CredentialID: []byte(credentialID), PublicKey: []byte("cose-key"), Alg: -7, SignCount: 0, Flags: 0x1d,
-		AAGUID: make([]byte, 16), Transports: []string{"internal", "hybrid"}, Name: "Passkey", CreatedAt: T0}
+		AAGUID: make([]byte, 16), Transports: []string{"internal", "hybrid"}, Name: "Passkey", CreatedAt: T0,
+		AttestationFormat: "packed", Attested: true}
 }
 
 func testPasskeys(t *testing.T, h Harness) {
@@ -41,7 +42,8 @@ func testPasskeys(t *testing.T, h Harness) {
 			return fmt.Errorf("same credential in another realm: %w", err)
 		}
 		bare := newPasskey(r, u, "cred-2")
-		bare.AAGUID, bare.Transports = nil, nil
+		// attestation を確かめていない行（ADR 0096 の前に登録したもの）。
+		bare.AAGUID, bare.Transports, bare.AttestationFormat, bare.Attested = nil, nil, "", false
 		bare.CreatedAt = T0.Add(time.Second)
 		if err := repo.Create(ctx, bare); err != nil {
 			return err
@@ -58,7 +60,8 @@ func testPasskeys(t *testing.T, h Harness) {
 			return err
 		}
 		list, err := repo.ListByUser(ctx, r, u)
-		if err != nil || len(list) != 2 || list[0].ID != p.ID || list[1].ID != bare.ID || len(list[1].Transports) != 0 {
+		if err != nil || len(list) != 2 || list[0].ID != p.ID || list[1].ID != bare.ID || len(list[1].Transports) != 0 ||
+			list[1].Attested || list[1].AttestationFormat != "" || !list[0].Attested || list[0].AttestationFormat != "packed" {
 			return fmt.Errorf("passkeys.ListByUser = %+v, %v", list, err)
 		}
 		return nil
