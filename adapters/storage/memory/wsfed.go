@@ -143,7 +143,7 @@ func (r wsfed) Count(context.Context) (int, error) {
 }
 
 func (r wsfed) Purge(_ context.Context, limit int) (int, error) {
-	n := purgeSorted(r.t, r.t.s.wsfedRPs, limit)
+	n := purgeKeys(r.t, r.t.s.wsfedRPs, limit)
 	if limit >= 0 && n >= limit {
 		return n, nil
 	}
@@ -151,11 +151,11 @@ func (r wsfed) Purge(_ context.Context, limit int) (int, error) {
 	if limit >= 0 {
 		rest = limit - n
 	}
-	return n + purgeSorted(r.t, r.t.s.wsfedCerts, rest), nil
+	return n + purgeKeys(r.t, r.t.s.wsfedCerts, rest), nil
 }
 
-// purgeSorted は m のキーを小さい順に最大 limit 個（負なら全部）消し、その数を返す。
-func purgeSorted[V any](t *tx, m map[string]V, limit int) int {
+// purgeKeys は m のキーを小さい順に最大 limit 個（負なら全部）消し、その数を返す。
+func purgeKeys[V any](t *tx, m map[string]V, limit int) int {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

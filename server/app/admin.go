@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/notify"
+	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/check"
@@ -33,10 +34,12 @@ type adminPrincipal struct {
 	Context *check.AuthContext
 	// AccessToken はサービスアカウントがアクセストークンで呼んだか（API キーでは偽）。
 	AccessToken bool
+	// PAT はユーザーが Personal Access Token で呼んだか（ADR 0109）。権限は Context のスコープで絞り、max_auth_age は見ない。
+	PAT bool
 }
 
-// withAdminAuth は管理 API の認証。Bearer のトークンが運営者のセッションならそのユーザー、
-// そうでなければサービスアカウントの API キーかアクセストークンとして確かめる。権限の判定は各操作で行う。
+// withAdminAuth は管理 API の認証。Bearer のトークンが運営者のセッションならそのユーザー、PAT（ADR 0109）ならその本人
+// （権限はスコープに絞る）、どちらでもなければサービスアカウントの API キーかアクセストークンとして確かめる。権限の判定は各操作で行う。
 func (a *App) withAdminAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -58,6 +61,23 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 				return
 			}
 			p = adminPrincipal{Type: port.PrincipalUser, ID: v.PrincipalID, Actor: v.Actor(), AuthenticatedAt: v.AuthenticatedAt, Context: sessionContext(v)}
+		} else if pat.Looks(key) && a.pats != nil {
+			var au pat.Authenticated
+			err := a.deps.Storage.Tx(r.Context(), func(ctx context.Context, tx port.Tx) error {
+				var err error
+				au, err = a.authenticatePAT(ctx, tx, key)
+				return err
+			})
+			if err != nil && !errors.Is(err, pat.ErrInvalid) {
+				a.unavailable(w, r, err)
+				return
+			}
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			p = adminPrincipal{Type: port.PrincipalUser, ID: au.User.ID, Actor: audit.Actor{Type: "user", ID: au.User.PublicID},
+				AuthenticatedAt: au.Token.CreatedAt, Context: patContext(au), PAT: true}
 		} else {
 			var sa serviceaccount.Authenticated
 			err := a.deps.Storage.Tx(r.Context(), func(ctx context.Context, tx port.Tx) error {
@@ -103,7 +123,8 @@ func (a *App) authorizeOn(ctx context.Context, perm string, res check.Resource, 
 	if !ok {
 		return p, &denial{http.StatusUnauthorized, adminapi.Error{Error: errs.CodeAuthenticationFailed}}, nil
 	}
-	if p.Type == port.PrincipalUser {
+	// PAT はトークンの期限と realm のポリシーが max_auth_age の代わり（名前空間の要件の auth_within で締め出せる。ADR 0109）。
+	if p.Type == port.PrincipalUser && !p.PAT {
 		if age := a.cfg.Security.Session.MaxAuthAge.Default.D(); a.deps.Clock.Now().Sub(p.AuthenticatedAt) > age {
 			return p, &denial{http.StatusUnauthorized, adminapi.Error{Error: "reauthentication_required"}}, nil
 		}

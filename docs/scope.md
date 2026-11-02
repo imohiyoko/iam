@@ -64,7 +64,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 本人のデータの書き出し（GDPR） | C | ❌ | |
 | 利用規約・同意の版と記録 | C P | ❌ | |
 | 段階的なプロフィール収集 | P | ❌ | |
-| 本人の Personal Access Token | P | ❌ | |
+| 本人の Personal Access Token | P | ✅ | フィーチャー `personal_access_tokens`（ADR 0109） |
 | 本人が許可した連携先の一覧と取り消し | P | ⛔ | ADR 0026 |
 
 ## 4. IdP として

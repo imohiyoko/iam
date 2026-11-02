@@ -403,7 +403,7 @@ Group のネスト、Org 階層（M7）。
 - ディレクトリ：LDAP / AD のバインド認証と同期、Kerberos / SPNEGO
 - 方式：WebAuthn の attestation と AAGUID の許可リスト、HOTP、SMS・音声、プッシュ、X.509・スマートカード、Verifiable Credentials（OpenID4VP）
 - リスクに応じた追加認証、新しい端末の検知、ボット対策、アカウント単位のロックアウト（下記）
-- Device Authorization Grant（下記）、本人の Personal Access Token
+- Device Authorization Grant（下記）、本人の Personal Access Token（下記）
 
 #### Device Authorization Grant（ADR 0095）
 
@@ -517,6 +517,19 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] amr は `wia`（外部 ID と同じ分類の分からない 1 要素。AAL1）。1要素目だけ
 - [x] トークンの解析と確かめ、ヘッダーの解析にファジングのテストがある
 - [ ] ホスト型のログイン画面（開いたときに Negotiate を試す）、keytab の再読み込み、PAC のグループ、相互認証、カスタム属性での結び付け
+#### 本人の Personal Access Token（ADR 0109）
+
+**ゴール**：人が CLI やスクリプトから自分として API を呼べ、トークンごとに使える権限を本人の権限の内側に絞れる。漏れたトークンは見つけやすく、DB が漏れても秘密は戻せない。
+
+- [x] フィーチャー `personal_access_tokens`（既定オフ）。オフなら API は 404、PAT の形のトークンはどの経路でも通らない
+- [x] 本人が作る（直近の認証が要る）・一覧・取り消しができる。トークンは作ったときに 1 回だけ返し、DB には秘密の SHA-256 だけを持つ
+- [x] 接頭辞 `iampat_`・固定の長さ・検査の文字（CRC32）で秘密の走査に引っかかる。トークンの解析にファジングのテストがある
+- [x] スコープは権限の名前で、判定と `Holds` で本人の権限を絞るだけ（本人が持たない権限は効かない）
+- [x] 管理 API の Bearer、判定の API の `access_token`、イントロスペクションで受け付ける。公開 API では受け付けない
+- [x] 使うたびに取り消し・期限・本人の停止（作成から）・realm の今のポリシーを確かめ、最後に使った時刻を残す
+- [x] realm のポリシー（寿命の上限・許すスコープ・期限の要否。ホスト先の上限の内）とユーザーごとの数の上限
+- [x] 運営者の一覧と取り消し、侵害時の一括の無効化・消去・統合で片付け、監査ログ、無効化で全部消す。全部の Storage で契約テストが通る
+- 監査ログの行為者にトークン ID を載せる、連携先（`aud`）に結び付けた PAT、期限切れのトークンの自動の削除、期限前の通知
 #### WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）
 
 **ゴール**：WS-Federation しか持たない RP（ECDSA の署名を読めるもの）が、ADFS の代わりに iam でサインインできる。

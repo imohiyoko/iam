@@ -209,6 +209,8 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.WSFed().Purge(ctx, limit)
 		}},
+	// 本人の Personal Access Token と realm のポリシーを消す（ADR 0109）。
+	feature.PersonalAccessTokens: patCleaner,
 }
 
 // eachClient は全 realm の連携先に fn を呼び、true を返した数を数える。limit が 0 以上なら、その数で止める。

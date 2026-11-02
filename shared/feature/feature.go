@@ -53,6 +53,8 @@ const (
 	BotProtection     = "bot_protection"
 	// ADR 0107。
 	Kerberos = "kerberos"
+	// PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
+	PersonalAccessTokens = "personal_access_tokens"
 	// WSFed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。
 	WSFed = "wsfed"
 )

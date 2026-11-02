@@ -103,6 +103,9 @@ type state struct {
 	// wsfedRPs と wsfedCerts は WS-Federation の RP と署名の証明書（ADR 0110）。キーは realm_id + ID / key_id。
 	wsfedRPs   map[string]port.WSFedRelyingParty
 	wsfedCerts map[string]port.WSFedCertificate
+	// pats は本人の Personal Access Token、patPolicies は realm ごとのポリシー（キーは realm_id。ADR 0109）。
+	pats        map[string]port.PersonalAccessToken
+	patPolicies map[string]port.PersonalAccessTokenPolicy
 }
 
 // Storage はインメモリの Storage。
@@ -134,6 +137,7 @@ func New(clk clock.Clock) *Storage {
 		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{}, eventSubs: map[string]port.EventSubscription{},
 		dirGroups: map[string]port.DirectoryGroup{},
 		wsfedRPs:  map[string]port.WSFedRelyingParty{}, wsfedCerts: map[string]port.WSFedCertificate{},
+		pats: map[string]port.PersonalAccessToken{}, patPolicies: map[string]port.PersonalAccessTokenPolicy{},
 	}}
 }
 
@@ -213,6 +217,9 @@ func (t *tx) SigningKeys() port.SigningKeyRepo           { return signingKeys{t}
 func (t *tx) Grants() port.GrantRepo                     { return grants{t} }
 func (t *tx) OIDCTokens() port.OIDCTokenRepo             { return oidcTokens{t} }
 func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t} }
+
+// PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
+func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t} }
 
 // setKey は map の値を設定し、取り消し方を記録する。
 func setKey[K comparable, V any](t *tx, m map[K]V, k K, v V) {

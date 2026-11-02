@@ -553,6 +553,30 @@ func (e PasskeyPolicyMinCertificationLevel) Valid() bool {
 	}
 }
 
+// Defines values for PersonalAccessTokenRevokeReason.
+const (
+	PersonalAccessTokenRevokeReasonMerged    PersonalAccessTokenRevokeReason = "merged"
+	PersonalAccessTokenRevokeReasonOperator  PersonalAccessTokenRevokeReason = "operator"
+	PersonalAccessTokenRevokeReasonRevokeAll PersonalAccessTokenRevokeReason = "revoke_all"
+	PersonalAccessTokenRevokeReasonUser      PersonalAccessTokenRevokeReason = "user"
+)
+
+// Valid indicates whether the value is a known member of the PersonalAccessTokenRevokeReason enum.
+func (e PersonalAccessTokenRevokeReason) Valid() bool {
+	switch e {
+	case PersonalAccessTokenRevokeReasonMerged:
+		return true
+	case PersonalAccessTokenRevokeReasonOperator:
+		return true
+	case PersonalAccessTokenRevokeReasonRevokeAll:
+		return true
+	case PersonalAccessTokenRevokeReasonUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for QuotaGrantKind.
 const (
 	QuotaGrantKindAddon    QuotaGrantKind = "addon"
@@ -1822,6 +1846,51 @@ type PasskeyPolicy struct {
 // PasskeyPolicyMinCertificationLevel 求める FIDO の認定レベル（FIDO Metadata Service の status report）
 type PasskeyPolicyMinCertificationLevel string
 
+// PersonalAccessToken Personal Access Token（秘密は含めない。ADR 0109）
+type PersonalAccessToken struct {
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Id トークン ID（`pat_…`）
+	Id           string                           `json:"id"`
+	LastUsedAt   *time.Time                       `json:"last_used_at,omitempty"`
+	Name         string                           `json:"name"`
+	RevokeReason *PersonalAccessTokenRevokeReason `json:"revoke_reason,omitempty"`
+	RevokedAt    *time.Time                       `json:"revoked_at,omitempty"`
+	Scopes       []string                         `json:"scopes"`
+}
+
+// PersonalAccessTokenRevokeReason defines model for PersonalAccessToken.RevokeReason.
+type PersonalAccessTokenRevokeReason string
+
+// PersonalAccessTokenPolicy defines model for PersonalAccessTokenPolicy.
+type PersonalAccessTokenPolicy struct {
+	AllowedScopes []string `json:"allowed_scopes"`
+
+	// EffectiveMaxLifetimeSeconds 今効く上限（0 なら上限なし）
+	EffectiveMaxLifetimeSeconds int64 `json:"effective_max_lifetime_seconds"`
+
+	// HostMaxLifetimeSeconds ホスト先の上限（0 なら上限なし）
+	HostMaxLifetimeSeconds int64 `json:"host_max_lifetime_seconds"`
+	MaxLifetimeSeconds     int64 `json:"max_lifetime_seconds"`
+	RequireExpiry          bool  `json:"require_expiry"`
+
+	// UpdatedAt 最後に変えた時刻（置いていなければ無い）
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// PersonalAccessTokenPolicyInput defines model for PersonalAccessTokenPolicyInput.
+type PersonalAccessTokenPolicyInput struct {
+	// AllowedScopes 作れるスコープ（権限の名前。`x:*` も可）。空なら形だけを確かめる
+	AllowedScopes []string `json:"allowed_scopes"`
+
+	// MaxLifetimeSeconds realm の寿命の上限（0 なら realm では決めない）
+	MaxLifetimeSeconds int64 `json:"max_lifetime_seconds"`
+
+	// RequireExpiry 期限の無いトークンを作れない・使えない
+	RequireExpiry bool `json:"require_expiry"`
+}
+
 // PrincipalGroup defines model for PrincipalGroup.
 type PrincipalGroup struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -1978,6 +2047,9 @@ type RevokedCredentials struct {
 	Identities  int  `json:"identities"`
 	Passkeys    int  `json:"passkeys"`
 	Password    bool `json:"password"`
+
+	// PersonalAccessTokens 取り消した Personal Access Token の数（ADR 0109）
+	PersonalAccessTokens *int `json:"personal_access_tokens,omitempty"`
 
 	// RecoveryCodes 消した未使用のリカバリーコードの数
 	RecoveryCodes int `json:"recovery_codes"`
@@ -2666,6 +2738,9 @@ type DeleteOrgJSONRequestBody DeleteOrgJSONBody
 // SetOrgParentJSONRequestBody defines body for SetOrgParent for application/json ContentType.
 type SetOrgParentJSONRequestBody SetOrgParentJSONBody
 
+// PutPersonalAccessTokenPolicyJSONRequestBody defines body for PutPersonalAccessTokenPolicy for application/json ContentType.
+type PutPersonalAccessTokenPolicyJSONRequestBody = PersonalAccessTokenPolicyInput
+
 // CreateRealmJSONRequestBody defines body for CreateRealm for application/json ContentType.
 type CreateRealmJSONRequestBody = RealmInput
 
@@ -2947,6 +3022,12 @@ type ServerInterface interface {
 	// SetOrgParent Org の親を設定する・外す（Org 階層。11.4、ADR 0078）
 	// (POST /v1/admin/orgs/{id}:set-parent)
 	SetOrgParent(w http.ResponseWriter, r *http.Request, id string)
+	// GetPersonalAccessTokenPolicy realm の Personal Access Token のポリシー（ADR 0109）
+	// (GET /v1/admin/personal-access-token-policy)
+	GetPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request)
+	// PutPersonalAccessTokenPolicy realm の Personal Access Token のポリシーを置き換える（ADR 0109）
+	// (PUT /v1/admin/personal-access-token-policy)
+	PutPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request)
 	// ListRealms realm の一覧（複数 realm。design.md 11.1、ADR 0083）
 	// (GET /v1/admin/realms)
 	ListRealms(w http.ResponseWriter, r *http.Request)
@@ -3088,6 +3169,12 @@ type ServerInterface interface {
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)
 	RevokeUserPassword(w http.ResponseWriter, r *http.Request, id string)
+	// ListUserPersonalAccessTokens ユーザーの Personal Access Token の一覧（フィーチャー personal_access_tokens。ADR 0109）
+	// (GET /v1/admin/users/{id}/personal-access-tokens)
+	ListUserPersonalAccessTokens(w http.ResponseWriter, r *http.Request, id string)
+	// RevokeUserPersonalAccessToken ユーザーの Personal Access Token を取り消す（ADR 0109）
+	// (POST /v1/admin/users/{id}/personal-access-tokens/{token_id}:revoke)
+	RevokeUserPersonalAccessToken(w http.ResponseWriter, r *http.Request, id string, tokenId string)
 	// ListUserRoleBindings ユーザーに効くロールの付与の逆引き（ADR 0097）
 	// (GET /v1/admin/users/{id}/role-bindings)
 	ListUserRoleBindings(w http.ResponseWriter, r *http.Request, id string)
@@ -5003,6 +5090,34 @@ func (siw *ServerInterfaceWrapper) SetOrgParent(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetPersonalAccessTokenPolicy operation middleware
+func (siw *ServerInterfaceWrapper) GetPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPersonalAccessTokenPolicy(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutPersonalAccessTokenPolicy operation middleware
+func (siw *ServerInterfaceWrapper) PutPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutPersonalAccessTokenPolicy(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListRealms operation middleware
 func (siw *ServerInterfaceWrapper) ListRealms(w http.ResponseWriter, r *http.Request) {
 
@@ -6291,6 +6406,67 @@ func (siw *ServerInterfaceWrapper) RevokeUserPassword(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ListUserPersonalAccessTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListUserPersonalAccessTokens(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUserPersonalAccessTokens(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeUserPersonalAccessToken operation middleware
+func (siw *ServerInterfaceWrapper) RevokeUserPersonalAccessToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "token_id" -------------
+	var tokenId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "token_id", r.PathValue("token_id"), &tokenId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "token_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeUserPersonalAccessToken(w, r, id, tokenId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUserRoleBindings operation middleware
 func (siw *ServerInterfaceWrapper) ListUserRoleBindings(w http.ResponseWriter, r *http.Request) {
 
@@ -6955,6 +7131,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/event-subscriptions/{id}:delete", wrapper.DeleteEventSubscription)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/event-subscriptions/{id}:rotate-secret", wrapper.RotateEventSubscriptionSecret)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/event-subscriptions/{id}:test", wrapper.TestEventSubscription)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/personal-access-tokens", wrapper.ListUserPersonalAccessTokens)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/personal-access-tokens/{token_id}:revoke", wrapper.RevokeUserPersonalAccessToken)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/personal-access-token-policy", wrapper.GetPersonalAccessTokenPolicy)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/personal-access-token-policy", wrapper.PutPersonalAccessTokenPolicy)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties", wrapper.ListWSFedRelyingParties)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties", wrapper.CreateWSFedRelyingParty)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}", wrapper.GetWSFedRelyingParty)
@@ -12099,6 +12279,147 @@ func (response SetOrgParent409JSONResponse) VisitSetOrgParentResponse(w http.Res
 	return err
 }
 
+type GetPersonalAccessTokenPolicyRequestObject struct {
+}
+
+type GetPersonalAccessTokenPolicyResponseObject interface {
+	VisitGetPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error
+}
+
+type GetPersonalAccessTokenPolicy200JSONResponse PersonalAccessTokenPolicy
+
+func (response GetPersonalAccessTokenPolicy200JSONResponse) VisitGetPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPersonalAccessTokenPolicy401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetPersonalAccessTokenPolicy401JSONResponse) VisitGetPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPersonalAccessTokenPolicy403JSONResponse Error
+
+func (response GetPersonalAccessTokenPolicy403JSONResponse) VisitGetPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPersonalAccessTokenPolicy404JSONResponse Error
+
+func (response GetPersonalAccessTokenPolicy404JSONResponse) VisitGetPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutPersonalAccessTokenPolicyRequestObject struct {
+	Body *PutPersonalAccessTokenPolicyJSONRequestBody
+}
+
+type PutPersonalAccessTokenPolicyResponseObject interface {
+	VisitPutPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error
+}
+
+type PutPersonalAccessTokenPolicy200JSONResponse PersonalAccessTokenPolicy
+
+func (response PutPersonalAccessTokenPolicy200JSONResponse) VisitPutPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutPersonalAccessTokenPolicy400JSONResponse struct{ ErrorJSONResponse }
+
+func (response PutPersonalAccessTokenPolicy400JSONResponse) VisitPutPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutPersonalAccessTokenPolicy401JSONResponse Error
+
+func (response PutPersonalAccessTokenPolicy401JSONResponse) VisitPutPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutPersonalAccessTokenPolicy403JSONResponse Error
+
+func (response PutPersonalAccessTokenPolicy403JSONResponse) VisitPutPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutPersonalAccessTokenPolicy404JSONResponse Error
+
+func (response PutPersonalAccessTokenPolicy404JSONResponse) VisitPutPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListRealmsRequestObject struct {
 }
 
@@ -15521,6 +15842,131 @@ func (response RevokeUserPassword404JSONResponse) VisitRevokeUserPasswordRespons
 	return err
 }
 
+type ListUserPersonalAccessTokensRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListUserPersonalAccessTokensResponseObject interface {
+	VisitListUserPersonalAccessTokensResponse(w http.ResponseWriter) error
+}
+
+type ListUserPersonalAccessTokens200JSONResponse struct {
+	PersonalAccessTokens []PersonalAccessToken `json:"personal_access_tokens"`
+}
+
+func (response ListUserPersonalAccessTokens200JSONResponse) VisitListUserPersonalAccessTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserPersonalAccessTokens401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListUserPersonalAccessTokens401JSONResponse) VisitListUserPersonalAccessTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserPersonalAccessTokens403JSONResponse Error
+
+func (response ListUserPersonalAccessTokens403JSONResponse) VisitListUserPersonalAccessTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserPersonalAccessTokens404JSONResponse Error
+
+func (response ListUserPersonalAccessTokens404JSONResponse) VisitListUserPersonalAccessTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserPersonalAccessTokenRequestObject struct {
+	Id      string `json:"id"`
+	TokenId string `json:"token_id"`
+}
+
+type RevokeUserPersonalAccessTokenResponseObject interface {
+	VisitRevokeUserPersonalAccessTokenResponse(w http.ResponseWriter) error
+}
+
+type RevokeUserPersonalAccessToken204Response struct {
+}
+
+func (response RevokeUserPersonalAccessToken204Response) VisitRevokeUserPersonalAccessTokenResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeUserPersonalAccessToken401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RevokeUserPersonalAccessToken401JSONResponse) VisitRevokeUserPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserPersonalAccessToken403JSONResponse Error
+
+func (response RevokeUserPersonalAccessToken403JSONResponse) VisitRevokeUserPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserPersonalAccessToken404JSONResponse Error
+
+func (response RevokeUserPersonalAccessToken404JSONResponse) VisitRevokeUserPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListUserRoleBindingsRequestObject struct {
 	Id string `json:"id"`
 }
@@ -17001,6 +17447,12 @@ type StrictServerInterface interface {
 	// SetOrgParent Org の親を設定する・外す（Org 階層。11.4、ADR 0078）
 	// (POST /v1/admin/orgs/{id}:set-parent)
 	SetOrgParent(ctx context.Context, request SetOrgParentRequestObject) (SetOrgParentResponseObject, error)
+	// GetPersonalAccessTokenPolicy realm の Personal Access Token のポリシー（ADR 0109）
+	// (GET /v1/admin/personal-access-token-policy)
+	GetPersonalAccessTokenPolicy(ctx context.Context, request GetPersonalAccessTokenPolicyRequestObject) (GetPersonalAccessTokenPolicyResponseObject, error)
+	// PutPersonalAccessTokenPolicy realm の Personal Access Token のポリシーを置き換える（ADR 0109）
+	// (PUT /v1/admin/personal-access-token-policy)
+	PutPersonalAccessTokenPolicy(ctx context.Context, request PutPersonalAccessTokenPolicyRequestObject) (PutPersonalAccessTokenPolicyResponseObject, error)
 	// ListRealms realm の一覧（複数 realm。design.md 11.1、ADR 0083）
 	// (GET /v1/admin/realms)
 	ListRealms(ctx context.Context, request ListRealmsRequestObject) (ListRealmsResponseObject, error)
@@ -17142,6 +17594,12 @@ type StrictServerInterface interface {
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)
 	RevokeUserPassword(ctx context.Context, request RevokeUserPasswordRequestObject) (RevokeUserPasswordResponseObject, error)
+	// ListUserPersonalAccessTokens ユーザーの Personal Access Token の一覧（フィーチャー personal_access_tokens。ADR 0109）
+	// (GET /v1/admin/users/{id}/personal-access-tokens)
+	ListUserPersonalAccessTokens(ctx context.Context, request ListUserPersonalAccessTokensRequestObject) (ListUserPersonalAccessTokensResponseObject, error)
+	// RevokeUserPersonalAccessToken ユーザーの Personal Access Token を取り消す（ADR 0109）
+	// (POST /v1/admin/users/{id}/personal-access-tokens/{token_id}:revoke)
+	RevokeUserPersonalAccessToken(ctx context.Context, request RevokeUserPersonalAccessTokenRequestObject) (RevokeUserPersonalAccessTokenResponseObject, error)
 	// ListUserRoleBindings ユーザーに効くロールの付与の逆引き（ADR 0097）
 	// (GET /v1/admin/users/{id}/role-bindings)
 	ListUserRoleBindings(ctx context.Context, request ListUserRoleBindingsRequestObject) (ListUserRoleBindingsResponseObject, error)
@@ -19176,6 +19634,61 @@ func (sh *strictHandler) SetOrgParent(w http.ResponseWriter, r *http.Request, id
 	}
 }
 
+// GetPersonalAccessTokenPolicy operation middleware
+func (sh *strictHandler) GetPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request) {
+	var request GetPersonalAccessTokenPolicyRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPersonalAccessTokenPolicy(ctx, request.(GetPersonalAccessTokenPolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPersonalAccessTokenPolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPersonalAccessTokenPolicyResponseObject); ok {
+		if err := validResponse.VisitGetPersonalAccessTokenPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutPersonalAccessTokenPolicy operation middleware
+func (sh *strictHandler) PutPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request) {
+	var request PutPersonalAccessTokenPolicyRequestObject
+
+	var body PutPersonalAccessTokenPolicyJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutPersonalAccessTokenPolicy(ctx, request.(PutPersonalAccessTokenPolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutPersonalAccessTokenPolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutPersonalAccessTokenPolicyResponseObject); ok {
+		if err := validResponse.VisitPutPersonalAccessTokenPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListRealms operation middleware
 func (sh *strictHandler) ListRealms(w http.ResponseWriter, r *http.Request) {
 	var request ListRealmsRequestObject
@@ -20504,6 +21017,59 @@ func (sh *strictHandler) RevokeUserPassword(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeUserPasswordResponseObject); ok {
 		if err := validResponse.VisitRevokeUserPasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUserPersonalAccessTokens operation middleware
+func (sh *strictHandler) ListUserPersonalAccessTokens(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListUserPersonalAccessTokensRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUserPersonalAccessTokens(ctx, request.(ListUserPersonalAccessTokensRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUserPersonalAccessTokens")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUserPersonalAccessTokensResponseObject); ok {
+		if err := validResponse.VisitListUserPersonalAccessTokensResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeUserPersonalAccessToken operation middleware
+func (sh *strictHandler) RevokeUserPersonalAccessToken(w http.ResponseWriter, r *http.Request, id string, tokenId string) {
+	var request RevokeUserPersonalAccessTokenRequestObject
+
+	request.Id = id
+	request.TokenId = tokenId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeUserPersonalAccessToken(ctx, request.(RevokeUserPersonalAccessTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeUserPersonalAccessToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeUserPersonalAccessTokenResponseObject); ok {
+		if err := validResponse.VisitRevokeUserPersonalAccessTokenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

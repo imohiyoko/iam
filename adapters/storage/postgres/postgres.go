@@ -284,6 +284,9 @@ func (t *tx) Grants() port.GrantRepo                     { return grants{t.q} }
 func (t *tx) OIDCTokens() port.OIDCTokenRepo             { return oidcTokens{t.q} }
 func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t.q} }
 
+// PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
+func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t.q} }
+
 // ---------------------------------------------------------------------------
 
 type realms struct{ q *db.Queries }
