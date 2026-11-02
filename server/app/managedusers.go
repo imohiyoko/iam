@@ -175,6 +175,10 @@ func (s publicServer) DeclineOrgManagement(ctx context.Context, req publicapi.De
 
 // DeleteManagedAccount は Org の owner が管理ユーザーのアカウントの削除を予約する（本人の削除と同じ猶予）。
 func (s publicServer) DeleteManagedAccount(ctx context.Context, req publicapi.DeleteManagedAccountRequestObject) (publicapi.DeleteManagedAccountResponseObject, error) {
+	// 本人は取り消せないので、直近の本人確認を求める（盗まれたセッションで削除させない）。
+	if au, ok := authFrom(ctx); ok && !s.recent(ctx, au, role.ActionMeDeleteManaged) {
+		return publicapi.DeleteManagedAccount401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
+	}
 	var out publicapi.DeleteManagedAccount200JSONResponse
 	var revoked []string
 	r, code, cause, err := s.managedTarget(ctx, req.Id, req.MembershipId, func(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, au auth) error {
