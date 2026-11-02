@@ -289,6 +289,10 @@ type TOTPRepo interface {
 	Use(ctx context.Context, realmID, id string, step int64) error
 	// Revoke は at に無効化する。既に無効化されていれば何もしない。無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+	// ListAll は全 realm の TOTP を ID の順に最大 limit 件返す（無効化したものも。authn_credentials への移行。ADR 0101）。
+	ListAll(ctx context.Context, limit int) ([]TOTPCredential, error)
+	// Delete は行を消す（移した後）。無ければ何もしない。
+	Delete(ctx context.Context, realmID, id string) error
 }
 
 // PasswordCredential は password_credentials の1行（design.md 3.1、4.1）。有効なものはユーザーに1つまで。
@@ -320,6 +324,10 @@ type PasswordRepo interface {
 	Count(ctx context.Context) (int, error)
 	// Purge はパスワードを全 realm から最大 limit 件消し、消した件数を返す（フィーチャーの無効化）。
 	Purge(ctx context.Context, limit int) (int, error)
+	// ListAll は全 realm のパスワードを ID の順に最大 limit 件返す（無効化したものも。authn_credentials への移行。ADR 0101）。
+	ListAll(ctx context.Context, limit int) ([]PasswordCredential, error)
+	// Delete は行を消す（移した後）。無ければ何もしない。
+	Delete(ctx context.Context, realmID, id string) error
 }
 
 // RecoveryCode は authn_recovery_codes の1行（design.md 4.12）。コードは表示の1回だけで、argon2id のハッシュを持つ。

@@ -62,3 +62,12 @@ func (r passwords) Revoke(ctx context.Context, realmID, id string, at time.Time,
 	}
 	return mapErr(r.q.RevokePassword(ctx, db.RevokePasswordParams{RevokedAt: nullTime(&at), RevokeReason: reason, RealmID: realmID, ID: id}))
 }
+
+func (r passwords) ListAll(ctx context.Context, limit int) ([]port.PasswordCredential, error) {
+	rs, err := r.q.ListAllPasswords(ctx, int64(limit))
+	return rows(rs, err, toPassword)
+}
+
+func (r passwords) Delete(ctx context.Context, realmID, id string) error {
+	return mapErr(r.q.DeletePassword(ctx, db.DeletePasswordParams{RealmID: realmID, ID: id}))
+}

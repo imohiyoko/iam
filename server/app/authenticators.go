@@ -202,6 +202,14 @@ func (s publicServer) CompleteSecondFactorMethod(ctx context.Context, req public
 	return publicapi.CompleteSecondFactorMethod200JSONResponse(s.loginResult(ctx, is, au.PublicID, false, req.Body.ReturnToken)), nil
 }
 
+// knowledge は方式 name が知識の要素か。パスワードは、フィーチャーが止まっていても知識の要素として扱う（ADR 0101）。
+func (s publicServer) knowledge(name string) bool {
+	if a, ok := s.a.methods.Get(name); ok {
+		return a.Info().Kind == port.FactorKnowledge
+	}
+	return name == method.Password
+}
+
 // enrollable は本人が方式 name を登録できるか。登録だけのセッション（2要素目の登録の要求）では、2要素目に使える方式だけ。
 func (s publicServer) enrollable(au auth, name string) bool {
 	if _, err := s.a.credentials.Method(name, ""); err != nil {
@@ -228,7 +236,12 @@ func (s publicServer) BeginEnrollCredential(ctx context.Context, req publicapi.B
 			return publicapi.BeginEnrollCredential400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: "invalid_request"}}, nil
 		}
 	}
-	ch, err := s.a.credentials.EnrollBegin(ctx, s.a.realm.ID, au.PrincipalID, req.Method, p)
+	// 汎用のパスは直近の認証を求める（stale）ので RecentAuth。復旧専用のセッションでは、今の秘密を求めない再設定になる（ADR 0101）。
+	ch, err := s.a.credentials.EnrollBegin(ctx, s.a.realm.ID, au.PrincipalID, req.Method, p,
+		credential.EnrollOptions{Recovery: au.Restriction == port.RestrictionRecovery, RecentAuth: true})
+	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
+		return publicapi.BeginEnrollCredential429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+	}
 	if code, ok := invalidPayload(err); ok {
 		return publicapi.BeginEnrollCredential400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: code}}, nil
 	}
@@ -268,7 +281,8 @@ func (s publicServer) CompleteEnrollCredential(ctx context.Context, req publicap
 	upgrade := au.Restriction == port.RestrictionEnroll
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		if en, err = s.a.credentials.EnrollComplete(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Method, req.Body.FlowId, p, au.Actor(), c.RequestID); err != nil {
+		if en, err = s.a.credentials.EnrollComplete(ctx, tx, credential.EnrollInput{RealmID: s.a.realm.ID, UserID: au.PrincipalID,
+			Method: req.Method, FlowID: req.Body.FlowId, Payload: p, Actor: au.Actor(), RequestID: c.RequestID, KeepSession: au.SessionID}); err != nil {
 			return err
 		}
 		if codes, err = s.initialCodes(ctx, tx, au); err != nil || !upgrade {
@@ -299,6 +313,7 @@ func (s publicServer) CompleteEnrollCredential(ctx context.Context, req publicap
 	case err != nil:
 		return nil, err
 	}
+	s.a.sessions.ForgetIDs(ctx, s.a.realm.ID, en.RevokedSessions)
 	payload, err := objectPayload(en.Payload)
 	if err != nil {
 		return nil, err
@@ -318,10 +333,17 @@ func (s publicServer) RevokeMyCredential(ctx context.Context, req publicapi.Revo
 	} else if s.stale(ctx, au) {
 		return publicapi.RevokeMyCredential401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
+	var revoked []string
 	nf, code, err := s.change(ctx, func(ctx context.Context, tx port.Tx, au auth) error {
-		_, err := s.a.accounts.RevokeCredential(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Id, au.Actor(), requestID(ctx))
+		c, err := s.a.accounts.RevokeCredential(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Id, au.Actor(), requestID(ctx))
+		if err != nil || !s.knowledge(c.Method) {
+			return err
+		}
+		// 知識の要素（パスワード）を外したら、今のセッション以外を失効させる（5.2。方式専用のパスと同じ）。
+		revoked, err = s.a.sessions.RevokeAllTx(ctx, tx, s.a.realm.ID, au.PrincipalID, au.SessionID, session.ReasonCredentialChanged, au.Actor(), requestID(ctx))
 		return err
 	})
+	s.a.sessions.ForgetIDs(ctx, s.a.realm.ID, revoked)
 	switch {
 	case err != nil:
 		return nil, err

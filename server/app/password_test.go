@@ -110,11 +110,11 @@ func TestPasswordReauthAndBreachWarning(t *testing.T) {
 	}
 	// 設定の後で漏洩が分かったパスワードは、ログインで警告する。
 	_, cookie = l.login(t, "quinn@example.com")
-	l.a.password.Breach = nil
+	l.a.password.Method.Breach = nil
 	if status, _ := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": leaked}); status != 204 {
 		t.Fatalf("set: %d", status)
 	}
-	l.a.password.Breach = fakeBreach{sha1Hex(leaked): true}
+	l.a.password.Method.Breach = fakeBreach{sha1Hex(leaked): true}
 	status, res, _ := l.passwordLogin(t, "quinn@example.com", leaked)
 	ws, _ := res["warnings"].([]any)
 	if status != 200 || len(ws) != 1 || ws[0].(map[string]any)["code"] != "password_breached" {

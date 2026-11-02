@@ -9,6 +9,7 @@
 package credential
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -24,6 +25,7 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -68,7 +70,10 @@ type Service struct {
 	MaxAttempts int
 	// PerUser はユーザーごとの照合の回数の上限（2要素目と登録。総当たりの防止）。nil なら制限しない。
 	PerUser *ratelimit.Limiter
-	Log     *slog.Logger
+	// PerLogin はログイン ID（メールアドレス）ごと・接続元ごとの照合の回数の上限（ログイン ID で本人を決める方式。ADR 0101）。
+	// nil なら制限しない。
+	PerLogin *ratelimit.Limiter
+	Log      *slog.Logger
 }
 
 // Client は要求の接続元（監査ログとセッション）。
@@ -88,6 +93,7 @@ type flow struct {
 	Method    string    `json:"method"`
 	Purpose   string    `json:"purpose"`
 	State     []byte    `json:"state,omitempty"`
+	Recovery  bool      `json:"recovery,omitempty"`
 	Attempts  int       `json:"attempts"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
@@ -127,10 +133,66 @@ func (s *Service) Method(name string, u port.MethodUsage) (port.Authenticator, e
 	return a, nil
 }
 
+// env は方式に渡す環境。tx が nil なら、認証情報のストアは操作ごとに短いトランザクションで動く（方式の重い計算を、直列にした
+// トランザクションの外で行うため。ADR 0101）。
 func (s *Service) env(tx port.Tx, realmID, userID string, a port.Authenticator, u port.MethodUsage) port.MethodEnv {
 	now := s.Clock.Now()
-	return port.MethodEnv{RealmID: realmID, UserID: userID, Usage: u, Now: now, Issuer: s.Issuer,
-		Credentials: &method.Store{Tx: tx, Crypter: s.Crypter, RealmID: realmID, Info: a.Info(), Now: now}}
+	st := &method.Store{Tx: tx, Crypter: s.Crypter, RealmID: realmID, Info: a.Info(), Now: now}
+	if tx == nil {
+		st.Storage = s.Storage
+	}
+	return port.MethodEnv{RealmID: realmID, UserID: userID, Usage: u, Now: now, Issuer: s.Issuer, Credentials: st}
+}
+
+// loginUsers は1要素目でログイン ID から本人を引き当てる（port.MethodUsers）。引き当てたメールとユーザーを覚え、発行する
+// セッションをそのメールに結び付ける。
+type loginUsers struct {
+	s       *Service
+	realmID string
+	ip      string
+	userID  string
+	emailID string
+}
+
+// LoginUser は確認済みのメールの、ログインできる状態のユーザーを返す。それ以外は errs.NotFound（理由を区別しない。4.9）。
+// ログイン ID ごと（接続元ごと）の回数の上限を先に数える。
+func (l *loginUsers) LoginUser(ctx context.Context, identifier string) (string, error) {
+	email, err := account.NormalizeEmail(identifier)
+	if err != nil {
+		return "", errs.New(errs.KindNotFound, "user")
+	}
+	if l.s.PerLogin != nil {
+		ix, err := l.s.Crypter.EmailIndex(ctx, email)
+		if err != nil {
+			return "", err
+		}
+		if err := l.s.PerLogin.AllowFrom(ctx, "login:"+l.realmID+":"+base64.RawURLEncoding.EncodeToString(ix.Value), l.ip); err != nil {
+			return "", err
+		}
+	}
+	err = l.s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		e, err := l.s.Accounts.FindByEmail(ctx, tx, l.realmID, email)
+		if err != nil {
+			return err
+		}
+		if e.VerifiedAt == nil {
+			return errs.New(errs.KindNotFound, "user")
+		}
+		u, err := tx.Users().Get(ctx, l.realmID, e.UserID)
+		if err != nil {
+			return err
+		}
+		if u.Status != port.UserActive {
+			return errs.New(errs.KindNotFound, "user")
+		}
+		l.userID, l.emailID = u.ID, e.ID
+		return nil
+	})
+	if err != nil {
+		l.userID, l.emailID = "", ""
+		return "", err
+	}
+	return l.userID, nil
 }
 
 // payload は方式の Payload を応答の形（nil なら {}）にする。
@@ -161,12 +223,7 @@ func (s *Service) Begin(ctx context.Context, realmID, userID, name string, usage
 	} else {
 		userID = ""
 	}
-	var ch port.MethodChallenge
-	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		var err error
-		ch, err = a.Begin(ctx, s.env(tx, realmID, userID, a, usage), port.MethodRequest{Payload: p})
-		return err
-	})
+	ch, err := a.Begin(ctx, s.env(nil, realmID, userID, a, usage), port.MethodRequest{Payload: p})
 	// 1要素目の前は、方式が本人の有無を返しても区別しない（4.9）。2要素目は本人確認の後なので、方式の認証情報が無ければ 404。
 	if errors.Is(err, errs.AuthenticationFailed) || (err != nil && usage == port.UsageFirstFactor && errors.Is(err, errs.NotFound)) {
 		return Challenge{}, ErrAuthFailed
@@ -243,8 +300,9 @@ func (s *Service) retry(ctx context.Context, flowID string, f flow) {
 	}
 }
 
-// used は方式が返した認証情報を Storage から読み直し、realm・方式・持ち主（userID が空でなければ）が合い、有効なことを確かめて
-// 最終使用を記録する。
+// used は方式が返した認証情報を Storage から読み直し、realm・方式・持ち主（userID が空でなければ）が合い、有効で、方式が確かめた
+// 後に書き換わっていない（暗号文が同じ）ことを確かめて最終使用を記録する。方式はトランザクションの外で確かめるので、その間の
+// 変更・無効化をここで拒む。
 func (s *Service) used(ctx context.Context, tx port.Tx, realmID, userID, name string, r port.MethodResult) (port.Credential, error) {
 	c, err := tx.Credentials().Get(ctx, realmID, r.Credential.ID)
 	if errors.Is(err, errs.NotFound) {
@@ -255,6 +313,9 @@ func (s *Service) used(ctx context.Context, tx port.Tx, realmID, userID, name st
 	}
 	if c.Method != name || c.RevokedAt != nil || (userID != "" && c.UserID != userID) {
 		return port.Credential{}, fmt.Errorf("%w: credential revoked or for another user or method", errRejected)
+	}
+	if !bytes.Equal(c.Data, r.Credential.Sealed) {
+		return port.Credential{}, fmt.Errorf("%w: credential changed after verification", errRejected)
 	}
 	return c, tx.Credentials().Used(ctx, realmID, c.ID, s.Clock.Now())
 }
@@ -269,55 +330,97 @@ func amr(a port.Authenticator, r port.MethodResult) []string {
 // Login は1要素目のフローを完了し、セッションを発行する（2要素目が要れば制限つきのセッション。ADR 0050）。
 // 失敗は ErrAuthFailed（停止などは errs.Denial、上限を超えれば *ratelimit.ExceededError）。返す文字列はユーザーの公開 ID。
 func (s *Service) Login(ctx context.Context, realmID, name, flowID string, p json.RawMessage, c Client, replaceToken string) (session.Issued, string, error) {
-	a, err := s.Method(name, port.UsageFirstFactor)
-	if err != nil {
+	if _, err := s.Method(name, port.UsageFirstFactor); err != nil {
 		return session.Issued{}, "", err
 	}
 	f, err := s.take(ctx, flowID, realmID, "", name, purposeLogin)
 	if err != nil {
 		return session.Issued{}, "", s.fail(ctx, realmID, name, c, err)
 	}
+	is, publicID, err := s.login(ctx, realmID, name, f.State, p, c, replaceToken)
+	if rejectedByUser(err) {
+		s.retry(ctx, flowID, f)
+	}
+	if err != nil {
+		return session.Issued{}, "", s.fail(ctx, realmID, name, c, err)
+	}
+	return is, publicID, nil
+}
+
+// LoginOnce は、チャレンジの無い方式（パスワード）の1要素目を、フローを使わずに1回の要求で完了する（方式専用の互換のパス。
+// ADR 0101）。失敗は Login と同じ。
+func (s *Service) LoginOnce(ctx context.Context, realmID, name string, p json.RawMessage, c Client, replaceToken string) (session.Issued, string, error) {
+	a, err := s.Method(name, port.UsageFirstFactor)
+	if err != nil {
+		return session.Issued{}, "", err
+	}
+	ch, err := a.Begin(ctx, s.env(nil, realmID, "", a, port.UsageFirstFactor), port.MethodRequest{})
+	if err == nil && len(ch.State) > 0 {
+		err = fmt.Errorf("credential: method %s needs a challenge", name)
+	}
+	if err == nil {
+		var is session.Issued
+		var publicID string
+		if is, publicID, err = s.login(ctx, realmID, name, nil, p, c, replaceToken); err == nil {
+			return is, publicID, nil
+		}
+	}
+	return session.Issued{}, "", s.fail(ctx, realmID, name, c, err)
+}
+
+// login は方式の Complete をトランザクションの外で呼び、使った認証情報を確かめてセッションを発行する。
+func (s *Service) login(ctx context.Context, realmID, name string, state []byte, p json.RawMessage, c Client, replaceToken string) (session.Issued, string, error) {
+	a, err := s.Method(name, port.UsageFirstFactor)
+	if err != nil {
+		return session.Issued{}, "", err
+	}
+	users := &loginUsers{s: s, realmID: realmID, ip: c.IP}
+	env := s.env(nil, realmID, "", a, port.UsageFirstFactor)
+	env.Users = users
 	var is session.Issued
 	var publicID string
-	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		r, err := a.Complete(ctx, s.env(tx, realmID, "", a, port.UsageFirstFactor), port.MethodRequest{Payload: p, State: f.State})
-		if err != nil {
+	r, err := a.Complete(ctx, env, port.MethodRequest{Payload: p, State: state})
+	if err == nil {
+		err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			cred, err := s.used(ctx, tx, realmID, users.userID, name, r)
+			if err != nil {
+				return err
+			}
+			u, err := tx.Users().Get(ctx, realmID, cred.UserID)
+			if err != nil {
+				return err
+			}
+			// 停止と有効期間は照合が通った後に見る（本人確認の後なので理由を返す。4.9）。
+			now := s.Clock.Now()
+			if _, err := account.Check(ctx, tx, u, now, now); err != nil {
+				return err
+			}
+			// ログイン ID で本人を決めた方式（パスワード）は、セッションを引き当てたメールに結び付ける（従来どおり。パスワードの
+			// 置き換えと削除は、今のセッション以外をまとめて失効させる）。それ以外は使った認証情報に結び付ける。
+			bound := []string{cred.ID}
+			if users.emailID != "" {
+				bound = []string{users.emailID}
+			}
+			if is, err = s.Sessions.Issue(ctx, tx, session.Issue{RealmID: realmID, UserID: u.ID, AuthMethods: amr(a, r), Credentials: bound,
+				Evidence: warning.Evidence{PasswordBreached: r.KnowledgeBreached},
+				IP:       c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, ReplaceToken: replaceToken}); err != nil {
+				return err
+			}
+			publicID = u.PublicID
+			_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
+				Type: "login.succeeded", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
+				SessionID: is.Session.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+				Details: map[string]any{"method": name, "credential_id": cred.PublicID},
+			})
 			return err
-		}
-		cred, err := s.used(ctx, tx, realmID, "", name, r)
-		if err != nil {
-			return err
-		}
-		u, err := tx.Users().Get(ctx, realmID, cred.UserID)
-		if err != nil {
-			return err
-		}
-		// 停止と有効期間は照合が通った後に見る（本人確認の後なので理由を返す。4.9）。
-		now := s.Clock.Now()
-		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
-			return err
-		}
-		if is, err = s.Sessions.Issue(ctx, tx, session.Issue{RealmID: realmID, UserID: u.ID, AuthMethods: amr(a, r), Credentials: []string{cred.ID},
-			IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, ReplaceToken: replaceToken}); err != nil {
-			return err
-		}
-		publicID = u.PublicID
-		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
-			Type: "login.succeeded", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
-			SessionID: is.Session.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
-			Details: map[string]any{"method": name, "credential_id": cred.PublicID},
 		})
-		return err
-	})
+	}
 	if err != nil {
 		// 認証情報・ユーザーが無い、ログインできない状態（削除済みなど）は、照合の失敗と区別しない（4.9）。
 		if errors.Is(err, account.ErrInactive) || errors.Is(err, errs.NotFound) {
 			err = fmt.Errorf("%w: %w", errRejected, err)
 		}
-		if rejectedByUser(err) {
-			s.retry(ctx, flowID, f)
-		}
-		return session.Issued{}, "", s.fail(ctx, realmID, name, c, err)
+		return session.Issued{}, "", err
 	}
 	s.Sessions.Committed(ctx, realmID, is)
 	return is, publicID, nil
@@ -325,7 +428,9 @@ func (s *Service) Login(ctx context.Context, realmID, name, flowID string, p jso
 
 // fail は1要素目の失敗を監査ログに残し、利用者の入力による失敗を ErrAuthFailed にする。
 func (s *Service) fail(ctx context.Context, realmID, name string, c Client, cause error) error {
-	if _, ok := errors.AsType[errs.Denial](cause); !ok {
+	_, denied := errors.AsType[errs.Denial](cause)
+	_, limited := errors.AsType[*ratelimit.ExceededError](cause)
+	if !denied && !limited {
 		err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 			_, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{
 				Type: "login.failed", Result: audit.ResultFailure, RealmID: realmID, Actor: audit.Actor{Type: "anonymous"},
@@ -347,8 +452,7 @@ func (s *Service) fail(ctx context.Context, realmID, name string, c Client, caus
 // SecondFactor は2要素目のフローを完了し、制限つきのセッション sessionID を通常のセッションに替える（ADR 0050）。
 // 失敗は ErrAuthFailed（上限を超えれば *ratelimit.ExceededError、停止などは errs.Denial）。
 func (s *Service) SecondFactor(ctx context.Context, realmID, userID, sessionID, name, flowID string, p json.RawMessage, c Client) (session.Issued, error) {
-	a, err := s.Method(name, port.UsageSecondFactor)
-	if err != nil {
+	if _, err := s.Method(name, port.UsageSecondFactor); err != nil {
 		return session.Issued{}, err
 	}
 	if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
@@ -359,24 +463,57 @@ func (s *Service) SecondFactor(ctx context.Context, realmID, userID, sessionID, 
 		s.logger().DebugContext(ctx, "second factor rejected", "method", name, "error", err)
 		return session.Issued{}, ErrAuthFailed
 	}
+	is, err := s.secondFactor(ctx, realmID, userID, sessionID, name, f.State, p, c)
+	if rejectedByUser(err) {
+		s.retry(ctx, flowID, f)
+	}
+	return is, err
+}
+
+// SecondFactorOnce は、チャレンジの無い方式（TOTP）の2要素目を、フローを使わずに1回の要求で完了する（方式専用の互換のパス
+// `/v1/login/second-factor:verify`。ADR 0101）。失敗は SecondFactor と同じ。
+func (s *Service) SecondFactorOnce(ctx context.Context, realmID, userID, sessionID, name string, p json.RawMessage, c Client) (session.Issued, error) {
+	a, err := s.Method(name, port.UsageSecondFactor)
+	if err != nil {
+		return session.Issued{}, err
+	}
+	if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
+		return session.Issued{}, err
+	}
+	ch, err := a.Begin(ctx, s.env(nil, realmID, userID, a, port.UsageSecondFactor), port.MethodRequest{})
+	switch {
+	case errors.Is(err, errs.NotFound), errors.Is(err, errs.AuthenticationFailed):
+		s.logger().DebugContext(ctx, "second factor rejected", "method", name, "error", err)
+		return session.Issued{}, ErrAuthFailed
+	case err != nil:
+		return session.Issued{}, err
+	case len(ch.State) > 0:
+		return session.Issued{}, fmt.Errorf("credential: method %s needs a challenge", name)
+	}
+	return s.secondFactor(ctx, realmID, userID, sessionID, name, nil, p, c)
+}
+
+func (s *Service) secondFactor(ctx context.Context, realmID, userID, sessionID, name string, state []byte, p json.RawMessage, c Client) (session.Issued, error) {
+	a, err := s.Method(name, port.UsageSecondFactor)
+	if err != nil {
+		return session.Issued{}, err
+	}
 	var is session.Issued
-	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		r, err := a.Complete(ctx, s.env(tx, realmID, userID, a, port.UsageSecondFactor), port.MethodRequest{Payload: p, State: f.State})
-		if err != nil {
+	r, err := a.Complete(ctx, s.env(nil, realmID, userID, a, port.UsageSecondFactor), port.MethodRequest{Payload: p, State: state})
+	if err == nil {
+		err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			cred, err := s.used(ctx, tx, realmID, userID, name, r)
+			if err != nil {
+				return err
+			}
+			is, err = s.Sessions.CompleteSecondFactor(ctx, tx, realmID, sessionID, session.SecondFactor{
+				AMR: amr(a, r), CredentialID: cred.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+			})
 			return err
-		}
-		cred, err := s.used(ctx, tx, realmID, userID, name, r)
-		if err != nil {
-			return err
-		}
-		is, err = s.Sessions.CompleteSecondFactor(ctx, tx, realmID, sessionID, session.SecondFactor{
-			AMR: amr(a, r), CredentialID: cred.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
 		})
-		return err
-	})
+	}
 	if err != nil {
 		if rejectedByUser(err) {
-			s.retry(ctx, flowID, f)
 			s.logger().DebugContext(ctx, "second factor rejected", "method", name, "error", err)
 			return session.Issued{}, ErrAuthFailed
 		}
@@ -386,25 +523,43 @@ func (s *Service) SecondFactor(ctx context.Context, realmID, userID, sessionID, 
 	return is, nil
 }
 
-// EnrollBegin は本人（内部 ID）の、方式 name の登録を始める。
-func (s *Service) EnrollBegin(ctx context.Context, realmID, userID, name string, p json.RawMessage) (Challenge, error) {
+// EnrollOptions は登録の呼び出しの条件。
+type EnrollOptions struct {
+	// Recovery は復旧専用のセッションでの登録（今の秘密を求めない再設定。4.12）。
+	Recovery bool
+	// RecentAuth は本人の認証が直近（max_auth_age の内）か。
+	RecentAuth bool
+}
+
+// EnrollBegin は本人（内部 ID）の、方式 name の登録を始める。方式はトランザクションの外で呼ぶ（パスワードのハッシュなど）。
+// 知識の要素は、始めで今の秘密を照合しうるので、本人ごとの回数の上限を掛ける。
+func (s *Service) EnrollBegin(ctx context.Context, realmID, userID, name string, p json.RawMessage, o EnrollOptions) (Challenge, error) {
 	a, err := s.Method(name, "")
 	if err != nil {
 		return Challenge{}, err
 	}
-	var ch port.MethodChallenge
-	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		e := s.env(tx, realmID, userID, a, "")
-		if e.Account, err = s.accountName(ctx, tx, realmID, userID); err != nil {
-			return err
+	if a.Info().Kind == port.FactorKnowledge {
+		if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
+			return Challenge{}, err
 		}
-		ch, err = a.EnrollBegin(ctx, e, port.MethodRequest{Payload: p})
+	}
+	e := s.env(nil, realmID, userID, a, "")
+	e.RecentAuth = o.RecentAuth
+	if o.Recovery {
+		e.Usage = port.UsageRecovery
+	}
+	if err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		e.Account, err = s.accountName(ctx, tx, realmID, userID)
 		return err
-	})
+	}); err != nil {
+		return Challenge{}, err
+	}
+	ch, err := a.EnrollBegin(ctx, e, port.MethodRequest{Payload: p})
 	if err != nil {
 		return Challenge{}, err
 	}
-	return s.start(ctx, flow{RealmID: realmID, UserID: userID, Method: name, Purpose: purposeEnroll, State: ch.State}, ch.Payload)
+	return s.start(ctx, flow{RealmID: realmID, UserID: userID, Method: name, Purpose: purposeEnroll, State: ch.State, Recovery: o.Recovery}, ch.Payload)
 }
 
 // accountName は認証器に表示する本人の名前（primary のメールアドレス。最小化モードなら公開 ID）。
@@ -429,27 +584,47 @@ func (s *Service) accountName(ctx context.Context, tx port.Tx, realmID, userID s
 type Enrolled struct {
 	Credential port.Credential
 	Payload    json.RawMessage
+	// RevokedSessions は、知識の要素の登録で失効させた、ほかのセッションの ID（確定の後に Sessions.ForgetIDs に渡す）。
+	RevokedSessions []string
+}
+
+// EnrollInput は登録の完了の入力。
+type EnrollInput struct {
+	RealmID, UserID, Method, FlowID string
+	Payload                         json.RawMessage
+	Actor                           audit.Actor
+	RequestID                       string
+	// KeepSession は、知識の要素（パスワード）の登録で失効させないセッション（今のセッション。5.2）。
+	KeepSession string
 }
 
 // EnrollComplete は登録を完了する。呼び出し側のトランザクションで呼ぶ。確認に失敗すれば ErrAuthFailed（回数の上限まではフローを
-// 残す。ただしトランザクションの外のことなので、呼び出し側が失敗で終えたときにだけ意味を持つ）。
-func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, realmID, userID, name, flowID string, p json.RawMessage, actor audit.Actor, requestID string) (Enrolled, error) {
+// 残す。ただしトランザクションの外のことなので、呼び出し側が失敗で終えたときにだけ意味を持つ）。知識の要素（パスワード）の登録は、
+// 復旧専用のセッションでなければ、KeepSession 以外の本人のセッションを失効させる（5.2）。
+func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, in EnrollInput) (Enrolled, error) {
+	realmID, userID, name := in.RealmID, in.UserID, in.Method
 	a, err := s.Method(name, "")
 	if err != nil {
 		return Enrolled{}, err
 	}
-	if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
-		return Enrolled{}, err
+	// 知識の要素は始め（今の秘密の照合）で数えたので、ここでは数えない。
+	if a.Info().Kind != port.FactorKnowledge {
+		if err := s.PerUser.Allow(ctx, "method:"+name+":"+realmID+":"+userID); err != nil {
+			return Enrolled{}, err
+		}
 	}
-	f, err := s.take(ctx, flowID, realmID, userID, name, purposeEnroll)
+	f, err := s.take(ctx, in.FlowID, realmID, userID, name, purposeEnroll)
 	if err != nil {
 		s.logger().DebugContext(ctx, "enrollment rejected", "method", name, "error", err)
 		return Enrolled{}, ErrAuthFailed
 	}
 	e := s.env(tx, realmID, userID, a, "")
-	en, err := a.EnrollComplete(ctx, e, port.MethodRequest{Payload: p, State: f.State})
+	if f.Recovery {
+		e.Usage = port.UsageRecovery
+	}
+	en, err := a.EnrollComplete(ctx, e, port.MethodRequest{Payload: in.Payload, State: f.State})
 	if errors.Is(err, errs.AuthenticationFailed) {
-		s.retry(ctx, flowID, f)
+		s.retry(ctx, in.FlowID, f)
 		s.logger().DebugContext(ctx, "enrollment rejected", "method", name, "error", err)
 		return Enrolled{}, ErrAuthFailed
 	}
@@ -463,9 +638,15 @@ func (s *Service) EnrollComplete(ctx context.Context, tx port.Tx, realmID, userI
 	if c.UserID != userID || c.Method != name || c.RevokedAt != nil {
 		return Enrolled{}, fmt.Errorf("credential: method %s enrolled a credential for another user or method", name)
 	}
-	_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
-		Type: "credential.registered", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
+	if _, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
+		Type: "credential.registered", Result: audit.ResultSuccess, RealmID: realmID, Actor: in.Actor, RequestID: in.RequestID,
 		Details: map[string]any{"credential_id": c.PublicID, "method": name},
-	})
-	return Enrolled{Credential: c, Payload: payload(en.Payload)}, err
+	}); err != nil {
+		return Enrolled{}, err
+	}
+	out := Enrolled{Credential: c, Payload: payload(en.Payload)}
+	if a.Info().Kind == port.FactorKnowledge && !f.Recovery {
+		out.RevokedSessions, err = s.Sessions.RevokeAllTx(ctx, tx, realmID, userID, in.KeepSession, session.ReasonCredentialChanged, in.Actor, in.RequestID)
+	}
+	return out, err
 }

@@ -112,4 +112,5 @@
 | [0098](0098-saml-sp.md) | 外部 IdP としての SAML 2.0 は goxmldsig で署名を確かめ、プロトコルの確認は自前の薄い層で行う | 承認 |
 | [0099](0099-token-exchange.md) | Token Exchange（RFC 8693）で委任となりすましを扱い、交換したトークンを元の認可とログインの系列に結び付ける | 承認 |
 | [0100](0100-audit-query-and-event-subscriptions.md) | 監査ログは索引の列で照会してペイロードで確かめ直し、Webhook の購読は監査ログを outbox にして購読ごとの位置で送る | 承認 |
+| [0101](0101-port-totp-and-password.md) | TOTP とパスワードを認証方式のポートに載せ、方式専用の表から authn_credentials へ起動時に移す | 承認 |
 | [0102](0102-ldap.md) | LDAP / Active Directory は外部 ID の connection として扱い、サービスアカウントで探して本人で bind し、同期は止めることだけを自動にする | 承認 |

@@ -46,7 +46,6 @@ func TestCheck(t *testing.T) {
 	}
 	bad := []func(*port.MethodInfo){
 		func(i *port.MethodInfo) { i.Name = "Bad" },
-		func(i *port.MethodInfo) { i.Feature = "" },
 		func(i *port.MethodInfo) { i.Kind = "magic" },
 		func(i *port.MethodInfo) { i.AAL = 0 },
 		func(i *port.MethodInfo) { i.AAL = 4 },
@@ -71,6 +70,14 @@ func TestActive(t *testing.T) {
 	func() {
 		defer func() {
 			if recover() == nil {
+				t.Error("registration without a feature accepted")
+			}
+		}()
+		Register(fake{info("zz_core", "", port.UsageSecondFactor)})
+	}()
+	func() {
+		defer func() {
+			if recover() == nil {
 				t.Error("duplicate registration accepted")
 			}
 		}()
@@ -89,6 +96,10 @@ func TestActive(t *testing.T) {
 	}
 	if got := s.Names(port.UsageFirstFactor); !slices.Equal(got, []string{"zz_extra"}) {
 		t.Errorf("first factor names = %v", got)
+	}
+	// コアの方式（フィーチャーが空）は組み込みとして渡せば、フィーチャーを問わずに動く。
+	if core, err := Active(func(string) bool { return false }, fake{info("zz_core", "", port.UsageSecondFactor)}); err != nil || !core.Supports("zz_core", port.UsageSecondFactor) {
+		t.Errorf("core method not active: %v", err)
 	}
 	if _, err := Active(func(string) bool { return false }, fake{info("Bad", "f", port.UsageFirstFactor)}); err == nil {
 		t.Error("invalid extra method accepted")

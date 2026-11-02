@@ -31,6 +31,7 @@ var authnTests = []struct {
 	{"PasskeyUniqueConcurrent", testPasskeyUniqueConcurrent},
 	{"TOTP", testTOTP},
 	{"TOTPUseConcurrent", testTOTPUseConcurrent},
+	{"LegacyCredentialsListAllDelete", testLegacyListAllDelete},
 	{"Credentials", testCredentials},
 	{"DirectoryGroups", testDirectoryGroups},
 	{"IdentitiesByConnection", testIdentitiesByConnection},

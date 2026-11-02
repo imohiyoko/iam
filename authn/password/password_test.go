@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/credential"
+	"github.com/imohiyoko/iam/authn/method"
+	pwm "github.com/imohiyoko/iam/authn/method/password"
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
@@ -20,31 +23,7 @@ import (
 	"github.com/imohiyoko/iam/shared/ratelimit"
 )
 
-var fast = password.Params{Memory: 8, Time: 1, Threads: 1}
-
-func TestHashAndVerify(t *testing.T) {
-	h, err := password.Hash("correct horse battery staple", fast)
-	if err != nil || !strings.HasPrefix(h, "$argon2id$v=19$m=8,t=1,p=1$") {
-		t.Fatalf("hash = %q, %v", h, err)
-	}
-	if h2, _ := password.Hash("correct horse battery staple", fast); h2 == h {
-		t.Fatal("salt not random")
-	}
-	if ok, rehash, err := password.Verify("correct horse battery staple", h, fast); !ok || rehash || err != nil {
-		t.Fatalf("verify = %v %v %v", ok, rehash, err)
-	}
-	if ok, _, _ := password.Verify("wrong", h, fast); ok {
-		t.Fatal("wrong password accepted")
-	}
-	if _, rehash, _ := password.Verify("correct horse battery staple", h, password.Params{Memory: 16, Time: 1, Threads: 1}); !rehash {
-		t.Fatal("changed params should ask for rehash")
-	}
-	for _, bad := range []string{"", "$argon2i$v=19$m=8,t=1,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA", "$argon2id$v=19$m=99999999,t=1,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA"} {
-		if _, _, err := password.Verify("x", bad, fast); err == nil {
-			t.Errorf("malformed hash %q accepted", bad)
-		}
-	}
-}
+var fast = pwm.Params{Memory: 8, Time: 1, Threads: 1}
 
 // fakeBreach は決まったパスワードを漏洩済みとする。
 type fakeBreach struct {
@@ -83,9 +62,17 @@ func setup(t *testing.T) *env {
 	}
 	sm.Warnings = w
 	b := &fakeBreach{bad: map[string]bool{sha("password1234567890"): true}}
+	pm := &pwm.Method{Params: fast, Breach: b}
+	methods, err := method.Active(func(string) bool { return false }, pm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acc.Methods, sm.Methods = methods, methods
+	limit := &ratelimit.Limiter{Cache: k.Cache, Clock: k.Clock, Window: time.Minute, Limit: 5}
+	cs := &credential.Service{Storage: k.Storage, Cache: k.Cache, Crypter: k.Crypter, Clock: k.Clock, Accounts: acc, Sessions: sm,
+		Methods: methods, PerLogin: limit}
 	return &env{k: k, acc: acc, breach: b, svc: &password.Service{Storage: k.Storage, Crypter: k.Crypter, Clock: k.Clock, Accounts: acc,
-		Sessions: sm, Breach: b, Params: fast,
-		PerAccount: &ratelimit.Limiter{Cache: k.Cache, Clock: k.Clock, Window: time.Minute, Limit: 5}}}
+		Sessions: sm, Credentials: cs, Method: pm, PerAccount: limit}}
 }
 
 func (e *env) user(t *testing.T, email string) port.User {
@@ -109,15 +96,15 @@ func TestSetAndLogin(t *testing.T) {
 		pw   string
 		want error
 	}{
-		{"short", password.ErrTooShort},
-		{strings.Repeat("x", password.MaxLength+1), password.ErrTooLong},
-		{"password1234567890", password.ErrBreached},
+		{"short", pwm.ErrTooShort},
+		{strings.Repeat("x", pwm.MaxLength+1), pwm.ErrTooLong},
+		{"password1234567890", pwm.ErrBreached},
 	} {
 		if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, c.pw, "", true, "", audit.Actor{}, ""); !errors.Is(err, c.want) {
 			t.Errorf("set %q = %v, want %v", c.pw, err, c.want)
 		}
 	}
-	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", false, "", audit.Actor{}, ""); !errors.Is(err, password.ErrReauthRequired) {
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", false, "", audit.Actor{}, ""); !errors.Is(err, pwm.ErrReauthRequired) {
 		t.Fatalf("first set without recent auth = %v", err)
 	}
 	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", true, "", audit.Actor{}, ""); err != nil {
@@ -141,7 +128,7 @@ func TestSetAndLogin(t *testing.T) {
 		}
 	}
 	// 変更には今のパスワードが要る。
-	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, "another long passphrase", "wrong", true, "", audit.Actor{}, ""); !errors.Is(err, password.ErrCurrentPassword) {
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, "another long passphrase", "wrong", true, "", audit.Actor{}, ""); !errors.Is(err, pwm.ErrCurrentPassword) {
 		t.Fatalf("change with wrong current = %v", err)
 	}
 	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, "another long passphrase", good, false, "", audit.Actor{}, ""); err != nil {
@@ -186,7 +173,7 @@ func TestRemove(t *testing.T) {
 	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, good, "", true, "", audit.Actor{}, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, "wrong", "", audit.Actor{}, ""); !errors.Is(err, password.ErrCurrentPassword) {
+	if err := e.svc.Remove(ctx, e.k.RealmID, u.ID, "wrong", "", audit.Actor{}, ""); !errors.Is(err, pwm.ErrCurrentPassword) {
 		t.Fatalf("remove with wrong current = %v", err)
 	}
 	// メールのコードが使えなければ、パスワードが最後のログインの手段。
@@ -218,16 +205,16 @@ func TestLoginDoesNotHideInfrastructureErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 正規化で 128 文字に縮んでも、入力が上限を超えれば設定できない（ログインで受け取れないため）。
-	decomposed := strings.Repeat("\u1100\u1161\u11A8", password.MaxLength)
-	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, decomposed, good, true, "", audit.Actor{}, ""); !errors.Is(err, password.ErrTooLong) {
+	decomposed := strings.Repeat("\u1100\u1161\u11A8", pwm.MaxLength)
+	if _, err := e.svc.Set(ctx, e.k.RealmID, u.ID, decomposed, good, true, "", audit.Actor{}, ""); !errors.Is(err, pwm.ErrTooLong) {
 		t.Fatalf("set oversized input = %v", err)
 	}
 	// 上限を超える入力は照合せずに認証の失敗にする。
-	long := strings.Repeat("a", password.MaxInputBytes+1)
+	long := strings.Repeat("a", pwm.MaxInputBytes+1)
 	if _, err := e.svc.Login(ctx, e.k.RealmID, password.Login{Email: "dave@example.com", Password: long}); !errors.Is(err, errs.AuthenticationFailed) {
 		t.Fatalf("too long = %v", err)
 	}
-	e.svc.Storage = failingStorage{e.k.Storage}
+	e.svc.Storage, e.svc.Credentials.Storage = failingStorage{e.k.Storage}, failingStorage{e.k.Storage}
 	if _, err := e.svc.Login(ctx, e.k.RealmID, password.Login{Email: "dave@example.com", Password: good}); !errors.Is(err, errDown) {
 		t.Fatalf("storage failure = %v, want it returned as is", err)
 	}

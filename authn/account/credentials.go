@@ -28,7 +28,8 @@ func (s *Service) RevokeCredential(ctx context.Context, tx port.Tx, realmID, use
 	if err != nil {
 		return port.Credential{}, err
 	}
-	if s.Methods.Supports(c.Method, port.UsageFirstFactor) {
+	// パスワードはフィーチャーが止まっていてもログインの手段に数える（loginMethods と同じ）。
+	if c.Method == method.Password || s.Methods.Supports(c.Method, port.UsageFirstFactor) {
 		m, err := s.ListMethods(ctx, tx, realmID, userID)
 		if err != nil {
 			return port.Credential{}, err
