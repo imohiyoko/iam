@@ -143,6 +143,15 @@ oidc:
     token_ttl: 10m  # なりすましのアクセストークンの寿命（1時間以下）
     max_auth_age: 5m  # 運営者が直近に認証していなければならない時間（step-up）
     min_factors: 2  # 運営者のセッションに要る認証要素の数（0〜3）
+  dpop:  # DPoP（RFC 9449。フィーチャー dpop。ADR 0113）
+    require_nonce: false  # true なら DPoP-Nonce で iam の nonce を求める
+    proof_max_age: 5m  # 証明の iat の古さの上限（1時間以下）
+    nonce_ttl: 5m  # nonce の寿命（1時間以下）
+    # admin_url: https://admin.id.example.com  # 管理 API の外から見たオリジン。あればサービスアカウントのトークンを DPoP に結び付けられる
+  # mtls:  # OAuth の mTLS（RFC 8705。フィーチャー mtls_client_auth。証明書は server.client_certificates で受ける）
+  #   trust_anchors: [/etc/iam/client-ca.pem]  # tls_client_auth の連携先の証明書の CA
+  #   intermediates: []
+  #   endpoint_url: https://mtls.id.example.com  # mTLS の専用の待ち受けの外のオリジン（Discovery の mtls_endpoint_aliases）
   ciba_ttl: 5m  # CIBA の auth_req_id の期限の上限（30秒から10分。フィーチャー ciba。ADR 0114）
   ciba_poll_interval: 5s  # CIBA の連携先のポーリングの最短の間隔（1秒から1分）
 

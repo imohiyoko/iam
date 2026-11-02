@@ -54,6 +54,8 @@ type Clients struct {
 	DeviceFlow bool
 	// FrontChannel はフィーチャー oidc_logout が動いているか（Front-Channel Logout の登録を受け付けるか。ADR 0094）。
 	FrontChannel bool
+	// DPoP と MTLS はフィーチャー dpop・mtls_client_auth が動いているか（ADR 0113）。
+	DPoP, MTLS bool
 	// CIBA は CIBA の登録を受け付けるか（フィーチャー ciba。ADR 0114）。
 	CIBA bool
 	// PAR はフィーチャー par が動いているか（require_pushed_authorization_requests を受け付けるか。ADR 0112）。
@@ -75,6 +77,11 @@ type ClientInput struct {
 	// FrontchannelLogoutURI と FrontchannelLogoutSessionRequired は Front-Channel Logout（フィーチャー oidc_logout）。
 	FrontchannelLogoutURI             string
 	FrontchannelLogoutSessionRequired bool
+	// DPoPBoundAccessTokens・TLSBoundAccessTokens・TLSAuthField・TLSAuthValue は送信者制約トークンと mTLS の認証（ADR 0113）。
+	DPoPBoundAccessTokens bool
+	TLSBoundAccessTokens  bool
+	TLSAuthField          string
+	TLSAuthValue          string
 	// CIBAMode は CIBA のトークンの受け取り方（backchannel_token_delivery_mode。空・poll・ping）、CIBANotificationEndpoint は
 	// ping の通知先（フィーチャー ciba。ADR 0114）。
 	CIBAMode                 string
@@ -173,13 +180,20 @@ func (in ClientInput) normalize(deviceFlow, ciba bool) (ClientInput, error) {
 	if !slices.Contains(Algs, in.IDTokenAlg) {
 		return in, invalidClient("id_token_signed_response_alg")
 	}
+	if in.AuthMethod == port.ClientAuthTLS {
+		if !validTLSAuth(in.TLSAuthField, in.TLSAuthValue) {
+			return in, invalidClient("tls_client_auth needs exactly one of tls_client_auth_subject_dn, _san_dns, _san_uri, _san_ip, _san_email")
+		}
+	} else if in.TLSAuthField != "" || in.TLSAuthValue != "" {
+		return in, invalidClient("tls_client_auth_* is only for tls_client_auth")
+	}
 	switch in.AuthMethod {
-	case port.ClientAuthSecret, port.ClientAuthNone:
+	case port.ClientAuthSecret, port.ClientAuthNone, port.ClientAuthTLS:
 		if len(in.JWKS) > 0 {
-			return in, invalidClient("jwks is only for private_key_jwt")
+			return in, invalidClient("jwks is only for private_key_jwt and self_signed_tls_client_auth")
 		}
 		in.JWKS = nil
-	case port.ClientAuthPrivateKeyJWT:
+	case port.ClientAuthPrivateKeyJWT, port.ClientAuthSelfSignedTLS:
 		if len(in.JWKS) == 0 || len(in.JWKS) > maxJWKSBytes {
 			return in, invalidClient("jwks")
 		}
@@ -261,6 +275,15 @@ func (c *Clients) record(ctx context.Context, tx port.Tx, realmID string, actor 
 	if cl.DeviceGrant {
 		details["device_authorization_grant"] = true
 	}
+	if cl.DPoPBoundAccessTokens {
+		details["dpop_bound_access_tokens"] = true
+	}
+	if cl.TLSBoundAccessTokens {
+		details["tls_client_certificate_bound_access_tokens"] = true
+	}
+	if cl.TLSAuthField != "" {
+		details["tls_client_auth_"+cl.TLSAuthField] = cl.TLSAuthValue
+	}
 	if cl.CIBAMode != "" {
 		details["backchannel_token_delivery_mode"] = cl.CIBAMode
 	}
@@ -282,6 +305,26 @@ func (c *Clients) checkFrontChannel(in ClientInput, prev port.Client) error {
 	return invalidClient("frontchannel_logout_uri: the oidc_logout feature is not enabled")
 }
 
+// checkSenderConstraint は、フィーチャー dpop・mtls_client_auth が動いていないときに、その設定を新しく入れるのを拒む
+// （ADR 0113）。今の値から変えないもの・外すものは受け付ける。
+func (c *Clients) checkSenderConstraint(in ClientInput, prev port.Client) error {
+	if !c.DPoP && in.DPoPBoundAccessTokens && !prev.DPoPBoundAccessTokens {
+		return invalidClient("dpop_bound_access_tokens: the dpop feature is not enabled")
+	}
+	if c.MTLS {
+		return nil
+	}
+	if in.TLSBoundAccessTokens && !prev.TLSBoundAccessTokens {
+		return invalidClient("tls_client_certificate_bound_access_tokens: the mtls_client_auth feature is not enabled")
+	}
+	tlsMethod := in.AuthMethod == port.ClientAuthTLS || in.AuthMethod == port.ClientAuthSelfSignedTLS
+	if tlsMethod && (in.AuthMethod != prev.AuthMethod || in.TLSAuthField != prev.TLSAuthField || in.TLSAuthValue != prev.TLSAuthValue) {
+		return invalidClient("token_endpoint_auth_method: the mtls_client_auth feature is not enabled")
+	}
+	return nil
+
+}
+
 // checkPAR は、フィーチャー par が動いていないときに PAR の必須を新たに置くのを拒む。今の値のままなら受け付ける。
 func (c *Clients) checkPAR(in ClientInput, prev port.Client) error {
 	if c.PAR || !in.RequirePAR || prev.RequirePAR {
@@ -299,6 +342,9 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 	if err := c.checkFrontChannel(in, port.Client{}); err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkSenderConstraint(in, port.Client{}); err != nil {
+		return port.Client{}, "", err
+	}
 	if err := c.checkPAR(in, port.Client{}); err != nil {
 		return port.Client{}, "", err
 	}
@@ -307,7 +353,9 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 		RedirectURIs: in.RedirectURIs, PostLogoutRedirectURIs: in.PostLogoutRedirectURIs, AuthMethod: in.AuthMethod, JWKS: in.JWKS,
 		IDTokenAlg: in.IDTokenAlg, BackchannelLogoutURI: in.BackchannelLogoutURI, DeviceGrant: in.DeviceGrant,
 		FrontchannelLogoutURI: in.FrontchannelLogoutURI, FrontchannelLogoutSessionRequired: in.FrontchannelLogoutSessionRequired,
-		CIBAMode: in.CIBAMode, CIBANotificationEndpoint: in.CIBANotificationEndpoint, RequirePAR: in.RequirePAR, CreatedAt: now, UpdatedAt: now}
+		DPoPBoundAccessTokens: in.DPoPBoundAccessTokens, TLSBoundAccessTokens: in.TLSBoundAccessTokens, TLSAuthField: in.TLSAuthField,
+		TLSAuthValue: in.TLSAuthValue, CIBAMode: in.CIBAMode, CIBANotificationEndpoint: in.CIBANotificationEndpoint,
+		RequirePAR: in.RequirePAR, CreatedAt: now, UpdatedAt: now}
 	var secret string
 	if cl.AuthMethod == port.ClientAuthSecret {
 		if secret, cl.SecretHash, err = newSecret(); err != nil {
@@ -329,6 +377,9 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	if err := c.checkFrontChannel(in, cl); err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkSenderConstraint(in, cl); err != nil {
+		return port.Client{}, "", err
+	}
 	if err := c.checkPAR(in, cl); err != nil {
 		return port.Client{}, "", err
 	}
@@ -345,6 +396,8 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	cl.DeviceGrant, cl.RequirePAR = in.DeviceGrant, in.RequirePAR
 	cl.CIBAMode, cl.CIBANotificationEndpoint = in.CIBAMode, in.CIBANotificationEndpoint
 	cl.FrontchannelLogoutURI, cl.FrontchannelLogoutSessionRequired = in.FrontchannelLogoutURI, in.FrontchannelLogoutSessionRequired
+	cl.DPoPBoundAccessTokens, cl.TLSBoundAccessTokens = in.DPoPBoundAccessTokens, in.TLSBoundAccessTokens
+	cl.TLSAuthField, cl.TLSAuthValue = in.TLSAuthField, in.TLSAuthValue
 	if cl.AuthMethod == port.ClientAuthNone {
 		// 公開クライアントには交換を許さない（ADR 0099）。
 		cl.TokenExchange = nil

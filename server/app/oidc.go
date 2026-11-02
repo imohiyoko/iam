@@ -14,6 +14,8 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/op"
 	"golang.org/x/text/language"
 
+	"github.com/imohiyoko/iam/authn/credential"
+	"github.com/imohiyoko/iam/authn/dpop"
 	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
@@ -83,23 +85,24 @@ func newOIDCHandler(a *App) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(oidc.DiscoveryEndpoint, ops)
 	mux.Handle(oidcKeys, ops)
+	// DPoP の nonce（ADR 0113）は token エンドポイントと UserInfo の応答に付ける。
 	if a.ciba != nil {
 		// CIBA の grant は op.Server の前で受ける（ADR 0114）。
-		mux.Handle(oidcToken, srv.withCIBAToken(ops))
+		mux.Handle(oidcToken, a.withDPoPNonce(srv.withCIBAToken(ops)))
 		mux.HandleFunc(oidcBackchannel, srv.backchannelAuthorize)
 	} else {
-		mux.Handle(oidcToken, ops)
+		mux.Handle(oidcToken, a.withDPoPNonce(ops))
 	}
 	mux.Handle(oidcIntrospect, ops)
 	mux.Handle(oidcRevoke, ops)
 	// 認可要求とその続きはブラウザのセッションを見る。
 	mux.Handle(oidcAuthorize, a.withSession(ops))
 	mux.Handle(oidcResume, a.withSession(http.HandlerFunc(srv.resume)))
-	mux.HandleFunc(oidcUserinfo, srv.userinfo)
+	mux.Handle(oidcUserinfo, a.withDPoPNonce(http.HandlerFunc(srv.userinfo)))
 	mux.HandleFunc(wellKnownAS, srv.authorizationServerMetadata)
 	mux.HandleFunc(wellKnownResource, srv.protectedResourceMetadata)
 	if a.par {
-		mux.HandleFunc(oidcPAR, srv.pushAuthorization)
+		mux.Handle(oidcPAR, a.withDPoPNonce(http.HandlerFunc(srv.pushAuthorization)))
 	}
 	if a.device != nil {
 		mux.Handle(oidcDeviceAuth, ops)
@@ -146,11 +149,11 @@ func (s *oidcServer) cors(w http.ResponseWriter, r *http.Request) bool {
 		return preflight
 	}
 	if !preflight {
-		h.Set("Access-Control-Expose-Headers", "WWW-Authenticate")
+		h.Set("Access-Control-Expose-Headers", "WWW-Authenticate, DPoP-Nonce")
 		return false
 	}
 	h.Set("Access-Control-Allow-Methods", "GET, POST")
-	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, DPoP")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
 	return true
@@ -259,6 +262,10 @@ type discovery struct {
 	*oidc.DiscoveryConfiguration
 	FrontChannelLogoutSupported        bool `json:"frontchannel_logout_supported,omitempty"`
 	FrontChannelLogoutSessionSupported bool `json:"frontchannel_logout_session_supported,omitempty"`
+	// DPoP（RFC 9449 5.1）と OAuth の mTLS（RFC 8705 3.3、5）。ADR 0113。
+	DPoPSigningAlgValuesSupported         []string          `json:"dpop_signing_alg_values_supported,omitempty"`
+	TLSClientCertificateBoundAccessTokens bool              `json:"tls_client_certificate_bound_access_tokens,omitempty"`
+	MTLSEndpointAliases                   map[string]string `json:"mtls_endpoint_aliases,omitempty"`
 	// CIBA（CIBA Core 4。フィーチャー ciba）。
 	BackchannelAuthenticationEndpoint      string   `json:"backchannel_authentication_endpoint,omitempty"`
 	BackchannelTokenDeliveryModesSupported []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
@@ -325,6 +332,7 @@ func (s *oidcServer) metadata() discovery {
 		d.PushedAuthorizationRequestEndpoint = s.endpoint(oidcPAR)
 		d.RequirePushedAuthorizationRequests = s.a.settings.RequirePushedAuthorizationRequests
 	}
+	s.senderConstraintDiscovery(&d)
 	return d
 }
 
@@ -379,6 +387,8 @@ func (c opClient) AuthMethod() oidc.AuthMethod {
 		return oidc.AuthMethodBasic
 	case port.ClientAuthPrivateKeyJWT:
 		return oidc.AuthMethodPrivateKeyJWT
+	case port.ClientAuthTLS, port.ClientAuthSelfSignedTLS:
+		return oidc.AuthMethod(c.c.AuthMethod)
 	}
 	return oidc.AuthMethodNone
 }
@@ -397,7 +407,7 @@ func (c opClient) GrantTypes() []oidc.GrantType {
 	return gt
 }
 func (opClient) LoginURL(string) string { return "" }
-func (opClient) AccessTokenType() op.AccessTokenType {
+func (opClient) AccessTokenType() op.AccessTokenType { // 不透明なトークン。DPoP の token_type は応答で決める（ADR 0113）
 	return op.AccessTokenTypeBearer
 }
 func (opClient) IDTokenLifetime() time.Duration { return 0 }
@@ -562,6 +572,13 @@ func (s *oidcServer) authRequest(r *op.ClientRequest[oidc.AuthRequest]) (provide
 		}
 		req.ACR = acr.Requested(values, s.a.hardwareAAL())
 	}
+	if jkt := r.Form.Get("dpop_jkt"); jkt != "" && s.a.dpop != nil {
+		// 認可コードを DPoP の鍵に結び付ける（RFC 9449 10）。PAR で預けたものも同じ（10.1）。フィーチャーが止まっていれば見ない。
+		if !dpop.ValidJKT(jkt) {
+			return provider.AuthRequest{}, oidc.ErrInvalidRequest().WithDescription("dpop_jkt is malformed")
+		}
+		req.DPoPJKT = jkt
+	}
 	return req, nil
 }
 
@@ -715,11 +732,20 @@ func (s *oidcServer) authenticate(ctx context.Context, cc *op.ClientCredentials,
 			cl, err = provider.AuthenticateAssertion(ctx, tx, s.a.deps.Ephemeral, s.a.deps.Clock, s.a.realm.ID, cc.ClientID, cc.ClientAssertion, audiences)
 		case cc.ClientSecret != "":
 			cl, err = provider.AuthenticateSecret(ctx, tx, s.a.realm.ID, cc.ClientID, cc.ClientSecret)
-		case confidential:
-			err = provider.ErrClientAuth
 		default:
 			cl, err = tx.Clients().GetByPublicID(ctx, s.a.realm.ID, cc.ClientID)
-			if errors.Is(err, errs.NotFound) || (err == nil && cl.AuthMethod != port.ClientAuthNone) {
+			switch {
+			case errors.Is(err, errs.NotFound):
+				err = provider.ErrClientAuth
+			case err != nil:
+			case cl.AuthMethod == port.ClientAuthTLS || cl.AuthMethod == port.ClientAuthSelfSignedTLS:
+				// mTLS の認証（RFC 8705 2。ADR 0113）。証明書は ADR 0103 の経路で受けたもの。フィーチャーが止まっていれば通さない。
+				if s.a.oauthMTLS == nil {
+					err = provider.ErrClientAuth
+					break
+				}
+				cl, err = provider.AuthenticateTLS(ctx, tx, s.a.oauthMTLS, s.a.realm.ID, cc.ClientID, credential.ClientCertificates(ctx))
+			case confidential || cl.AuthMethod != port.ClientAuthNone:
 				err = provider.ErrClientAuth
 			}
 		}
@@ -736,6 +762,10 @@ func (s *oidcServer) authenticate(ctx context.Context, cc *op.ClientCredentials,
 
 func (s *oidcServer) CodeExchange(ctx context.Context, r *op.ClientRequest[oidc.AccessTokenRequest]) (*op.Response, error) {
 	cl := r.Client.(opClient).c
+	b, err := s.tokenBinding(ctx, r.Method, r.URL.Path, r.Header, cl)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.a.flow.Redeem(ctx, s.a.realm.ID, cl.PublicID, r.Data.Code, r.Data.RedirectURI, r.Data.CodeVerifier)
 	if errors.Is(err, provider.ErrInvalidGrant) {
 		return nil, oidc.ErrInvalidGrant()
@@ -750,7 +780,7 @@ func (s *oidcServer) CodeExchange(ctx context.Context, r *op.ClientRequest[oidc.
 	var out provider.Issued
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		out, err = s.a.tokens.Exchange(ctx, tx, cl, c, requestID(ctx))
+		out, err = s.a.tokens.Exchange(ctx, tx, cl, c, b, requestID(ctx))
 		return err
 	})
 	if errors.Is(err, provider.ErrInvalidGrant) {
@@ -772,7 +802,7 @@ func (s *oidcServer) tokenResources(form url.Values) []string {
 
 func tokenResponse(out provider.Issued) *op.Response {
 	// #nosec G115 -- ExpiresIn は設定の正の寿命
-	resp := op.NewResponse(&oidc.AccessTokenResponse{AccessToken: out.AccessToken, TokenType: oidc.BearerToken, RefreshToken: out.RefreshToken,
+	resp := op.NewResponse(&oidc.AccessTokenResponse{AccessToken: out.AccessToken, TokenType: tokenType(out.Binding), RefreshToken: out.RefreshToken,
 		ExpiresIn: uint64(out.ExpiresIn / time.Second), IDToken: out.IDToken, Scope: out.Scopes})
 	resp.Header.Set("Pragma", "no-cache")
 	return resp
@@ -782,10 +812,14 @@ func tokenResponse(out provider.Issued) *op.Response {
 // 確定してから invalid_grant を返す。
 func (s *oidcServer) RefreshToken(ctx context.Context, r *op.ClientRequest[oidc.RefreshTokenRequest]) (*op.Response, error) {
 	cl := r.Client.(opClient).c
+	b, err := s.tokenBinding(ctx, r.Method, r.URL.Path, r.Header, cl)
+	if err != nil {
+		return nil, err
+	}
 	var out provider.Refreshed
-	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		out, err = s.a.tokens.Refresh(ctx, tx, cl, r.Data.RefreshToken, s.tokenResources(r.Form), requestID(ctx))
+		out, err = s.a.tokens.Refresh(ctx, tx, cl, r.Data.RefreshToken, b, s.tokenResources(r.Form), requestID(ctx))
 		return err
 	})
 	if errors.Is(err, provider.ErrInvalidGrant) || (err == nil && out.Reused) {
@@ -845,9 +879,9 @@ func (s *oidcServer) userinfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok && r.Method == http.MethodPost {
-		token = r.PostFormValue("access_token")
+	scheme, token := authorization(r.Header.Get("Authorization"))
+	if scheme == "" && r.Method == http.MethodPost {
+		scheme, token = "Bearer", r.PostFormValue("access_token")
 	}
 	ctx := r.Context()
 	var claims map[string]any
@@ -860,12 +894,20 @@ func (s *oidcServer) userinfo(w http.ResponseWriter, r *http.Request) {
 			// aud が自前の API のトークンは、IAM 自身の UserInfo では使えない（RFC 8707。ADR 0112）。
 			return provider.ErrInvalidToken
 		}
+		// 結び付けたトークン（DPoP・mTLS。ADR 0113）は、同じ鍵・証明書の要求でだけ通す。
+		if err := s.a.checkResourceBinding(ctx, r, scheme, strings.TrimSpace(token), provider.TokenBinding(a.Token), s.endpointURLs(oidcUserinfo)); err != nil {
+			return err
+		}
 		claims, err = s.a.tokens.UserInfo(ctx, tx, a)
 		return err
 	})
+	if eb, ok := errors.AsType[*errBinding](err); ok {
+		s.a.challenge(w, eb.Code, s.endpoint(wellKnownResource))
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": eb.Code})
+		return
+	}
 	if errors.Is(err, provider.ErrInvalidToken) {
-		// RFC 9728 5.1：リソースのメタデータの場所を知らせる。
-		w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token", resource_metadata="`+s.endpoint(wellKnownResource)+`"`)
+		s.a.challenge(w, "invalid_token", s.endpoint(wellKnownResource))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
 		return
 	}

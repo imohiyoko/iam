@@ -687,6 +687,22 @@ ADR 0112。
 - リソースに向けたトークンは UserInfo と管理 API では使えない。イントロスペクションは `aud` とスコープを返す。リソースの削除・
   許可の取り消し・フィーチャーの無効化は、発行済みのトークンにも次の検証から効く
 
+### 5.11 送信者制約トークン
+
+フィーチャー `dpop`（DPoP、RFC 9449）と `mtls_client_auth`（OAuth の mTLS、RFC 8705）。どちらも既定オフ（ADR 0113）。
+
+- token エンドポイントで、DPoP の証明の鍵（`jkt`）と、`tls_client_certificate_bound_access_tokens` の連携先のクライアント証明書
+  （`x5t#S256`）をアクセストークンに結び付ける。公開クライアントはリフレッシュトークンも結び付け、次のリフレッシュで同じ鍵・証明書を求める。
+  認可コードの交換・リフレッシュ・Device Authorization Grant・CIBA・Token Exchange で同じ。イントロスペクションは `cnf` を返す
+- DPoP の証明は `typ`・`alg`・公開鍵の `jwk`・署名・`htm`・`htu`・`iat`・`jti`（EphemeralStore で1回だけ）を確かめる。`require_nonce` なら
+  `DPoP-Nonce` で iam の nonce を求める。`dpop_bound_access_tokens` の連携先は証明が要る。認可要求の `dpop_jkt` を受ける。
+  PAR（5.10）は PAR の要求の証明の鍵か本文の `dpop_jkt` を預ける。自前の API に向けたトークン（5.10）も同じく結び付ける
+- mTLS の連携先の認証は `tls_client_auth`（`oidc.mtls.trust_anchors` までの連鎖と、DN か SAN の 1 項目の照合）と `self_signed_tls_client_auth`
+  （JWKS の鍵と証明書の鍵の一致）。証明書は ADR 0103 の専用の待ち受けかプロキシのヘッダーで受ける。`oidc.mtls.endpoint_url` があれば
+  Discovery に `mtls_endpoint_aliases`
+- iam の資源：UserInfo と管理 API（DPoP に結び付けたサービスアカウントのアクセストークン）は、結び付けたトークンに同じ鍵の
+  `Authorization: DPoP` と証明（`ath` 付き）、同じクライアント証明書を求める。フィーチャーが止まっていれば結び付けたトークンは通さない
+
 ## 6. 監査ログとイベント出力
 
 ### 6.1 記録するもの
@@ -885,6 +901,8 @@ ADR 0112。
 | Kerberos / SPNEGO（4.1、ADR 0107） | オフ | ― | Negotiate のログインと登録なし（設定の無い realm でも）。無効化は認証情報が 0 件になって完了 |
 | 本人の Personal Access Token（11.18、ADR 0109） | オフ | ― | PAT の API は 404。`iampat_` のトークンはどの経路でも通らない。無効化でトークンと realm のポリシーを消す |
 | WS-Federation（5.8、ADR 0110） | オフ | ― | `/wsfed` とメタデータは 404、RP の管理 API は `404 wsfed_disabled`。無効化は RP と署名の証明書を消して完了 |
+| DPoP（5.11、ADR 0113） | オフ | ― | 証明を見ずに Bearer を出す（`dpop_bound_access_tokens` の連携先には出さない）。DPoP に結び付けたトークンは通らない。無効化で連携先の設定を外し、結び付けたトークンを消す |
+| OAuth の mTLS（5.11、ADR 0113） | オフ | ― | mTLS の連携先の認証と証明書の結び付けなし。結び付けたトークンは通らない。無効化で連携先の照合の項目と設定を外し、結び付けたトークンを消す |
 | CIBA（11.19、ADR 0114） | オフ | ― | backchannel authentication エンドポイントと本人の API は 404、CIBA の grant は `unsupported_grant_type`。Discovery に出さない。無効化は連携先の登録を外して完了 |
 | SAML 2.0 の IdP（5.9、ADR 0115） | オフ | ― | `/saml/idp/*` は 404、SP の管理 API は `404 saml_idp_disabled`。無効化は SP の登録と署名の証明書を消して完了 |
 | PAR（5.10、ADR 0112） | オフ | ― | `/oauth2/par` は 404、`request_uri` は `request_uri_not_supported`、PAR の必須は効かず新しく置けない。無効化で連携先と realm の必須を外して完了 |

@@ -10,6 +10,17 @@ import (
 	"database/sql"
 )
 
+const countDPoPBoundOIDCTokens = `-- name: CountDPoPBoundOIDCTokens :one
+SELECT count(*) FROM authn_oidc_tokens WHERE jkt <> ''
+`
+
+func (q *Queries) CountDPoPBoundOIDCTokens(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countDPoPBoundOIDCTokens)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countExchangedGrants = `-- name: CountExchangedGrants :one
 SELECT count(*) FROM authn_oidc_grants WHERE exchange = ?
 `
@@ -21,11 +32,22 @@ func (q *Queries) CountExchangedGrants(ctx context.Context, exchange string) (in
 	return count, err
 }
 
+const countMTLSBoundOIDCTokens = `-- name: CountMTLSBoundOIDCTokens :one
+SELECT count(*) FROM authn_oidc_tokens WHERE x5t <> ''
+`
+
+func (q *Queries) CountMTLSBoundOIDCTokens(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countMTLSBoundOIDCTokens)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createClient = `-- name: CreateClient :exec
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
     id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at, token_exchange, device_grant,
-    ciba_mode, ciba_notification_endpoint, require_par)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ciba_mode, ciba_notification_endpoint, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateClientParams struct {
@@ -50,6 +72,10 @@ type CreateClientParams struct {
 	CibaMode                          string
 	CibaNotificationEndpoint          string
 	RequirePar                        int64
+	DpopBoundAccessTokens             int64
+	TlsBoundAccessTokens              int64
+	TlsAuthField                      string
+	TlsAuthValue                      string
 }
 
 func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) error {
@@ -75,6 +101,10 @@ func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) erro
 		arg.CibaMode,
 		arg.CibaNotificationEndpoint,
 		arg.RequirePar,
+		arg.DpopBoundAccessTokens,
+		arg.TlsBoundAccessTokens,
+		arg.TlsAuthField,
+		arg.TlsAuthValue,
 	)
 	return err
 }
@@ -133,7 +163,7 @@ func (q *Queries) CreateGrant(ctx context.Context, arg CreateGrantParams) error 
 }
 
 const createOIDCToken = `-- name: CreateOIDCToken :exec
-INSERT INTO authn_oidc_tokens (id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_oidc_tokens (id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at, jkt, x5t) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateOIDCTokenParams struct {
@@ -145,6 +175,8 @@ type CreateOIDCTokenParams struct {
 	CreatedAt string
 	ExpiresAt string
 	UsedAt    sql.NullString
+	Jkt       string
+	X5t       string
 }
 
 func (q *Queries) CreateOIDCToken(ctx context.Context, arg CreateOIDCTokenParams) error {
@@ -157,6 +189,8 @@ func (q *Queries) CreateOIDCToken(ctx context.Context, arg CreateOIDCTokenParams
 		arg.CreatedAt,
 		arg.ExpiresAt,
 		arg.UsedAt,
+		arg.Jkt,
+		arg.X5t,
 	)
 	return err
 }
@@ -280,7 +314,7 @@ func (q *Queries) EraseUserGrants(ctx context.Context, arg EraseUserGrantsParams
 }
 
 const getClient = `-- name: GetClient :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = ? AND id = ?
 `
 
 type GetClientParams struct {
@@ -311,6 +345,10 @@ func (q *Queries) GetClient(ctx context.Context, arg GetClientParams) (AuthnClie
 		&i.DeviceGrant,
 		&i.TokenExchange,
 		&i.RequirePar,
+		&i.DpopBoundAccessTokens,
+		&i.TlsBoundAccessTokens,
+		&i.TlsAuthField,
+		&i.TlsAuthValue,
 		&i.CibaMode,
 		&i.CibaNotificationEndpoint,
 	)
@@ -318,7 +356,7 @@ func (q *Queries) GetClient(ctx context.Context, arg GetClientParams) (AuthnClie
 }
 
 const getClientByPublicID = `-- name: GetClientByPublicID :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = ? AND public_id = ?
 `
 
 type GetClientByPublicIDParams struct {
@@ -349,6 +387,10 @@ func (q *Queries) GetClientByPublicID(ctx context.Context, arg GetClientByPublic
 		&i.DeviceGrant,
 		&i.TokenExchange,
 		&i.RequirePar,
+		&i.DpopBoundAccessTokens,
+		&i.TlsBoundAccessTokens,
+		&i.TlsAuthField,
+		&i.TlsAuthValue,
 		&i.CibaMode,
 		&i.CibaNotificationEndpoint,
 	)
@@ -392,7 +434,7 @@ func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (AuthnOidcGr
 }
 
 const getOIDCToken = `-- name: GetOIDCToken :one
-SELECT id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at FROM authn_oidc_tokens WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at, jkt, x5t FROM authn_oidc_tokens WHERE realm_id = ? AND id = ?
 `
 
 type GetOIDCTokenParams struct {
@@ -412,12 +454,14 @@ func (q *Queries) GetOIDCToken(ctx context.Context, arg GetOIDCTokenParams) (Aut
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.UsedAt,
+		&i.Jkt,
+		&i.X5t,
 	)
 	return i, err
 }
 
 const listClients = `-- name: ListClients :many
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id
 `
 
 func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClient, error) {
@@ -449,6 +493,10 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 			&i.DeviceGrant,
 			&i.TokenExchange,
 			&i.RequirePar,
+			&i.DpopBoundAccessTokens,
+			&i.TlsBoundAccessTokens,
+			&i.TlsAuthField,
+			&i.TlsAuthValue,
 			&i.CibaMode,
 			&i.CibaNotificationEndpoint,
 		); err != nil {
@@ -552,6 +600,18 @@ func (q *Queries) ListSigningKeys(ctx context.Context, realmID string) ([]AuthnS
 	return items, nil
 }
 
+const purgeDPoPBoundOIDCTokens = `-- name: PurgeDPoPBoundOIDCTokens :execrows
+DELETE FROM authn_oidc_tokens WHERE id IN (SELECT t.id FROM authn_oidc_tokens t WHERE t.jkt <> '' ORDER BY t.id LIMIT ?1)
+`
+
+func (q *Queries) PurgeDPoPBoundOIDCTokens(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeDPoPBoundOIDCTokens, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const purgeExchangedGrantTokens = `-- name: PurgeExchangedGrantTokens :exec
 DELETE FROM authn_oidc_tokens WHERE grant_id IN (
     SELECT g.id FROM authn_oidc_grants g WHERE g.exchange = ?1 ORDER BY g.id LIMIT ?2)
@@ -579,6 +639,18 @@ type PurgeExchangedGrantsParams struct {
 
 func (q *Queries) PurgeExchangedGrants(ctx context.Context, arg PurgeExchangedGrantsParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, purgeExchangedGrants, arg.Exchange, arg.Lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const purgeMTLSBoundOIDCTokens = `-- name: PurgeMTLSBoundOIDCTokens :execrows
+DELETE FROM authn_oidc_tokens WHERE id IN (SELECT t.id FROM authn_oidc_tokens t WHERE t.x5t <> '' ORDER BY t.id LIMIT ?1)
+`
+
+func (q *Queries) PurgeMTLSBoundOIDCTokens(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeMTLSBoundOIDCTokens, lim)
 	if err != nil {
 		return 0, err
 	}
@@ -633,7 +705,7 @@ func (q *Queries) RevokeGrant(ctx context.Context, arg RevokeGrantParams) (int64
 const updateClient = `-- name: UpdateClient :execrows
 UPDATE authn_clients SET name = ?, trust_level = ?, redirect_uris = ?, post_logout_redirect_uris = ?, auth_method = ?, secret_hash = ?, jwks = ?,
     id_token_alg = ?, backchannel_logout_uri = ?, frontchannel_logout_uri = ?, frontchannel_logout_session_required = ?, updated_at = ?, token_exchange = ?, device_grant = ?,
-    ciba_mode = ?, ciba_notification_endpoint = ?, require_par = ?
+    ciba_mode = ?, ciba_notification_endpoint = ?, require_par = ?, dpop_bound_access_tokens = ?, tls_bound_access_tokens = ?, tls_auth_field = ?, tls_auth_value = ?
 WHERE realm_id = ? AND id = ?
 `
 
@@ -655,6 +727,10 @@ type UpdateClientParams struct {
 	CibaMode                          string
 	CibaNotificationEndpoint          string
 	RequirePar                        int64
+	DpopBoundAccessTokens             int64
+	TlsBoundAccessTokens              int64
+	TlsAuthField                      string
+	TlsAuthValue                      string
 	RealmID                           string
 	ID                                string
 }
@@ -678,6 +754,10 @@ func (q *Queries) UpdateClient(ctx context.Context, arg UpdateClientParams) (int
 		arg.CibaMode,
 		arg.CibaNotificationEndpoint,
 		arg.RequirePar,
+		arg.DpopBoundAccessTokens,
+		arg.TlsBoundAccessTokens,
+		arg.TlsAuthField,
+		arg.TlsAuthValue,
 		arg.RealmID,
 		arg.ID,
 	)

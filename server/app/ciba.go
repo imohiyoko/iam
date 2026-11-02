@@ -335,6 +335,12 @@ func (s *oidcServer) cibaToken(w http.ResponseWriter, r *http.Request) {
 		s.writeCIBAError(w, r, oidc.ErrInvalidRequest().WithDescription("auth_req_id is required"))
 		return
 	}
+	// 送信者制約（ADR 0113）。証明の誤りでポーリングの間隔を数えないよう、Poll の前に確かめる。
+	b, err := s.tokenBinding(ctx, r.Method, r.URL.Path, r.Header, cl)
+	if err != nil {
+		s.writeCIBAError(w, r, err)
+		return
+	}
 	c, req, err := s.a.ciba.Poll(ctx, s.a.realm.ID, cl.PublicID, id)
 	if errors.Is(err, provider.ErrDevicePending) && req.Channel != nil {
 		// 端末の応答が届いていて、記録に失敗していた（届く前に Attach が終わっていなかったなど）ときに拾う。
@@ -360,7 +366,7 @@ func (s *oidcServer) cibaToken(w http.ResponseWriter, r *http.Request) {
 	var out provider.Issued
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		out, err = s.a.tokens.Exchange(ctx, tx, cl, c, requestID(ctx))
+		out, err = s.a.tokens.Exchange(ctx, tx, cl, c, b, requestID(ctx))
 		return err
 	})
 	if errors.Is(err, provider.ErrInvalidGrant) {
@@ -371,7 +377,7 @@ func (s *oidcServer) cibaToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Pragma", "no-cache")
-	writeJSON(w, http.StatusOK, &oidc.AccessTokenResponse{AccessToken: out.AccessToken, TokenType: oidc.BearerToken, RefreshToken: out.RefreshToken,
+	writeJSON(w, http.StatusOK, &oidc.AccessTokenResponse{AccessToken: out.AccessToken, TokenType: tokenType(out.Binding), RefreshToken: out.RefreshToken,
 		ExpiresIn: uint64(out.ExpiresIn / time.Second), IDToken: out.IDToken, Scope: out.Scopes}) // #nosec G115 -- ExpiresIn は設定の正の寿命
 }
 

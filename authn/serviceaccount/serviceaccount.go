@@ -105,6 +105,8 @@ type Authenticated struct {
 	Method string
 	// AuthTime は認証の時刻：API キーは now、アクセストークンは発行の時刻。
 	AuthTime time.Time
+	// JKT はアクセストークンを結び付けた DPoP の鍵（ADR 0113）。空なら Bearer。呼び出し側が同じ鍵の証明を確かめる。
+	JKT string
 }
 
 // MethodAPIKey は API キーの認証の手段（amr）。
@@ -127,7 +129,7 @@ func (au Authenticator) Authenticate(ctx context.Context, tx port.Tx, realmID, b
 			// 自前の API に向けたトークン（ADR 0112）は管理 API では使えない。
 			return Authenticated{}, ErrInvalid
 		}
-		accountID, out.Method, out.AuthTime = t.ServiceAccountID, method, t.CreatedAt
+		accountID, out.Method, out.AuthTime, out.JKT = t.ServiceAccountID, method, t.CreatedAt, t.JKT
 	} else {
 		c, err := checkSecret(ctx, tx, realmID, bearer, TypeAPIKey, now)
 		if err != nil {

@@ -661,6 +661,24 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] リソースの削除・許可の取り消し・無効化が発行済みのトークンにも次の検証から効く。memory・SQLite・PostgreSQL の契約テスト
 - Device Authorization Grant の `resource`、1 つの認可で複数のリソース、主体ごとのスコープの絞り込み、`/oauth2/token` での client credentials
 
+#### 送信者制約トークン（ADR 0113）
+
+**ゴール**：漏れたトークンを、連携先の鍵（DPoP）か証明書（mTLS）が無ければ使えないようにできる。
+
+- [x] フィーチャー `dpop`・`mtls_client_auth`（既定オフ）。オフなら Discovery・連携先の設定に出さず、結び付けたトークンは通さない（fail-closed）
+- [x] token エンドポイントで DPoP の証明を確かめ（`typ`・`alg`・公開鍵・署名・`htm`・`htu`・`iat`・`jti` の再送）、アクセストークンに `jkt` を
+  結び付けて `token_type: DPoP` を返す。公開クライアントのリフレッシュトークンも結び付け、別の鍵・証明の無いリフレッシュを拒むテストがある
+- [x] `DPoP-Nonce` の nonce（`use_dpop_nonce`）、`dpop_bound_access_tokens`、認可要求の `dpop_jkt`、Discovery の `dpop_signing_alg_values_supported`
+- [x] `tls_client_auth`（CA までの連鎖と DN・SAN の照合）と `self_signed_tls_client_auth`（JWKS の鍵）の連携先の認証。証明書は ADR 0103 の
+  専用の待ち受けかプロキシのヘッダーで受け、`tls_client_certificate_bound_access_tokens` の連携先のトークンを `x5t#S256` に結び付ける
+- [x] イントロスペクションの `cnf`。UserInfo と管理 API（サービスアカウントのトークン）は結び付けたトークンに同じ鍵の証明・同じ証明書を求め、
+  Bearer での提示・別の鍵・`ath` の無い証明・再送を拒むテストがある
+- [x] Token Exchange は結び付けた subject_token・actor_token に同じ鍵・証明書を求める。Device Authorization Grant・CIBA も結び付ける
+- [x] PAR の要求の DPoP の証明か本文の `dpop_jkt` で認可コードを鍵に結び付ける。自前の API に向けたトークン（認可コードフロー・
+  リフレッシュ・サービスアカウントの `resource`）も結び付け、イントロスペクションが `aud` と `cnf` を返すテストがある
+- [x] 無効化で連携先の設定と結び付けたトークンを消す。memory・SQLite・PostgreSQL の契約テスト、証明の解析のファジング（`FuzzParse`）
+- 連携先の証明書の失効（OCSP・CRL）の確かめ、realm ごとの CA、JWT のアクセストークンの `cnf` クレーム
+
 ### M12 認可の拡張
 
 - 一括判定、権限の一覧、OpenID AuthZEN、ReBAC、ポリシー言語、時限付きの付与と棚卸し

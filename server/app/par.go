@@ -11,6 +11,7 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/op"
 	"github.com/zitadel/schema"
 
+	"github.com/imohiyoko/iam/authn/dpop"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/shared/port"
@@ -103,6 +104,10 @@ func (s *oidcServer) pushAuthorization(w http.ResponseWriter, r *http.Request) {
 	}
 	params = cloneValues(params)
 	params.Set("client_id", cl.PublicID)
+	if err := s.pushedDPoP(ctx, r, params); err != nil {
+		op.WriteError(w, r, err, nil)
+		return
+	}
 	if err := s.checkPushed(ctx, r, params, cl); err != nil {
 		op.WriteError(w, r, err, nil)
 		return
@@ -117,6 +122,29 @@ func (s *oidcServer) pushAuthorization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"request_uri": uri, "expires_in": int(ttl.Seconds())})
+}
+
+// pushedDPoP は PAR の要求の DPoP の証明（RFC 9449 10.1）。証明があれば確かめ、その鍵を dpop_jkt として預ける。本文にも
+// dpop_jkt があれば同じ鍵であること。フィーチャー dpop が止まっていれば証明を見ない（dpop_jkt も authRequest が見ない）。
+func (s *oidcServer) pushedDPoP(ctx context.Context, r *http.Request, params url.Values) error {
+	proofs := r.Header.Values(dpop.Header)
+	if s.a.dpop == nil || len(proofs) == 0 {
+		return nil
+	}
+	p, err := s.a.dpop.Verify(ctx, proofs, dpop.Expect{Method: r.Method, URLs: s.endpointURLs(oidcPAR)})
+	switch {
+	case errors.Is(err, dpop.ErrUseNonce):
+		return errUseDPoPNonce()
+	case errors.Is(err, dpop.ErrInvalidProof):
+		return errInvalidDPoPProof()
+	case err != nil:
+		return s.fail(ctx, err)
+	}
+	if jkt := params.Get("dpop_jkt"); jkt != "" && jkt != p.JKT {
+		return errInvalidDPoPProof().WithDescription("dpop_jkt does not match the DPoP proof")
+	}
+	params.Set("dpop_jkt", p.JKT)
+	return nil
 }
 
 // checkPushed は預ける認可要求を、authorize と同じ規則（op の確かめと IAM の規則）で確かめる。
@@ -202,6 +230,11 @@ func (a *App) resourceTokenIntrospection(ctx context.Context, tx port.Tx, token 
 	if err != nil {
 		return provider.Introspection{}, err
 	}
-	return provider.Introspection{Active: true, Scope: strings.Join(t.Scopes, " "), ClientID: sa.ID, TokenType: "access_token", Exp: t.ExpiresAt.Unix(),
-		Iat: t.CreatedAt.Unix(), Sub: sa.ID, Aud: []string{t.Audience}, Iss: a.issuer}, nil
+	out := provider.Introspection{Active: true, Scope: strings.Join(t.Scopes, " "), ClientID: sa.ID, TokenType: "access_token", Exp: t.ExpiresAt.Unix(),
+		Iat: t.CreatedAt.Unix(), Sub: sa.ID, Aud: []string{t.Audience}, Iss: a.issuer}
+	if t.JKT != "" {
+		// DPoP に結び付けたトークン（ADR 0113）。リソースサーバーが同じ鍵の証明を求める。
+		out.Cnf = &provider.Confirmation{JKT: t.JKT}
+	}
+	return out, nil
 }

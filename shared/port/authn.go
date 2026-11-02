@@ -442,6 +442,8 @@ type ServiceAccountToken struct {
 	Hash             []byte
 	CreatedAt        time.Time
 	ExpiresAt        time.Time
+	// JKT はトークンを結び付けた DPoP の鍵の JWK SHA-256 Thumbprint（RFC 9449。ADR 0113）。空なら結び付けない。
+	JKT string
 	// Audience は自前の API に向けたトークンの aud（登録したリソースの URI。RFC 8707、フィーチャー resource_indicators。
 	// ADR 0112）。空なら管理 API 向けのトークン。Audience のあるトークンは管理 API では使えない。
 	Audience string
@@ -466,6 +468,10 @@ type ServiceAccountRepo interface {
 	GetToken(ctx context.Context, realmID, id string) (ServiceAccountToken, error)
 	// DeleteExpiredTokens は before より前に期限が切れたトークンを全 realm から最大 limit 件消し、消した件数を返す（9.6）。
 	DeleteExpiredTokens(ctx context.Context, before time.Time, limit int) (int, error)
+	// CountBoundTokens は全 realm の、DPoP に結び付けたアクセストークンの数を返す（ADR 0113）。
+	CountBoundTokens(ctx context.Context) (int, error)
+	// PurgeBoundTokens は全 realm の、DPoP に結び付けたアクセストークンを最大 limit 件消し、消した件数を返す。
+	PurgeBoundTokens(ctx context.Context, limit int) (int, error)
 }
 
 // OrgKind は Org の種類（design.md 11.13）。

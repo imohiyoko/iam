@@ -19,6 +19,7 @@ var featureDataTests = []struct {
 	{"FeatureDataCountPurge", testFeatureDataCountPurge},
 	{"ExchangedGrantsCountPurge", testExchangedGrantsCountPurge},
 	{"OrgList", testOrgList},
+	{"SenderConstrainedTokens", testSenderConstrainedTokens},
 }
 
 func testFeatureDataCountPurge(t *testing.T, h Harness) {

@@ -3,8 +3,8 @@
 -- name: CreateClient :exec
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
     id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at, token_exchange, device_grant,
-    ciba_mode, ciba_notification_endpoint, require_par)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21);
+    ciba_mode, ciba_notification_endpoint, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25);
 
 -- name: GetClient :one
 SELECT * FROM authn_clients WHERE realm_id = $1 AND id = $2;
@@ -18,8 +18,8 @@ SELECT * FROM authn_clients WHERE realm_id = $1 ORDER BY created_at, id;
 -- name: UpdateClient :execrows
 UPDATE authn_clients SET name = $1, trust_level = $2, redirect_uris = $3, post_logout_redirect_uris = $4, auth_method = $5, secret_hash = $6, jwks = $7,
     id_token_alg = $8, backchannel_logout_uri = $9, frontchannel_logout_uri = $10, frontchannel_logout_session_required = $11, updated_at = $12, token_exchange = $13, device_grant = $14,
-    ciba_mode = $15, ciba_notification_endpoint = $16, require_par = $17
-WHERE realm_id = $18 AND id = $19;
+    ciba_mode = $15, ciba_notification_endpoint = $16, require_par = $17, dpop_bound_access_tokens = $18, tls_bound_access_tokens = $19, tls_auth_field = $20, tls_auth_value = $21
+WHERE realm_id = $22 AND id = $23;
 
 -- name: DeleteClient :execrows
 DELETE FROM authn_clients WHERE realm_id = $1 AND id = $2;
@@ -78,10 +78,22 @@ DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_gra
 DELETE FROM authn_oidc_grants WHERE realm_id = $1 AND client_id = $2;
 
 -- name: CreateOIDCToken :exec
-INSERT INTO authn_oidc_tokens (id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO authn_oidc_tokens (id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at, jkt, x5t) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: GetOIDCToken :one
 SELECT * FROM authn_oidc_tokens WHERE realm_id = $1 AND id = $2;
+
+-- name: CountDPoPBoundOIDCTokens :one
+SELECT count(*) FROM authn_oidc_tokens WHERE jkt <> '';
+
+-- name: CountMTLSBoundOIDCTokens :one
+SELECT count(*) FROM authn_oidc_tokens WHERE x5t <> '';
+
+-- name: PurgeDPoPBoundOIDCTokens :execrows
+DELETE FROM authn_oidc_tokens WHERE id IN (SELECT t.id FROM authn_oidc_tokens t WHERE t.jkt <> '' ORDER BY t.id LIMIT sqlc.arg(lim)::bigint);
+
+-- name: PurgeMTLSBoundOIDCTokens :execrows
+DELETE FROM authn_oidc_tokens WHERE id IN (SELECT t.id FROM authn_oidc_tokens t WHERE t.x5t <> '' ORDER BY t.id LIMIT sqlc.arg(lim)::bigint);
 
 -- name: UseOIDCToken :execrows
 UPDATE authn_oidc_tokens SET used_at = $1 WHERE realm_id = $2 AND id = $3 AND used_at IS NULL;

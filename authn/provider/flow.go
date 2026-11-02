@@ -60,6 +60,8 @@ type AuthRequest struct {
 	LoginAfter *time.Time `json:"login_after,omitempty"`
 	// ACR は要求された acr の値のうち対応するもの（要求の順。フィーチャー acr。ADR 0093）。空なら求めない。
 	ACR []string `json:"acr,omitempty"`
+	// DPoPJKT は認可要求の dpop_jkt（RFC 9449 10。フィーチャー dpop。ADR 0113）。あれば認可コードの交換で同じ鍵の証明を求める。
+	DPoPJKT string `json:"dpop_jkt,omitempty"`
 	// Resource は resource（RFC 8707。フィーチャー resource_indicators。ADR 0112）。空なら IAM 自身に向けたトークン。
 	Resource  string    `json:"resource,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`

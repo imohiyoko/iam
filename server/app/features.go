@@ -201,6 +201,9 @@ var cleaners = map[string]cleaner{
 		}},
 	// 本人の Personal Access Token と realm のポリシーを消す（ADR 0109）。
 	feature.PersonalAccessTokens: patCleaner,
+	// DPoP と OAuth の mTLS（ADR 0113）。連携先の設定を外し、結び付けたトークンを消す。
+	feature.DPoP:           dpopCleaner,
+	feature.MTLSClientAuth: mtlsCleaner,
 	// 連携先と realm の PAR の必須を外す（ADR 0112）。預かった request_uri は EphemeralStore にあり、期限で消える。
 	feature.PAR: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		n, err := eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.RequirePAR, nil })

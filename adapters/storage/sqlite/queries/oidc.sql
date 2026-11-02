@@ -1,8 +1,8 @@
 -- name: CreateClient :exec
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
     id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at, token_exchange, device_grant,
-    ciba_mode, ciba_notification_endpoint, require_par)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    ciba_mode, ciba_notification_endpoint, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetClient :one
 SELECT * FROM authn_clients WHERE realm_id = ? AND id = ?;
@@ -16,7 +16,7 @@ SELECT * FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id;
 -- name: UpdateClient :execrows
 UPDATE authn_clients SET name = ?, trust_level = ?, redirect_uris = ?, post_logout_redirect_uris = ?, auth_method = ?, secret_hash = ?, jwks = ?,
     id_token_alg = ?, backchannel_logout_uri = ?, frontchannel_logout_uri = ?, frontchannel_logout_session_required = ?, updated_at = ?, token_exchange = ?, device_grant = ?,
-    ciba_mode = ?, ciba_notification_endpoint = ?, require_par = ?
+    ciba_mode = ?, ciba_notification_endpoint = ?, require_par = ?, dpop_bound_access_tokens = ?, tls_bound_access_tokens = ?, tls_auth_field = ?, tls_auth_value = ?
 WHERE realm_id = ? AND id = ?;
 
 -- name: DeleteClient :execrows
@@ -76,10 +76,22 @@ DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_gra
 DELETE FROM authn_oidc_grants WHERE realm_id = ? AND client_id = ?;
 
 -- name: CreateOIDCToken :exec
-INSERT INTO authn_oidc_tokens (id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_oidc_tokens (id, realm_id, grant_id, kind, token_hash, created_at, expires_at, used_at, jkt, x5t) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetOIDCToken :one
 SELECT * FROM authn_oidc_tokens WHERE realm_id = ? AND id = ?;
+
+-- name: CountDPoPBoundOIDCTokens :one
+SELECT count(*) FROM authn_oidc_tokens WHERE jkt <> '';
+
+-- name: CountMTLSBoundOIDCTokens :one
+SELECT count(*) FROM authn_oidc_tokens WHERE x5t <> '';
+
+-- name: PurgeDPoPBoundOIDCTokens :execrows
+DELETE FROM authn_oidc_tokens WHERE id IN (SELECT t.id FROM authn_oidc_tokens t WHERE t.jkt <> '' ORDER BY t.id LIMIT sqlc.arg(lim));
+
+-- name: PurgeMTLSBoundOIDCTokens :execrows
+DELETE FROM authn_oidc_tokens WHERE id IN (SELECT t.id FROM authn_oidc_tokens t WHERE t.x5t <> '' ORDER BY t.id LIMIT sqlc.arg(lim));
 
 -- name: UseOIDCToken :execrows
 UPDATE authn_oidc_tokens SET used_at = ? WHERE realm_id = ? AND id = ? AND used_at IS NULL;

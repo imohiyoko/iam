@@ -41,6 +41,10 @@ type AuthnClient struct {
 	DeviceGrant                       int64
 	TokenExchange                     []byte
 	RequirePar                        int64
+	DpopBoundAccessTokens             int64
+	TlsBoundAccessTokens              int64
+	TlsAuthField                      string
+	TlsAuthValue                      string
 	CibaMode                          string
 	CibaNotificationEndpoint          string
 }
@@ -135,6 +139,8 @@ type AuthnOidcToken struct {
 	CreatedAt string
 	ExpiresAt string
 	UsedAt    sql.NullString
+	Jkt       string
+	X5t       string
 }
 
 type AuthnPersonalAccessToken struct {
@@ -243,6 +249,7 @@ type AuthnServiceAccountToken struct {
 	ExpiresAt        string
 	Audience         string
 	Scopes           string
+	Jkt              string
 }
 
 type AuthnSession struct {

@@ -159,6 +159,33 @@ type OIDC struct {
 	CIBAPollInterval Duration `yaml:"ciba_poll_interval"`
 	// PARRequestURITTL は PAR（RFC 9126）の request_uri の寿命（10 分以下。フィーチャー par。ADR 0112）。
 	PARRequestURITTL Duration `yaml:"par_request_uri_ttl"`
+	// DPoP は DPoP の証明の確かめ方（フィーチャー dpop。ADR 0113）。
+	DPoP DPoP `yaml:"dpop"`
+	// MTLS は OAuth の mTLS の連携先の認証（フィーチャー mtls_client_auth。ADR 0113）。
+	MTLS OAuthMTLS `yaml:"mtls"`
+}
+
+// DPoP は DPoP（RFC 9449）の設定。
+type DPoP struct {
+	// RequireNonce なら iam が DPoP-Nonce で出した nonce を証明に求める（RFC 9449 8）。
+	RequireNonce bool `yaml:"require_nonce"`
+	// ProofMaxAge は証明の iat の古さの上限（既定 5 分。1 時間以下）。NonceTTL は nonce の寿命（既定 5 分。1 時間以下）。
+	ProofMaxAge Duration `yaml:"proof_max_age"`
+	NonceTTL    Duration `yaml:"nonce_ttl"`
+	// AdminURL は管理 API の外から見た URL（https のオリジン）。証明の htu を比べるのに使う。空なら管理 API では DPoP を受けない
+	// （サービスアカウントのトークンを DPoP に結び付けない。結び付けたトークンは通らない）。
+	AdminURL string `yaml:"admin_url"`
+}
+
+// OAuthMTLS は OAuth の mTLS（RFC 8705）の設定。証明書の受け取りは server.client_certificates（ADR 0103）。
+type OAuthMTLS struct {
+	// TrustAnchors は tls_client_auth の連携先の証明書を発行する CA（PEM のファイル）。空なら tls_client_auth の連携先は認証できない
+	// （self_signed_tls_client_auth は使える）。Intermediates は中間 CA（PEM のファイル）。
+	TrustAnchors  []string `yaml:"trust_anchors"`
+	Intermediates []string `yaml:"intermediates"`
+	// EndpointURL は mTLS の専用の待ち受け（server.client_certificates.mtls_addr）の外から見たオリジン。あれば Discovery に
+	// mtls_endpoint_aliases を出す（RFC 8705 5）。
+	EndpointURL string `yaml:"endpoint_url"`
 }
 
 // Impersonation はなりすましの寿命と step-up の条件。
@@ -813,12 +840,8 @@ func (c Config) Validate() error {
 	} else if c.Server.PublicAddr == c.Server.AdminAddr {
 		problems = append(problems, "server.public_addr and server.admin_addr must differ")
 	}
-	if u := c.Server.PublicURL; u != "" {
-		p, err := url.Parse(u)
-		schemeOK := err == nil && (p.Scheme == "https" || (c.Dev && p.Scheme == "http"))
-		if !schemeOK || p.Host == "" || p.User != nil || p.RawQuery != "" || p.ForceQuery || p.Fragment != "" || (p.Path != "" && p.Path != "/") {
-			problems = append(problems, "server.public_url must be an https origin (http only with dev: true)")
-		}
+	if u := c.Server.PublicURL; u != "" && !validOrigin(u, c.Dev) {
+		problems = append(problems, "server.public_url must be an https origin (http only with dev: true)")
 	}
 	if c.Notifier.Driver == "dev" && !c.Dev {
 		problems = append(problems, "notifier.driver=dev is only allowed with dev: true")
@@ -871,6 +894,14 @@ func (c Config) Validate() error {
 	}
 	if m := o.Impersonation.MinFactors; m < 0 || m > 3 {
 		problems = append(problems, "oidc.impersonation.min_factors must be between 0 and 3")
+	}
+	if d := o.DPoP; d.ProofMaxAge < 0 || d.ProofMaxAge > Duration(time.Hour) || d.NonceTTL < 0 || d.NonceTTL > Duration(time.Hour) {
+		problems = append(problems, "oidc.dpop: proof_max_age and nonce_ttl must be within [0, 1h]")
+	}
+	for _, f := range [][2]string{{"oidc.dpop.admin_url", o.DPoP.AdminURL}, {"oidc.mtls.endpoint_url", o.MTLS.EndpointURL}} {
+		if f[1] != "" && !validOrigin(f[1], c.Dev) {
+			problems = append(problems, f[0]+" must be an https origin (http only with dev: true)")
+		}
 	}
 	if t := c.ServiceAccounts.TokenTTL; t <= 0 || t > Duration(time.Hour) {
 		problems = append(problems, "service_accounts.token_ttl must be positive and at most 1h")
@@ -1001,4 +1032,11 @@ func (c Config) validateLoginProtection() []string {
 		problems = append(problems, "security.bot_protection: after_failures and window must be positive")
 	}
 	return problems
+}
+
+// validOrigin は u が https のオリジン（dev なら http も）かを返す。
+func validOrigin(u string, dev bool) bool {
+	p, err := url.Parse(u)
+	schemeOK := err == nil && (p.Scheme == "https" || (dev && p.Scheme == "http"))
+	return schemeOK && p.Host != "" && p.User == nil && p.RawQuery == "" && !p.ForceQuery && p.Fragment == "" && (p.Path == "" || p.Path == "/")
 }

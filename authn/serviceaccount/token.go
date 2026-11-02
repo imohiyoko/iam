@@ -56,6 +56,8 @@ type TokenRequest struct {
 	ClientSecret  string
 	AssertionType string
 	Assertion     string
+	// JKT はトークンを結び付ける DPoP の鍵（呼び出し側が証明を確かめたもの。ADR 0113）。空なら Bearer。
+	JKT string
 	// Resources は resource（RFC 8707）。指定するなら 1 つだけ。Scope は resource のスコープ（空白区切り）。resource が無ければ使わない。
 	Resources []string
 	Scope     string
@@ -109,12 +111,16 @@ func (s *Service) Token(ctx context.Context, tx port.Tx, realmID string, req Tok
 		return Issued{}, err
 	}
 	t := port.ServiceAccountToken{ID: id.NewExternal(id.SAToken), RealmID: realmID, ServiceAccountID: a.ID, CredentialID: c.ID,
-		Hash: h, CreatedAt: now, ExpiresAt: now.Add(s.TokenTTL), Audience: audience, Scopes: scopes}
+		Hash: h, CreatedAt: now, ExpiresAt: now.Add(s.TokenTTL), Audience: audience, Scopes: scopes,
+		JKT: req.JKT}
 	if err := tx.ServiceAccounts().CreateToken(ctx, t); err != nil {
 		return Issued{}, err
 	}
 	actor := audit.Actor{Type: "service_account", ID: a.ID}
 	details := map[string]any{"service_account_id": a.ID, "credential_id": c.ID, "token_id": t.ID}
+	if t.JKT != "" {
+		details["dpop_jkt"] = t.JKT
+	}
 	if audience != "" {
 		details["resource"], details["scopes"] = audience, scopes
 	}
