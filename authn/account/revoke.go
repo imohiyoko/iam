@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/id"
@@ -32,22 +31,12 @@ type Revoked struct {
 	RecoveryCodes int
 }
 
-// AdminRevokeCredential はユーザーの passkey・外部 ID の紐付け・TOTP・汎用の認証情報を公開 ID（psk_ / idn_ / otp_ / crd_）で
+// AdminRevokeCredential はユーザーの外部 ID の紐付けと、汎用の認証情報（passkey・TOTP など）を公開 ID（idn_ / crd_）で
 // 無効化する。そのユーザーの有効なものでなければ errs.NotFound。その認証情報で作ったセッションは、次の検証
 // （遅くとも validity_max_delay の後）から使えない。
 func (s *Service) AdminRevokeCredential(ctx context.Context, tx port.Tx, realmID string, u port.User, publicID string, actor audit.Actor, requestID string) error {
 	now := s.Clock.Now()
 	switch prefix, _, _ := strings.Cut(publicID, "_"); prefix {
-	case string(id.Passkey):
-		// 方式専用の表から移した passkey（ADR 0106）は psk_ の公開 ID のまま。
-		p, err := passkey(ctx, tx, realmID, u.ID, publicID)
-		if err != nil {
-			return err
-		}
-		if err := tx.Credentials().Revoke(ctx, realmID, p.ID, now, ReasonRevokedByAdmin); err != nil {
-			return err
-		}
-		return s.record(ctx, tx, realmID, "passkey.revoked", actor, requestID, map[string]any{"user_id": u.PublicID, "passkey_id": p.PublicID, "reason": ReasonRevokedByAdmin})
 	case string(id.Identity):
 		i, err := tx.Identities().GetByPublicID(ctx, realmID, publicID)
 		if err == nil && (i.UserID != u.ID || i.RevokedAt != nil) {
@@ -61,19 +50,6 @@ func (s *Service) AdminRevokeCredential(ctx context.Context, tx port.Tx, realmID
 		}
 		return s.record(ctx, tx, realmID, "identity.unlinked", actor, requestID,
 			map[string]any{"user_id": u.PublicID, "identity_id": i.PublicID, "connection_id": i.ConnectionID, "reason": ReasonRevokedByAdmin})
-	case string(id.TOTP):
-		// 方式専用の表から移した TOTP（ADR 0101）は otp_ の公開 ID のまま。
-		c, err := credential(ctx, tx, realmID, u.ID, publicID)
-		if err == nil && c.Method != method.TOTP {
-			err = errs.New(errs.KindNotFound, "totp")
-		}
-		if err != nil {
-			return err
-		}
-		if err := tx.Credentials().Revoke(ctx, realmID, c.ID, now, ReasonRevokedByAdmin); err != nil {
-			return err
-		}
-		return s.record(ctx, tx, realmID, "totp.revoked", actor, requestID, map[string]any{"user_id": u.PublicID, "totp_id": c.PublicID, "reason": ReasonRevokedByAdmin})
 	case string(id.Credential):
 		return s.adminRevokeCredential(ctx, tx, realmID, u, publicID, actor, requestID)
 	}

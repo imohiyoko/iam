@@ -104,7 +104,7 @@ func (r authnCredentials) Revoke(ctx context.Context, realmID, id string, at tim
 		return nil
 	}
 	if c.ReserveLookup != 0 && len(c.Lookup) > 0 {
-		if err := r.Retire(ctx, port.RetiredLookup{RealmID: realmID, Method: c.Method, Lookup: c.Lookup, LookupKeyID: c.LookupKeyID, RetiredAt: at}); err != nil {
+		if err := r.retire(ctx, port.RetiredLookup{RealmID: realmID, Method: c.Method, Lookup: c.Lookup, LookupKeyID: c.LookupKeyID, RetiredAt: at}); err != nil {
 			return err
 		}
 	}
@@ -116,7 +116,8 @@ func (r authnCredentials) SetPreferredOrg(ctx context.Context, realmID, id, orgI
 	return affected(n, err, "credential")
 }
 
-func (r authnCredentials) Retire(ctx context.Context, x port.RetiredLookup) error {
+// retire は検索キーを退役済みに加える（既にあれば何もしない）。
+func (r authnCredentials) retire(ctx context.Context, x port.RetiredLookup) error {
 	if len(x.Lookup) == 0 {
 		return errs.New(errs.KindInvalid, "retired lookup is empty")
 	}

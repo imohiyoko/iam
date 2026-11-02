@@ -101,6 +101,17 @@
 - フローの期限は、コアのフローの期限（`security.second_factor.ttl`）と方式の期限（5 分）の短い方になる
 - 移す前のバイナリには戻せない（台帳が拒む）
 
+### 追記（2026-11-02）：未公開のため移行を外した
+
+このソフトウェアはまだ公開していないので、移す前のデータは無い。「移行」の節のうち、次を外した（`authn_credentials` の列
+（`preferred_org_id`・`reserve_lookup`）と退役した検索キーの表、ほかの決定はそのまま）。
+
+- 方式専用の表（`authn_passkeys`・`authn_revoked_passkey_credentials`）を消すマイグレーションを足した（SQLite 00061、PostgreSQL 00044）。
+  Storage のポートとアダプタから `PasskeyRepo` と、移行でだけ使う `CredentialRepo.Retire` を消した（退役は無効化の中でだけ行う）
+- 起動時の移行（`credential.MigratePasskeys`）と、台帳の `migration:` の記録の扱いを消した（0101 の追記と同じ）
+- 移した passkey が保つはずだった `psk_` の ID の接頭辞と、その分岐（セッションの結び付き、Org の選択・ポリシー、運営者の無効化）を消した。
+  passkey の ID は汎用の `crd_` だけ
+
 ## 検討した代替案
 
 - **無効化した credential ID を `authn_credentials` の無効化した行で拒む**：消去で行が消えると再登録できる（4.6 に反する）

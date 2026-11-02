@@ -99,12 +99,9 @@ const (
 	Grant          Prefix = "gnt"
 	AccessToken    Prefix = "atk"
 	RefreshToken   Prefix = "rtk"
-	Passkey        Prefix = "psk"
-	TOTP           Prefix = "otp"
 	Credential     Prefix = "crd" // 汎用の認証情報（authn_credentials。ADR 0090）
 	KnownDevice    Prefix = "dev" // 本人がログインした端末（authn_known_devices。ADR 0105）
 	PAT            Prefix = "pat" // 本人の Personal Access Token（authn_personal_access_tokens。ADR 0109）
-	Password       Prefix = "pwd"
 	RecoveryCode   Prefix = "rcv"
 	Notification   Prefix = "ntf"
 	Event          Prefix = "evt"

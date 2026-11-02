@@ -130,29 +130,3 @@ func TestPlanChange(t *testing.T) {
 		t.Fatalf("older binary = %+v", c)
 	}
 }
-
-// コアのデータの移行の記録（ADR 0101）は、知っているバイナリなら突き合わせから外し、知らないバイナリでは起動を拒む。
-func TestMigrationRecords(t *testing.T) {
-	RegisterMigration("migration:zz_known")
-	ledger := []port.FeatureRecord{active(Org, 1), active("migration:zz_known", 1)}
-	p, err := Resolve(ledger, []Feature{orgF}, nil)
-	if err != nil || !p.IsActive(Org) || p.IsActive("migration:zz_known") || len(p.Warnings) != 0 {
-		t.Fatalf("known migration: plan %+v, %v", p, err)
-	}
-	if _, err := Resolve(append(ledger, active("migration:zz_newer", 1)), []Feature{orgF}, nil); !errors.Is(err, ErrLedgerMismatch) {
-		t.Fatalf("unknown migration = %v", err)
-	}
-	if c := PlanChange(ledger, []Feature{orgF}, []Feature{orgF}, nil); len(c.Problems) != 0 || len(c.Steps) != 0 {
-		t.Fatalf("plan with a migration record = %+v", c)
-	}
-	for _, bad := range []string{"zz", "migration:"} {
-		func() {
-			defer func() {
-				if recover() == nil {
-					t.Errorf("RegisterMigration(%q) accepted", bad)
-				}
-			}()
-			RegisterMigration(bad)
-		}()
-	}
-}

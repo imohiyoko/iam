@@ -73,7 +73,7 @@ func (*Method) Info() port.MethodInfo {
 		Usages: []port.MethodUsage{port.UsageFirstFactor}, DataVersion: 1}
 }
 
-// Data は方式固有のデータ（コアが暗号化して置く）。移行（ADR 0101）でも作る。
+// Data は方式固有のデータ（コアが暗号化して置く）。
 type Data struct {
 	// Hash は argon2id の PHC 文字列。
 	Hash string `json:"hash"`

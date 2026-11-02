@@ -234,7 +234,7 @@ paths:
       operationId: revokeUserCredential
       summary: ユーザーの passkey・外部 ID の紐付け・TOTP を無効化する（4.6）
       description: |
-        権限 `credentials:revoke`。`credential_id` は公開 ID（`psk_…`、`idn_…`、`otp_…`、`crd_…`）。本人と違い、最後の1つも
+        権限 `credentials:revoke`。`credential_id` は公開 ID（`idn_…`、`crd_…`）。本人と違い、最後の1つも
         無効化できる（以後は復旧の手順で戻る）。取り消せない。その認証情報で作ったセッションは、遅くとも
         `validity_max_delay` の後に使えなくなる。
       parameters:

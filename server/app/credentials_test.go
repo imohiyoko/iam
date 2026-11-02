@@ -142,7 +142,7 @@ func TestAdminActionsRespectOutranks(t *testing.T) {
 	adminID, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
 	_, sec := l.operator(t, "sec@example.com", role.RealmSecurity)
 	users := "/v1/admin/users/" + ownerID
-	for _, path := range []string{users + "/credentials:revoke-all", users + "/password:revoke", users + "/credentials/psk_missing:revoke"} {
+	for _, path := range []string{users + "/credentials:revoke-all", users + "/password:revoke", users + "/credentials/crd_missing:revoke"} {
 		if status, out := l.admin(t, path, sec, nil); status != 403 {
 			t.Fatalf("%s by security: %d %v", path, status, out)
 		}

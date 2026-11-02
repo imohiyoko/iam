@@ -284,7 +284,7 @@ const MaxPasskeyName = passkeym.MaxName
 // PasskeyName は名前を確かめ、前後の空白を除いたものを返す。
 func PasskeyName(name string) (string, error) { return passkeym.ValidName(name) }
 
-// passkey はユーザーの無効化していない passkey を公開 ID（移す前の psk_ か、汎用の crd_。ADR 0106）で引く。別のユーザーのものと、
+// passkey はユーザーの無効化していない passkey を公開 ID（汎用の crd_。ADR 0106）で引く。別のユーザーのものと、
 // passkey でないものは無いものとして扱う。
 func passkey(ctx context.Context, tx port.Tx, realmID, userID, publicID string) (port.Credential, error) {
 	c, err := credential(ctx, tx, realmID, userID, publicID)
@@ -364,7 +364,7 @@ func (s *Service) RevokePassword(ctx context.Context, tx port.Tx, realmID, userI
 
 // RevokeTOTP は TOTP を無効化する（削除しない。4.6）。TOTP は2要素目だけに使うので、最後の1つでも
 // 無効化できる（2段階認証が必須なら、次のログインで登録を求める）。
-// ID は移す前の otp_ のものか、汎用の crd_ のもの（ADR 0101）。
+// ID は汎用の crd_ のもの（ADR 0101）。
 func (s *Service) RevokeTOTP(ctx context.Context, tx port.Tx, realmID, userID, publicID string, actor audit.Actor, requestID string) (port.Credential, error) {
 	c, err := credential(ctx, tx, realmID, userID, publicID)
 	if err == nil && c.Method != method.TOTP {

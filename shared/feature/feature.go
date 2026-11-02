@@ -99,31 +99,6 @@ func Registered() []Feature {
 	return out
 }
 
-// MigrationPrefix は、コアのデータの移行（フィーチャーに属さない）を台帳に記録するときの名前の接頭辞（ADR 0101）。
-// 移行を知らないバイナリ（移す前のもの）は、この記録を「バイナリに無いフィーチャー」として起動を拒む。
-const MigrationPrefix = "migration:"
-
-var migrations = map[string]bool{}
-
-// RegisterMigration は、このバイナリが行う（読める）コアのデータの移行の名前を登録する。名前は MigrationPrefix で始める。
-func RegisterMigration(name string) {
-	mu.Lock()
-	defer mu.Unlock()
-	if !strings.HasPrefix(name, MigrationPrefix) || len(name) == len(MigrationPrefix) {
-		panic("feature: invalid migration name: " + name)
-	}
-	migrations[name] = true
-}
-
-// IsMigration は台帳の記録がコアのデータの移行かを返す。
-func IsMigration(name string) bool { return strings.HasPrefix(name, MigrationPrefix) }
-
-func knownMigration(name string) bool {
-	mu.Lock()
-	defer mu.Unlock()
-	return migrations[name]
-}
-
 // ErrLedgerMismatch は台帳とバイナリの構成が合わず、起動できないことを表す。
 var ErrLedgerMismatch = errors.New("feature: ledger does not match binary")
 
@@ -176,12 +151,6 @@ func Resolve(ledger []port.FeatureRecord, binary []Feature, enabled []string) (P
 	led := map[string]port.FeatureRecord{}
 	var problems []string
 	for _, r := range ledger {
-		if IsMigration(r.Feature) {
-			if !knownMigration(r.Feature) {
-				problems = append(problems, fmt.Sprintf("data migration %s was applied by a newer binary; this binary cannot read the migrated data", r.Feature))
-			}
-			continue
-		}
 		led[r.Feature] = r
 		f, ok := bin[r.Feature]
 		if !ok {
@@ -280,10 +249,6 @@ func PlanChange(ledger []port.FeatureRecord, current, next []Feature, enabled []
 	}
 	recorded := map[string]port.FeatureRecord{}
 	for _, r := range ledger {
-		if IsMigration(r.Feature) {
-			// コアのデータの移行は、同じ版のソースから作るバイナリならどの構成でも行う（読める）。
-			continue
-		}
 		recorded[r.Feature] = r
 		f, ok := has(next, r.Feature)
 		switch {

@@ -10,22 +10,6 @@ import (
 	"database/sql"
 )
 
-const addRevokedPasskeyCredential = `-- name: AddRevokedPasskeyCredential :exec
-INSERT INTO authn_revoked_passkey_credentials (realm_id, credential_id, revoked_at) VALUES (?, ?, ?)
-ON CONFLICT (realm_id, credential_id) DO NOTHING
-`
-
-type AddRevokedPasskeyCredentialParams struct {
-	RealmID      string
-	CredentialID []byte
-	RevokedAt    string
-}
-
-func (q *Queries) AddRevokedPasskeyCredential(ctx context.Context, arg AddRevokedPasskeyCredentialParams) error {
-	_, err := q.db.ExecContext(ctx, addRevokedPasskeyCredential, arg.RealmID, arg.CredentialID, arg.RevokedAt)
-	return err
-}
-
 const cancelScheduledEvents = `-- name: CancelScheduledEvents :exec
 DELETE FROM scheduled_events WHERE realm_id = ? AND ref = ? AND fired_at IS NULL
 `
@@ -92,17 +76,6 @@ SELECT COUNT(*) FROM authn_connections WHERE realm_id = ? AND owner_org_id <> ''
 
 func (q *Queries) CountOwnedConnections(ctx context.Context, realmID string) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countOwnedConnections, realmID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countPasswords = `-- name: CountPasswords :one
-SELECT count(*) FROM authn_password_credentials
-`
-
-func (q *Queries) CountPasswords(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countPasswords)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -198,89 +171,6 @@ func (q *Queries) CreateIdentity(ctx context.Context, arg CreateIdentityParams) 
 		arg.UserID,
 		arg.ConnectionID,
 		arg.ProviderSubject,
-		arg.CreatedAt,
-		arg.RevokedAt,
-		arg.RevokeReason,
-	)
-	return err
-}
-
-const createPasskey = `-- name: CreatePasskey :exec
-INSERT INTO authn_passkeys (id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid,
-    transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id, user_handle, attestation_format, attested)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreatePasskeyParams struct {
-	ID                string
-	PublicID          string
-	RealmID           string
-	UserID            string
-	CredentialID      []byte
-	PublicKey         []byte
-	Alg               int64
-	SignCount         int64
-	Flags             int64
-	Aaguid            []byte
-	Transports        string
-	Name              string
-	CreatedAt         string
-	LastUsedAt        sql.NullString
-	RevokedAt         sql.NullString
-	RevokeReason      string
-	PreferredOrgID    string
-	UserHandle        []byte
-	AttestationFormat string
-	Attested          int64
-}
-
-func (q *Queries) CreatePasskey(ctx context.Context, arg CreatePasskeyParams) error {
-	_, err := q.db.ExecContext(ctx, createPasskey,
-		arg.ID,
-		arg.PublicID,
-		arg.RealmID,
-		arg.UserID,
-		arg.CredentialID,
-		arg.PublicKey,
-		arg.Alg,
-		arg.SignCount,
-		arg.Flags,
-		arg.Aaguid,
-		arg.Transports,
-		arg.Name,
-		arg.CreatedAt,
-		arg.LastUsedAt,
-		arg.RevokedAt,
-		arg.RevokeReason,
-		arg.PreferredOrgID,
-		arg.UserHandle,
-		arg.AttestationFormat,
-		arg.Attested,
-	)
-	return err
-}
-
-const createPassword = `-- name: CreatePassword :exec
-INSERT INTO authn_password_credentials (id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreatePasswordParams struct {
-	ID           string
-	RealmID      string
-	UserID       string
-	Hash         string
-	CreatedAt    string
-	RevokedAt    sql.NullString
-	RevokeReason string
-}
-
-func (q *Queries) CreatePassword(ctx context.Context, arg CreatePasswordParams) error {
-	_, err := q.db.ExecContext(ctx, createPassword,
-		arg.ID,
-		arg.RealmID,
-		arg.UserID,
-		arg.Hash,
 		arg.CreatedAt,
 		arg.RevokedAt,
 		arg.RevokeReason,
@@ -503,38 +393,6 @@ func (q *Queries) CreateSuspension(ctx context.Context, arg CreateSuspensionPara
 	return err
 }
 
-const createTOTP = `-- name: CreateTOTP :exec
-INSERT INTO authn_totp_credentials (id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreateTOTPParams struct {
-	ID               string
-	PublicID         string
-	RealmID          string
-	UserID           string
-	SecretCiphertext []byte
-	LastUsedStep     int64
-	CreatedAt        string
-	RevokedAt        sql.NullString
-	RevokeReason     string
-}
-
-func (q *Queries) CreateTOTP(ctx context.Context, arg CreateTOTPParams) error {
-	_, err := q.db.ExecContext(ctx, createTOTP,
-		arg.ID,
-		arg.PublicID,
-		arg.RealmID,
-		arg.UserID,
-		arg.SecretCiphertext,
-		arg.LastUsedStep,
-		arg.CreatedAt,
-		arg.RevokedAt,
-		arg.RevokeReason,
-	)
-	return err
-}
-
 const createUser = `-- name: CreateUser :exec
 INSERT INTO authn_users (id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
@@ -652,34 +510,6 @@ func (q *Queries) DeleteFiredScheduledEvents(ctx context.Context, arg DeleteFire
 	return result.RowsAffected()
 }
 
-const deletePasskey = `-- name: DeletePasskey :exec
-DELETE FROM authn_passkeys WHERE realm_id = ? AND id = ?
-`
-
-type DeletePasskeyParams struct {
-	RealmID string
-	ID      string
-}
-
-func (q *Queries) DeletePasskey(ctx context.Context, arg DeletePasskeyParams) error {
-	_, err := q.db.ExecContext(ctx, deletePasskey, arg.RealmID, arg.ID)
-	return err
-}
-
-const deletePassword = `-- name: DeletePassword :exec
-DELETE FROM authn_password_credentials WHERE realm_id = ? AND id = ?
-`
-
-type DeletePasswordParams struct {
-	RealmID string
-	ID      string
-}
-
-func (q *Queries) DeletePassword(ctx context.Context, arg DeletePasswordParams) error {
-	_, err := q.db.ExecContext(ctx, deletePassword, arg.RealmID, arg.ID)
-	return err
-}
-
 const deleteRecoveryCodes = `-- name: DeleteRecoveryCodes :exec
 DELETE FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ?
 `
@@ -691,20 +521,6 @@ type DeleteRecoveryCodesParams struct {
 
 func (q *Queries) DeleteRecoveryCodes(ctx context.Context, arg DeleteRecoveryCodesParams) error {
 	_, err := q.db.ExecContext(ctx, deleteRecoveryCodes, arg.RealmID, arg.UserID)
-	return err
-}
-
-const deleteRevokedPasskeyCredential = `-- name: DeleteRevokedPasskeyCredential :exec
-DELETE FROM authn_revoked_passkey_credentials WHERE realm_id = ? AND credential_id = ?
-`
-
-type DeleteRevokedPasskeyCredentialParams struct {
-	RealmID      string
-	CredentialID []byte
-}
-
-func (q *Queries) DeleteRevokedPasskeyCredential(ctx context.Context, arg DeleteRevokedPasskeyCredentialParams) error {
-	_, err := q.db.ExecContext(ctx, deleteRevokedPasskeyCredential, arg.RealmID, arg.CredentialID)
 	return err
 }
 
@@ -724,20 +540,6 @@ func (q *Queries) DeleteServiceAccount(ctx context.Context, arg DeleteServiceAcc
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-const deleteTOTP = `-- name: DeleteTOTP :exec
-DELETE FROM authn_totp_credentials WHERE realm_id = ? AND id = ?
-`
-
-type DeleteTOTPParams struct {
-	RealmID string
-	ID      string
-}
-
-func (q *Queries) DeleteTOTP(ctx context.Context, arg DeleteTOTPParams) error {
-	_, err := q.db.ExecContext(ctx, deleteTOTP, arg.RealmID, arg.ID)
-	return err
 }
 
 const dueScheduledEvents = `-- name: DueScheduledEvents :many
@@ -824,34 +626,6 @@ func (q *Queries) EraseUserIdentities(ctx context.Context, arg EraseUserIdentiti
 	return err
 }
 
-const eraseUserPasskeys = `-- name: EraseUserPasskeys :exec
-DELETE FROM authn_passkeys WHERE realm_id = ? AND user_id = ?
-`
-
-type EraseUserPasskeysParams struct {
-	RealmID string
-	UserID  string
-}
-
-func (q *Queries) EraseUserPasskeys(ctx context.Context, arg EraseUserPasskeysParams) error {
-	_, err := q.db.ExecContext(ctx, eraseUserPasskeys, arg.RealmID, arg.UserID)
-	return err
-}
-
-const eraseUserPasswords = `-- name: EraseUserPasswords :exec
-DELETE FROM authn_password_credentials WHERE realm_id = ? AND user_id = ?
-`
-
-type EraseUserPasswordsParams struct {
-	RealmID string
-	UserID  string
-}
-
-func (q *Queries) EraseUserPasswords(ctx context.Context, arg EraseUserPasswordsParams) error {
-	_, err := q.db.ExecContext(ctx, eraseUserPasswords, arg.RealmID, arg.UserID)
-	return err
-}
-
 const eraseUserRecoveryCodes = `-- name: EraseUserRecoveryCodes :exec
 DELETE FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ?
 `
@@ -892,44 +666,6 @@ type EraseUserSessionsParams struct {
 func (q *Queries) EraseUserSessions(ctx context.Context, arg EraseUserSessionsParams) error {
 	_, err := q.db.ExecContext(ctx, eraseUserSessions, arg.RealmID, arg.PrincipalID)
 	return err
-}
-
-const eraseUserTOTP = `-- name: EraseUserTOTP :exec
-DELETE FROM authn_totp_credentials WHERE realm_id = ? AND user_id = ?
-`
-
-type EraseUserTOTPParams struct {
-	RealmID string
-	UserID  string
-}
-
-func (q *Queries) EraseUserTOTP(ctx context.Context, arg EraseUserTOTPParams) error {
-	_, err := q.db.ExecContext(ctx, eraseUserTOTP, arg.RealmID, arg.UserID)
-	return err
-}
-
-const getActivePassword = `-- name: GetActivePassword :one
-SELECT id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason FROM authn_password_credentials WHERE realm_id = ? AND user_id = ? AND revoked_at IS NULL
-`
-
-type GetActivePasswordParams struct {
-	RealmID string
-	UserID  string
-}
-
-func (q *Queries) GetActivePassword(ctx context.Context, arg GetActivePasswordParams) (AuthnPasswordCredential, error) {
-	row := q.db.QueryRowContext(ctx, getActivePassword, arg.RealmID, arg.UserID)
-	var i AuthnPasswordCredential
-	err := row.Scan(
-		&i.ID,
-		&i.RealmID,
-		&i.UserID,
-		&i.Hash,
-		&i.CreatedAt,
-		&i.RevokedAt,
-		&i.RevokeReason,
-	)
-	return i, err
 }
 
 const getConnection = `-- name: GetConnection :one
@@ -1183,67 +919,6 @@ func (q *Queries) GetIdentityBySubject(ctx context.Context, arg GetIdentityBySub
 	return i, err
 }
 
-const getPasskey = `-- name: GetPasskey :one
-SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id, user_handle, attestation_format, attested FROM authn_passkeys WHERE realm_id = ? AND id = ?
-`
-
-type GetPasskeyParams struct {
-	RealmID string
-	ID      string
-}
-
-func (q *Queries) GetPasskey(ctx context.Context, arg GetPasskeyParams) (AuthnPasskey, error) {
-	row := q.db.QueryRowContext(ctx, getPasskey, arg.RealmID, arg.ID)
-	var i AuthnPasskey
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.RealmID,
-		&i.UserID,
-		&i.CredentialID,
-		&i.PublicKey,
-		&i.Alg,
-		&i.SignCount,
-		&i.Flags,
-		&i.Aaguid,
-		&i.Transports,
-		&i.Name,
-		&i.CreatedAt,
-		&i.LastUsedAt,
-		&i.RevokedAt,
-		&i.RevokeReason,
-		&i.PreferredOrgID,
-		&i.UserHandle,
-		&i.AttestationFormat,
-		&i.Attested,
-	)
-	return i, err
-}
-
-const getPassword = `-- name: GetPassword :one
-SELECT id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason FROM authn_password_credentials WHERE realm_id = ? AND id = ?
-`
-
-type GetPasswordParams struct {
-	RealmID string
-	ID      string
-}
-
-func (q *Queries) GetPassword(ctx context.Context, arg GetPasswordParams) (AuthnPasswordCredential, error) {
-	row := q.db.QueryRowContext(ctx, getPassword, arg.RealmID, arg.ID)
-	var i AuthnPasswordCredential
-	err := row.Scan(
-		&i.ID,
-		&i.RealmID,
-		&i.UserID,
-		&i.Hash,
-		&i.CreatedAt,
-		&i.RevokedAt,
-		&i.RevokeReason,
-	)
-	return i, err
-}
-
 const getServiceAccount = `-- name: GetServiceAccount :one
 SELECT id, realm_id, name, created_at, org_id, valid_from, valid_until, deleted_at, created_by FROM authn_service_accounts WHERE realm_id = ? AND id = ?
 `
@@ -1420,58 +1095,6 @@ func (q *Queries) GetSuspensionByPublicID(ctx context.Context, arg GetSuspension
 	return i, err
 }
 
-const getTOTP = `-- name: GetTOTP :one
-SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials WHERE realm_id = ? AND id = ?
-`
-
-type GetTOTPParams struct {
-	RealmID string
-	ID      string
-}
-
-func (q *Queries) GetTOTP(ctx context.Context, arg GetTOTPParams) (AuthnTotpCredential, error) {
-	row := q.db.QueryRowContext(ctx, getTOTP, arg.RealmID, arg.ID)
-	var i AuthnTotpCredential
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.RealmID,
-		&i.UserID,
-		&i.SecretCiphertext,
-		&i.LastUsedStep,
-		&i.CreatedAt,
-		&i.RevokedAt,
-		&i.RevokeReason,
-	)
-	return i, err
-}
-
-const getTOTPByPublicID = `-- name: GetTOTPByPublicID :one
-SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials WHERE realm_id = ? AND public_id = ?
-`
-
-type GetTOTPByPublicIDParams struct {
-	RealmID  string
-	PublicID string
-}
-
-func (q *Queries) GetTOTPByPublicID(ctx context.Context, arg GetTOTPByPublicIDParams) (AuthnTotpCredential, error) {
-	row := q.db.QueryRowContext(ctx, getTOTPByPublicID, arg.RealmID, arg.PublicID)
-	var i AuthnTotpCredential
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.RealmID,
-		&i.UserID,
-		&i.SecretCiphertext,
-		&i.LastUsedStep,
-		&i.CreatedAt,
-		&i.RevokedAt,
-		&i.RevokeReason,
-	)
-	return i, err
-}
-
 const getUser = `-- name: GetUser :one
 SELECT id, public_id, realm_id, status, valid_from, valid_until, created_at, updated_at, deletion_scheduled_at, legal_hold, managed_org_id, managed_at, merged_into FROM authn_users WHERE realm_id = ? AND id = ?
 `
@@ -1551,126 +1174,6 @@ func (q *Queries) LiftSuspension(ctx context.Context, arg LiftSuspensionParams) 
 		arg.ID,
 	)
 	return err
-}
-
-const listAllPasskeys = `-- name: ListAllPasskeys :many
-SELECT id, public_id, realm_id, user_id, credential_id, public_key, alg, sign_count, flags, aaguid, transports, name, created_at, last_used_at, revoked_at, revoke_reason, preferred_org_id, user_handle, attestation_format, attested FROM authn_passkeys ORDER BY id LIMIT ?1
-`
-
-func (q *Queries) ListAllPasskeys(ctx context.Context, lim int64) ([]AuthnPasskey, error) {
-	rows, err := q.db.QueryContext(ctx, listAllPasskeys, lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuthnPasskey
-	for rows.Next() {
-		var i AuthnPasskey
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.RealmID,
-			&i.UserID,
-			&i.CredentialID,
-			&i.PublicKey,
-			&i.Alg,
-			&i.SignCount,
-			&i.Flags,
-			&i.Aaguid,
-			&i.Transports,
-			&i.Name,
-			&i.CreatedAt,
-			&i.LastUsedAt,
-			&i.RevokedAt,
-			&i.RevokeReason,
-			&i.PreferredOrgID,
-			&i.UserHandle,
-			&i.AttestationFormat,
-			&i.Attested,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAllPasswords = `-- name: ListAllPasswords :many
-SELECT id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason FROM authn_password_credentials ORDER BY id LIMIT ?1
-`
-
-func (q *Queries) ListAllPasswords(ctx context.Context, lim int64) ([]AuthnPasswordCredential, error) {
-	rows, err := q.db.QueryContext(ctx, listAllPasswords, lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuthnPasswordCredential
-	for rows.Next() {
-		var i AuthnPasswordCredential
-		if err := rows.Scan(
-			&i.ID,
-			&i.RealmID,
-			&i.UserID,
-			&i.Hash,
-			&i.CreatedAt,
-			&i.RevokedAt,
-			&i.RevokeReason,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAllTOTP = `-- name: ListAllTOTP :many
-SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials ORDER BY id LIMIT ?1
-`
-
-func (q *Queries) ListAllTOTP(ctx context.Context, lim int64) ([]AuthnTotpCredential, error) {
-	rows, err := q.db.QueryContext(ctx, listAllTOTP, lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuthnTotpCredential
-	for rows.Next() {
-		var i AuthnTotpCredential
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.RealmID,
-			&i.UserID,
-			&i.SecretCiphertext,
-			&i.LastUsedStep,
-			&i.CreatedAt,
-			&i.RevokedAt,
-			&i.RevokeReason,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listConnections = `-- name: ListConnections :many
@@ -1875,33 +1378,6 @@ func (q *Queries) ListRecoveryCodes(ctx context.Context, arg ListRecoveryCodesPa
 	return items, nil
 }
 
-const listRevokedPasskeyCredentials = `-- name: ListRevokedPasskeyCredentials :many
-SELECT realm_id, credential_id, revoked_at FROM authn_revoked_passkey_credentials ORDER BY realm_id, credential_id LIMIT ?1
-`
-
-func (q *Queries) ListRevokedPasskeyCredentials(ctx context.Context, lim int64) ([]AuthnRevokedPasskeyCredential, error) {
-	rows, err := q.db.QueryContext(ctx, listRevokedPasskeyCredentials, lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuthnRevokedPasskeyCredential
-	for rows.Next() {
-		var i AuthnRevokedPasskeyCredential
-		if err := rows.Scan(&i.RealmID, &i.CredentialID, &i.RevokedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listServiceAccountCredentials = `-- name: ListServiceAccountCredentials :many
 SELECT id, realm_id, service_account_id, type, secret_hash, created_at, expires_at, revoked_at, public_key, alg FROM authn_service_account_credentials WHERE realm_id = ? AND service_account_id = ? ORDER BY created_at, id
 `
@@ -2076,48 +1552,6 @@ func (q *Queries) ListSuspensionsByTarget(ctx context.Context, arg ListSuspensio
 			&i.CreatedAt,
 			&i.LiftedAt,
 			&i.LiftedBy,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTOTPByUser = `-- name: ListTOTPByUser :many
-SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
-`
-
-type ListTOTPByUserParams struct {
-	RealmID string
-	UserID  string
-}
-
-func (q *Queries) ListTOTPByUser(ctx context.Context, arg ListTOTPByUserParams) ([]AuthnTotpCredential, error) {
-	rows, err := q.db.QueryContext(ctx, listTOTPByUser, arg.RealmID, arg.UserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuthnTotpCredential
-	for rows.Next() {
-		var i AuthnTotpCredential
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.RealmID,
-			&i.UserID,
-			&i.SecretCiphertext,
-			&i.LastUsedStep,
-			&i.CreatedAt,
-			&i.RevokedAt,
-			&i.RevokeReason,
 		); err != nil {
 			return nil, err
 		}
@@ -2309,18 +1743,6 @@ func (q *Queries) MoveSessionsOrg(ctx context.Context, arg MoveSessionsOrgParams
 	return items, nil
 }
 
-const purgePasswords = `-- name: PurgePasswords :execrows
-DELETE FROM authn_password_credentials WHERE id IN (SELECT p.id FROM authn_password_credentials p LIMIT ?1)
-`
-
-func (q *Queries) PurgePasswords(ctx context.Context, lim int64) (int64, error) {
-	result, err := q.db.ExecContext(ctx, purgePasswords, lim)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 const releaseManagedUsers = `-- name: ReleaseManagedUsers :execrows
 UPDATE authn_users SET managed_org_id = NULL, managed_at = NULL, updated_at = ?1
 WHERE id IN (SELECT u.id FROM authn_users u WHERE u.managed_org_id IS NOT NULL LIMIT ?2)
@@ -2376,48 +1798,6 @@ type RevokeIdentityParams struct {
 
 func (q *Queries) RevokeIdentity(ctx context.Context, arg RevokeIdentityParams) error {
 	_, err := q.db.ExecContext(ctx, revokeIdentity,
-		arg.RevokedAt,
-		arg.RevokeReason,
-		arg.RealmID,
-		arg.ID,
-	)
-	return err
-}
-
-const revokePasskey = `-- name: RevokePasskey :exec
-UPDATE authn_passkeys SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
-`
-
-type RevokePasskeyParams struct {
-	RevokedAt    sql.NullString
-	RevokeReason string
-	RealmID      string
-	ID           string
-}
-
-func (q *Queries) RevokePasskey(ctx context.Context, arg RevokePasskeyParams) error {
-	_, err := q.db.ExecContext(ctx, revokePasskey,
-		arg.RevokedAt,
-		arg.RevokeReason,
-		arg.RealmID,
-		arg.ID,
-	)
-	return err
-}
-
-const revokePassword = `-- name: RevokePassword :exec
-UPDATE authn_password_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
-`
-
-type RevokePasswordParams struct {
-	RevokedAt    sql.NullString
-	RevokeReason string
-	RealmID      string
-	ID           string
-}
-
-func (q *Queries) RevokePassword(ctx context.Context, arg RevokePasswordParams) error {
-	_, err := q.db.ExecContext(ctx, revokePassword,
 		arg.RevokedAt,
 		arg.RevokeReason,
 		arg.RealmID,
@@ -2515,27 +1895,6 @@ func (q *Queries) RevokeSessionsByPrincipal(ctx context.Context, arg RevokeSessi
 		return nil, err
 	}
 	return items, nil
-}
-
-const revokeTOTP = `-- name: RevokeTOTP :exec
-UPDATE authn_totp_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
-`
-
-type RevokeTOTPParams struct {
-	RevokedAt    sql.NullString
-	RevokeReason string
-	RealmID      string
-	ID           string
-}
-
-func (q *Queries) RevokeTOTP(ctx context.Context, arg RevokeTOTPParams) error {
-	_, err := q.db.ExecContext(ctx, revokeTOTP,
-		arg.RevokedAt,
-		arg.RevokeReason,
-		arg.RealmID,
-		arg.ID,
-	)
-	return err
 }
 
 const scheduleEvent = `-- name: ScheduleEvent :exec
@@ -2837,24 +2196,6 @@ func (q *Queries) UpdateConnectionConfig(ctx context.Context, arg UpdateConnecti
 	return result.RowsAffected()
 }
 
-const updatePasswordHash = `-- name: UpdatePasswordHash :execrows
-UPDATE authn_password_credentials SET hash = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL
-`
-
-type UpdatePasswordHashParams struct {
-	Hash    string
-	RealmID string
-	ID      string
-}
-
-func (q *Queries) UpdatePasswordHash(ctx context.Context, arg UpdatePasswordHashParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, updatePasswordHash, arg.Hash, arg.RealmID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 const useRecoveryCode = `-- name: UseRecoveryCode :execrows
 UPDATE authn_recovery_codes SET used_at = ? WHERE realm_id = ? AND id = ? AND used_at IS NULL
 `
@@ -2867,25 +2208,6 @@ type UseRecoveryCodeParams struct {
 
 func (q *Queries) UseRecoveryCode(ctx context.Context, arg UseRecoveryCodeParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, useRecoveryCode, arg.UsedAt, arg.RealmID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const useTOTP = `-- name: UseTOTP :execrows
-UPDATE authn_totp_credentials SET last_used_step = ?1
-WHERE realm_id = ?2 AND id = ?3 AND last_used_step < ?1
-`
-
-type UseTOTPParams struct {
-	Step    int64
-	RealmID string
-	ID      string
-}
-
-func (q *Queries) UseTOTP(ctx context.Context, arg UseTOTPParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, useTOTP, arg.Step, arg.RealmID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

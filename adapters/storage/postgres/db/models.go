@@ -122,39 +122,6 @@ type AuthnOidcToken struct {
 	UsedAt    sql.NullString
 }
 
-type AuthnPasskey struct {
-	ID                string
-	PublicID          string
-	RealmID           string
-	UserID            string
-	CredentialID      []byte
-	PublicKey         []byte
-	Alg               int64
-	SignCount         int64
-	Flags             int64
-	Aaguid            []byte
-	Transports        string
-	Name              string
-	CreatedAt         string
-	LastUsedAt        sql.NullString
-	RevokedAt         sql.NullString
-	RevokeReason      string
-	PreferredOrgID    string
-	UserHandle        []byte
-	AttestationFormat string
-	Attested          int64
-}
-
-type AuthnPasswordCredential struct {
-	ID           string
-	RealmID      string
-	UserID       string
-	Hash         string
-	CreatedAt    string
-	RevokedAt    sql.NullString
-	RevokeReason string
-}
-
 type AuthnPersonalAccessToken struct {
 	ID           string
 	RealmID      string
@@ -207,12 +174,6 @@ type AuthnRetiredCredentialLookup struct {
 	Lookup      []byte
 	LookupKeyID string
 	RetiredAt   string
-}
-
-type AuthnRevokedPasskeyCredential struct {
-	RealmID      string
-	CredentialID []byte
-	RevokedAt    string
 }
 
 type AuthnServiceAccount struct {
@@ -298,18 +259,6 @@ type AuthnSuspension struct {
 	CreatedAt   string
 	LiftedAt    sql.NullString
 	LiftedBy    string
-}
-
-type AuthnTotpCredential struct {
-	ID               string
-	PublicID         string
-	RealmID          string
-	UserID           string
-	SecretCiphertext []byte
-	LastUsedStep     int64
-	CreatedAt        string
-	RevokedAt        sql.NullString
-	RevokeReason     string
 }
 
 type AuthnUser struct {
