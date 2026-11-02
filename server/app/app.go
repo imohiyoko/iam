@@ -158,6 +158,15 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		return nil, err
 	}
 
+	// 監査ログの IP と User-Agent の全文は、本人のデータ鍵と日ごとの鍵で暗号化する（ADR 0063）。
+	// 監査ログは最初の1件（新しい DB のフィーチャーの記録）から監査の鍵で鍵付きにする（ADR 0086）。
+	crypter := pii.New(d.KeyStore)
+	clientSealer := &eventlog.ClientSealer{Crypter: crypter, Clock: d.Clock, Retention: cfg.Realm.ClientDataRetention.D()}
+	if ak, ok := d.KeyStore.(port.AuditKeyStore); ok {
+		clientSealer.AuditKeys = ak
+	}
+	d.Storage = clientSealer.Storage(d.Storage)
+
 	enabled := derefFeatures(cfg.Features)
 	var ledger []port.FeatureRecord
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
@@ -178,10 +187,6 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		d.Logger.Warn("feature", "message", w)
 	}
 
-	// 監査ログの IP と User-Agent の全文は、本人のデータ鍵と日ごとの鍵で暗号化する（ADR 0063）。
-	crypter := pii.New(d.KeyStore)
-	clientSealer := &eventlog.ClientSealer{Crypter: crypter, Clock: d.Clock, Retention: cfg.Realm.ClientDataRetention.D()}
-	d.Storage = clientSealer.Storage(d.Storage)
 	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary, clientSealer: clientSealer, pii: crypter}
 	a.root = a
 	a.checkClockSkew(ctx)
@@ -299,7 +304,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 				MaxAuthAge: ss.MaxAuthAge.Rule("session.max_auth_age"), Warnings: warnings,
 			}, LoginPolicies: plan.IsActive(feature.OrgLoginPolicy), Quotas: plan.IsActive(feature.Quota),
 			QuotaCount: org.QuotaCount(rs.QuotaCount), ManagedUsers: plan.IsActive(feature.OrgManagedUsers), Resolver: d.DNS,
-			Hierarchy: plan.IsActive(feature.OrgHierarchy)}
+			Hierarchy: plan.IsActive(feature.OrgHierarchy), ACR: plan.IsActive(feature.ACR)}
 		a.accounts.Orgs, a.sessions.Orgs = a.orgs, a.orgs
 	}
 	// 判定の材料のキャッシュは、セッションの検証と同じ反映の遅れの上限（5.3）まで。
@@ -322,7 +327,8 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.attributes = &attribute.Service{Clock: d.Clock, Crypter: a.pii}
 	}
 	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Attributes: a.attributes, Issuer: a.issuer,
-		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D()}
+		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D(),
+		ACR: plan.IsActive(feature.ACR)}
 	if a.issuer != "" {
 		a.sessions.Lineages = a.tokens
 	}
@@ -397,8 +403,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	if err != nil {
 		return err
 	}
-	a.ownPublic = withCommon(newPublicHandler(a, login))
-	a.ownAdmin = withCommon(newAdminHandler(a))
+	trusted, err := cfg.Server.TrustedProxyPrefixes()
+	if err != nil {
+		return err
+	}
+	a.ownPublic = withCommon(newPublicHandler(a, login), trusted)
+	a.ownAdmin = withCommon(newAdminHandler(a), trusted)
 	return nil
 }
 
@@ -477,6 +487,15 @@ func checkKeys(ctx context.Context, ks port.KeyStore) error {
 	}
 	if k, err := ks.IndexKey(ctx, iid); err != nil || len(k) != pii.KeySize {
 		return fmt.Errorf("app: keystore: index key %q unusable: %v", iid, err)
+	}
+	if aks, ok := ks.(port.AuditKeyStore); ok {
+		aid, err := aks.CurrentAuditKeyID(ctx)
+		if err != nil {
+			return fmt.Errorf("app: keystore: %w", err)
+		}
+		if k, err := aks.AuditKey(ctx, aid); aid != "" && (err != nil || len(k) != pii.KeySize) {
+			return fmt.Errorf("app: keystore: audit key %q unusable: %v", aid, err)
+		}
 	}
 	return nil
 }

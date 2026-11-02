@@ -62,6 +62,7 @@ type AuthnOidcGrant struct {
 	ExpiresAt    string
 	RevokedAt    sql.NullString
 	RevokeReason string
+	Acr          string
 }
 
 type AuthnOidcToken struct {
@@ -467,6 +468,7 @@ type SharedAuditCheckpoint struct {
 	Seq       int64
 	Hash      []byte
 	CreatedAt string
+	KeyID     string
 }
 
 type SharedAuditClientKey struct {
@@ -482,6 +484,7 @@ type SharedAuditEvent struct {
 	PrevHash []byte
 	Hash     []byte
 	Payload  []byte
+	KeyID    string
 }
 
 type SharedInstalledFeature struct {

@@ -45,8 +45,8 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 項目 | 出どころ | 状態 | メモ |
 | --- | --- | --- | --- |
 | 2 要素目の強制と登録の要求 | P C | ✅ | passkey と TOTP に固定 |
-| step-up（RFC 9470） | S P | △ | Org の切り替えと `max_age` だけ |
-| `acr`・`acr_values`・AAL | S（OIDC、SP 800-63B） | ❌ | `amr` はある |
+| step-up（RFC 9470） | S P | ✅ | フィーチャー acr（ADR 0093）。判定の API の `step_up`、公開 API の `WWW-Authenticate` |
+| `acr`・`acr_values`・AAL | S（OIDC、SP 800-63B） | △ | フィーチャー acr（ADR 0093）。AAL3・`phrh` は方式の宣言（0090）を待つ |
 | リスクに応じた追加認証 | P | △ | リスクは認可に効く（ADR 0084） |
 | 新しい端末・異常な場所の検知 | P | △ | `new_device` は ignore |
 | ブルートフォース対策・ロックアウト | P C | △ | レートリミットはある。アカウント単位のロックは要確認 |

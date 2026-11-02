@@ -14,6 +14,7 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/id"
@@ -35,6 +36,8 @@ const (
 	PolicyIPAllowlist           = "ip_allowlist"
 	// PolicyRequireSSO はその Org の connection（Org 専用 SSO。ADR 0077）での認証。フィーチャー org_managed_users も要る。
 	PolicyRequireSSO = "require_sso"
+	// PolicyMinAAL は amr から求めた AAL の下限（ADR 0093）。フィーチャー acr も要る。
+	PolicyMinAAL = "min_aal"
 )
 
 // 上限。
@@ -53,10 +56,12 @@ type LoginPolicy struct {
 	IPAllowlist []string `json:"ip_allowlist,omitempty"`
 	// RequireSSO はその Org の connection で認証したセッションだけを入れる（ADR 0077）。
 	RequireSSO bool `json:"require_sso,omitempty"`
+	// MinAAL は amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（ADR 0093）。0 は判定しない。
+	MinAAL int `json:"min_aal,omitempty"`
 }
 
 func (p *LoginPolicy) empty() bool {
-	return p == nil || (!p.RequirePasskey && !p.RequireSSO && len(p.MembershipEmailDomains) == 0 && len(p.IPAllowlist) == 0)
+	return p == nil || (!p.RequirePasskey && !p.RequireSSO && len(p.MembershipEmailDomains) == 0 && len(p.IPAllowlist) == 0 && p.MinAAL == 0)
 }
 
 // checkPolicy は設定しようとするポリシー p を確かめ、正規化したものを返す。フィーチャーが止まっていても、
@@ -78,6 +83,9 @@ func (s *Service) checkPolicy(p, prev *LoginPolicy) (*LoginPolicy, error) {
 	if out.RequireSSO && !s.ManagedUsers && (prev == nil || !prev.RequireSSO) {
 		return nil, settingInvalid("login_policy.require_sso: the org_managed_users feature is not enabled")
 	}
+	if out.MinAAL != 0 && !s.ACR && (prev == nil || prev.MinAAL != out.MinAAL) {
+		return nil, settingInvalid("login_policy.min_aal: the acr feature is not enabled")
+	}
 	return out, nil
 }
 
@@ -85,7 +93,10 @@ func normalizePolicy(p *LoginPolicy) (*LoginPolicy, error) {
 	if p.empty() {
 		return nil, nil
 	}
-	out := &LoginPolicy{RequirePasskey: p.RequirePasskey, RequireSSO: p.RequireSSO}
+	out := &LoginPolicy{RequirePasskey: p.RequirePasskey, RequireSSO: p.RequireSSO, MinAAL: p.MinAAL}
+	if p.MinAAL < 0 || p.MinAAL > acr.MaxAAL {
+		return nil, settingInvalid("login_policy.min_aal: must be within [1, %d]", acr.MaxAAL)
+	}
 	if len(p.MembershipEmailDomains) > MaxPolicyDomains || len(p.IPAllowlist) > MaxPolicyCIDRs {
 		return nil, settingInvalid("login_policy: too many entries")
 	}
@@ -152,6 +163,9 @@ func (s *Service) policyDenied(ctx context.Context, tx port.Tx, o port.Org, m po
 		if !ok {
 			codes = append(codes, "policy."+PolicyRequireSSO)
 		}
+	}
+	if p.MinAAL > 0 && s.ACR && acr.AAL(in.AuthMethods) < p.MinAAL { // フィーチャーがオフなら判定しない（無効化の片付けで外す）
+		codes = append(codes, "policy."+PolicyMinAAL)
 	}
 	if len(codes) == 0 {
 		return nil
@@ -266,6 +280,31 @@ func ClearRequireSSO(ctx context.Context, tx port.Tx, o port.Org, now time.Time)
 		return false, err
 	}
 	st.LoginPolicy.RequireSSO = false
+	if st.LoginPolicy.empty() {
+		st.LoginPolicy = nil
+	}
+	var raw []byte
+	if !st.empty() {
+		if raw, err = json.Marshal(st); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Orgs().SetSettings(ctx, o.RealmID, o.ID, raw, now)
+}
+
+// HasMinAAL は Org のログインポリシーに min_aal があるかを返す（acr の無効化で数える。11.12）。
+func HasMinAAL(o port.Org) (bool, error) {
+	st, err := SettingsOf(o)
+	return st.LoginPolicy != nil && st.LoginPolicy.MinAAL != 0, err
+}
+
+// ClearMinAAL は Org のログインポリシーから min_aal を外す（acr の無効化の片付け。11.12）。外したら true。
+func ClearMinAAL(ctx context.Context, tx port.Tx, o port.Org, now time.Time) (bool, error) {
+	st, err := SettingsOf(o)
+	if err != nil || st.LoginPolicy == nil || st.LoginPolicy.MinAAL == 0 {
+		return false, err
+	}
+	st.LoginPolicy.MinAAL = 0
 	if st.LoginPolicy.empty() {
 		st.LoginPolicy = nil
 	}

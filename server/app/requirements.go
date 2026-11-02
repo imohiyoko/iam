@@ -165,6 +165,9 @@ func (s adminServer) putNamespace(ctx context.Context, p adminPrincipal, name st
 		if err != nil {
 			return err
 		}
+		if err := s.a.aalAllowed(next.Requirements, prev.Requirements); err != nil {
+			return err
+		}
 		before, err := json.Marshal(prev)
 		if err != nil {
 			return err

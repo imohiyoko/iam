@@ -72,6 +72,8 @@ func TestParseRejects(t *testing.T) {
 		"hook http":               "hooks: {pre_token: {url: 'http://hooks.example.com', secret_env: S}}\n",
 		"hook without secret":     "dev: true\nhooks: {pre_token: {url: 'https://hooks.example.com'}}\n",
 		"hook secret without url": "dev: true\nhooks: {pre_token: {secret_env: S}}\n",
+		"bad trusted proxy":       "dev: true\nserver: {trusted_proxies: [proxy.example.com]}\n",
+		"short mapped proxy":      "dev: true\nserver: {trusted_proxies: ['::ffff:0.0.0.0/95']}\n",
 	}
 	for name, y := range cases {
 		if _, err := Parse([]byte(y)); err == nil {
@@ -177,5 +179,22 @@ func TestSecondFactorAndPasswordRules(t *testing.T) {
 	}
 	if _, err := Parse([]byte("dev: true\nsecurity: {password: {argon2: {memory_kib: 8, iterations: 1}}}\n")); err != nil {
 		t.Errorf("light params in dev: %v", err)
+	}
+}
+
+func TestTrustedProxyPrefixes(t *testing.T) {
+	s := Server{TrustedProxies: []string{"192.0.2.0/24", "::ffff:198.51.100.0/120", "::ffff:203.0.113.7", "2001:db8::/32", "10.0.0.1"}}
+	got, err := s.TrustedProxyPrefixes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"192.0.2.0/24", "198.51.100.0/24", "203.0.113.7/32", "2001:db8::/32", "10.0.0.1/32"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", got)
+	}
+	for i, p := range got {
+		if p.String() != want[i] {
+			t.Errorf("%d: got %s, want %s", i, p, want[i])
+		}
 	}
 }
