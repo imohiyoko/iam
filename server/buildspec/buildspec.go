@@ -34,6 +34,7 @@ import (
 	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
+	"github.com/imohiyoko/iam/authn/wsfed"
 	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/eventlog"
@@ -80,6 +81,7 @@ var featureCatalog = map[string]struct {
 	feature.SMSOTP:             {sms.Feature, module + "/features/sms"},
 	feature.PushAuth:           {push.Feature, module + "/features/push"},
 	feature.X509:               {x509method.Feature, module + "/features/x509"},
+	feature.WSFed:              {wsfed.Feature, module + "/features/wsfed"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

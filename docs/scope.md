@@ -85,7 +85,8 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 同意画面・サードパーティ・動的登録（RFC 7591、7592） | S P | ⛔ | ADR 0026 |
 | ロール・Group のクレーム | P | △ | `pre_token` フックで足せる |
 | SAML 2.0 IdP | S P C | ❌ | |
-| WS-Federation、CAS | P | ❌ | |
+| WS-Federation（パッシブ要求者プロファイル。SAML 1.1 / 2.0 のトークン） | P | ✅ | フィーチャー `wsfed`（ADR 0110）。署名は ECDSA だけ（RSA は RS256 のフィーチャーの後） |
+| CAS | P | ❌ | |
 | OAuth AS メタデータ（RFC 8414）、Protected Resource Metadata（RFC 9728） | S | ❌ | |
 | Device Authorization Grant（RFC 8628） | S P | ✅ | フィーチャー `device_flow`（ADR 0095） |
 | CIBA | S | ❌ | |

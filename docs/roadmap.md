@@ -499,6 +499,24 @@ Group のネスト、Org 階層（M7）。
 - [x] memory・SQLite・PostgreSQL の契約テスト、GeoIP の CSV の解析のファジング、HTTP の通しのテスト
 - ホスト型のログイン画面の CAPTCHA のウィジェット、MaxMind の mmdb の GeoIP のアダプタ、ロックの本人への通知
 
+#### WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）
+
+**ゴール**：WS-Federation しか持たない RP（ECDSA の署名を読めるもの）が、ADFS の代わりに iam でサインインできる。
+
+- [x] フィーチャー `wsfed`（既定オフ）。実装は `authn/wsfed`。オフならエンドポイントは 404、管理 API は `404 wsfed_disabled`
+- [x] 管理 API（`/v1/admin/wsfed/relying-parties`、`clients:manage`）で realm ごとに RP を登録できる：`wtrealm`、`wreply` の許可リスト、
+  クレームの対応（`user_id`・確認済みの `email`・`org_id`・`amr`・カスタム属性）、トークンの種類（SAML 1.1 / 2.0）、有効期間
+- [x] `wa=wsignin1.0`：知らない `wtrealm`・登録と完全一致でない `wreply`・応えられない引数（`wreq`・`wauth` など）・重ねた引数を
+  RP に戻さずに 400 で拒むテストがある。ログインしていなければ要求を封をして預け、ログイン画面から戻って RP の登録を確かめ直す。`wfresh` を守る
+- [x] SAML 1.1 / 2.0 の bearer の Assertion（Audience は `wtrealm`、主体は公開のユーザー ID）を RSTR に入れ、realm の ES256 の鍵で
+  XML 署名（ECDSA-SHA256、Exclusive C14N、署名の値は `r||s`）する。goxmldsig の検証で通り、書き換えると通らないテストがある
+- [x] `/FederationMetadata/2007-06/FederationMetadata.xml`（署名付き）。鍵ごとの証明書を置いて同じものを返し、鍵の切り替えの後も退役した鍵の証明書を載せる
+- [x] `wa=wsignout1.0`：登録済みの `wtrealm` と `wreply` のときだけセッションを終えて戻す
+- [x] 監査ログ（`wsfed.token_issued`・`wsfed.signed_out`・RP の作成・変更・削除）、無効化で RP と証明書を消す、
+  memory・SQLite・PostgreSQL の契約テスト、要求の引数と登録の入力のファジング
+- RSA-SHA256 の署名（RS256 のフィーチャーの後。.NET Framework の WIF の RP のため）、ほかの RP へのサインアウトの伝播（`wsignoutcleanup1.0`）、
+  `wreq` のクレームの要求、暗号化したトークン、RP のメタデータからの登録
+
 ### M10 エンタープライズの運用
 
 - [x] 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作（ADR 0097）

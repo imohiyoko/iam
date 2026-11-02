@@ -338,6 +338,26 @@ type AuthnUserIdentity struct {
 	RevokeReason    string
 }
 
+type AuthnWsfedCertificate struct {
+	RealmID   string
+	KeyID     string
+	Der       []byte
+	CreatedAt string
+}
+
+type AuthnWsfedRelyingParty struct {
+	ID            string
+	RealmID       string
+	Realm         string
+	Name          string
+	ReplyUrls     string
+	TokenType     string
+	Claims        []byte
+	TokenLifetime int64
+	CreatedAt     string
+	UpdatedAt     string
+}
+
 type AuthzActionNamespace struct {
 	RealmID   string
 	Name      string

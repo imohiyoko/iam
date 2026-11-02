@@ -204,6 +204,11 @@ var cleaners = map[string]cleaner{
 			return true, tx.Clients().Update(ctx, c)
 		})
 	}},
+	// WS-Federation の RP と署名の証明書を消す（ADR 0110）。ログイン画面で待つ間の要求は EphemeralStore にあり、期限で消える。
+	feature.WSFed: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.WSFed().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return tx.WSFed().Purge(ctx, limit)
+		}},
 }
 
 // eachClient は全 realm の連携先に fn を呼び、true を返した数を数える。limit が 0 以上なら、その数で止める。

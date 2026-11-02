@@ -51,6 +51,8 @@ const (
 	DeviceRecognition = "device_recognition"
 	LoginRisk         = "login_risk"
 	BotProtection     = "bot_protection"
+	// WSFed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。
+	WSFed = "wsfed"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

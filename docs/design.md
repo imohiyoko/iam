@@ -225,6 +225,9 @@ suspensions          id, realm_id, target_type（user / org / service_account / 
                      created_by, created_at, lifted_at, lifted_by
 clients              id, realm_id, name, trust_level（first_party / third_party。当面は first_party のみ）, redirect_uris
                      auth_method（private_key_jwt / client_secret / none）, id_token_signed_response_alg（ML-DSA-65 / ES256）, created_at
+wsfed_relying_parties  id, realm_id, realm（wtrealm）, name, reply_urls, token_type（saml11 / saml20）, claims, token_lifetime
+                     UNIQUE (realm_id, realm)。WS-Federation の RP（5.8、ADR 0110）
+wsfed_certificates   realm_id, key_id（signing_keys の ID）, der, PK (realm_id, key_id)。署名鍵の自己署名の証明書
 
 user_attributes      user_id, key, value, PK (user_id, key)（11.7 の汎用形。アダプタが別の持ち方を選んでもよい）
 
@@ -623,6 +626,20 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 - 交換の認可は元の認可（`parent_id`）とログインの系列に結び付ける。元の失効・系列の終わり・本人が使えなくなることは交換したトークンにもすぐ効く。リフレッシュトークンは出さない
 - イントロスペクションは `act`・交換の `aud`、なりすましには `impersonation: true` を返す
 
+### 5.8 WS-Federation
+
+フィーチャー `wsfed`（既定オフ。ADR 0110）。WS-Federation 1.2 のパッシブ要求者プロファイルで、iam が IdP（STS）になる。
+
+- `GET /wsfed` の `wa=wsignin1.0`：`wtrealm` が登録にあり、`wreply` が無いか登録と完全一致のときだけ受ける。応えられない引数
+  （`wreq`・`wreqptr`・`wauth` など）と重ねた引数も拒み、どの誤りも RP に戻さずに 400 の画面にする。ブラウザのセッション（`wfresh` を満たすもの）が
+  無ければ、要求を EphemeralStore に封をして預けてログイン画面へ回し、`/wsfed/resume` で RP の登録を確かめ直す
+- 応答は `wreply` へ自動で POST する画面（`wa`・`wresult`・`wctx`。CSP の `form-action` は `wreply` のオリジンだけ）。`wresult` は
+  WS-Trust 2005/02 の RSTR に、SAML 1.1（既定）か SAML 2.0 の bearer の Assertion を入れたもの。Audience は `wtrealm`、主体は
+  公開のユーザー ID、クレームは RP ごとの対応（メールは確認済みのものだけ。Org の文脈では Membership に結び付けたもの。4.4）
+- Assertion とメタデータ（`/FederationMetadata/2007-06/FederationMetadata.xml`）は realm の ES256 の鍵で XML 署名する（9.3）
+- `wa=wsignout1.0`：登録済みの `wtrealm` と `wreply` のときだけ、確かめずにセッションを失効させて戻す（`POST /v1/logout` と同じ）
+- RP は管理 API（`/v1/admin/wsfed/relying-parties`、`clients:manage`）で realm ごとに登録する
+
 ## 6. 監査ログとイベント出力
 
 ### 6.1 記録するもの
@@ -705,6 +722,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 - JWKS に ML-DSA-65（`kty: AKP`、RFC 9964）と ES256 を公開し、クライアントごとに選ぶ（`id_token_signed_response_alg`）。主要な RP が対応したら ES256 を廃止する
 - 実装：zitadel/oidc の go-jose に `OpaqueSigner` で `crypto/mldsa` を差し込む。JWKS の AKP 出力は jwx で組み立てる（ADR 0038）
 - RS256 を出さないため、OIDC Discovery には厳密には適合しない（既知の差異）
+- WS-Federation（5.8）の Assertion とメタデータは、同じ realm の ES256 の鍵で XML 署名する（ECDSA-SHA256、Exclusive C14N、署名の値は `r||s`）。鍵ごとの自己署名の証明書を `wsfed_certificates` に置いて同じものを出す。RSA しか読めない RP とはつながらない
 
 ### 9.4 外部の RSA
 
@@ -814,6 +832,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | ログインのリスクの点数（11.17） | オフ | 端末の記憶 | 組み込みのリスク `device`・`ip` を付けない（フックの点数はそのまま） |
 | ボット対策（11.17） | オフ | ― | ログインの入口で人の確認を求めない |
 | LDAP / Active Directory（11.3、ADR 0102） | オフ | ― | LDAP の connection を使わない・同期しない（Org 専用には Org 管理ユーザーも要る） |
+| WS-Federation（5.8、ADR 0110） | オフ | ― | `/wsfed` とメタデータは 404、RP の管理 API は `404 wsfed_disabled`。無効化は RP と署名の証明書を消して完了 |
 
 ### 11.1 複数 realm
 

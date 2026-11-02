@@ -77,6 +77,8 @@ type Tx interface {
 	SigningKeys() SigningKeyRepo
 	Grants() GrantRepo
 	OIDCTokens() OIDCTokenRepo
+	// WSFed は WS-Federation の RP と署名の証明書（フィーチャー wsfed。ADR 0110）。
+	WSFed() WSFedRepo
 }
 
 // Realm はユーザー集合の単位（design.md 3.1）。

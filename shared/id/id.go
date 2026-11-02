@@ -118,6 +118,8 @@ const (
 	MasterKey         Prefix = "mk"
 	IndexKey          Prefix = "ik"
 	AuditKey          Prefix = "ak"
+	// WSFedRelyingParty は WS-Federation の RP（ADR 0110）。
+	WSFedRelyingParty Prefix = "wrp"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。
