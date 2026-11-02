@@ -453,3 +453,55 @@ func TestMTLSFeatureOff(t *testing.T) {
 		t.Fatalf("discovery while off: %v", disc)
 	}
 }
+
+// CIBA の grant（ADR 0114）でも、DPoP の証明でトークンを鍵に結び付ける。dpop_bound_access_tokens の連携先は証明が要り、
+// 証明の誤りはポーリングの間隔に数えない。
+func TestDPoPCIBA(t *testing.T) {
+	l := senderEnv(t, nil, feature.DPoP, feature.CIBA)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.cibaRP(t, owner, map[string]any{"backchannel_token_delivery_mode": "poll", "dpop_bound_access_tokens": true})
+	_, cookie := l.login(t, "alice@example.com")
+	k := dpoptest.NewKey(t)
+	h := l.a.PublicHandler()
+
+	status, res := p.bcAuthorize(t, url.Values{"scope": {"openid"}, "login_hint": {"alice@example.com"}})
+	id, _ := res["auth_req_id"].(string)
+	if status != 200 || id == "" {
+		t.Fatalf("bc-authorize: %d %v", status, res)
+	}
+	code, list := l.meDo(t, "GET", cookie, "/v1/me/backchannel-requests", nil)
+	reqs, _ := list["backchannel_requests"].([]any)
+	if code != 200 || len(reqs) != 1 {
+		t.Fatalf("list: %d %v", code, list)
+	}
+	if code, _ := l.meDo(t, "POST", cookie, "/v1/me/backchannel-requests/"+reqs[0].(map[string]any)["id"].(string)+":approve", nil); code != 204 {
+		t.Fatalf("approve: %d", code)
+	}
+	l.advance(10 * time.Second)
+	form := func() url.Values {
+		return url.Values{"grant_type": {provider.GrantTypeCIBA}, "auth_req_id": {id}, "client_id": {p.clientID}, "client_secret": {p.secret}}
+	}
+	// 証明が無い・誤った証明は invalid_dpop_proof（承認済みの要求は使われずに残る）。
+	if w, out := l.form(t, h, "POST", oidcToken, form(), nil); w.Code != 400 || out["error"] != "invalid_dpop_proof" {
+		t.Fatalf("no proof: %d %v", w.Code, out)
+	}
+	if w, out := l.form(t, h, "POST", oidcToken, form(), nil, "DPoP", l.proof(t, k, "POST", testIssuer+oidcUserinfo, "", "")); w.Code != 400 ||
+		out["error"] != "invalid_dpop_proof" {
+		t.Fatalf("wrong htu: %d %v", w.Code, out)
+	}
+	w, tok := l.form(t, h, "POST", oidcToken, form(), nil, "DPoP", l.proof(t, k, "POST", testIssuer+oidcToken, "", ""))
+	if w.Code != 200 || tok["token_type"] != "DPoP" {
+		t.Fatalf("token: %d %v", w.Code, tok)
+	}
+	if in := p.introspect(t, tok["access_token"].(string)); in["active"] != true || in["cnf"].(map[string]any)["jkt"] != k.JKT() {
+		t.Fatalf("introspect: %v", in)
+	}
+	// 機密の連携先のリフレッシュトークンは結び付けない（連携先の認証が守る）。
+	if in := p.introspect(t, tok["refresh_token"].(string)); in["active"] != true || in["cnf"] != nil {
+		t.Fatalf("introspect refresh: %v", in)
+	}
+	// 結び付けたアクセストークンは Bearer では UserInfo を通らない。
+	if w, _ := l.form(t, h, "GET", oidcUserinfo, nil, nil, "Authorization", "Bearer "+tok["access_token"].(string)); w.Code != 401 {
+		t.Fatalf("bearer use: %d", w.Code)
+	}
+}
