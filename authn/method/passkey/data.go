@@ -18,7 +18,6 @@ import (
 )
 
 // Data は方式固有のデータ（コアがユーザーのデータ鍵で暗号化して authn_credentials に置く）。公開鍵は COSE の形で、秘密ではない。
-// 移行（ADR 0106）でも作る。
 type Data struct {
 	CredentialID []byte `json:"credential_id"`
 	PublicKey    []byte `json:"public_key"` // COSE_Key
@@ -32,7 +31,7 @@ type Data struct {
 	// 認証器は元の持ち主の公開 ID を返すので、それを持ち続ける。
 	UserHandle []byte `json:"user_handle"`
 	Name       string `json:"name"`
-	// AttestationFormat は登録のときの attestation の形式（none、packed など。ADR 0096）。空はこの項目の前に登録したもの。
+	// AttestationFormat は登録のときの attestation の形式（none、packed など。ADR 0096）。空は形式が分からないもの。
 	AttestationFormat string `json:"attestation_format,omitempty"`
 	// Attested は登録のときに attestation の証明書の連なりを信頼の起点（MDS か設定）まで確かめたか。
 	Attested bool `json:"attested,omitempty"`

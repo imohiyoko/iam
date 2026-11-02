@@ -131,7 +131,7 @@ func (r authnCredentials) Revoke(_ context.Context, realmID, id string, at time.
 	c.RevokedAt, c.RevokeReason = &at, reason
 	setKey(r.t, r.t.s.authnCreds, id, c)
 	if c.ReserveLookup && len(c.Lookup) > 0 {
-		return r.Retire(context.Background(), port.RetiredLookup{RealmID: realmID, Method: c.Method, Lookup: c.Lookup, LookupKeyID: c.LookupKeyID, RetiredAt: at})
+		return r.retire(port.RetiredLookup{RealmID: realmID, Method: c.Method, Lookup: c.Lookup, LookupKeyID: c.LookupKeyID, RetiredAt: at})
 	}
 	return nil
 }
@@ -151,7 +151,8 @@ func retiredKey(realmID, method string, lookup []byte) string {
 	return realmID + "\x00" + method + "\x00" + string(lookup)
 }
 
-func (r authnCredentials) Retire(_ context.Context, x port.RetiredLookup) error {
+// retire は検索キーを退役済みに加える（既にあれば何もしない）。
+func (r authnCredentials) retire(x port.RetiredLookup) error {
 	if len(x.Lookup) == 0 {
 		return errs.New(errs.KindInvalid, "retired lookup is empty")
 	}

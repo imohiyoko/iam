@@ -590,3 +590,5 @@ func testRealmIsolation(t *testing.T, h Harness) {
 	s, clk := open(t, h)
 	CheckRealmIsolation(t, s, clk, IsolationCases)
 }
+
+func second[V any](_ V, err error) error { return err }

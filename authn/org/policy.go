@@ -249,8 +249,8 @@ func (s *Service) emailInDomains(ctx context.Context, tx port.Tx, m port.Members
 func (s *Service) passkeyAllowed(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, p *attestation.Policy, in session.OrgPick) (bool, error) {
 	var ps []port.Credential
 	for _, c := range in.Credentials {
-		// 移す前の psk_ と、汎用の crd_ の ID（ADR 0106）。方式が passkey のものだけを判定する。
-		if !strings.HasPrefix(c, string(id.Passkey)+"_") && !strings.HasPrefix(c, string(id.Credential)+"_") {
+		// 汎用の認証情報（crd_。ADR 0106）のうち、方式が passkey のものだけを判定する。
+		if !strings.HasPrefix(c, string(id.Credential)+"_") {
 			continue
 		}
 		if ps == nil {

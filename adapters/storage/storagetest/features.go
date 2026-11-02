@@ -26,9 +26,6 @@ func testFeatureDataCountPurge(t *testing.T, h Harness) {
 	r1, r2 := id.New(id.Realm), id.New(id.Realm)
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		for _, r := range []string{r1, r2, r2} {
-			if err := tx.Passwords().Create(ctx, newPassword(r, id.New(id.User))); err != nil {
-				return err
-			}
 			o := newOrg(r, port.OrgShared, "")
 			if err := tx.Orgs().Create(ctx, o); err != nil {
 				return err
@@ -43,20 +40,11 @@ func testFeatureDataCountPurge(t *testing.T, h Harness) {
 		return nil
 	})
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
-		if n, err := tx.Passwords().Count(ctx); err != nil || n != 3 {
-			return fmt.Errorf("passwords.Count = %d, %v", n, err)
-		}
 		if n, err := tx.QuotaGrants().Count(ctx); err != nil || n != 3 {
 			return fmt.Errorf("quotaGrants.Count = %d, %v", n, err)
 		}
-		if n, err := tx.Passwords().Purge(ctx, 2); err != nil || n != 2 {
-			return fmt.Errorf("passwords.Purge(2) = %d, %v", n, err)
-		}
 		if n, err := tx.QuotaGrants().Purge(ctx, 2); err != nil || n != 2 {
 			return fmt.Errorf("quotaGrants.Purge(2) = %d, %v", n, err)
-		}
-		if n, err := tx.Passwords().Purge(ctx, 10); err != nil || n != 1 {
-			return fmt.Errorf("passwords.Purge = %d, %v", n, err)
 		}
 		if n, err := tx.QuotaGrants().Purge(ctx, 10); err != nil || n != 1 {
 			return fmt.Errorf("quotaGrants.Purge = %d, %v", n, err)
@@ -72,9 +60,6 @@ func testFeatureDataCountPurge(t *testing.T, h Harness) {
 		}
 		if n, err := tx.OrgDomains().Count(ctx); err != nil || n != 0 {
 			return fmt.Errorf("orgDomains.Count after purge = %d, %v", n, err)
-		}
-		if n, err := tx.Passwords().Count(ctx); err != nil || n != 0 {
-			return fmt.Errorf("passwords.Count after purge = %d, %v", n, err)
 		}
 		if n, err := tx.QuotaGrants().Count(ctx); err != nil || n != 0 {
 			return fmt.Errorf("quotaGrants.Count after purge = %d, %v", n, err)

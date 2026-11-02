@@ -243,18 +243,6 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	for _, w := range plan.Warnings {
 		d.Logger.Warn("feature", "message", w)
 	}
-	// TOTP とパスワードを方式専用の表から authn_credentials へ移す（ADR 0101）。移した行は古い表から消え、台帳に記録する。
-	if m, err := credential.MigrateLegacy(ctx, d.Storage, crypter, d.Clock, prepareBatch); err != nil {
-		return nil, fmt.Errorf("app: migrate totp and password credentials: %w", err)
-	} else if m != (credential.Migrated{}) {
-		d.Logger.Info("migrated credentials to authn_credentials", "totp", m.TOTP, "passwords", m.Passwords)
-	}
-	// passkey を方式専用の表から authn_credentials へ移す（ADR 0106）。
-	if m, err := credential.MigratePasskeys(ctx, d.Storage, crypter, d.Clock, prepareBatch); err != nil {
-		return nil, fmt.Errorf("app: migrate passkeys: %w", err)
-	} else if m != (credential.MigratedPasskeys{}) {
-		d.Logger.Info("migrated passkeys to authn_credentials", "passkeys", m.Passkeys, "retired", m.Retired)
-	}
 
 	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary, clientSealer: clientSealer, pii: crypter}
 	a.root = a
@@ -612,8 +600,7 @@ func (a *App) accountLimiter() *ratelimit.Limiter {
 // active で記録する。片付けるデータも準備するデータも無いため、enable の手順（11.12）を省ける。
 // 既存の DB では何もしない（`iam features enable` で明示的に進める）。
 func activateOnFreshInstall(ctx context.Context, tx port.Tx, clk clock.Clock, ledger []port.FeatureRecord, binary []feature.Feature, enabled []string) ([]port.FeatureRecord, error) {
-	// コアのデータの移行の記録（ADR 0101）はフィーチャーの記録に数えない。
-	if slices.ContainsFunc(ledger, func(r port.FeatureRecord) bool { return !feature.IsMigration(r.Feature) }) {
+	if len(ledger) > 0 {
 		return ledger, nil
 	}
 	realms, err := tx.Realms().List(ctx)

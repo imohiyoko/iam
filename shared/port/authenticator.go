@@ -352,7 +352,7 @@ type Credential struct {
 	LookupKeyID string
 	Data        []byte
 	DataVersion int
-	// PreferredOrgID はこの認証情報でログインしたときに入る Org（内部 ID。4.4。passkey から移した。ADR 0106）。空なら指定なし。
+	// PreferredOrgID はこの認証情報でログインしたときに入る Org（内部 ID。4.4。passkey が使う。ADR 0106）。空なら指定なし。
 	PreferredOrgID string
 	// ReserveLookup は、無効化で Lookup を退役済みに加える（方式の MethodInfo.ReserveRevokedLookups。ADR 0106）。
 	ReserveLookup bool
@@ -396,8 +396,6 @@ type CredentialRepo interface {
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
 	// SetPreferredOrg はログインで入る Org（内部 ID。空なら指定なし）を変える。無ければ errs.NotFound（ADR 0106）。
 	SetPreferredOrg(ctx context.Context, realmID, id, orgID string) error
-	// Retire は検索キーを退役済みに加える（既にあれば何もしない。方式専用の表からの移行。ADR 0106）。
-	Retire(ctx context.Context, r RetiredLookup) error
 	// LookupRetired は (realm, method, lookup) が退役済みかを返す。
 	LookupRetired(ctx context.Context, realmID, method string, lookup []byte) (bool, error)
 	// RetiredLookupKeyIDs は方式の退役済みの検索キーの LookupKeyID を、重複を除いて名前の順に返す（インデックス鍵の切り替えの後も、

@@ -1,10 +1,8 @@
 package storagetest
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -13,112 +11,6 @@ import (
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/port"
 )
-
-func newPasskey(realmID, userID, credentialID string) port.Passkey {
-	return port.Passkey{ID: id.New(id.Passkey), PublicID: id.NewExternal(id.Passkey), RealmID: realmID, UserID: userID,
-		CredentialID: []byte(credentialID), PublicKey: []byte("cose-key"), Alg: -7, SignCount: 0, Flags: 0x1d,
-		AAGUID: make([]byte, 16), Transports: []string{"internal", "hybrid"}, Name: "Passkey", CreatedAt: T0,
-		AttestationFormat: "packed", Attested: true}
-}
-
-// testLegacyPasskeys は、authn_credentials への移行（ADR 0106）で使う、方式専用の passkey の表の列挙と削除を確かめる。
-func testLegacyPasskeys(t *testing.T, h Harness) {
-	s, _ := open(t, h)
-	r1, r2, u := id.New(id.Realm), id.New(id.Realm), id.New(id.User)
-	p := newPasskey(r1, u, "cred-1")
-	p.UserHandle, p.PreferredOrgID = []byte("handle"), id.New(id.Org)
-	bare := newPasskey(r2, u, "cred-2")
-	// attestation を確かめていない行（ADR 0096 の前に登録したもの）。
-	bare.AAGUID, bare.Transports, bare.AttestationFormat, bare.Attested = nil, nil, "", false
-	at := T0.Add(time.Hour)
-	tx(t, s, func(ctx context.Context, tx port.Tx) error {
-		repo := tx.Passkeys()
-		for _, x := range []port.Passkey{p, bare} {
-			if err := repo.Create(ctx, x); err != nil {
-				return err
-			}
-		}
-		if err := conflict("same credential id", repo.Create(ctx, newPasskey(r1, id.New(id.User), "cred-1"))); err != nil {
-			return err
-		}
-		dup := newPasskey(r1, u, "cred-x")
-		dup.PublicID = p.PublicID
-		if err := conflict("same public id", repo.Create(ctx, dup)); err != nil {
-			return err
-		}
-		all, err := repo.ListAll(ctx, 10)
-		if err != nil || len(all) != 2 {
-			return fmt.Errorf("passkeys.ListAll = %+v, %v", all, err)
-		}
-		want := map[string]port.Passkey{p.ID: p, bare.ID: bare}
-		for _, x := range all {
-			w := want[x.ID]
-			if w.ID == bare.ID {
-				w.AAGUID, w.Transports = x.AAGUID, x.Transports
-				if len(x.AAGUID) != 0 || len(x.Transports) != 0 {
-					return fmt.Errorf("bare passkey = %+v", x)
-				}
-			}
-			if !reflect.DeepEqual(x, w) {
-				return fmt.Errorf("passkeys.ListAll %s = %+v, want %+v", x.ID, x, w)
-			}
-		}
-		if all[0].ID > all[1].ID {
-			return fmt.Errorf("passkeys.ListAll is not in id order")
-		}
-		if first, err := repo.ListAll(ctx, 1); err != nil || len(first) != 1 || first[0].ID != all[0].ID {
-			return fmt.Errorf("passkeys.ListAll(1) = %+v, %v", first, err)
-		}
-		// 無効化は credential ID を無効化済みに残す。2度目は何もしない。別の realm・無いものは NotFound。
-		if err := repo.Revoke(ctx, r1, p.ID, at, "revoked_by_user"); err != nil {
-			return err
-		}
-		if err := repo.Revoke(ctx, r1, p.ID, at.Add(time.Hour), "again"); err != nil {
-			return err
-		}
-		for name, err := range map[string]error{
-			"revoke in another realm": repo.Revoke(ctx, r2, p.ID, at, "x"),
-			"revoke missing":          repo.Revoke(ctx, r1, id.New(id.Passkey), at, "x"),
-		} {
-			if err := notFound(name, err); err != nil {
-				return err
-			}
-		}
-		all, err = repo.ListAll(ctx, 10)
-		if err != nil {
-			return err
-		}
-		for _, x := range all {
-			if x.ID == p.ID && (x.RevokedAt == nil || !x.RevokedAt.Equal(at) || x.RevokeReason != "revoked_by_user") {
-				return fmt.Errorf("revoked passkey = %+v", x)
-			}
-		}
-		rv, err := repo.ListRevoked(ctx, 10)
-		if err != nil || len(rv) != 1 || rv[0].RealmID != r1 || !bytes.Equal(rv[0].CredentialID, p.CredentialID) || !rv[0].RevokedAt.Equal(at) {
-			return fmt.Errorf("passkeys.ListRevoked = %+v, %v", rv, err)
-		}
-		// 消す：別の realm の ID では消さない。無いものは何もしない。
-		for _, err := range []error{repo.Delete(ctx, r2, p.ID), repo.Delete(ctx, r1, id.New(id.Passkey)), repo.Delete(ctx, r1, p.ID),
-			repo.DeleteRevoked(ctx, r2, p.CredentialID), repo.DeleteRevoked(ctx, r1, []byte("none"))} {
-			if err != nil {
-				return err
-			}
-		}
-		if left, err := repo.ListAll(ctx, 10); err != nil || len(left) != 1 || left[0].ID != bare.ID {
-			return fmt.Errorf("passkeys after delete = %+v, %v", left, err)
-		}
-		if rv, err := repo.ListRevoked(ctx, 10); err != nil || len(rv) != 1 {
-			return fmt.Errorf("revoked after delete in another realm = %+v, %v", rv, err)
-		}
-		if err := repo.DeleteRevoked(ctx, r1, p.CredentialID); err != nil {
-			return err
-		}
-		if rv, err := repo.ListRevoked(ctx, 10); err != nil || len(rv) != 0 {
-			return fmt.Errorf("revoked after delete = %+v, %v", rv, err)
-		}
-		return nil
-	})
-}
 
 // testRetiredLookups は、退役した検索キー（ADR 0106）と、認証情報の Org の指定を確かめる。
 func testRetiredLookups(t *testing.T, h Harness) {
@@ -176,7 +68,7 @@ func testRetiredLookups(t *testing.T, h Harness) {
 		if err := conflict("re-create retired", repo.Create(ctx, newCredential(r, id.New(id.User), "passkey", []byte("cred-1")))); err != nil {
 			return err
 		}
-		// 無効化した行としてなら作れる（移行で履歴を写す）。
+		// 無効化した行としてなら作れる（履歴。退役の確認は有効なものだけ）。
 		hist := newCredential(r, u, "passkey", []byte("cred-1"))
 		hist.RevokedAt = &at
 		if err := repo.Create(ctx, hist); err != nil {
@@ -187,15 +79,20 @@ func testRetiredLookups(t *testing.T, h Harness) {
 				return fmt.Errorf("create %s: %w", x.Method, err)
 			}
 		}
-		// Retire は重ねても何もしない。空の検索キーは誤り。
-		if err := repo.Retire(ctx, port.RetiredLookup{RealmID: r, Method: "passkey", Lookup: []byte("cred-1"), LookupKeyID: "ik_other", RetiredAt: at}); err != nil {
-			return err
-		}
-		if err := repo.Retire(ctx, port.RetiredLookup{RealmID: r, Method: "passkey", Lookup: []byte("cred-9"), LookupKeyID: "ik_0", RetiredAt: at}); err != nil {
-			return err
-		}
-		if err := repo.Retire(ctx, port.RetiredLookup{RealmID: r, Method: "passkey", RetiredAt: at}); err == nil {
-			return fmt.Errorf("retire of an empty lookup succeeded")
+		// 別の鍵で作ったものを退役させる。無効化を重ねても何もしない。検索キーの無いものは退役させない。
+		old := newCredential(r, u, "passkey", []byte("cred-9"))
+		old.ReserveLookup, old.LookupKeyID = true, "ik_0"
+		bare := newCredential(r, u, "passkey", nil)
+		bare.ReserveLookup, bare.LookupKeyID = true, "ik_bare"
+		for _, x := range []port.Credential{old, bare} {
+			if err := repo.Create(ctx, x); err != nil {
+				return err
+			}
+			for range 2 {
+				if err := repo.Revoke(ctx, r, x.ID, at, "revoked_by_user"); err != nil {
+					return err
+				}
+			}
 		}
 		if ids, err := repo.RetiredLookupKeyIDs(ctx, r, "passkey"); err != nil || !slices.Equal(ids, []string{"ik_0", "ik_1"}) {
 			return fmt.Errorf("retired key ids = %v, %v", ids, err)
@@ -220,7 +117,12 @@ func testRetiredLookups(t *testing.T, h Harness) {
 var passkeyIsolationCase = IsolationCase{
 	Name: "Credentials.LookupRetired+RetiredLookupKeyIDs",
 	Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
-		return tx.Credentials().Retire(ctx, port.RetiredLookup{RealmID: r, Method: "passkey", Lookup: []byte("iso-cred"), LookupKeyID: "ik_iso", RetiredAt: T0})
+		c := newCredential(r, isoUser, "passkey", []byte("iso-cred"))
+		c.ReserveLookup, c.LookupKeyID = true, "ik_iso"
+		if err := tx.Credentials().Create(ctx, c); err != nil {
+			return err
+		}
+		return tx.Credentials().Revoke(ctx, r, c.ID, T0, "revoked_by_user")
 	},
 	Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {
 		ok, err := tx.Credentials().LookupRetired(ctx, r, "passkey", []byte("iso-cred"))

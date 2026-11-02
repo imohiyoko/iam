@@ -972,8 +972,8 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 					found, revoked = true, i.RevokedAt != nil
 				}
 			}
-		// 方式専用の表から移した TOTP（ADR 0101）と passkey（ADR 0106）は otp_・psk_ の ID のまま汎用の認証情報にある。
-		case strings.HasPrefix(c, string(id.TOTP)+"_"), strings.HasPrefix(c, string(id.Passkey)+"_"), strings.HasPrefix(c, string(id.Credential)+"_"):
+		// TOTP・passkey などの汎用の認証情報（ADR 0092、0101、0106）。
+		case strings.HasPrefix(c, string(id.Credential)+"_"):
 			if creds == nil {
 				var err error
 				if creds, err = tx.Credentials().ListByUser(ctx, s.RealmID, s.PrincipalID, ""); err != nil {
