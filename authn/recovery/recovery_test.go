@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
+	password "github.com/imohiyoko/iam/authn/method/password"
 	"github.com/imohiyoko/iam/authn/notify"
-	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/recovery"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/internal/testkit"
@@ -164,8 +164,8 @@ func TestComplete(t *testing.T) {
 	}
 	e.k.Clock.Advance(time.Second)
 	e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
-		return tx.TOTP().Create(ctx, port.TOTPCredential{ID: id.New(id.TOTP), PublicID: id.NewExternal(id.TOTP), RealmID: e.k.RealmID,
-			UserID: e.user.ID, SecretCiphertext: []byte("x"), CreatedAt: e.k.Clock.Now()})
+		return tx.Credentials().Create(ctx, port.Credential{ID: id.New(id.Credential), PublicID: id.NewExternal(id.Credential), RealmID: e.k.RealmID,
+			UserID: e.user.ID, Method: "totp", Data: []byte("x"), DataVersion: 1, CreatedAt: e.k.Clock.Now()})
 	})
 	fresh, revoked, err := e.s.Complete(ctx, e.k.RealmID, is.Session.ID, recovery.Client{})
 	if err != nil || len(fresh) != recovery.Count || len(revoked) != 2 {

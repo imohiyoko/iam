@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/errs"
@@ -78,5 +80,21 @@ func (r passwords) Revoke(_ context.Context, realmID, id string, at time.Time, r
 	c = clonePassword(c)
 	c.RevokedAt, c.RevokeReason = &at, reason
 	setKey(r.t, r.t.s.passwords, id, c)
+	return nil
+}
+
+func (r passwords) ListAll(_ context.Context, limit int) ([]port.PasswordCredential, error) {
+	var out []port.PasswordCredential
+	for _, x := range r.t.s.passwords {
+		out = append(out, clonePassword(x))
+	}
+	slices.SortFunc(out, func(a, b port.PasswordCredential) int { return strings.Compare(a.ID, b.ID) })
+	return out[:min(limit, len(out))], nil
+}
+
+func (r passwords) Delete(_ context.Context, realmID, id string) error {
+	if c, ok := r.t.s.passwords[id]; ok && c.RealmID == realmID {
+		deleteKey(r.t, r.t.s.passwords, id)
+	}
 	return nil
 }
