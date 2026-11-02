@@ -1499,6 +1499,12 @@ paths:
         方式（`{method}`）は、そのフィーチャーが動いているもの（ADR 0090、0092）。無ければ 404。応答の `payload` は方式ごとの形で、
         秘密を含みうるので本人にだけ返す。登録だけのセッション（`next: enroll`）では2要素目に使える方式だけを使え、
         復旧専用のセッションでも使える。
+
+        組み込みの方式（ADR 0101）：`totp`（payload なし。応答は `secret` と `uri`。完了は `{"code"}`。有効なものがあれば
+        409 `totp_exists`）と、`password`（フィーチャー password。payload は `{"password", "current_password"}`。置き換えには
+        今のパスワードが要り（違えば 409 `current_password_mismatch`）、復旧専用のセッションでは要らない。長さと漏洩の確認で
+        400 `password_too_short`・`password_too_long`・`password_breached`。完了は payload なしで、今のセッション以外を失効させる）。
+        知識の要素（パスワード）は、始めで今の秘密を照合するので、本人ごとの回数の上限を超えれば 429。
       security:
         - cookieAuth: []
         - bearerAuth: []

@@ -5,7 +5,7 @@
 - 関連: [design.md](../design.md) 2.4、4.1、11.11、[0010](0010-feature-toggles.md)、[0014](0014-pii-encryption-minimization.md)、
   [0022](0022-deny-reason-disclosure.md)、[0031](0031-notifier-ids-only.md)、[0050](0050-second-factor.md)、[0069](0069-org-login-policy.md)、
   [0073](0073-build-and-feature-toggle.md)、[0083](0083-multi-realm.md)、[0089](0089-enterprise-full-scope.md)、
-  [0090](0090-authenticator-plugins.md)、[0092](0092-authenticator-port-implementation.md)、[0093](0093-acr-aal-step-up.md)
+  [0090](0090-authenticator-plugins.md)、[0092](0092-authenticator-port-implementation.md)、[0093](0093-acr-aal-step-up.md)、[0101](0101-port-totp-and-password.md)
 
 ## 背景
 
@@ -37,7 +37,7 @@
 ### ポートの拡張（0092 への追加）
 
 - `MethodEnv.ClientIP`：要求の接続元（接続元ごとの制限に使う）
-- `MethodChallenge.Deliver`：コアが**トランザクションを確定した後**に呼ぶ送信。失敗すればフローを置かず、`503 delivery_failed` を返す
+- `MethodChallenge.Deliver`：コアが方式の `Begin`・`EnrollBegin` の後に、**トランザクションの外**で呼ぶ送信（0101 で方式はトランザクションの外で呼ぶ形になった。送信も DB のロックを持たない）。失敗すればフローを置かず、`503 delivery_failed` を返す
 - `MethodChallenge.Events`・`MethodCallbackResult.Events`：方式が残したい監査ログ。コアが種類を `method.<方式>.<出来事>` にして、
   本人の公開 ID と一緒に記録する（方式は Storage を触らない）。詳細に電話番号・宛先・コードを入れない
 - `MethodInfo.OutOfBand` と `port.ErrMethodPending`：応答が別の経路（端末）から届く方式。`Complete` が `ErrMethodPending` を返したら、

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	pwm "github.com/imohiyoko/iam/authn/method/password"
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/publicapi"
@@ -88,11 +89,11 @@ func (s publicServer) SetMyPassword(ctx context.Context, req publicapi.SetMyPass
 		return publicapi.SetMyPassword429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
 	switch {
-	case errors.Is(err, password.ErrTooShort), errors.Is(err, password.ErrTooLong), errors.Is(err, password.ErrBreached):
+	case errors.Is(err, pwm.ErrTooShort), errors.Is(err, pwm.ErrTooLong), errors.Is(err, pwm.ErrBreached):
 		return publicapi.SetMyPassword400JSONResponse{BadRequestJSONResponse: publicapi.BadRequestJSONResponse{Error: errCode(err)}}, nil
-	case errors.Is(err, password.ErrReauthRequired):
+	case errors.Is(err, pwm.ErrReauthRequired):
 		return publicapi.SetMyPassword401JSONResponse{UnauthenticatedJSONResponse: publicapi.UnauthenticatedJSONResponse{Error: errCode(err)}}, nil
-	case errors.Is(err, password.ErrCurrentPassword):
+	case errors.Is(err, pwm.ErrCurrentPassword):
 		return publicapi.SetMyPassword409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: errCode(err)}}, nil
 	case err != nil:
 		return nil, err

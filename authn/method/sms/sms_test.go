@@ -227,3 +227,5 @@ func FuzzNormalizeNumber(f *testing.F) {
 		}
 	})
 }
+
+func (f *fakeStore) Revoke(context.Context, port.MethodCredential, string) error { return nil }

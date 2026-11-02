@@ -156,10 +156,22 @@ var cleaners = map[string]cleaner{
 			return true, tx.Clients().Update(ctx, c)
 		})
 	}},
-	feature.Password: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.Passwords().Count(ctx) },
-		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
-			return tx.Passwords().Purge(ctx, limit)
-		}},
+	// パスワードは authn_credentials（方式 password。ADR 0101）にある。移す前の表に残っていれば（移行の前に止めたとき）それも消す。
+	feature.Password: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		n, err := tx.Passwords().Count(ctx)
+		if err != nil {
+			return 0, err
+		}
+		c, err := tx.Credentials().Count(ctx, method.Password)
+		return n + c, err
+	}, Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+		n, err := tx.Passwords().Purge(ctx, limit)
+		if err != nil || n >= limit {
+			return n, err
+		}
+		c, err := tx.Credentials().Purge(ctx, method.Password, limit-n)
+		return n + c, err
+	}},
 	// 連携先の Device Authorization Grant の許可を外す（ADR 0095）。途中の要求は EphemeralStore にあり、期限で消える。
 	feature.DeviceFlow: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		return eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.DeviceGrant, nil })

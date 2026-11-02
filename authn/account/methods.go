@@ -2,11 +2,11 @@ package account
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/eventlog"
@@ -38,10 +38,12 @@ type Methods struct {
 	Emails     []port.UserEmail
 	Identities []port.Identity
 	Passkeys   []port.Passkey
-	TOTP       []port.TOTPCredential // 2要素目だけに使う（ログインの手段には数えない）
-	// Password は有効なパスワード（フィーチャー password）。無ければ nil。
-	Password *port.PasswordCredential
-	// Credentials は無効化していない汎用の認証情報（認証方式のプラグイン。ADR 0092）。
+	// TOTP は有効な TOTP（汎用の認証情報の方式 totp。ADR 0101）。2要素目だけに使う（ログインの手段には数えない）。
+	TOTP []port.Credential
+	// Password は有効なパスワード（汎用の認証情報の方式 password。フィーチャー password。ADR 0101）。無ければ nil。
+	// フィーチャーが止まっていても数える（従来どおり）。
+	Password *port.Credential
+	// Credentials は無効化していない汎用の認証情報（認証方式のプラグイン。ADR 0092）のうち、TOTP とパスワード以外。
 	Credentials []port.Credential
 }
 
@@ -59,29 +61,22 @@ func (s *Service) ListMethods(ctx context.Context, tx port.Tx, realmID, userID s
 	if err != nil {
 		return Methods{}, err
 	}
-	ts, err := tx.TOTP().ListByUser(ctx, realmID, userID)
-	if err != nil {
-		return Methods{}, err
-	}
 	cs, err := tx.Credentials().ListByUser(ctx, realmID, userID, "")
 	if err != nil {
 		return Methods{}, err
 	}
 	m := Methods{Emails: es}
 	for _, c := range cs {
-		if c.RevokedAt == nil {
+		switch {
+		case c.RevokedAt != nil:
+		case c.Method == method.TOTP:
+			m.TOTP = append(m.TOTP, c)
+		case c.Method == method.Password:
+			if m.Password == nil {
+				m.Password = &c
+			}
+		default:
 			m.Credentials = append(m.Credentials, c)
-		}
-	}
-	switch pw, err := tx.Passwords().GetActive(ctx, realmID, userID); {
-	case err == nil:
-		m.Password = &pw
-	case !errors.Is(err, errs.NotFound):
-		return Methods{}, err
-	}
-	for _, t := range ts {
-		if t.RevokedAt == nil {
-			m.TOTP = append(m.TOTP, t)
 		}
 	}
 	for _, i := range is {
@@ -354,7 +349,7 @@ func (s *Service) RevokePasskey(ctx context.Context, tx port.Tx, realmID, userID
 
 // RevokePassword はパスワードを無効化する（削除しない）。最後のログインの手段なら ErrLastMethod。
 // 他のセッションの失効は呼び出し側が行う（5.2）。
-func (s *Service) RevokePassword(ctx context.Context, tx port.Tx, realmID, userID string, c port.PasswordCredential, reason string, actor audit.Actor, requestID string) error {
+func (s *Service) RevokePassword(ctx context.Context, tx port.Tx, realmID, userID string, c port.Credential, reason string, actor audit.Actor, requestID string) error {
 	m, err := s.ListMethods(ctx, tx, realmID, userID)
 	if err != nil {
 		return err
@@ -362,24 +357,25 @@ func (s *Service) RevokePassword(ctx context.Context, tx port.Tx, realmID, userI
 	if s.loginMethods(m) <= 1 {
 		return ErrLastMethod
 	}
-	if err := tx.Passwords().Revoke(ctx, realmID, c.ID, s.Clock.Now(), reason); err != nil {
+	if err := tx.Credentials().Revoke(ctx, realmID, c.ID, s.Clock.Now(), reason); err != nil {
 		return err
 	}
-	return s.record(ctx, tx, realmID, "password.removed", actor, requestID, map[string]any{"reason": reason})
+	return s.record(ctx, tx, realmID, "password.removed", actor, requestID, map[string]any{"reason": reason, "credential_id": c.PublicID})
 }
 
 // RevokeTOTP は TOTP を無効化する（削除しない。4.6）。TOTP は2要素目だけに使うので、最後の1つでも
 // 無効化できる（2段階認証が必須なら、次のログインで登録を求める）。
-func (s *Service) RevokeTOTP(ctx context.Context, tx port.Tx, realmID, userID, publicID string, actor audit.Actor, requestID string) (port.TOTPCredential, error) {
-	c, err := tx.TOTP().GetByPublicID(ctx, realmID, publicID)
-	if err == nil && (c.UserID != userID || c.RevokedAt != nil) {
+// ID は移す前の otp_ のものか、汎用の crd_ のもの（ADR 0101）。
+func (s *Service) RevokeTOTP(ctx context.Context, tx port.Tx, realmID, userID, publicID string, actor audit.Actor, requestID string) (port.Credential, error) {
+	c, err := credential(ctx, tx, realmID, userID, publicID)
+	if err == nil && c.Method != method.TOTP {
 		err = errs.New(errs.KindNotFound, "totp")
 	}
 	if err != nil {
-		return port.TOTPCredential{}, err
+		return port.Credential{}, err
 	}
-	if err := tx.TOTP().Revoke(ctx, realmID, c.ID, s.Clock.Now(), ReasonRevokedByUser); err != nil {
-		return port.TOTPCredential{}, err
+	if err := tx.Credentials().Revoke(ctx, realmID, c.ID, s.Clock.Now(), ReasonRevokedByUser); err != nil {
+		return port.Credential{}, err
 	}
 	return c, s.record(ctx, tx, realmID, "totp.revoked", actor, requestID, map[string]any{"totp_id": c.PublicID, "reason": ReasonRevokedByUser})
 }

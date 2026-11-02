@@ -16,6 +16,12 @@ import (
 	"github.com/imohiyoko/iam/shared/port"
 )
 
+// コアが互換の欄（/v1/me/methods の totp・password など）で特別に扱う方式の名前（ADR 0101）。
+const (
+	TOTP     = "totp"
+	Password = "password"
+)
+
 // nameRE は方式の名前（API のパスと authn_credentials.method に使う）。
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
@@ -27,14 +33,12 @@ var (
 	registry = map[string]port.Authenticator{}
 )
 
-// Check は方式の宣言を確かめる。
+// Check は方式の宣言を確かめる。Feature が空（コアの方式）でもよい。
 func Check(a port.Authenticator) error {
 	i := a.Info()
 	switch {
 	case !ValidName(i.Name):
 		return fmt.Errorf("method: invalid name %q", i.Name)
-	case i.Feature == "":
-		return fmt.Errorf("method: %s has no feature", i.Name)
 	case i.Kind != port.FactorKnowledge && i.Kind != port.FactorPossession && i.Kind != port.FactorInherence:
 		return fmt.Errorf("method: %s has unknown factor kind %q", i.Name, i.Kind)
 	case i.AAL < 1 || i.AAL > 3:
@@ -58,6 +62,9 @@ func Register(a port.Authenticator) {
 	defer mu.Unlock()
 	if err := Check(a); err != nil {
 		panic(err.Error())
+	}
+	if a.Info().Feature == "" {
+		panic("method: " + a.Info().Name + " has no feature (core methods are passed to Active as built-ins)")
 	}
 	name := a.Info().Name
 	if _, dup := registry[name]; dup {

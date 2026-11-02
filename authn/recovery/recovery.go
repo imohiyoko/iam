@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
+	password "github.com/imohiyoko/iam/authn/method/password"
 	"github.com/imohiyoko/iam/authn/notify"
-	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -388,15 +388,6 @@ func addedSince(ctx context.Context, tx port.Tx, realmID, userID string, since t
 			return true, nil
 		}
 	}
-	ts, err := tx.TOTP().ListByUser(ctx, realmID, userID)
-	if err != nil {
-		return false, err
-	}
-	for _, t := range ts {
-		if t.RevokedAt == nil && after(t.CreatedAt) {
-			return true, nil
-		}
-	}
 	is, err := tx.Identities().ListByUser(ctx, realmID, userID)
 	if err != nil {
 		return false, err
@@ -406,6 +397,7 @@ func addedSince(ctx context.Context, tx port.Tx, realmID, userID string, since t
 			return true, nil
 		}
 	}
+	// 汎用の認証情報（TOTP・パスワードを含む。ADR 0101）。
 	cs, err := tx.Credentials().ListByUser(ctx, realmID, userID, "")
 	if err != nil {
 		return false, err
@@ -415,14 +407,7 @@ func addedSince(ctx context.Context, tx port.Tx, realmID, userID string, since t
 			return true, nil
 		}
 	}
-	switch p, err := tx.Passwords().GetActive(ctx, realmID, userID); {
-	case err == nil:
-		return after(p.CreatedAt), nil
-	case errors.Is(err, errs.NotFound):
-		return false, nil
-	default:
-		return false, err
-	}
+	return false, nil
 }
 
 // notifyAll は確認済みの全メールに復旧の完了を知らせる（4.12）。宛先は claim で取り出させる。
