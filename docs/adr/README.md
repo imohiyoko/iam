@@ -106,3 +106,4 @@
 | [0094](0094-oidc-rp-initiated-and-front-channel-logout.md) | RP-Initiated Logout はセッションと合う id_token_hint のときだけ確かめずに終え、Front-Channel Logout は完了の画面の iframe で知らせる | 承認 |
 | [0093](0093-acr-aal-step-up.md) | 認証の強さは amr から AAL を求めて acr で出し、足りなければ step-up（RFC 9470）を求める | 承認 |
 | [0097](0097-admin-read-api.md) | 管理 API の一覧・取得・検索は運営者ロールに読み取りの権限を足し、メールはブラインドインデックスの完全一致で引く | 承認 |
+| [0100](0100-audit-query-and-event-subscriptions.md) | 監査ログは索引の列で照会してペイロードで確かめ直し、Webhook の購読は監査ログを outbox にして購読ごとの位置で送る | 承認 |

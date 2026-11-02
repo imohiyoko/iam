@@ -184,6 +184,9 @@ func (t *tx) DataKeys() port.DataKeyRepo   { return dataKeys{t.q} }
 func (t *tx) AuditKeys() port.DataKeyRepo  { return auditKeys{t.q} }
 func (t *tx) Audit() port.AuditRepo        { return auditRepo{t.q} }
 func (t *tx) Outbox() port.OutboxRepo      { return outbox{t.q} }
+func (t *tx) EventSubscriptions() port.EventSubscriptionRepo {
+	return eventSubs{t.q}
+}
 
 func (t *tx) Users() port.UserRepo                       { return users{t.q} }
 func (t *tx) Emails() port.EmailRepo                     { return emails{t.q} }
@@ -415,8 +418,15 @@ func (a auditRepo) Last(ctx context.Context) (*audit.Record, error) {
 }
 
 func (a auditRepo) Append(ctx context.Context, r audit.Record) error {
-	return mapErr(a.q.AppendAuditEvent(ctx, db.AppendAuditEventParams{Seq: r.Seq, RealmID: r.RealmID, PrevHash: r.PrevHash, Hash: r.Hash, Payload: r.Payload,
-		KeyID: r.KeyID}))
+	return appendAudit(ctx, a.q, r)
+}
+
+func (a auditRepo) Query(ctx context.Context, q port.AuditQuery) ([]audit.Record, error) {
+	return queryAudit(ctx, a.q, q)
+}
+
+func (a auditRepo) GetByEventID(ctx context.Context, realmID, eventID string) (audit.Record, error) {
+	return auditByEventID(ctx, a.q, realmID, eventID)
 }
 
 func (a auditRepo) Scan(ctx context.Context, fromSeq int64, limit int) ([]audit.Record, error) {
@@ -456,8 +466,8 @@ func (a auditRepo) Checkpoint(ctx context.Context) (*audit.Checkpoint, error) {
 }
 
 func (a auditRepo) Truncate(ctx context.Context, cp audit.Checkpoint) error {
-	if err := a.q.TruncateAuditEvents(ctx, cp.Seq); err != nil {
-		return mapErr(err)
+	if err := truncateAudit(ctx, a.q, cp.Seq); err != nil {
+		return err
 	}
 	return mapErr(a.q.PutAuditCheckpoint(ctx, db.PutAuditCheckpointParams{Seq: cp.Seq, Hash: cp.Hash, CreatedAt: formatTime(cp.At), KeyID: cp.KeyID}))
 }

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/eventlog"
@@ -108,6 +109,11 @@ var cleaners = map[string]cleaner{
 		rs, err := tx.Realms().List(ctx)
 		return max(len(rs)-1, 0), err
 	}, Hint: "realms other than the default cannot be deleted yet: keep multi_realm enabled while they exist"},
+	// 購読と署名の鍵（データ鍵）を消す（ADR 0100）。
+	feature.EventSubscriptions: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.EventSubscriptions().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return eventsub.Purge(ctx, tx, limit)
+		}},
 	// 連携先の Front-Channel Logout の登録を外す（ADR 0094。post_logout_redirect_uris は前からある項目なので残す）。
 	feature.OIDCLogout: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		return eachClient(ctx, tx, -1, func(port.Client) (bool, error) { return true, nil })

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,8 @@ func init() {
 
 type auditRow struct {
 	rec audit.Record
+	// ix は照会の索引（追記のときにペイロードから作る。ADR 0100）。
+	ix audit.Index
 }
 
 type state struct {
@@ -89,6 +92,8 @@ type state struct {
 	signingKeys map[string]port.SigningKey
 	grants      map[string]port.Grant
 	oidcTokens  map[string]port.OIDCToken
+	// eventSubs はイベントの Webhook の購読（ADR 0100）。
+	eventSubs map[string]port.EventSubscription
 }
 
 // Storage はインメモリの Storage。
@@ -116,7 +121,7 @@ func New(clk clock.Clock) *Storage {
 		roleBindings: map[string]port.RoleBinding{}, roles: map[string]port.Role{}, groups: map[string]port.Group{},
 		groupMembers: map[string]port.GroupMember{}, groupClosure: map[string]groupLink{}, attrDefs: map[string]port.AttributeDef{}, attrValues: map[string]port.UserAttribute{}, riskTypes: map[string]port.RiskType{}, namespaces: map[string]port.ActionNamespace{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 		invitations: map[string]port.Invitation{}, quotaGrants: map[string]port.QuotaGrant{}, orgDomains: map[string]port.OrgDomain{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
-		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{},
+		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{}, eventSubs: map[string]port.EventSubscription{},
 	}}
 }
 
@@ -161,6 +166,9 @@ func (t *tx) DataKeys() port.DataKeyRepo   { return dataKeys{t, t.s.dataKeys} }
 func (t *tx) AuditKeys() port.DataKeyRepo  { return dataKeys{t, t.s.auditKeys} }
 func (t *tx) Audit() port.AuditRepo        { return auditRepo{t} }
 func (t *tx) Outbox() port.OutboxRepo      { return outbox{t} }
+func (t *tx) EventSubscriptions() port.EventSubscriptionRepo {
+	return eventSubs{t}
+}
 
 func (t *tx) Users() port.UserRepo                       { return users{t} }
 func (t *tx) Emails() port.EmailRepo                     { return emails{t} }
@@ -383,7 +391,11 @@ func (a auditRepo) Append(_ context.Context, r audit.Record) error {
 	if want := s.auditBase + int64(len(s.audit)) + 1; r.Seq != want {
 		return errs.New(errs.KindConflict, "audit seq %d: want %d", r.Seq, want)
 	}
-	s.audit = append(s.audit, auditRow{rec: cloneRecord(r)})
+	ix, err := audit.IndexOf(r.Payload)
+	if err != nil {
+		return err
+	}
+	s.audit = append(s.audit, auditRow{rec: cloneRecord(r), ix: ix})
 	a.t.undo = append(a.t.undo, func() { s.audit = s.audit[:len(s.audit)-1] })
 	return nil
 }
@@ -406,6 +418,46 @@ func (a auditRepo) ListByRealm(_ context.Context, realmID string, fromSeq int64,
 		}
 	}
 	return out, nil
+}
+
+func (a auditRepo) Query(_ context.Context, q port.AuditQuery) ([]audit.Record, error) {
+	out := []audit.Record{}
+	s := a.t.s
+	for i := len(s.audit) - 1; i >= 0 && len(out) < q.Limit; i-- {
+		row := s.audit[i]
+		if row.rec.RealmID != q.RealmID || (q.BeforeSeq > 0 && row.rec.Seq >= q.BeforeSeq) || !indexMatches(row.ix, q.Filter) {
+			continue
+		}
+		out = append(out, cloneRecord(row.rec))
+	}
+	return out, nil
+}
+
+// indexMatches は索引が条件に合うかを返す（SQL のアダプタの WHERE と同じ。時刻は秒の単位で、境界の秒を含める）。
+func indexMatches(ix audit.Index, f audit.Filter) bool {
+	switch {
+	case !f.Since.IsZero() && ix.Unix < f.Since.Unix():
+	case !f.Until.IsZero() && ix.Unix > f.Until.Unix():
+	case f.Type != "" && ix.Type != f.Type:
+	case f.TypePrefix != "" && !strings.HasPrefix(ix.Type, f.TypePrefix):
+	case f.Result != "" && ix.Result != string(f.Result):
+	case f.ActorType != "" && ix.ActorType != f.ActorType:
+	case f.ActorID != "" && ix.ActorID != f.ActorID:
+	case f.OrgID != "" && ix.OrgID != f.OrgID:
+	case f.Ref != "" && !slices.Contains(ix.Refs, f.Ref):
+	default:
+		return true
+	}
+	return false
+}
+
+func (a auditRepo) GetByEventID(_ context.Context, realmID, eventID string) (audit.Record, error) {
+	for _, row := range a.t.s.audit {
+		if row.rec.RealmID == realmID && row.ix.EventID == eventID {
+			return cloneRecord(row.rec), nil
+		}
+	}
+	return audit.Record{}, errs.New(errs.KindNotFound, "audit event")
 }
 
 func (a auditRepo) Checkpoint(context.Context) (*audit.Checkpoint, error) {

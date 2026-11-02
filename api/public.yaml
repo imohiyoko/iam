@@ -1671,6 +1671,49 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/orgs/{id}/audit-events:
+    get:
+      operationId: listOrgAuditEvents
+      summary: Org の監査ログ（Org の owner・admin。ADR 0100）
+      description: |
+        Org の権限 `org:audit.read`（組み込みのロールでは owner と admin）。この Org のイベント（`org_id` がこの Org のもの）を
+        新しい順に `limit` 件ずつ返す。続きは `next_cursor` を `after` に渡す。条件は管理 API の照会と同じ（Org と主体の種類を除く）。
+        Org に見せてよい範囲だけを返す（ADR 0022、0036）：IP・User-Agent・セッション ID は返さない。主体の ID は、この Org の
+        メンバー（終了したものを含む）か、この Org のサービスアカウントのときだけ返す（ほかは種類だけ）。
+        保持期間で切り詰めたイベントは返らない。照会そのものを `audit.read` として監査ログ（この Org のもの）に残す。
+        フィーチャー `org_audit_log` が動いていなければ 404。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: after, in: query, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+        - { name: type, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: type_prefix, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: result, in: query, schema: { type: string, enum: [success, failure] } }
+        - { name: actor_id, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: target_id, in: query, schema: { type: string, maxLength: 200 } }
+      responses:
+        "200":
+          description: 新しい順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgAuditEvent" }
+                  next_cursor: { type: string, description: 続きがあるときだけ }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/me/orgs/{id}/domains:
     get:
       operationId: listOrgDomains
@@ -2520,6 +2563,25 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    OrgAuditEvent:
+      type: object
+      required: [id, time, type, result, actor]
+      description: Org の監査ログの1件（Org に見せてよい項目だけ。ADR 0100）
+      properties:
+        id: { type: string }
+        time: { type: string, format: date-time }
+        type: { type: string }
+        result: { type: string }
+        actor:
+          type: object
+          required: [type]
+          properties:
+            type: { type: string }
+            id: { type: string, description: この Org のメンバーかサービスアカウントのときだけ }
+        request_id: { type: string }
+        details:
+          type: object
+          additionalProperties: {}
     MyAttributes:
       type: object
       required: [attributes, editable]

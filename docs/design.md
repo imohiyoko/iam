@@ -456,14 +456,14 @@ check(principal, action, resource, context) -> allow / deny
 | realm の運営者ロール | できること |
 |---|---|
 | `realm:owner` | すべて。運営者ロールの付与 |
-| `realm:admin` | ユーザー・Org の管理、`tos_violation` の停止・解除 |
-| `realm:security` | `security_risk` の停止・解除、無効化、監査ログ閲覧 |
+| `realm:admin` | ユーザー・Org の管理、`tos_violation` の停止・解除、監査ログの照会（`audit:read`） |
+| `realm:security` | `security_risk` の停止・解除、無効化、監査ログの照会と IP・User-Agent の全文の復号（`audit:read_client_data`） |
 | `realm:support` | 状態の閲覧、復旧手続き（個人情報の復号は不可） |
 | `realm:billing` | Quota の付与、`billing` の停止・解除（課金連携用のサービスアカウント向け） |
 
 - 運営者ロールは `org_id` が NULL のロール付与で表し、ホスト先が独自のロールを追加できる。停止の種別ごとの解除権限は、これらのロールの permission として定義する
 - Org のロール：`org_role` を Org 範囲の既定ロールに対応させる。`owner`（削除・譲渡・全設定）、`admin`（招待・除名・Group とロール、`customer_request` の停止）、`member`。Group と所属の参照だけは `org:groups.read`（ADR 0085）
-- 個人情報の復号は独立した権限 `pii:read`
+- 個人情報の復号は独立した権限 `pii:read`。監査ログの IP・User-Agent の全文の復号も、照会（`audit:read`）とは別の権限 `audit:read_client_data`（ADR 0100）
 - 参照は読み取りの権限で渡す（ADR 0097）：`users:read`・`sessions:read`・`roles:read`・`groups:read` は admin・security・support、
   `connections:read` は admin・security、`signing_keys:read` は security。運営者によるメールの操作は `users:emails`（admin）
 - 管理操作には強い認証と直近の認証（`max_auth_age`）を求める。管理者のセッションは短くする
@@ -621,6 +621,28 @@ GET    /v1/admin/signing-keys
 - 掃除は1時間ごと。期間は `realm.audit_retention`（既定90日）と `realm.ended_retention`（既定7日）
 - その他のデータの保持期間は 9.6
 
+### 6.6 照会
+
+実装（ADR 0100）：
+
+- 管理 API の `GET /v1/admin/audit-events`（期間・種類・種類の接頭辞・結果・主体・Org・対象・カーソル）、`GET /v1/admin/audit-events/{id}`、
+  `POST /v1/admin/audit-events:verify`（seq の範囲。1 回で 10 万件まで。既定の realm だけ）。権限は `audit:read`、全文の復号は `audit:read_client_data`
+- 照会はペイロードから導いた索引の列（ハッシュの対象外）で絞り、結果をペイロードで確かめ直す。対象は details の `*_id` の値で引く
+- 公開 API の `GET /v1/me/orgs/{id}/audit-events`（フィーチャー `org_audit_log`。`org:audit.read`）。イベントの `org_id` がその Org のものだけを、
+  IP・User-Agent・セッション ID・チェーンの位置を外して返す。主体の ID はその Org のメンバーとサービスアカウントだけ
+- 読んだことは `audit.read`、検証は `audit.verified` として監査ログに残す。保持期間で消えたイベントは出ない
+
+### 6.7 イベントの Webhook の購読
+
+実装（ADR 0100）：
+
+- フィーチャー `event_subscriptions`。管理 API の `/v1/admin/event-subscriptions`（`event_subscriptions:manage`）で realm ごとに 20 件まで登録する。
+  種類（完全一致か接頭辞）で絞り、個人情報は `omit`（既定）か `pseudonymize`。形式は独自 JSON（6.3 の EventSink とは別に動く）
+- 監査ログを outbox にし、購読ごとの位置から送る（少なくとも 1 回。イベント ID で重複を除く）。失敗は 10 秒から倍々（上限 1 時間）で送り直す
+- 送り先は https で、実際につなぐアドレスが公開のアドレスに限る（転送に従わない、プロキシを使わない）。署名の鍵は作成と作り直しで 1 度だけ返し、
+  購読ごとのデータ鍵で暗号化して置く。署名は EventSink の Webhook と同じ `X-IAM-Signature`
+- テスト送信（1 分に 5 回まで）は監査ログに載らないイベントを 1 件送る
+
 ## 7. ロードマップ
 
 [roadmap.md](roadmap.md) を参照。
@@ -744,6 +766,8 @@ GET    /v1/admin/signing-keys
 | フロー フック（11.8） | オフ | ― | フックを一切呼ばない |
 | OIDC のログアウト（5.6） | オフ | ― | `end_session_endpoint` と Front-Channel Logout なし（Back-Channel Logout は動く） |
 | acr・AAL と step-up（11.15） | オフ | ― | `acr` を出さず、`acr_values` を見ない。AAL で書く条件・ポリシーなし |
+| Org の監査ログ（6.6） | オフ | Org | Org の管理者は監査ログを読めない（運営者の照会は常にある） |
+| イベントの Webhook の購読（6.7） | オフ | ― | 購読の API なし・配送しない（EventSink はそのまま） |
 
 ### 11.1 複数 realm
 

@@ -481,12 +481,43 @@ type SharedAuditClientKey struct {
 }
 
 type SharedAuditEvent struct {
-	Seq      int64
-	RealmID  string
-	PrevHash []byte
-	Hash     []byte
-	Payload  []byte
-	KeyID    string
+	Seq          int64
+	RealmID      string
+	PrevHash     []byte
+	Hash         []byte
+	Payload      []byte
+	KeyID        string
+	EventID      string
+	OccurredUnix int64
+	EventType    string
+	Result       string
+	ActorType    string
+	ActorID      string
+	OrgID        string
+}
+
+type SharedAuditRef struct {
+	RealmID string
+	RefID   string
+	Seq     int64
+}
+
+type SharedEventSubscription struct {
+	ID               string
+	RealmID          string
+	Url              string
+	EventTypes       string
+	Pii              string
+	Enabled          int64
+	SecretCiphertext []byte
+	CreatedBy        string
+	CreatedAt        string
+	UpdatedAt        string
+	CursorSeq        int64
+	Failures         int64
+	NextAttemptAt    sql.NullString
+	LastError        string
+	LastDeliveredAt  sql.NullString
 }
 
 type SharedInstalledFeature struct {

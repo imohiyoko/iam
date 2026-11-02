@@ -339,6 +339,24 @@ func (e WarningSeverity) Valid() bool {
 	}
 }
 
+// Defines values for ListOrgAuditEventsParamsResult.
+const (
+	Failure ListOrgAuditEventsParamsResult = "failure"
+	Success ListOrgAuditEventsParamsResult = "success"
+)
+
+// Valid indicates whether the value is a known member of the ListOrgAuditEventsParamsResult enum.
+func (e ListOrgAuditEventsParamsResult) Valid() bool {
+	switch e {
+	case Failure:
+		return true
+	case Success:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InviteToOrgJSONBodyRole.
 const (
 	InviteToOrgJSONBodyRoleAdmin  InviteToOrgJSONBodyRole = "admin"
@@ -651,6 +669,21 @@ type MyTOTP struct {
 
 	// Id 公開の TOTP の ID（otp_…）
 	Id string `json:"id"`
+}
+
+// OrgAuditEvent Org の監査ログの1件（Org に見せてよい項目だけ。ADR 0100）
+type OrgAuditEvent struct {
+	Actor struct {
+		// Id この Org のメンバーかサービスアカウントのときだけ
+		Id   *string `json:"id,omitempty"`
+		Type string  `json:"type"`
+	} `json:"actor"`
+	Details   *map[string]interface{} `json:"details,omitempty"`
+	Id        string                  `json:"id"`
+	RequestId *string                 `json:"request_id,omitempty"`
+	Result    string                  `json:"result"`
+	Time      time.Time               `json:"time"`
+	Type      string                  `json:"type"`
 }
 
 // OrgConnection defines model for OrgConnection.
@@ -1088,6 +1121,22 @@ type CreateMyOrgJSONBody struct {
 	Name string `json:"name"`
 }
 
+// ListOrgAuditEventsParams defines parameters for ListOrgAuditEvents.
+type ListOrgAuditEventsParams struct {
+	Limit      *int                            `form:"limit,omitempty" json:"limit,omitempty"`
+	After      *string                         `form:"after,omitempty" json:"after,omitempty"`
+	Since      *time.Time                      `form:"since,omitempty" json:"since,omitempty"`
+	Until      *time.Time                      `form:"until,omitempty" json:"until,omitempty"`
+	Type       *string                         `form:"type,omitempty" json:"type,omitempty"`
+	TypePrefix *string                         `form:"type_prefix,omitempty" json:"type_prefix,omitempty"`
+	Result     *ListOrgAuditEventsParamsResult `form:"result,omitempty" json:"result,omitempty"`
+	ActorId    *string                         `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+	TargetId   *string                         `form:"target_id,omitempty" json:"target_id,omitempty"`
+}
+
+// ListOrgAuditEventsParamsResult defines parameters for ListOrgAuditEvents.
+type ListOrgAuditEventsParamsResult string
+
 // AddOrgConnectionJSONBody defines parameters for AddOrgConnection.
 type AddOrgConnectionJSONBody struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
@@ -1460,6 +1509,9 @@ type ServerInterface interface {
 	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
 	// (POST /v1/me/orgs)
 	CreateMyOrg(w http.ResponseWriter, r *http.Request)
+	// ListOrgAuditEvents Org の監査ログ（Org の owner・admin。ADR 0100）
+	// (GET /v1/me/orgs/{id}/audit-events)
+	ListOrgAuditEvents(w http.ResponseWriter, r *http.Request, id string, params ListOrgAuditEventsParams)
 	// ListOrgConnections Org 専用 SSO の connection の一覧（Org の owner。11.3、ADR 0077）
 	// (GET /v1/me/orgs/{id}/connections)
 	ListOrgConnections(w http.ResponseWriter, r *http.Request, id string)
@@ -2159,6 +2211,152 @@ func (siw *ServerInterfaceWrapper) CreateMyOrg(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateMyOrg(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOrgAuditEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListOrgAuditEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListOrgAuditEventsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "since" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "since", r.URL.Query(), &params.Since, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "since"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "since", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "until" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "until", r.URL.Query(), &params.Until, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "until"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "until", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", r.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "type_prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type_prefix", r.URL.Query(), &params.TypePrefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "type_prefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type_prefix", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "result" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "result", r.URL.Query(), &params.Result, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "result"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "result", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actor_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_id", r.URL.Query(), &params.ActorId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "target_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "target_id", r.URL.Query(), &params.TargetId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "target_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "target_id", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrgAuditEvents(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4030,6 +4228,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/invitations", wrapper.ListOrgInvitations)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/invitations", wrapper.InviteToOrg)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/invitations/{invitation_id}:revoke", wrapper.RevokeOrgInvitation)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/audit-events", wrapper.ListOrgAuditEvents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/orgs/{id}/domains", wrapper.ListOrgDomains)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains", wrapper.AddOrgDomain)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/domains/{domain_id}:verify", wrapper.VerifyOrgDomain)
@@ -6008,6 +6207,90 @@ func (response CreateMyOrg403JSONResponse) VisitCreateMyOrgResponse(w http.Respo
 type CreateMyOrg404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response CreateMyOrg404JSONResponse) VisitCreateMyOrgResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgAuditEventsRequestObject struct {
+	Id     string `json:"id"`
+	Params ListOrgAuditEventsParams
+}
+
+type ListOrgAuditEventsResponseObject interface {
+	VisitListOrgAuditEventsResponse(w http.ResponseWriter) error
+}
+
+type ListOrgAuditEvents200JSONResponse struct {
+	Events []OrgAuditEvent `json:"events"`
+
+	// NextCursor 続きがあるときだけ
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+func (response ListOrgAuditEvents200JSONResponse) VisitListOrgAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgAuditEvents400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListOrgAuditEvents400JSONResponse) VisitListOrgAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgAuditEvents401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListOrgAuditEvents401JSONResponse) VisitListOrgAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgAuditEvents403JSONResponse struct{ DeniedJSONResponse }
+
+func (response ListOrgAuditEvents403JSONResponse) VisitListOrgAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgAuditEvents404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListOrgAuditEvents404JSONResponse) VisitListOrgAuditEventsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -10569,6 +10852,9 @@ type StrictServerInterface interface {
 	// CreateMyOrg 共有 Org を作り、本人を owner にする（4.11）
 	// (POST /v1/me/orgs)
 	CreateMyOrg(ctx context.Context, request CreateMyOrgRequestObject) (CreateMyOrgResponseObject, error)
+	// ListOrgAuditEvents Org の監査ログ（Org の owner・admin。ADR 0100）
+	// (GET /v1/me/orgs/{id}/audit-events)
+	ListOrgAuditEvents(ctx context.Context, request ListOrgAuditEventsRequestObject) (ListOrgAuditEventsResponseObject, error)
 	// ListOrgConnections Org 専用 SSO の connection の一覧（Org の owner。11.3、ADR 0077）
 	// (GET /v1/me/orgs/{id}/connections)
 	ListOrgConnections(ctx context.Context, request ListOrgConnectionsRequestObject) (ListOrgConnectionsResponseObject, error)
@@ -11705,6 +11991,33 @@ func (sh *strictHandler) CreateMyOrg(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateMyOrgResponseObject); ok {
 		if err := validResponse.VisitCreateMyOrgResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOrgAuditEvents operation middleware
+func (sh *strictHandler) ListOrgAuditEvents(w http.ResponseWriter, r *http.Request, id string, params ListOrgAuditEventsParams) {
+	var request ListOrgAuditEventsRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrgAuditEvents(ctx, request.(ListOrgAuditEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrgAuditEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrgAuditEventsResponseObject); ok {
+		if err := validResponse.VisitListOrgAuditEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

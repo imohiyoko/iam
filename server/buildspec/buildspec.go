@@ -16,6 +16,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/imohiyoko/iam/authn/attribute"
+	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/org"
@@ -25,6 +26,7 @@ import (
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/shared/acr"
+	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/plugin"
 	"github.com/imohiyoko/iam/shared/realm"
@@ -37,21 +39,23 @@ var featureCatalog = map[string]struct {
 	decl feature.Feature
 	pkg  string
 }{
-	feature.Org:              {org.Feature, module + "/features/org"},
-	feature.OrgManagedUsers:  {org.ManagedUsersFeature, module + "/features/orgmanagedusers"},
-	feature.OrgHierarchy:     {org.HierarchyFeature, module + "/features/orghierarchy"},
-	feature.OrgLoginPolicy:   {org.PolicyFeature, module + "/features/orgloginpolicy"},
-	feature.Quota:            {org.QuotaFeature, module + "/features/quota"},
-	feature.Warnings:         {warning.Feature, module + "/features/warnings"},
-	feature.Password:         {password.Feature, module + "/features/password"},
-	feature.ServiceAccounts:  {serviceaccount.Feature, module + "/features/serviceaccounts"},
-	feature.NestedGroups:     {manage.NestedGroupsFeature, module + "/features/nestedgroups"},
-	feature.CustomAttributes: {attribute.Feature, module + "/features/customattributes"},
-	feature.FlowHooks:        {hook.Feature, module + "/features/flowhooks"},
-	feature.AccountMerge:     {merge.Feature, module + "/features/accountmerge"},
-	feature.MultiRealm:       {realm.Feature, module + "/features/multirealm"},
-	feature.OIDCLogout:       {provider.LogoutFeature, module + "/features/oidclogout"},
-	feature.ACR:              {acr.Feature, module + "/features/acr"},
+	feature.Org:                {org.Feature, module + "/features/org"},
+	feature.OrgManagedUsers:    {org.ManagedUsersFeature, module + "/features/orgmanagedusers"},
+	feature.OrgHierarchy:       {org.HierarchyFeature, module + "/features/orghierarchy"},
+	feature.OrgLoginPolicy:     {org.PolicyFeature, module + "/features/orgloginpolicy"},
+	feature.Quota:              {org.QuotaFeature, module + "/features/quota"},
+	feature.Warnings:           {warning.Feature, module + "/features/warnings"},
+	feature.Password:           {password.Feature, module + "/features/password"},
+	feature.ServiceAccounts:    {serviceaccount.Feature, module + "/features/serviceaccounts"},
+	feature.NestedGroups:       {manage.NestedGroupsFeature, module + "/features/nestedgroups"},
+	feature.CustomAttributes:   {attribute.Feature, module + "/features/customattributes"},
+	feature.FlowHooks:          {hook.Feature, module + "/features/flowhooks"},
+	feature.AccountMerge:       {merge.Feature, module + "/features/accountmerge"},
+	feature.MultiRealm:         {realm.Feature, module + "/features/multirealm"},
+	feature.OrgAuditLog:        {eventlog.OrgAuditLogFeature, module + "/features/orgauditlog"},
+	feature.EventSubscriptions: {eventsub.Feature, module + "/features/eventsubscriptions"},
+	feature.OIDCLogout:         {provider.LogoutFeature, module + "/features/oidclogout"},
+	feature.ACR:                {acr.Feature, module + "/features/acr"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

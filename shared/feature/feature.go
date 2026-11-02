@@ -32,6 +32,8 @@ const (
 	AccountMerge        = "account_merge"
 	CustomAttributes    = "custom_attributes"
 	FlowHooks           = "flow_hooks"
+	OrgAuditLog         = "org_audit_log"
+	EventSubscriptions  = "event_subscriptions"
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 )
