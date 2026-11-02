@@ -175,6 +175,31 @@ func TestDisableOrgLoginPolicyWithData(t *testing.T) {
 	}
 }
 
+// acr の無効化はログインポリシーの min_aal だけを外す（ADR 0093）。ほかの項目は残す。
+func TestDisableACRWithData(t *testing.T) {
+	l := allFeaturesEnv(t)
+	_, owner := l.login(t, "boss@acme.example")
+	acme := l.sharedOrg(t, owner, "Acme")
+	if code, out := l.putSettings(t, owner, acme, map[string]any{"login_policy": map[string]any{"min_aal": 2, "require_passkey": true}}); code != 200 {
+		t.Fatalf("put: %d %v", code, out)
+	}
+	disableWithData(t, l, feature.ACR, 1)
+	err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+		o, err := tx.Orgs().GetByPublicID(ctx, l.a.realm.ID, acme)
+		if err != nil {
+			return err
+		}
+		st, err := org.SettingsOf(o)
+		if err != nil || st.LoginPolicy == nil || st.LoginPolicy.MinAAL != 0 || !st.LoginPolicy.RequirePasskey {
+			t.Fatalf("settings after purge = %+v, %v", st.LoginPolicy, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDisableWarningsHasNoData(t *testing.T) {
 	l := allFeaturesEnv(t)
 	l.login(t, "pat@example.com")
