@@ -160,7 +160,8 @@ func newAdminHandler(a *App) http.Handler {
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.responseError,
 	}), adminapi.StdHTTPServerOptions{BaseRouter: newColonMux(), ErrorHandlerFunc: a.requestError})
-	return a.withAdminAuth(h)
+	// nonce のチャレンジ（use_dpop_nonce）の応答にも DPoP-Nonce が付くよう、認証の外側に置く。
+	return a.withDPoPNonce(a.withAdminAuth(h))
 }
 
 // requestError は要求の形式の誤りを返す。内部の説明は返さない。

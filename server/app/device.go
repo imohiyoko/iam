@@ -82,6 +82,11 @@ func (s *oidcServer) DeviceToken(ctx context.Context, r *op.ClientRequest[oidc.D
 	if !cl.device {
 		return nil, oidc.ErrUnauthorizedClient()
 	}
+	// 証明は Poll の前に確かめる。Poll は承認済みの結果を1回で消費するため、後で use_dpop_nonce を返すと nonce 付きの再試行が通らない。
+	b, err := s.tokenBinding(ctx, r.Method, r.URL.Path, r.Header, cl.c)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.a.device.Poll(ctx, s.a.realm.ID, cl.c.PublicID, r.Data.DeviceCode)
 	switch {
 	case errors.Is(err, provider.ErrDevicePending):
@@ -96,10 +101,6 @@ func (s *oidcServer) DeviceToken(ctx context.Context, r *op.ClientRequest[oidc.D
 		return nil, oidc.ErrInvalidGrant()
 	case err != nil:
 		return nil, s.fail(ctx, err)
-	}
-	b, err := s.tokenBinding(ctx, r.Method, r.URL.Path, r.Header, cl.c)
-	if err != nil {
-		return nil, err
 	}
 	var out provider.Issued
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
