@@ -36,8 +36,12 @@ func (s *oidcServer) TokenExchange(ctx context.Context, r *op.ClientRequest[oidc
 	if r.Form != nil {
 		in.RequestedSubject = r.Form.Get("requested_subject")
 	}
+	var err error
+	if in.Binding, err = s.tokenBinding(ctx, r.Method, r.URL.Path, r.Header, cl); err != nil {
+		return nil, err
+	}
 	var out provider.Issued
-	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
 		out, err = s.a.tokens.ExchangeToken(ctx, tx, cl, in, requestID(ctx))
 		return err
@@ -60,7 +64,7 @@ func (s *oidcServer) TokenExchange(ctx context.Context, r *op.ClientRequest[oidc
 		return nil, s.fail(ctx, err)
 	}
 	// #nosec G115 -- ExpiresIn は正の寿命
-	resp := op.NewResponse(&oidc.TokenExchangeResponse{AccessToken: out.AccessToken, IssuedTokenType: oidc.AccessTokenType, TokenType: oidc.BearerToken,
+	resp := op.NewResponse(&oidc.TokenExchangeResponse{AccessToken: out.AccessToken, IssuedTokenType: oidc.AccessTokenType, TokenType: tokenType(out.Binding),
 		ExpiresIn: uint64(out.ExpiresIn / time.Second), Scopes: out.Scopes})
 	resp.Header.Set("Pragma", "no-cache")
 	return resp, nil

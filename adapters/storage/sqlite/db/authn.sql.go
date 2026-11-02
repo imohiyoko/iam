@@ -75,6 +75,17 @@ func (q *Queries) CountActiveIdentitiesByConnection(ctx context.Context, arg Cou
 	return count, err
 }
 
+const countBoundServiceAccountTokens = `-- name: CountBoundServiceAccountTokens :one
+SELECT count(*) FROM authn_service_account_tokens WHERE jkt <> ''
+`
+
+func (q *Queries) CountBoundServiceAccountTokens(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countBoundServiceAccountTokens)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countManagedUsers = `-- name: CountManagedUsers :one
 SELECT count(*) FROM authn_users WHERE managed_org_id IS NOT NULL
 `
@@ -379,7 +390,7 @@ func (q *Queries) CreateServiceAccountCredential(ctx context.Context, arg Create
 }
 
 const createServiceAccountToken = `-- name: CreateServiceAccountToken :exec
-INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at, jkt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateServiceAccountTokenParams struct {
@@ -390,6 +401,7 @@ type CreateServiceAccountTokenParams struct {
 	TokenHash        []byte
 	CreatedAt        string
 	ExpiresAt        string
+	Jkt              string
 }
 
 func (q *Queries) CreateServiceAccountToken(ctx context.Context, arg CreateServiceAccountTokenParams) error {
@@ -401,6 +413,7 @@ func (q *Queries) CreateServiceAccountToken(ctx context.Context, arg CreateServi
 		arg.TokenHash,
 		arg.CreatedAt,
 		arg.ExpiresAt,
+		arg.Jkt,
 	)
 	return err
 }
@@ -1298,7 +1311,7 @@ func (q *Queries) GetServiceAccountCredential(ctx context.Context, arg GetServic
 }
 
 const getServiceAccountToken = `-- name: GetServiceAccountToken :one
-SELECT id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at FROM authn_service_account_tokens WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at, jkt FROM authn_service_account_tokens WHERE realm_id = ? AND id = ?
 `
 
 type GetServiceAccountTokenParams struct {
@@ -1317,6 +1330,7 @@ func (q *Queries) GetServiceAccountToken(ctx context.Context, arg GetServiceAcco
 		&i.TokenHash,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.Jkt,
 	)
 	return i, err
 }
@@ -2307,6 +2321,19 @@ func (q *Queries) MoveSessionsOrg(ctx context.Context, arg MoveSessionsOrgParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const purgeBoundServiceAccountTokens = `-- name: PurgeBoundServiceAccountTokens :execrows
+DELETE FROM authn_service_account_tokens WHERE id IN (
+    SELECT t.id FROM authn_service_account_tokens t WHERE t.jkt <> '' ORDER BY t.id LIMIT ?1)
+`
+
+func (q *Queries) PurgeBoundServiceAccountTokens(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeBoundServiceAccountTokens, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const purgePasswords = `-- name: PurgePasswords :execrows

@@ -261,9 +261,11 @@ func (e ClientInputIdTokenSignedResponseAlg) Valid() bool {
 
 // Defines values for ClientInputTokenEndpointAuthMethod.
 const (
-	ClientInputTokenEndpointAuthMethodClientSecret  ClientInputTokenEndpointAuthMethod = "client_secret"
-	ClientInputTokenEndpointAuthMethodNone          ClientInputTokenEndpointAuthMethod = "none"
-	ClientInputTokenEndpointAuthMethodPrivateKeyJwt ClientInputTokenEndpointAuthMethod = "private_key_jwt"
+	ClientInputTokenEndpointAuthMethodClientSecret            ClientInputTokenEndpointAuthMethod = "client_secret"
+	ClientInputTokenEndpointAuthMethodNone                    ClientInputTokenEndpointAuthMethod = "none"
+	ClientInputTokenEndpointAuthMethodPrivateKeyJwt           ClientInputTokenEndpointAuthMethod = "private_key_jwt"
+	ClientInputTokenEndpointAuthMethodSelfSignedTlsClientAuth ClientInputTokenEndpointAuthMethod = "self_signed_tls_client_auth"
+	ClientInputTokenEndpointAuthMethodTlsClientAuth           ClientInputTokenEndpointAuthMethod = "tls_client_auth"
 )
 
 // Valid indicates whether the value is a known member of the ClientInputTokenEndpointAuthMethod enum.
@@ -274,6 +276,10 @@ func (e ClientInputTokenEndpointAuthMethod) Valid() bool {
 	case ClientInputTokenEndpointAuthMethodNone:
 		return true
 	case ClientInputTokenEndpointAuthMethodPrivateKeyJwt:
+		return true
+	case ClientInputTokenEndpointAuthMethodSelfSignedTlsClientAuth:
+		return true
+	case ClientInputTokenEndpointAuthMethodTlsClientAuth:
 		return true
 	default:
 		return false
@@ -901,12 +907,15 @@ func (e RotateSigningKeyJSONBodyAlg) Valid() bool {
 // Defines values for IssueServiceAccountToken200JSONResponseBodyTokenType.
 const (
 	Bearer IssueServiceAccountToken200JSONResponseBodyTokenType = "Bearer"
+	DPoP   IssueServiceAccountToken200JSONResponseBodyTokenType = "DPoP"
 )
 
 // Valid indicates whether the value is a known member of the IssueServiceAccountToken200JSONResponseBodyTokenType enum.
 func (e IssueServiceAccountToken200JSONResponseBodyTokenType) Valid() bool {
 	switch e {
 	case Bearer:
+		return true
+	case DPoP:
 		return true
 	default:
 		return false
@@ -1293,6 +1302,9 @@ type Client struct {
 	// DeviceAuthorizationGrant フィーチャー `device_flow` が動いているときだけ返す
 	DeviceAuthorizationGrant *bool `json:"device_authorization_grant,omitempty"`
 
+	// DpopBoundAccessTokens フィーチャー `dpop` が動いているときだけ返す
+	DpopBoundAccessTokens *bool `json:"dpop_bound_access_tokens,omitempty"`
+
 	// FrontchannelLogoutSessionRequired `frontchannel_logout_uri` があるときだけ
 	FrontchannelLogoutSessionRequired *bool                   `json:"frontchannel_logout_session_required,omitempty"`
 	FrontchannelLogoutUri             *string                 `json:"frontchannel_logout_uri,omitempty"`
@@ -1301,9 +1313,17 @@ type Client struct {
 	Name                              string                  `json:"name"`
 	PostLogoutRedirectUris            []string                `json:"post_logout_redirect_uris"`
 	RedirectUris                      []string                `json:"redirect_uris"`
-	TokenEndpointAuthMethod           string                  `json:"token_endpoint_auth_method"`
-	TrustLevel                        ClientTrustLevel        `json:"trust_level"`
-	UpdatedAt                         time.Time               `json:"updated_at"`
+	TlsClientAuthSanDns               *string                 `json:"tls_client_auth_san_dns,omitempty"`
+	TlsClientAuthSanEmail             *string                 `json:"tls_client_auth_san_email,omitempty"`
+	TlsClientAuthSanIp                *string                 `json:"tls_client_auth_san_ip,omitempty"`
+	TlsClientAuthSanUri               *string                 `json:"tls_client_auth_san_uri,omitempty"`
+	TlsClientAuthSubjectDn            *string                 `json:"tls_client_auth_subject_dn,omitempty"`
+
+	// TlsClientCertificateBoundAccessTokens フィーチャー `mtls_client_auth` が動いているときだけ返す
+	TlsClientCertificateBoundAccessTokens *bool            `json:"tls_client_certificate_bound_access_tokens,omitempty"`
+	TokenEndpointAuthMethod               string           `json:"token_endpoint_auth_method"`
+	TrustLevel                            ClientTrustLevel `json:"trust_level"`
+	UpdatedAt                             time.Time        `json:"updated_at"`
 }
 
 // ClientTrustLevel defines model for Client.TrustLevel.
@@ -1315,6 +1335,9 @@ type ClientInput struct {
 
 	// DeviceAuthorizationGrant Device Authorization Grant（RFC 8628）を許す。フィーチャー `device_flow` が動いているときだけ true にできる（ADR 0095）
 	DeviceAuthorizationGrant *bool `json:"device_authorization_grant,omitempty"`
+
+	// DpopBoundAccessTokens token エンドポイントで常に DPoP の証明を求める（RFC 9449 5.2。フィーチャー `dpop` が動いているときだけ true にできる）
+	DpopBoundAccessTokens *bool `json:"dpop_bound_access_tokens,omitempty"`
 
 	// FrontchannelLogoutSessionRequired `frontchannel_logout_uri` に `iss` と `sid` を付けるか（既定 false）
 	FrontchannelLogoutSessionRequired *bool `json:"frontchannel_logout_session_required,omitempty"`
@@ -1331,14 +1354,28 @@ type ClientInput struct {
 	PostLogoutRedirectUris *[]string               `json:"post_logout_redirect_uris,omitempty"`
 
 	// RedirectUris 1 つ以上。`device_authorization_grant` を許す連携先だけは空でよい
-	RedirectUris            []string                           `json:"redirect_uris"`
+	RedirectUris          []string `json:"redirect_uris"`
+	TlsClientAuthSanDns   *string  `json:"tls_client_auth_san_dns,omitempty"`
+	TlsClientAuthSanEmail *string  `json:"tls_client_auth_san_email,omitempty"`
+	TlsClientAuthSanIp    *string  `json:"tls_client_auth_san_ip,omitempty"`
+	TlsClientAuthSanUri   *string  `json:"tls_client_auth_san_uri,omitempty"`
+
+	// TlsClientAuthSubjectDn 証明書の主体の DN（RFC 4514 の文字列。完全一致）
+	TlsClientAuthSubjectDn *string `json:"tls_client_auth_subject_dn,omitempty"`
+
+	// TlsClientCertificateBoundAccessTokens トークンをクライアント証明書に結び付ける（RFC 8705 3。フィーチャー `mtls_client_auth` が動いているときだけ true にできる）
+	TlsClientCertificateBoundAccessTokens *bool `json:"tls_client_certificate_bound_access_tokens,omitempty"`
+
+	// TokenEndpointAuthMethod `tls_client_auth`・`self_signed_tls_client_auth` は OAuth の mTLS（RFC 8705。フィーチャー `mtls_client_auth`。ADR 0113）。
+	// `tls_client_auth` は `tls_client_auth_*` のどれか1つで証明書を照合し、`self_signed_tls_client_auth` は `jwks` の鍵と証明書の鍵を照合する
 	TokenEndpointAuthMethod ClientInputTokenEndpointAuthMethod `json:"token_endpoint_auth_method"`
 }
 
 // ClientInputIdTokenSignedResponseAlg defines model for ClientInput.IdTokenSignedResponseAlg.
 type ClientInputIdTokenSignedResponseAlg string
 
-// ClientInputTokenEndpointAuthMethod defines model for ClientInput.TokenEndpointAuthMethod.
+// ClientInputTokenEndpointAuthMethod `tls_client_auth`・`self_signed_tls_client_auth` は OAuth の mTLS（RFC 8705。フィーチャー `mtls_client_auth`。ADR 0113）。
+// `tls_client_auth` は `tls_client_auth_*` のどれか1つで証明書を照合し、`self_signed_tls_client_auth` は `jwks` の鍵と証明書の鍵を照合する
 type ClientInputTokenEndpointAuthMethod string
 
 // Clients defines model for Clients.
@@ -2584,6 +2621,7 @@ type IssueServiceAccountTokenFormdataBody struct {
 // IssueServiceAccountTokenParams defines parameters for IssueServiceAccountToken.
 type IssueServiceAccountTokenParams struct {
 	Authorization *string `json:"Authorization,omitempty"`
+	DPoP          *string `json:"DPoP,omitempty"`
 }
 
 // IssueServiceAccountToken200JSONResponseBodyTokenType defines parameters for IssueServiceAccountToken.
@@ -5834,6 +5872,25 @@ func (siw *ServerInterfaceWrapper) IssueServiceAccountToken(w http.ResponseWrite
 		}
 
 		params.Authorization = &Authorization
+
+	}
+
+	// ------------- Optional header parameter "DPoP" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("DPoP")]; found {
+		var DPoP string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "DPoP", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "DPoP", valueList[0], &DPoP, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "DPoP", Err: err})
+			return
+		}
+
+		params.DPoP = &DPoP
 
 	}
 

@@ -33,6 +33,10 @@ const (
 var mtlsPath = regexp.MustCompile(`^(?:/realms/[a-z0-9][a-z0-9-]{0,62})?/v1/(?:login/methods/[a-z][a-z0-9_]{0,31}:(?:begin|complete)|` +
 	`login/second-factor/[a-z][a-z0-9_]{0,31}:(?:begin|complete)|me/credentials/[a-z][a-z0-9_]{0,31}:(?:enroll-begin|enroll-complete))$`)
 
+// mtlsOAuthPath は、フィーチャー mtls_client_auth が動いているときに mTLS の専用の待ち受けで通す OAuth のエンドポイント
+// （RFC 8705 の連携先の認証と、証明書に結び付けたトークンの提示。ADR 0113）。
+var mtlsOAuthPath = regexp.MustCompile(`^(?:/realms/[a-z0-9][a-z0-9-]{0,62})?/oauth2/(?:token|introspect|revoke|userinfo|device_authorization)$`)
+
 // withClientCertHeader は、信じたプロキシからの要求のヘッダーの証明書を ctx に載せる。ヘッダーは読んだら消す。
 // TLS で受けた要求（mTLS の専用の待ち受け）のヘッダーは読まない。
 func withClientCertHeader(h http.Handler, name, format string, proxies []netip.Prefix) http.Handler {
@@ -124,13 +128,14 @@ func parseCertHeader(v, format string) ([][]byte, error) {
 	return out, nil
 }
 
-// mtlsHandler は mTLS の専用の待ち受けのハンドラ。認証方式のパスだけを通し、TLS で受け取った証明書を ctx に載せる。
-func mtlsHandler(public http.Handler) http.Handler {
+// mtlsHandler は mTLS の専用の待ち受けのハンドラ。認証方式のパス（oauth なら OAuth のエンドポイントも）だけを通し、
+// TLS で受け取った証明書を ctx に載せる。
+func mtlsHandler(public http.Handler, oauth bool) http.Handler {
 	notFound := withCommon(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found")
 	}), nil)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.TLS == nil || !mtlsPath.MatchString(r.URL.Path) {
+		if r.TLS == nil || !(mtlsPath.MatchString(r.URL.Path) || oauth && mtlsOAuthPath.MatchString(r.URL.Path)) {
 			notFound.ServeHTTP(w, r)
 			return
 		}

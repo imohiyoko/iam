@@ -97,10 +97,14 @@ func (s *oidcServer) DeviceToken(ctx context.Context, r *op.ClientRequest[oidc.D
 	case err != nil:
 		return nil, s.fail(ctx, err)
 	}
+	b, err := s.tokenBinding(ctx, r.Method, r.URL.Path, r.Header, cl.c)
+	if err != nil {
+		return nil, err
+	}
 	var out provider.Issued
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		out, err = s.a.tokens.Exchange(ctx, tx, cl.c, c, requestID(ctx))
+		out, err = s.a.tokens.Exchange(ctx, tx, cl.c, c, b, requestID(ctx))
 		return err
 	})
 	if errors.Is(err, provider.ErrInvalidGrant) {

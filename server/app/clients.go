@@ -15,8 +15,37 @@ import (
 
 // 連携先（OIDC のクライアント）と署名鍵の管理 API（design.md 5.5、9.3、ADR 0026）。
 
-// clientOut は連携先を返す形にする。deviceFlow はフィーチャー device_flow が動いているか（オフなら許可の有無を返さない）。
-func clientOut(c port.Client, secret string, deviceFlow bool) (adminapi.Client, error) {
+// clientOut は連携先を返す形にする。フィーチャー device_flow・dpop・mtls_client_auth が止まっていれば、その許可の有無を返さない。
+func (a *App) clientOut(c port.Client, secret string) (adminapi.Client, error) {
+	out, err := clientOutBase(c, secret, a.device != nil)
+	if err != nil {
+		return out, err
+	}
+	if a.dpop != nil {
+		out.DpopBoundAccessTokens = &c.DPoPBoundAccessTokens
+	}
+	if a.oauthMTLS != nil {
+		out.TlsClientCertificateBoundAccessTokens = &c.TLSBoundAccessTokens
+	}
+	if c.TLSAuthField != "" {
+		v := c.TLSAuthValue
+		switch c.TLSAuthField {
+		case port.TLSAuthSubjectDN:
+			out.TlsClientAuthSubjectDn = &v
+		case port.TLSAuthSANDNS:
+			out.TlsClientAuthSanDns = &v
+		case port.TLSAuthSANURI:
+			out.TlsClientAuthSanUri = &v
+		case port.TLSAuthSANIP:
+			out.TlsClientAuthSanIp = &v
+		case port.TLSAuthSANEmail:
+			out.TlsClientAuthSanEmail = &v
+		}
+	}
+	return out, nil
+}
+
+func clientOutBase(c port.Client, secret string, deviceFlow bool) (adminapi.Client, error) {
 	out := adminapi.Client{ClientId: c.PublicID, Name: c.Name, TrustLevel: adminapi.ClientTrustLevel(c.TrustLevel),
 		RedirectUris: c.RedirectURIs, PostLogoutRedirectUris: c.PostLogoutRedirectURIs, TokenEndpointAuthMethod: c.AuthMethod,
 		IdTokenSignedResponseAlg: c.IDTokenAlg, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
@@ -69,6 +98,26 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	if b.FrontchannelLogoutSessionRequired != nil {
 		in.FrontchannelLogoutSessionRequired = *b.FrontchannelLogoutSessionRequired
 	}
+	if b.DpopBoundAccessTokens != nil {
+		in.DPoPBoundAccessTokens = *b.DpopBoundAccessTokens
+	}
+	if b.TlsClientCertificateBoundAccessTokens != nil {
+		in.TLSBoundAccessTokens = *b.TlsClientCertificateBoundAccessTokens
+	}
+	// tls_client_auth の照合の項目は1つだけ（RFC 8705 2.1.2）。2つ以上なら誤り。
+	for _, f := range []struct {
+		name string
+		v    *string
+	}{{port.TLSAuthSubjectDN, b.TlsClientAuthSubjectDn}, {port.TLSAuthSANDNS, b.TlsClientAuthSanDns}, {port.TLSAuthSANURI, b.TlsClientAuthSanUri},
+		{port.TLSAuthSANIP, b.TlsClientAuthSanIp}, {port.TLSAuthSANEmail, b.TlsClientAuthSanEmail}} {
+		if f.v == nil {
+			continue
+		}
+		if in.TLSAuthField != "" {
+			return provider.ClientInput{}, provider.ErrInvalidClient
+		}
+		in.TLSAuthField, in.TLSAuthValue = f.name, *f.v
+	}
 	if b.Jwks != nil {
 		raw, err := json.Marshal(*b.Jwks)
 		if err != nil {
@@ -100,7 +149,7 @@ func (s adminServer) ListClients(ctx context.Context, _ adminapi.ListClientsRequ
 			return err
 		}
 		for _, c := range cs {
-			v, err := clientOut(c, "", s.a.device != nil)
+			v, err := s.a.clientOut(c, "")
 			if err != nil {
 				return err
 			}
@@ -135,7 +184,7 @@ func (s adminServer) CreateClient(ctx context.Context, req adminapi.CreateClient
 		if err != nil {
 			return err
 		}
-		out, err = clientOut(c, secret, s.a.device != nil)
+		out, err = s.a.clientOut(c, secret)
 		return err
 	})
 	switch {
@@ -160,7 +209,7 @@ func (s adminServer) GetClient(ctx context.Context, req adminapi.GetClientReques
 		if err != nil {
 			return err
 		}
-		out, err = clientOut(c, "", s.a.device != nil)
+		out, err = s.a.clientOut(c, "")
 		return err
 	})
 	switch {
@@ -196,7 +245,7 @@ func (s adminServer) UpdateClient(ctx context.Context, req adminapi.UpdateClient
 		if err != nil {
 			return err
 		}
-		out, err = clientOut(c, secret, s.a.device != nil)
+		out, err = s.a.clientOut(c, secret)
 		return err
 	})
 	switch {

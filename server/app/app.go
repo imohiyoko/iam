@@ -26,6 +26,7 @@ import (
 	"github.com/imohiyoko/iam/authn/botcheck"
 	"github.com/imohiyoko/iam/authn/credential"
 	"github.com/imohiyoko/iam/authn/device"
+	"github.com/imohiyoko/iam/authn/dpop"
 	"github.com/imohiyoko/iam/authn/emailflow"
 	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/hook"
@@ -191,6 +192,10 @@ type App struct {
 	ownPublic, ownAdmin http.Handler
 	// pats は本人の Personal Access Token（ADR 0109）。フィーチャー personal_access_tokens が動いていなければ nil。
 	pats *pat.Service
+	// dpop は DPoP の証明の確かめ、oauthMTLS は mTLS の連携先の認証（ADR 0113）。フィーチャー dpop・mtls_client_auth が
+	// 動いていなければ nil。
+	dpop      *dpop.Verifier
+	oauthMTLS *provider.MTLS
 }
 
 // New は起動前の検査を行い、App を組み立てる。binary はこのバイナリに含まれるフィーチャー。
@@ -364,7 +369,7 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		if a.mtlsTLS, err = mtlsConfig(cc); err != nil {
 			return nil, fmt.Errorf("app: server.client_certificates: %w", err)
 		}
-		a.mtls = mtlsHandler(a.public)
+		a.mtls = mtlsHandler(a.public, plan.IsActive(feature.MTLSClientAuth))
 	}
 	for name := range cfg.Methods {
 		if _, ok := a.methods.Get(name); !ok {
@@ -454,7 +459,11 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.authz.Members, a.authz.Hierarchy = authzMembers{}, a.orgs.Hierarchy
 	}
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
-	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout)}
+	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout),
+		DPoP: plan.IsActive(feature.DPoP), MTLS: plan.IsActive(feature.MTLSClientAuth)}
+	if err := a.setupSenderConstraint(); err != nil {
+		return err
+	}
 	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D()}
 	// ID トークンの署名鍵は realm ごとに用意しておく（JWKS が空のまま公開されないように）。
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, realm.ID) }); err != nil {

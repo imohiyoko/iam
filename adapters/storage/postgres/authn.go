@@ -419,7 +419,7 @@ func nilEmpty(b []byte) []byte {
 func toSAToken(r db.AuthnServiceAccountToken) (port.ServiceAccountToken, error) {
 	var p times
 	t := port.ServiceAccountToken{ID: r.ID, RealmID: r.RealmID, ServiceAccountID: r.ServiceAccountID, CredentialID: r.CredentialID,
-		Hash: r.TokenHash, CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.at(r.ExpiresAt)}
+		Hash: r.TokenHash, CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.at(r.ExpiresAt), JKT: r.Jkt}
 	return t, p.err
 }
 
@@ -471,12 +471,22 @@ func (r accounts) RevokeCredential(ctx context.Context, realmID, id string, at t
 func (r accounts) CreateToken(ctx context.Context, t port.ServiceAccountToken) error {
 	return mapErr(r.q.CreateServiceAccountToken(ctx, db.CreateServiceAccountTokenParams{ID: t.ID, RealmID: t.RealmID,
 		ServiceAccountID: t.ServiceAccountID, CredentialID: t.CredentialID, TokenHash: nonNil(t.Hash), CreatedAt: formatTime(t.CreatedAt),
-		ExpiresAt: formatTime(t.ExpiresAt)}))
+		ExpiresAt: formatTime(t.ExpiresAt), Jkt: t.JKT}))
 }
 
 func (r accounts) GetToken(ctx context.Context, realmID, id string) (port.ServiceAccountToken, error) {
 	row, err := r.q.GetServiceAccountToken(ctx, db.GetServiceAccountTokenParams{RealmID: realmID, ID: id})
 	return one(row, err, toSAToken)
+}
+
+func (r accounts) CountBoundTokens(ctx context.Context) (int, error) {
+	n, err := r.q.CountBoundServiceAccountTokens(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r accounts) PurgeBoundTokens(ctx context.Context, limit int) (int, error) {
+	n, err := r.q.PurgeBoundServiceAccountTokens(ctx, int64(limit))
+	return int(n), mapErr(err)
 }
 
 func (r accounts) DeleteExpiredTokens(ctx context.Context, before time.Time, limit int) (int, error) {

@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/dpop"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/pat"
+	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/check"
@@ -42,9 +43,14 @@ type adminPrincipal struct {
 // （権限はスコープに絞る）、どちらでもなければサービスアカウントの API キーかアクセストークンとして確かめる。権限の判定は各操作で行う。
 func (a *App) withAdminAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		key = strings.TrimSpace(key)
-		if !ok || key == "" {
+		scheme, key := authorization(r.Header.Get("Authorization"))
+		if scheme == "" || key == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// DPoP の方式で使えるのは、DPoP に結び付けたサービスアカウントのアクセストークンだけ（ADR 0113）。
+		if scheme == dpop.Scheme && !serviceaccount.IsAccessToken(key) {
+			a.challenge(w, "invalid_token")
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -91,6 +97,17 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 			}
 			if err != nil {
 				next.ServeHTTP(w, r)
+				return
+			}
+			// DPoP に結び付けたトークンは、同じ鍵の証明でだけ通す。結び付けの無いトークンを DPoP の方式で示すのも拒む。
+			err = a.checkResourceBinding(r.Context(), r, scheme, key, provider.Binding{JKT: sa.JKT}, a.adminURLs(r.URL.Path))
+			if eb, ok := errors.AsType[*errBinding](err); ok {
+				a.challenge(w, eb.Code)
+				next.ServeHTTP(w, r)
+				return
+			}
+			if err != nil {
+				a.unavailable(w, r, err)
 				return
 			}
 			p = adminPrincipal{Type: port.PrincipalServiceAccount, ID: sa.Account.ID, Actor: audit.Actor{Type: "service_account", ID: sa.Account.ID},

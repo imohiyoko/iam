@@ -18,6 +18,7 @@ import (
 	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/botcheck"
 	"github.com/imohiyoko/iam/authn/device"
+	"github.com/imohiyoko/iam/authn/dpop"
 	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/lockout"
@@ -90,6 +91,9 @@ var featureCatalog = map[string]struct {
 	feature.PersonalAccessTokens: {pat.Feature, module + "/features/personalaccesstokens"},
 	feature.OpenID4VP:            {openid4vp.Feature, module + "/features/openid4vp"},
 	feature.WSFed:                {wsfed.Feature, module + "/features/wsfed"},
+	// ADR 0113。
+	feature.DPoP:           {dpop.Feature, module + "/features/dpop"},
+	feature.MTLSClientAuth: {provider.MTLSFeature, module + "/features/mtlsclientauth"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

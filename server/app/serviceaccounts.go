@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/imohiyoko/iam/authn/dpop"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authz/check"
@@ -424,8 +425,17 @@ func (s adminServer) IssueServiceAccountToken(ctx context.Context, req adminapi.
 		}
 		tr.ClientID, tr.ClientSecret = id, secret
 	}
+	// DPoP の証明があれば鍵に結び付ける（ADR 0113）。
+	jkt, err := s.a.serviceAccountJKT(ctx, req.Params.DPoP)
+	switch {
+	case errors.Is(err, dpop.ErrInvalidProof), errors.Is(err, dpop.ErrUseNonce):
+		return adminapi.IssueServiceAccountToken400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError(errCode(err), ""))}, nil
+	case err != nil:
+		return nil, err
+	}
+	tr.JKT = jkt
 	var is serviceaccount.Issued
-	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
 		is, err = s.a.serviceAccounts.Token(ctx, tx, s.a.realm.ID, tr, requestID(ctx))
 		return err
@@ -441,6 +451,9 @@ func (s adminServer) IssueServiceAccountToken(ctx context.Context, req adminapi.
 	noStore := "no-store"
 	out := adminapi.IssueServiceAccountToken200JSONResponse{Headers: adminapi.IssueServiceAccountToken200ResponseHeaders{CacheControl: &noStore}}
 	out.Body.AccessToken, out.Body.TokenType, out.Body.ExpiresIn = is.Token, "Bearer", int(is.ExpiresIn.Seconds())
+	if jkt != "" {
+		out.Body.TokenType = dpop.TokenType
+	}
 	return out, nil
 }
 

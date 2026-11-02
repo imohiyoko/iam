@@ -183,6 +183,9 @@ type ExchangeRequest struct {
 	SubjectToken, SubjectTokenType string
 	ActorToken, ActorTokenType     string
 	RequestedTokenType             string
+	// Binding は要求で示した DPoP の鍵・クライアント証明書（ADR 0113）。発行するトークンに結び付け、結び付けた
+	// subject_token・actor_token にはこれが合うことを求める（盗んだトークンを交換で Bearer にさせない）。
+	Binding Binding
 	// Audiences は audience、Resources は resource（RFC 8707）。どちらも発行するトークンの aud になる。
 	Audiences, Resources []string
 	Scopes               []string
@@ -282,10 +285,10 @@ func narrow(have, want []string) ([]string, error) {
 }
 
 // subject は subject_token を検証する。使えなければ ErrInvalidGrant。
-func (t *Tokens) subject(ctx context.Context, tx port.Tx, realmID, token, typ string, now time.Time) (subjectToken, error) {
+func (t *Tokens) subject(ctx context.Context, tx port.Tx, realmID, token, typ string, b Binding, now time.Time) (subjectToken, error) {
 	switch typ {
 	case TokenTypeAccess:
-		tok, g, err := t.accessToken(ctx, tx, realmID, token, now)
+		tok, g, err := t.accessToken(ctx, tx, realmID, token, b, now)
 		if err != nil {
 			return subjectToken{}, err
 		}
@@ -308,9 +311,9 @@ func (t *Tokens) subject(ctx context.Context, tx port.Tx, realmID, token, typ st
 }
 
 // accessToken はアクセストークンが今使えるか（Validate と同じ規則）を確かめる。使えなければ ErrInvalidGrant。
-func (t *Tokens) accessToken(ctx context.Context, tx port.Tx, realmID, token string, now time.Time) (port.OIDCToken, port.Grant, error) {
+func (t *Tokens) accessToken(ctx context.Context, tx port.Tx, realmID, token string, b Binding, now time.Time) (port.OIDCToken, port.Grant, error) {
 	tok, g, err := t.token(ctx, tx, realmID, token, port.TokenAccess)
-	if err == nil && !now.Before(tok.ExpiresAt) {
+	if err == nil && (!now.Before(tok.ExpiresAt) || !TokenBinding(tok).Satisfies(b)) {
 		err = ErrInvalidToken
 	}
 	if err == nil {
@@ -420,7 +423,7 @@ func earliestOf(a, b time.Time) time.Time {
 // delegate は委任：本人のトークンを、下流の aud 向けのトークンに交換する。
 func (t *Tokens) delegate(ctx context.Context, tx port.Tx, cl port.Client, pol ExchangePolicy, in ExchangeRequest, aud []string, requestID string,
 	now time.Time) (Issued, error) {
-	sub, err := t.subject(ctx, tx, cl.RealmID, in.SubjectToken, in.SubjectTokenType, now)
+	sub, err := t.subject(ctx, tx, cl.RealmID, in.SubjectToken, in.SubjectTokenType, in.Binding, now)
 	if err != nil {
 		return Issued{}, err
 	}
@@ -446,7 +449,7 @@ func (t *Tokens) delegate(ctx context.Context, tx port.Tx, cl port.Client, pol E
 		if in.ActorTokenType != TokenTypeAccess {
 			return Issued{}, ErrUnsupportedTokenType
 		}
-		_, ag, err := t.accessToken(ctx, tx, cl.RealmID, in.ActorToken, now)
+		_, ag, err := t.accessToken(ctx, tx, cl.RealmID, in.ActorToken, in.Binding, now)
 		if err != nil {
 			return Issued{}, err
 		}
@@ -478,7 +481,7 @@ func (t *Tokens) delegate(ctx context.Context, tx port.Tx, cl port.Client, pol E
 		AuthMethods: src.AuthMethods, AuthTime: src.AuthTime, CreatedAt: now,
 		ExpiresAt: earliestOf(now.Add(ttlOr(t.AccessTokenTTL, DefaultAccessTokenTTL)), sub.expires),
 		Exchange:  port.ExchangeDelegation, ParentID: src.ID, ActorUserID: actorUserID, Act: actJSON, Audiences: aud}
-	out, err := t.issueExchanged(ctx, tx, g, now)
+	out, err := t.issueExchanged(ctx, tx, g, in.Binding, now)
 	if err != nil {
 		return Issued{}, err
 	}
@@ -500,7 +503,7 @@ func (t *Tokens) delegate(ctx context.Context, tx port.Tx, cl port.Client, pol E
 }
 
 // issueExchanged は交換の認可を作り、その期限までのアクセストークンを発行する。
-func (t *Tokens) issueExchanged(ctx context.Context, tx port.Tx, g port.Grant, now time.Time) (Issued, error) {
+func (t *Tokens) issueExchanged(ctx context.Context, tx port.Tx, g port.Grant, b Binding, now time.Time) (Issued, error) {
 	if err := tx.Grants().Create(ctx, g); err != nil {
 		return Issued{}, err
 	}
@@ -509,10 +512,10 @@ func (t *Tokens) issueExchanged(ctx context.Context, tx port.Tx, g port.Grant, n
 		return Issued{}, err
 	}
 	if err := tx.OIDCTokens().Create(ctx, port.OIDCToken{ID: tid, RealmID: g.RealmID, GrantID: g.ID, Kind: port.TokenAccess, Hash: hash,
-		CreatedAt: now, ExpiresAt: g.ExpiresAt}); err != nil {
+		CreatedAt: now, ExpiresAt: g.ExpiresAt, JKT: b.JKT, X5T: b.X5T}); err != nil {
 		return Issued{}, err
 	}
-	return Issued{AccessToken: token, ExpiresIn: g.ExpiresAt.Sub(now), Scopes: g.Scopes, Grant: g}, nil
+	return Issued{AccessToken: token, ExpiresIn: g.ExpiresAt.Sub(now), Scopes: g.Scopes, Grant: g, Binding: b}, nil
 }
 
 // impersonate はなりすまし：運営者のアクセストークンを、本人（requested_subject）として動くトークンに交換する。
@@ -525,7 +528,7 @@ func (t *Tokens) impersonate(ctx context.Context, tx port.Tx, cl port.Client, po
 	if in.SubjectTokenType != TokenTypeAccess || in.ActorToken != "" || in.ActorTokenType != "" {
 		return Issued{}, ErrUnsupportedTokenType
 	}
-	tok, g, err := t.accessToken(ctx, tx, cl.RealmID, in.SubjectToken, now)
+	tok, g, err := t.accessToken(ctx, tx, cl.RealmID, in.SubjectToken, in.Binding, now)
 	if err != nil {
 		return Issued{}, err
 	}
@@ -594,7 +597,7 @@ func (t *Tokens) impersonate(ctx context.Context, tx port.Tx, cl port.Client, po
 		AuthMethods: s.AuthMethods, AuthTime: s.AuthenticatedAt, CreatedAt: now,
 		ExpiresAt: earliestOf(now.Add(ttlOr(imp.TTL, DefaultImpersonationTTL)), tok.ExpiresAt),
 		Exchange:  port.ExchangeImpersonation, ParentID: g.ID, ActorUserID: operator.ID, Act: act, Audiences: aud}
-	out, err := t.issueExchanged(ctx, tx, ng, now)
+	out, err := t.issueExchanged(ctx, tx, ng, in.Binding, now)
 	if err != nil {
 		return Issued{}, err
 	}

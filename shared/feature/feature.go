@@ -59,6 +59,10 @@ const (
 	OpenID4VP = "openid4vp"
 	// WSFed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。
 	WSFed = "wsfed"
+	// DPoP は DPoP（RFC 9449）の送信者制約トークン、MTLSClientAuth は OAuth の mTLS（RFC 8705）の連携先の認証と
+	// 証明書に結び付けたトークン（ADR 0113）。
+	DPoP           = "dpop"
+	MTLSClientAuth = "mtls_client_auth"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

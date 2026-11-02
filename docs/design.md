@@ -653,6 +653,21 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 - `wa=wsignout1.0`：登録済みの `wtrealm` と `wreply` のときだけ、確かめずにセッションを失効させて戻す（`POST /v1/logout` と同じ）
 - RP は管理 API（`/v1/admin/wsfed/relying-parties`、`clients:manage`）で realm ごとに登録する
 
+### 5.9 送信者制約トークン
+
+フィーチャー `dpop`（DPoP、RFC 9449）と `mtls_client_auth`（OAuth の mTLS、RFC 8705）。どちらも既定オフ（ADR 0113）。
+
+- token エンドポイントで、DPoP の証明の鍵（`jkt`）と、`tls_client_certificate_bound_access_tokens` の連携先のクライアント証明書
+  （`x5t#S256`）をアクセストークンに結び付ける。公開クライアントはリフレッシュトークンも結び付け、次のリフレッシュで同じ鍵・証明書を求める。
+  認可コードの交換・リフレッシュ・Device Authorization Grant・Token Exchange で同じ。イントロスペクションは `cnf` を返す
+- DPoP の証明は `typ`・`alg`・公開鍵の `jwk`・署名・`htm`・`htu`・`iat`・`jti`（EphemeralStore で1回だけ）を確かめる。`require_nonce` なら
+  `DPoP-Nonce` で iam の nonce を求める。`dpop_bound_access_tokens` の連携先は証明が要る。認可要求の `dpop_jkt` を受ける
+- mTLS の連携先の認証は `tls_client_auth`（`oidc.mtls.trust_anchors` までの連鎖と、DN か SAN の 1 項目の照合）と `self_signed_tls_client_auth`
+  （JWKS の鍵と証明書の鍵の一致）。証明書は ADR 0103 の専用の待ち受けかプロキシのヘッダーで受ける。`oidc.mtls.endpoint_url` があれば
+  Discovery に `mtls_endpoint_aliases`
+- iam の資源：UserInfo と管理 API（DPoP に結び付けたサービスアカウントのアクセストークン）は、結び付けたトークンに同じ鍵の
+  `Authorization: DPoP` と証明（`ath` 付き）、同じクライアント証明書を求める。フィーチャーが止まっていれば結び付けたトークンは通さない
+
 ## 6. 監査ログとイベント出力
 
 ### 6.1 記録するもの
@@ -849,6 +864,8 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | Kerberos / SPNEGO（4.1、ADR 0107） | オフ | ― | Negotiate のログインと登録なし（設定の無い realm でも）。無効化は認証情報が 0 件になって完了 |
 | 本人の Personal Access Token（11.18、ADR 0109） | オフ | ― | PAT の API は 404。`iampat_` のトークンはどの経路でも通らない。無効化でトークンと realm のポリシーを消す |
 | WS-Federation（5.8、ADR 0110） | オフ | ― | `/wsfed` とメタデータは 404、RP の管理 API は `404 wsfed_disabled`。無効化は RP と署名の証明書を消して完了 |
+| DPoP（5.9、ADR 0113） | オフ | ― | 証明を見ずに Bearer を出す（`dpop_bound_access_tokens` の連携先には出さない）。DPoP に結び付けたトークンは通らない。無効化で連携先の設定を外し、結び付けたトークンを消す |
+| OAuth の mTLS（5.9、ADR 0113） | オフ | ― | mTLS の連携先の認証と証明書の結び付けなし。結び付けたトークンは通らない。無効化で連携先の照合の項目と設定を外し、結び付けたトークンを消す |
 
 ### 11.1 複数 realm
 

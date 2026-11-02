@@ -160,10 +160,17 @@ SELECT * FROM authn_service_account_credentials WHERE realm_id = $1 AND service_
 UPDATE authn_service_account_credentials SET revoked_at = coalesce(revoked_at, sqlc.arg(at)) WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
 
 -- name: CreateServiceAccountToken :exec
-INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7);
+INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at, jkt) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: GetServiceAccountToken :one
 SELECT * FROM authn_service_account_tokens WHERE realm_id = $1 AND id = $2;
+
+-- name: CountBoundServiceAccountTokens :one
+SELECT count(*) FROM authn_service_account_tokens WHERE jkt <> '';
+
+-- name: PurgeBoundServiceAccountTokens :execrows
+DELETE FROM authn_service_account_tokens WHERE id IN (
+    SELECT t.id FROM authn_service_account_tokens t WHERE t.jkt <> '' ORDER BY t.id LIMIT sqlc.arg(lim)::bigint);
 
 -- name: DeleteExpiredServiceAccountTokens :execrows
 DELETE FROM authn_service_account_tokens WHERE id IN (

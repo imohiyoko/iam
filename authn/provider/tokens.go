@@ -84,6 +84,8 @@ type Issued struct {
 	IDToken      string
 	Scopes       []string
 	Grant        port.Grant
+	// Binding はアクセストークンに結び付けたもの（ADR 0113。JKT があれば token_type は DPoP）。
+	Binding Binding
 }
 
 func newOpaque(prefix id.Prefix) (tokenID, token string, hash []byte, err error) {
@@ -107,8 +109,13 @@ func splitOpaque(token string) (string, []byte, bool) {
 }
 
 // Exchange は検証済みの認可コードから認可を作り、トークンを発行する。ログインの系列がもう使えなければ ErrInvalidGrant。
-func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Code, requestID string) (Issued, error) {
+// b は要求で示した DPoP の鍵・クライアント証明書で、トークンに結び付ける（ADR 0113）。認可要求に dpop_jkt があれば、
+// 同じ鍵でなければ ErrInvalidGrant（RFC 9449 10）。
+func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Code, b Binding, requestID string) (Issued, error) {
 	now := t.Clock.Now()
+	if c.DPoPJKT != "" && (b.JKT == "" || !(Binding{JKT: c.DPoPJKT}).Satisfies(Binding{JKT: b.JKT})) {
+		return Issued{}, ErrInvalidGrant
+	}
 	if err := t.alive(ctx, tx, c.RealmID, c.SID, c.UserID, c.OrgID, now); err != nil {
 		if errors.Is(err, ErrInvalidToken) {
 			return Issued{}, ErrInvalidGrant
@@ -121,7 +128,7 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 	if err := tx.Grants().Create(ctx, g); err != nil {
 		return Issued{}, err
 	}
-	out, err := t.issue(ctx, tx, cl, g, c.Nonce, now)
+	out, err := t.issue(ctx, tx, cl, g, c.Nonce, b, now)
 	if err != nil {
 		return Issued{}, err
 	}
@@ -137,6 +144,13 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 	if c.GrantType != "" {
 		details["grant_type"] = c.GrantType
 	}
+	// 送信者制約（ADR 0113）。
+	if b.JKT != "" {
+		details["dpop_jkt"] = b.JKT
+	}
+	if b.X5T != "" {
+		details["x5t#S256"] = b.X5T
+	}
 	_, err = eventlog.Record(ctx, tx, t.Clock, audit.Event{
 		Type: "oidc.authorized", Result: audit.ResultSuccess, RealmID: c.RealmID, OrgID: orgPublicID,
 		Actor: audit.Actor{Type: "user", ID: u.PublicID}, SessionID: c.SID, RequestID: requestID,
@@ -146,14 +160,14 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 }
 
 // issue はアクセストークンと ID トークンを発行する。
-func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.Grant, nonce string, now time.Time) (Issued, error) {
+func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.Grant, nonce string, b Binding, now time.Time) (Issued, error) {
 	ttl := ttlOr(t.AccessTokenTTL, DefaultAccessTokenTTL)
 	tid, token, hash, err := newOpaque(id.AccessToken)
 	if err != nil {
 		return Issued{}, err
 	}
 	if err := tx.OIDCTokens().Create(ctx, port.OIDCToken{ID: tid, RealmID: g.RealmID, GrantID: g.ID, Kind: port.TokenAccess, Hash: hash,
-		CreatedAt: now, ExpiresAt: now.Add(ttl)}); err != nil {
+		CreatedAt: now, ExpiresAt: now.Add(ttl), JKT: b.JKT, X5T: b.X5T}); err != nil {
 		return Issued{}, err
 	}
 	claims, err := t.userClaims(ctx, tx, g)
@@ -172,11 +186,11 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 	if err := t.hookClaims(ctx, cl, g, claims); err != nil {
 		return Issued{}, err
 	}
-	b, err := json.Marshal(claims)
+	payload, err := json.Marshal(claims)
 	if err != nil {
 		return Issued{}, err
 	}
-	idToken, err := t.Keys.Sign(ctx, tx, g.RealmID, cl.IDTokenAlg, "JWT", b)
+	idToken, err := t.Keys.Sign(ctx, tx, g.RealmID, cl.IDTokenAlg, "JWT", payload)
 	if err != nil {
 		return Issued{}, err
 	}
@@ -184,11 +198,12 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 	if err != nil {
 		return Issued{}, err
 	}
+	rb := refreshBinding(cl, b)
 	if err := tx.OIDCTokens().Create(ctx, port.OIDCToken{ID: rid, RealmID: g.RealmID, GrantID: g.ID, Kind: port.TokenRefresh, Hash: rhash,
-		CreatedAt: now, ExpiresAt: g.ExpiresAt}); err != nil {
+		CreatedAt: now, ExpiresAt: g.ExpiresAt, JKT: rb.JKT, X5T: rb.X5T}); err != nil {
 		return Issued{}, err
 	}
-	return Issued{AccessToken: token, RefreshToken: refresh, ExpiresIn: ttl, IDToken: idToken, Scopes: g.Scopes, Grant: g}, nil
+	return Issued{AccessToken: token, RefreshToken: refresh, ExpiresIn: ttl, IDToken: idToken, Scopes: g.Scopes, Grant: g, Binding: b}, nil
 }
 
 // SubjectClaims は、ID トークン以外で本人を連携先に渡すとき（WS-Federation。ADR 0110）のクレーム。中身は ID トークンと同じ
@@ -412,7 +427,9 @@ func revoked(g port.Grant, now time.Time) bool {
 // Refresh はリフレッシュトークンを使って新しいトークンを発行する（RFC 6749 6、OAuth 2.0 Security BCP 4.14）。
 // リフレッシュトークンは1回限りで、使用済みのものが再び来たら認可（ファミリー）ごと失効させる。ログインの系列の
 // 今のセッションの無操作の期限を延ばす（連携先での利用も利用とみなす）。使えないトークンは ErrInvalidGrant。
-func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refreshToken, requestID string) (Refreshed, error) {
+// b は要求で示した DPoP の鍵・クライアント証明書。結び付けたリフレッシュトークン（公開クライアント）には同じものを求め
+// （合わなければ使用済みにせずに ErrInvalidGrant。ADR 0113）、新しいトークンに結び付ける。
+func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refreshToken string, b Binding, requestID string) (Refreshed, error) {
 	now := t.Clock.Now()
 	tok, g, err := t.token(ctx, tx, cl.RealmID, refreshToken, port.TokenRefresh)
 	if errors.Is(err, ErrInvalidToken) {
@@ -421,7 +438,7 @@ func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refres
 	if err != nil {
 		return Refreshed{}, err
 	}
-	if g.ClientID != cl.ID || revoked(g, now) || !now.Before(tok.ExpiresAt) {
+	if g.ClientID != cl.ID || revoked(g, now) || !now.Before(tok.ExpiresAt) || !TokenBinding(tok).Satisfies(b) {
 		return Refreshed{}, ErrInvalidGrant
 	}
 	fresh, err := tx.OIDCTokens().Use(ctx, cl.RealmID, tok.ID, now)
@@ -450,7 +467,7 @@ func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refres
 	if err := tx.Sessions().Touch(ctx, g.RealmID, s.ID, now); err != nil {
 		return Refreshed{}, err
 	}
-	out, err := t.issue(ctx, tx, cl, g, "", now)
+	out, err := t.issue(ctx, tx, cl, g, "", b, now)
 	return Refreshed{Issued: out}, err
 }
 
@@ -514,6 +531,8 @@ type Introspection struct {
 	Act json.RawMessage `json:"act,omitempty"`
 	// Impersonation は運営者のなりすましのトークンか（act.sub が運営者。sid は出さない）。
 	Impersonation bool `json:"impersonation,omitempty"`
+	// Cnf はトークンを結び付けた DPoP の鍵（jkt）とクライアント証明書（x5t#S256）（RFC 9449 6.2、RFC 8705 3.2。ADR 0113）。
+	Cnf *Confirmation `json:"cnf,omitempty"`
 }
 
 // Introspect はトークン（アクセストークンかリフレッシュトークン）が今使えるかを返す（RFC 7662）。
@@ -565,7 +584,7 @@ func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token stri
 	}
 	out := Introspection{Active: true, Scope: strings.Join(g.Scopes, " "), ClientID: cl.PublicID, TokenType: typ, Exp: tok.ExpiresAt.Unix(),
 		Iat: tok.CreatedAt.Unix(), Sub: u.PublicID, Aud: []string{cl.PublicID}, Iss: t.Issuer, SID: g.SID, OrgID: orgPublicID,
-		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods, ACR: acrValue, Risk: risk}
+		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods, ACR: acrValue, Risk: risk, Cnf: confirmation(tok)}
 	return out, exchangeIntrospection(&out, g)
 }
 

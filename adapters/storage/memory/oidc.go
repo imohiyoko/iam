@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"time"
 
@@ -252,4 +253,39 @@ func (r oidcTokens) Use(_ context.Context, realmID, id string, at time.Time) (bo
 	t.UsedAt = &at
 	setKey(r.t, r.t.s.oidcTokens, id, t)
 	return true, nil
+}
+
+// boundBy は t が binding（port.BindingDPoP・BindingMTLS）で結び付いているか。知らない binding は偽。
+func boundBy(t port.OIDCToken, binding string) bool {
+	switch binding {
+	case port.BindingDPoP:
+		return t.JKT != ""
+	case port.BindingMTLS:
+		return t.X5T != ""
+	}
+	return false
+}
+
+func (r oidcTokens) CountBound(_ context.Context, binding string) (int, error) {
+	n := 0
+	for _, t := range r.t.s.oidcTokens {
+		if boundBy(t, binding) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r oidcTokens) PurgeBound(_ context.Context, binding string, limit int) (int, error) {
+	n := 0
+	for _, id := range slices.Sorted(maps.Keys(r.t.s.oidcTokens)) {
+		if n >= limit {
+			break
+		}
+		if boundBy(r.t.s.oidcTokens[id], binding) {
+			deleteKey(r.t, r.t.s.oidcTokens, id)
+			n++
+		}
+	}
+	return n, nil
 }

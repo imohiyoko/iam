@@ -2228,9 +2228,15 @@ paths:
         発行するのは不透明なトークンで、`Authorization: Bearer` で管理 API に使う。寿命は `service_accounts.token_ttl`。
         認証の失敗は理由を区別せず `401 invalid_client`。`service_account.token_issued` を監査ログに残す。
         フィーチャー service_accounts が動いていなければ `404 service_accounts_disabled`。
+
+        フィーチャー `dpop` が動いていて `oidc.dpop.admin_url` があれば、`DPoP` ヘッダーの証明（RFC 9449。`htu` は
+        `admin_url` + このパス）でトークンを鍵に結び付け、`token_type` を `DPoP` にする（ADR 0113）。結び付けたトークンは
+        `Authorization: DPoP` と同じ鍵・`ath` の証明でだけ使え、`Bearer` では通らない。証明の誤りは `400 invalid_dpop_proof`、
+        nonce が要るときは `400 use_dpop_nonce`（応答の `DPoP-Nonce` の値を使う）。
       security: []
       parameters:
         - { name: Authorization, in: header, schema: { type: string } }
+        - { name: DPoP, in: header, schema: { type: string } }
       requestBody:
         required: true
         content:
@@ -2257,7 +2263,7 @@ paths:
                 required: [access_token, token_type, expires_in]
                 properties:
                   access_token: { type: string }
-                  token_type: { type: string, enum: [Bearer] }
+                  token_type: { type: string, enum: [Bearer, DPoP] }
                   expires_in: { type: integer }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
@@ -4034,7 +4040,23 @@ components:
           type: array
           maxItems: 20
           items: { type: string }
-        token_endpoint_auth_method: { type: string, enum: [client_secret, private_key_jwt, none] }
+        token_endpoint_auth_method:
+          type: string
+          enum: [client_secret, private_key_jwt, none, tls_client_auth, self_signed_tls_client_auth]
+          description: |
+            `tls_client_auth`・`self_signed_tls_client_auth` は OAuth の mTLS（RFC 8705。フィーチャー `mtls_client_auth`。ADR 0113）。
+            `tls_client_auth` は `tls_client_auth_*` のどれか1つで証明書を照合し、`self_signed_tls_client_auth` は `jwks` の鍵と証明書の鍵を照合する
+        tls_client_auth_subject_dn: { type: string, description: 証明書の主体の DN（RFC 4514 の文字列。完全一致） }
+        tls_client_auth_san_dns: { type: string }
+        tls_client_auth_san_uri: { type: string }
+        tls_client_auth_san_ip: { type: string }
+        tls_client_auth_san_email: { type: string }
+        tls_client_certificate_bound_access_tokens:
+          type: boolean
+          description: トークンをクライアント証明書に結び付ける（RFC 8705 3。フィーチャー `mtls_client_auth` が動いているときだけ true にできる）
+        dpop_bound_access_tokens:
+          type: boolean
+          description: token エンドポイントで常に DPoP の証明を求める（RFC 9449 5.2。フィーチャー `dpop` が動いているときだけ true にできる）
         device_authorization_grant:
           type: boolean
           description: Device Authorization Grant（RFC 8628）を許す。フィーチャー `device_flow` が動いているときだけ true にできる（ADR 0095）
@@ -4073,6 +4095,13 @@ components:
         id_token_signed_response_alg: { type: string }
         backchannel_logout_uri: { type: string }
         device_authorization_grant: { type: boolean, description: フィーチャー `device_flow` が動いているときだけ返す }
+        tls_client_auth_subject_dn: { type: string }
+        tls_client_auth_san_dns: { type: string }
+        tls_client_auth_san_uri: { type: string }
+        tls_client_auth_san_ip: { type: string }
+        tls_client_auth_san_email: { type: string }
+        tls_client_certificate_bound_access_tokens: { type: boolean, description: フィーチャー `mtls_client_auth` が動いているときだけ返す }
+        dpop_bound_access_tokens: { type: boolean, description: フィーチャー `dpop` が動いているときだけ返す }
         frontchannel_logout_uri: { type: string }
         frontchannel_logout_session_required: { type: boolean, description: "`frontchannel_logout_uri` があるときだけ" }
         client_secret: { type: string, description: 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す） }

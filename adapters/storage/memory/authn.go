@@ -3,6 +3,7 @@ package memory
 import (
 	"bytes"
 	"context"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -803,4 +804,28 @@ func eraseWhere[V any](t *tx, m map[string]V, match func(V) bool) {
 	for _, k := range keys {
 		deleteKey(t, m, k)
 	}
+}
+
+func (r accounts) CountBoundTokens(context.Context) (int, error) {
+	n := 0
+	for _, t := range r.t.s.saTokens {
+		if t.JKT != "" {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r accounts) PurgeBoundTokens(_ context.Context, limit int) (int, error) {
+	n := 0
+	for _, id := range slices.Sorted(maps.Keys(r.t.s.saTokens)) {
+		if n >= limit {
+			break
+		}
+		if r.t.s.saTokens[id].JKT != "" {
+			deleteKey(r.t, r.t.s.saTokens, id)
+			n++
+		}
+	}
+	return n, nil
 }

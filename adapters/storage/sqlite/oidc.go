@@ -26,7 +26,8 @@ func toClient(r db.AuthnClient) (port.Client, error) {
 	c := port.Client{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Name: r.Name, TrustLevel: r.TrustLevel, AuthMethod: r.AuthMethod,
 		SecretHash: r.SecretHash, JWKS: r.Jwks, IDTokenAlg: r.IDTokenAlg, BackchannelLogoutURI: r.BackchannelLogoutUri, DeviceGrant: r.DeviceGrant != 0,
 		FrontchannelLogoutURI: r.FrontchannelLogoutUri, FrontchannelLogoutSessionRequired: r.FrontchannelLogoutSessionRequired != 0,
-		TokenExchange: r.TokenExchange, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		TokenExchange: r.TokenExchange, DPoPBoundAccessTokens: r.DpopBoundAccessTokens != 0, TLSBoundAccessTokens: r.TlsBoundAccessTokens != 0,
+		TLSAuthField: r.TlsAuthField, TLSAuthValue: r.TlsAuthValue, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	if p.err != nil {
 		return port.Client{}, p.err
 	}
@@ -49,7 +50,8 @@ func (r clients) Create(ctx context.Context, c port.Client) error {
 		TrustLevel: c.TrustLevel, RedirectUris: redirect, PostLogoutRedirectUris: logout, AuthMethod: c.AuthMethod, SecretHash: c.SecretHash,
 		Jwks: c.JWKS, IDTokenAlg: c.IDTokenAlg, BackchannelLogoutUri: c.BackchannelLogoutURI, DeviceGrant: boolInt(c.DeviceGrant), FrontchannelLogoutUri: c.FrontchannelLogoutURI,
 		FrontchannelLogoutSessionRequired: boolInt(c.FrontchannelLogoutSessionRequired), CreatedAt: formatTime(c.CreatedAt),
-		UpdatedAt: formatTime(c.UpdatedAt), TokenExchange: c.TokenExchange}))
+		UpdatedAt: formatTime(c.UpdatedAt), TokenExchange: c.TokenExchange, DpopBoundAccessTokens: boolInt(c.DPoPBoundAccessTokens),
+		TlsBoundAccessTokens: boolInt(c.TLSBoundAccessTokens), TlsAuthField: c.TLSAuthField, TlsAuthValue: c.TLSAuthValue}))
 }
 
 func (r clients) Get(ctx context.Context, realmID, id string) (port.Client, error) {
@@ -80,7 +82,8 @@ func (r clients) Update(ctx context.Context, c port.Client) error {
 		PostLogoutRedirectUris: logout, AuthMethod: c.AuthMethod, SecretHash: c.SecretHash, Jwks: c.JWKS, IDTokenAlg: c.IDTokenAlg,
 		BackchannelLogoutUri: c.BackchannelLogoutURI, FrontchannelLogoutUri: c.FrontchannelLogoutURI,
 		FrontchannelLogoutSessionRequired: boolInt(c.FrontchannelLogoutSessionRequired), UpdatedAt: formatTime(c.UpdatedAt),
-		TokenExchange: c.TokenExchange, DeviceGrant: boolInt(c.DeviceGrant), RealmID: c.RealmID, ID: c.ID})
+		TokenExchange: c.TokenExchange, DeviceGrant: boolInt(c.DeviceGrant), DpopBoundAccessTokens: boolInt(c.DPoPBoundAccessTokens),
+		TlsBoundAccessTokens: boolInt(c.TLSBoundAccessTokens), TlsAuthField: c.TLSAuthField, TlsAuthValue: c.TLSAuthValue, RealmID: c.RealmID, ID: c.ID})
 	return affected(n, err, "client")
 }
 
@@ -192,13 +195,14 @@ type oidcTokens struct{ q *db.Queries }
 func toOIDCToken(r db.AuthnOidcToken) (port.OIDCToken, error) {
 	var p times
 	t := port.OIDCToken{ID: r.ID, RealmID: r.RealmID, GrantID: r.GrantID, Kind: r.Kind, Hash: r.TokenHash, CreatedAt: p.at(r.CreatedAt),
-		ExpiresAt: p.at(r.ExpiresAt), UsedAt: p.null(r.UsedAt)}
+		ExpiresAt: p.at(r.ExpiresAt), UsedAt: p.null(r.UsedAt), JKT: r.Jkt, X5T: r.X5t}
 	return t, p.err
 }
 
 func (r oidcTokens) Create(ctx context.Context, t port.OIDCToken) error {
 	return mapErr(r.q.CreateOIDCToken(ctx, db.CreateOIDCTokenParams{ID: t.ID, RealmID: t.RealmID, GrantID: t.GrantID, Kind: t.Kind,
-		TokenHash: nonNil(t.Hash), CreatedAt: formatTime(t.CreatedAt), ExpiresAt: formatTime(t.ExpiresAt), UsedAt: nullTime(t.UsedAt)}))
+		TokenHash: nonNil(t.Hash), CreatedAt: formatTime(t.CreatedAt), ExpiresAt: formatTime(t.ExpiresAt), UsedAt: nullTime(t.UsedAt),
+		Jkt: t.JKT, X5t: t.X5T}))
 }
 
 func (r oidcTokens) Get(ctx context.Context, realmID, id string) (port.OIDCToken, error) {
@@ -218,4 +222,28 @@ func (r oidcTokens) Use(ctx context.Context, realmID, id string, at time.Time) (
 		return false, err
 	}
 	return false, nil
+}
+
+func (r oidcTokens) CountBound(ctx context.Context, binding string) (int, error) {
+	var n int64
+	var err error
+	switch binding {
+	case port.BindingDPoP:
+		n, err = r.q.CountDPoPBoundOIDCTokens(ctx)
+	case port.BindingMTLS:
+		n, err = r.q.CountMTLSBoundOIDCTokens(ctx)
+	}
+	return int(n), mapErr(err)
+}
+
+func (r oidcTokens) PurgeBound(ctx context.Context, binding string, limit int) (int, error) {
+	var n int64
+	var err error
+	switch binding {
+	case port.BindingDPoP:
+		n, err = r.q.PurgeDPoPBoundOIDCTokens(ctx, int64(limit))
+	case port.BindingMTLS:
+		n, err = r.q.PurgeMTLSBoundOIDCTokens(ctx, int64(limit))
+	}
+	return int(n), mapErr(err)
 }

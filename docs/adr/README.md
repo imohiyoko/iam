@@ -122,3 +122,4 @@
 | [0108](0108-openid4vp-verifier.md) | OpenID4VP の検証者は認証方式のプラグインにし、SD-JWT VC を信じる発行者の鍵だけで確かめて、本人の結び付けで利用者を引く | 承認 |
 | [0109](0109-personal-access-tokens.md) | 本人の Personal Access Token は権限の名前のスコープで本人の権限を絞り、ハッシュだけを持つ不透明なトークンにする | 承認 |
 | [0110](0110-wsfed-passive-idp.md) | WS-Federation のパッシブ要求者プロファイルを IdP として持ち、トークンは realm の ES256 の鍵で XML 署名する | 承認 |
+| [0113](0113-sender-constrained-tokens.md) | 送信者制約トークンは DPoP と OAuth の mTLS の 2 つのフィーチャーにし、iam の資源でも結び付けを確かめる | 承認 |

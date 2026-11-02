@@ -211,6 +211,9 @@ var cleaners = map[string]cleaner{
 		}},
 	// 本人の Personal Access Token と realm のポリシーを消す（ADR 0109）。
 	feature.PersonalAccessTokens: patCleaner,
+	// DPoP と OAuth の mTLS（ADR 0113）。連携先の設定を外し、結び付けたトークンを消す。
+	feature.DPoP:           dpopCleaner,
+	feature.MTLSClientAuth: mtlsCleaner,
 }
 
 // eachClient は全 realm の連携先に fn を呼び、true を返した数を数える。limit が 0 以上なら、その数で止める。

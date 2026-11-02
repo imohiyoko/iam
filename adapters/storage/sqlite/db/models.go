@@ -40,6 +40,10 @@ type AuthnClient struct {
 	FrontchannelLogoutSessionRequired int64
 	DeviceGrant                       int64
 	TokenExchange                     []byte
+	DpopBoundAccessTokens             int64
+	TlsBoundAccessTokens              int64
+	TlsAuthField                      string
+	TlsAuthValue                      string
 }
 
 type AuthnConnection struct {
@@ -120,6 +124,8 @@ type AuthnOidcToken struct {
 	CreatedAt string
 	ExpiresAt string
 	UsedAt    sql.NullString
+	Jkt       string
+	X5t       string
 }
 
 type AuthnPasskey struct {
@@ -248,6 +254,7 @@ type AuthnServiceAccountToken struct {
 	TokenHash        []byte
 	CreatedAt        string
 	ExpiresAt        string
+	Jkt              string
 }
 
 type AuthnSession struct {

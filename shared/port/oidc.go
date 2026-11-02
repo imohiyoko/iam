@@ -12,6 +12,19 @@ const (
 	ClientAuthSecret        = "client_secret"   // client_secret_basic / client_secret_post
 	ClientAuthPrivateKeyJWT = "private_key_jwt" // 公開鍵（JWKS）を登録する
 	ClientAuthNone          = "none"            // 公開クライアント（PKCE 必須）
+	// ClientAuthTLS は PKI の証明書での mTLS の認証（RFC 8705 2.1。フィーチャー mtls_client_auth。ADR 0113）。
+	ClientAuthTLS = "tls_client_auth"
+	// ClientAuthSelfSignedTLS は自己署名の証明書での mTLS の認証（RFC 8705 2.2。鍵は JWKS に登録する）。
+	ClientAuthSelfSignedTLS = "self_signed_tls_client_auth"
+)
+
+// tls_client_auth で証明書と照合する項目（RFC 8705 2.1.2。ADR 0113）。
+const (
+	TLSAuthSubjectDN = "subject_dn"
+	TLSAuthSANDNS    = "san_dns"
+	TLSAuthSANURI    = "san_uri"
+	TLSAuthSANIP     = "san_ip"
+	TLSAuthSANEmail  = "san_email"
 )
 
 // TrustFirstParty はホスト先が登録したファーストパーティのクライアント（当面これだけ。ADR 0026）。
@@ -52,8 +65,16 @@ type Client struct {
 	// TokenExchange は Token Exchange（RFC 8693）で許す交換（JSON。形は authn/provider の ExchangePolicy）。nil なら何も許さない
 	// （フィーチャー token_exchange。ADR 0099）。
 	TokenExchange []byte
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// DPoPBoundAccessTokens は token エンドポイントで常に DPoP の証明を求める（RFC 9449 5.2。フィーチャー dpop。ADR 0113）。
+	DPoPBoundAccessTokens bool
+	// TLSBoundAccessTokens はアクセストークンをクライアント証明書に結び付ける
+	// （tls_client_certificate_bound_access_tokens。RFC 8705 3.4。フィーチャー mtls_client_auth）。
+	TLSBoundAccessTokens bool
+	// TLSAuthField と TLSAuthValue は tls_client_auth で照合する証明書の項目（TLSAuth*）と値。
+	TLSAuthField string
+	TLSAuthValue string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // ClientRepo は clients の Repository。
@@ -171,7 +192,17 @@ type OIDCToken struct {
 	ExpiresAt time.Time
 	// UsedAt はリフレッシュトークンを使った（ローテーションした）時刻。
 	UsedAt *time.Time
+	// JKT はトークンを結び付けた DPoP の鍵の JWK SHA-256 Thumbprint（RFC 9449 6.1 の cnf.jkt）。空なら結び付けない。
+	JKT string
+	// X5T はトークンを結び付けたクライアント証明書の SHA-256 の指紋（RFC 8705 3.1 の cnf.x5t#S256）。空なら結び付けない。
+	X5T string
 }
+
+// トークンの結び付けの種類（OIDCTokenRepo.CountBound・PurgeBound。ADR 0113）。
+const (
+	BindingDPoP = "dpop"
+	BindingMTLS = "mtls"
+)
 
 // OIDCTokenRepo は oidc_tokens の Repository。
 type OIDCTokenRepo interface {
@@ -180,4 +211,8 @@ type OIDCTokenRepo interface {
 	Get(ctx context.Context, realmID, id string) (OIDCToken, error)
 	// Use はまだ使っていなければ at に使用済みにして true を返す（同時に使われても true は1回だけ）。無ければ errs.NotFound。
 	Use(ctx context.Context, realmID, id string, at time.Time) (bool, error)
+	// CountBound は全 realm の、binding（BindingDPoP・BindingMTLS）で結び付けたトークンの数を返す。
+	CountBound(ctx context.Context, binding string) (int, error)
+	// PurgeBound は全 realm の、binding で結び付けたトークンを最大 limit 件消し、消した件数を返す（フィーチャーの無効化）。
+	PurgeBound(ctx context.Context, binding string, limit int) (int, error)
 }

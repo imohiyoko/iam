@@ -57,7 +57,9 @@ type AuthRequest struct {
 	// LoginAfter は prompt=login のとき、この時刻より後の本人確認を求める。
 	LoginAfter *time.Time `json:"login_after,omitempty"`
 	// ACR は要求された acr の値のうち対応するもの（要求の順。フィーチャー acr。ADR 0093）。空なら求めない。
-	ACR       []string  `json:"acr,omitempty"`
+	ACR []string `json:"acr,omitempty"`
+	// DPoPJKT は認可要求の dpop_jkt（RFC 9449 10。フィーチャー dpop。ADR 0113）。あれば認可コードの交換で同じ鍵の証明を求める。
+	DPoPJKT   string    `json:"dpop_jkt,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
