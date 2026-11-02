@@ -391,8 +391,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	if err != nil {
 		return err
 	}
-	a.ownPublic = withCommon(newPublicHandler(a, login))
-	a.ownAdmin = withCommon(newAdminHandler(a))
+	trusted, err := cfg.Server.TrustedProxyPrefixes()
+	if err != nil {
+		return err
+	}
+	a.ownPublic = withCommon(newPublicHandler(a, login), trusted)
+	a.ownAdmin = withCommon(newAdminHandler(a), trusted)
 	return nil
 }
 

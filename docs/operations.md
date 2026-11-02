@@ -13,6 +13,7 @@
 
 - 複数インスタンスでは `server.multi_instance: true` にする。インメモリの EphemeralStore は共有されないため、この設定では起動を拒否する
 - 公開 API（既定 `:8080`）と管理 API（既定 `127.0.0.1:8081`）は別のリスナー。管理 API は内部のネットワークだけに出す
+- リバースプロキシやロードバランサーの後ろに置くなら、`server.trusted_proxies` にプロキシの IP か CIDR を書く。書かないと全員の接続元がプロキシの IP になり、接続元ごとのレートリミットを全員で共有する。プロキシ以外の範囲は入れない（そこからは X-Forwarded-For で接続元を偽れる。ADR 0088）
 - `/healthz` は Storage に届くかを返す（ロードバランサーのヘルスチェックに使う）
 - DB との時刻がずれていれば起動時に警告する（`server.clock_skew_warn`、既定 1 秒）。NTP で合わせる
 - 公式イメージは全部入り（`ghcr.io/imohiyoko/iam`）と最小構成（`-minimal`）。自分の構成は `iam build` で作る（README、ADR 0073）。

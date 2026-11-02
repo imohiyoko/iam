@@ -72,6 +72,7 @@ func TestParseRejects(t *testing.T) {
 		"hook http":               "hooks: {pre_token: {url: 'http://hooks.example.com', secret_env: S}}\n",
 		"hook without secret":     "dev: true\nhooks: {pre_token: {url: 'https://hooks.example.com'}}\n",
 		"hook secret without url": "dev: true\nhooks: {pre_token: {secret_env: S}}\n",
+		"bad trusted proxy":       "dev: true\nserver: {trusted_proxies: [proxy.example.com]}\n",
 	}
 	for name, y := range cases {
 		if _, err := Parse([]byte(y)); err == nil {

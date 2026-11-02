@@ -357,9 +357,10 @@ func (a *App) indexOnlyRealms() []string {
 // dispatch は要求の realm を決め、その realm のハンドラに渡す。ホスト名が realm のものならその realm、/realms/{slug} なら
 // （ホスト名を持たない）その realm、どちらでもなければ既定の realm。知らない slug は 404。
 func (a *App) dispatch(own http.Handler, admin bool) http.Handler {
+	trusted, _ := a.cfg.Server.TrustedProxyPrefixes() // New で確かめ済み
 	notFound := withCommon(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "realm_not_found")
-	}))
+	}), trusted)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.refreshRealms(r.Context())
 		ra, rest, ok := a.resolve(r)
