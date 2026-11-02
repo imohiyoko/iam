@@ -8,6 +8,8 @@ server:
   admin_addr: "127.0.0.1:8081" # 管理 API は公開 API とポートを分ける
   multi_instance: false
   clock_skew_warn: 1s
+  # リバースプロキシ・ロードバランサーの後ろに置くなら、その IP か CIDR を書く（X-Forwarded-For から接続元を求める。ADR 0088）
+  # trusted_proxies: ["10.0.0.0/8"]
 
 storage:
   driver: sqlite

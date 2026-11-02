@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"testing"
@@ -149,6 +150,52 @@ func TestRateLimitPerIP(t *testing.T) {
 	}
 	if n := countType(l.auditTypes(t), "rate_limit.triggered"); n != 1 {
 		t.Fatalf("rate_limit.triggered = %d", n)
+	}
+}
+
+// 信頼できるプロキシの後ろでは X-Forwarded-For の接続元ごとに数える。左に書き足した偽の値では逃れられない（ADR 0088）。
+func TestRateLimitBehindProxy(t *testing.T) {
+	l := newLoginEnvWith(t, func(c *config.Config) {
+		c.Security.Login.RateLimit.PerIP = 2
+		c.Server.TrustedProxies = []string{"192.0.2.0/24"} // httptest の RemoteAddr は 192.0.2.1
+	}, nil)
+	verify := func(xff string) int {
+		t.Helper()
+		return l.do(t, l.a.PublicHandler(), "POST", "/v1/login/email:verify", map[string]string{"flow_id": "x", "code": "1"}, "X-Forwarded-For", xff).Code
+	}
+	for i, xff := range []string{"198.51.100.7", "203.0.113.1, 198.51.100.7"} {
+		if c := verify(xff); c != 401 {
+			t.Fatalf("request %d: %d", i, c)
+		}
+	}
+	if c := verify("203.0.113.2, 198.51.100.7"); c != 429 {
+		t.Fatalf("spoofed left-most entry must not reset the count: %d", c)
+	}
+	// 別の利用者（別の接続元）は同じプロキシを通っても止まらない。
+	if c := verify("198.51.100.8"); c != 401 {
+		t.Fatalf("another client behind the proxy: %d", c)
+	}
+}
+
+func TestForwardedFor(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("2001:db8::/32")}
+	for _, c := range []struct {
+		peer string
+		xff  []string
+		want string
+	}{
+		{"203.0.113.9", []string{"198.51.100.1"}, "203.0.113.9"},                  // 信頼しない接続元の XFF は読まない
+		{"10.0.0.1", nil, "10.0.0.1"},                                             // XFF が無ければプロキシ自身
+		{"10.0.0.1", []string{"198.51.100.1"}, "198.51.100.1"},                    // プロキシが付けた接続元
+		{"10.0.0.1", []string{"1.2.3.4, 198.51.100.1, 10.0.0.2"}, "198.51.100.1"}, // 右から trusted を飛ばす
+		{"10.0.0.1", []string{"1.2.3.4", "198.51.100.1"}, "198.51.100.1"},         // 複数のヘッダーは順につなぐ
+		{"10.0.0.1", []string{"10.0.0.3, 10.0.0.2"}, "10.0.0.3"},                  // 全部 trusted なら一番左
+		{"10.0.0.1", []string{"198.51.100.1, garbage, 10.0.0.2"}, "10.0.0.2"},     // 読めない値の右で止める
+		{"2001:db8::1", []string{"::ffff:198.51.100.1"}, "198.51.100.1"},          // IPv4 射影は IPv4 に
+	} {
+		if got := forwardedFor(c.peer, c.xff, trusted); got != c.want {
+			t.Errorf("forwardedFor(%q, %q) = %q, want %q", c.peer, c.xff, got, c.want)
+		}
 	}
 }
 

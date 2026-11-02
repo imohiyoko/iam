@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -127,17 +128,63 @@ func requestID(ctx context.Context) string {
 
 type clientKey struct{}
 
-// client は監査ログに残す接続元。信頼できるプロキシの扱い（X-Forwarded-For）は M6 で足す。
+// client は監査ログに残し、レートリミットで数える接続元。
 type client struct{ IP, UserAgent string }
 
-func clientOf(r *http.Request) client {
+// clientOf は r の接続元を返す。RemoteAddr が trusted（信頼できるプロキシ）なら X-Forwarded-For を右から読み、
+// trusted でない最初のアドレスを接続元にする（ADR 0088）。左の方は利用者が自由に書けるので、右から読む。
+func clientOf(r *http.Request, trusted []netip.Prefix) client {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
+	host = forwardedFor(host, r.Header.Values("X-Forwarded-For"), trusted)
 	ua := r.UserAgent()
 	if len(ua) > 512 {
 		ua = ua[:512]
 	}
 	return client{IP: host, UserAgent: ua}
+}
+
+// forwardedFor は直接の接続元 peer と X-Forwarded-For の値 xff から接続元を決める。peer が trusted でなければ peer。
+// trusted の中を右から辿り、trusted でない最初のアドレスを返す。読めない値に当たったら、その右の（trusted な）アドレスで止める。
+func forwardedFor(peer string, xff []string, trusted []netip.Prefix) string {
+	if !inPrefixes(peer, trusted) {
+		return peer
+	}
+	var hops []string
+	for _, v := range xff {
+		for _, h := range strings.Split(v, ",") {
+			hops = append(hops, strings.TrimSpace(h))
+		}
+	}
+	last := peer
+	for i := len(hops) - 1; i >= 0; i-- {
+		a, err := netip.ParseAddr(hops[i])
+		if err != nil {
+			return last
+		}
+		last = a.Unmap().String()
+		if !inPrefixes(last, trusted) {
+			return last
+		}
+	}
+	return last
+}
+
+func inPrefixes(ip string, ps []netip.Prefix) bool {
+	if len(ps) == 0 {
+		return false
+	}
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return false
+	}
+	a = a.Unmap()
+	for _, p := range ps {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
