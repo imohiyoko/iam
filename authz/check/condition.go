@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/risk"
 )
@@ -14,6 +15,7 @@ import (
 //	condition := all(条件...) | any(条件...)
 //	           | amr_has(<手段>...) | factors_at_least(<n>) | auth_within(<秒>)
 //	           | risk_below(<種類>, <点数>) | risk_at_most(<種類>, low|medium|high) | attested()
+//	           | aal_at_least(<n>)   # フィーチャー acr（ADR 0093）。AAL は amr から求める
 
 // Condition は条件の木の1つの節。ちょうど1つの項目を持つ。
 type Condition struct {
@@ -26,6 +28,8 @@ type Condition struct {
 	RiskBelow  *RiskScore `json:"risk_below,omitempty"`
 	RiskAtMost *RiskLevel `json:"risk_at_most,omitempty"`
 	Attested   bool       `json:"attested,omitempty"`
+	// AALAtLeast は amr から求めた AAL（SP 800-63B）の下限（フィーチャー acr。ADR 0093）。
+	AALAtLeast int `json:"aal_at_least,omitempty"`
 }
 
 // RiskScore は risk_below の引数。点数が Score 未満なら満たす。
@@ -88,6 +92,7 @@ const (
 	UnmetFactors  = "condition.factors"
 	UnmetAuthAge  = "condition.auth_age"
 	UnmetAttested = "condition.attested"
+	UnmetAAL      = "condition.aal"
 	// UnmetRiskPrefix の後ろにリスクの種類が付く（condition.risk.account など）。
 	UnmetRiskPrefix = "condition.risk."
 )
@@ -108,7 +113,7 @@ func (c Condition) validate(depth int, leaves *int, riskType func(string) bool) 
 	}
 	set := 0
 	for _, b := range []bool{c.All != nil, c.Any != nil, c.AMRHas != nil, c.FactorsAtLeast != 0, c.AuthWithin != 0,
-		c.RiskBelow != nil, c.RiskAtMost != nil, c.Attested} {
+		c.RiskBelow != nil, c.RiskAtMost != nil, c.Attested, c.AALAtLeast != 0} {
 		if b {
 			set++
 		}
@@ -140,6 +145,10 @@ func (c Condition) validate(depth int, leaves *int, riskType func(string) bool) 
 	case c.FactorsAtLeast != 0:
 		if c.FactorsAtLeast < 1 || c.FactorsAtLeast > MaxFactors {
 			return fmt.Errorf("factors_at_least must be within [1, %d]", MaxFactors)
+		}
+	case c.AALAtLeast != 0:
+		if c.AALAtLeast < 1 || c.AALAtLeast > acr.MaxAAL {
+			return fmt.Errorf("aal_at_least must be within [1, %d]", acr.MaxAAL)
 		}
 	case c.AuthWithin != 0:
 		if c.AuthWithin < 1 || c.AuthWithin > MaxAuthWithin {
@@ -179,6 +188,14 @@ func (c Condition) RiskTypes() []string {
 	}
 	walk(c)
 	return out
+}
+
+// UsesAAL は条件が aal_at_least を含むかを返す（フィーチャー acr が止まっている間の保存の可否。ADR 0093）。
+func (c Condition) UsesAAL() bool {
+	if c.AALAtLeast != 0 {
+		return true
+	}
+	return slices.ContainsFunc(slices.Concat(c.All, c.Any), Condition.UsesAAL)
 }
 
 func riskTypeOf(r *RiskScore) string {
@@ -257,6 +274,8 @@ func (c Condition) leaf(ac *AuthContext, now time.Time, bands Bands) (string, bo
 		return UnmetRiskPrefix + c.RiskAtMost.Type, ok && levelOf(bands.of(c.RiskAtMost.Type), score).rank() <= c.RiskAtMost.Level.rank()
 	case c.Attested:
 		return UnmetAttested, ac != nil && ac.Attested
+	case c.AALAtLeast != 0:
+		return UnmetAAL, ac != nil && acr.AAL(ac.AMR) >= c.AALAtLeast
 	}
 	return "", false
 }
@@ -278,4 +297,42 @@ func (c Condition) EvalRequirement(ac *AuthContext, now time.Time, bands Bands) 
 type Decision struct {
 	Allow bool
 	Unmet []string
+	// StepUp は満たさなかった条件のうち、認証をやり直せば満たせるもの（AAL と経過時間）。Unmet を返すときだけ（ADR 0093）。
+	StepUp StepUp
+}
+
+// StepUp は step-up（RFC 9470）で求める認証。0 は求めない。
+type StepUp struct {
+	// AAL は求める AAL の下限（満たさなかった aal_at_least の最大）。
+	AAL int
+	// MaxAge は求める認証からの経過の上限（秒。満たさなかった auth_within の最小）。
+	MaxAge int
+}
+
+// Empty は求めるものが無いかを返す。
+func (s StepUp) Empty() bool { return s.AAL == 0 && s.MaxAge == 0 }
+
+func (s *StepUp) add(o StepUp) {
+	s.AAL = max(s.AAL, o.AAL)
+	if o.MaxAge > 0 && (s.MaxAge == 0 || o.MaxAge < s.MaxAge) {
+		s.MaxAge = o.MaxAge
+	}
+}
+
+// stepUp は満たさなかった条件 c のうち、認証をやり直せば満たせる葉を集める。any は満たさなかった子をすべて集める
+// （どれを満たせばよいかは選べないので、厳しい方に寄せる）。
+func (c Condition) stepUp(ac *AuthContext, now time.Time, bands Bands, out *StepUp) {
+	if ok, _ := c.eval(ac, now, bands); ok {
+		return
+	}
+	switch {
+	case c.All != nil || c.Any != nil:
+		for _, ch := range slices.Concat(c.All, c.Any) {
+			ch.stepUp(ac, now, bands, out)
+		}
+	case c.AALAtLeast != 0:
+		out.add(StepUp{AAL: c.AALAtLeast})
+	case c.AuthWithin != 0:
+		out.add(StepUp{MaxAge: c.AuthWithin})
+	}
 }

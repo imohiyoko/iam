@@ -323,6 +323,18 @@ Group のネスト、Org 階層（M7）。
 - realm の削除、realm ごとのセキュリティの階層
 - SCIM、管理画面（design.md 1章では当面やらないとしている。必要になったら検討）
 
+### acr・AAL と step-up（ADR 0093。M8 認証の土台）
+
+**ゴール**：ポリシーと条件を認証の強さ（AAL）で書け、足りなければ連携先と API が step-up を求められる。
+
+- [x] amr から AAL（SP 800-63B）を求める対応表。amr の値ごとに引け、方式の宣言（ADR 0090）に置き換えられる
+- [x] `acr` を ID トークン・UserInfo・イントロスペクションに載せ、Discovery に `acr_values_supported`
+- [x] authorize の `acr_values` と `claims` の `id_token.acr`。満たさなければログインへ回し、届かなければ `unmet_authentication_requirements`
+- [x] 判定の API の `step_up` と、公開 API の本人の重要な操作の RFC 9470 の `WWW-Authenticate`（本文は変えない）
+- [x] 条件の言語の `aal_at_least` と、Org のログインポリシーの `min_aal`
+- [x] フィーチャー `acr`（既定オフ）。オフなら今の動作と同じ
+- AAL3 と `phrh`（attestation で鍵がハードウェアにあると確かめる方式。ADR 0090 の方式の宣言で足す）、メールのコードと TOTP の区別
+
 ---
 
 ## v1.0 の条件

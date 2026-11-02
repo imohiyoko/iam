@@ -40,6 +40,9 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.responseError,
 	}), publicapi.StdHTTPServerOptions{BaseRouter: newColonMux(), ErrorHandlerFunc: a.requestError})
+	if a.acrActive() {
+		h = withStepUp(h)
+	}
 	api := a.withLoginGuard(a.withSession(h))
 	protected := http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isHosted(r.URL.Path) {

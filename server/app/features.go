@@ -37,6 +37,12 @@ var cleaners = map[string]cleaner{
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
 		return eachOrg(ctx, tx, limit, func(o port.Org) (bool, error) { return org.ClearLoginPolicy(ctx, tx, o, now) })
 	}},
+	// ログインポリシーの min_aal を外す（ADR 0093）。条件の aal_at_least は残し、判定し続ける（外すと緩むため。運営者が外す）。
+	feature.ACR: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachOrg(ctx, tx, -1, func(o port.Org) (bool, error) { return org.HasMinAAL(o) })
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachOrg(ctx, tx, limit, func(o port.Org) (bool, error) { return org.ClearMinAAL(ctx, tx, o, now) })
+	}},
 	// 親子関係を外す（ADR 0078）。
 	feature.OrgHierarchy: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		return eachOrg(ctx, tx, -1, func(o port.Org) (bool, error) { return o.ParentID != "", nil })

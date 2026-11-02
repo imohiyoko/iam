@@ -415,8 +415,8 @@ func TestRequirements(t *testing.T) {
 	}{
 		{"fresh", check.Request{Principal: alice, Action: "payment:send", Context: fresh}, check.Decision{Allow: true}},
 		// 同じ操作に当たる要件（`payment:*` と `payment:send`）はすべて AND する。
-		{"old", check.Request{Principal: alice, Action: "payment:read", Context: old}, check.Decision{Unmet: []string{"condition.auth_age"}}},
-		{"no context", check.Request{Principal: alice, Action: "payment:send"}, check.Decision{Unmet: []string{"condition.attested", "condition.auth_age", "condition.risk.account"}}},
+		{"old", check.Request{Principal: alice, Action: "payment:read", Context: old}, check.Decision{Unmet: []string{"condition.auth_age"}, StepUp: check.StepUp{MaxAge: 300}}},
+		{"no context", check.Request{Principal: alice, Action: "payment:send"}, check.Decision{Unmet: []string{"condition.attested", "condition.auth_age", "condition.risk.account"}, StepUp: check.StepUp{MaxAge: 300}}},
 		{"namespace bands", check.Request{Principal: alice, Action: "payment:send", Context: risky}, check.Decision{Unmet: []string{"condition.risk.account"}}},
 		// 要件は attested() を暗黙に AND する。
 		{"declared", check.Request{Principal: alice, Action: "payment:read", Context: declared}, check.Decision{Unmet: []string{"condition.attested"}}},
@@ -470,6 +470,41 @@ func TestRequirementsValidate(t *testing.T) {
 	} {
 		if err := c.ns.Validate(c.name, cat); errs.KindOf(err) != errs.KindInvalid || !errors.Is(err, errs.WithCode(errs.KindInvalid, c.code, "")) {
 			t.Errorf("%s %+v: %v, want %s", c.name, c.ns, err, c.code)
+		}
+	}
+}
+
+// step-up の手がかり（ADR 0093）：満たさなかった aal_at_least と auth_within から、求める AAL と経過の上限を返す。
+func TestStepUp(t *testing.T) {
+	e := newEnv(t, nil)
+	now := e.clk.Now()
+	e.tx(func(ctx context.Context, tx port.Tx) error {
+		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: realm, Name: "payment", CreatedAt: now, UpdatedAt: now,
+			Settings: []byte(`{"requirements":{"payment:*":{"auth_within":600},"payment:send":{"all":[{"aal_at_least":2},{"auth_within":300}]}}}`)})
+	})
+	payer := e.role("", "payment:send", "payment:read")
+	e.bind(payer.ID, alice, "", "", "")
+	approver := e.role("", "payment:approve")
+	e.bindIf(approver.ID, alice, `{"any":[{"aal_at_least":3},{"amr_has":["sc"]}]}`)
+
+	pwd := &check.AuthContext{AMR: []string{"pwd"}, Factors: 1, AuthTime: now.Add(-time.Hour), Attested: true}
+	mfa := &check.AuthContext{AMR: []string{"pwd", "otp", "mfa"}, Factors: 2, AuthTime: now, Attested: true}
+	for _, c := range []struct {
+		name string
+		r    check.Request
+		want check.Decision
+	}{
+		{"weak and old", check.Request{Principal: alice, Action: "payment:send", Context: pwd},
+			check.Decision{Unmet: []string{"condition.aal", "condition.auth_age"}, StepUp: check.StepUp{AAL: 2, MaxAge: 300}}},
+		{"strong", check.Request{Principal: alice, Action: "payment:send", Context: mfa}, check.Decision{Allow: true}},
+		{"other action", check.Request{Principal: alice, Action: "payment:read", Context: pwd},
+			check.Decision{Unmet: []string{"condition.auth_age"}, StepUp: check.StepUp{MaxAge: 600}}},
+		// 付与の条件の any は、満たさなかった子をすべて集める（amr_has は手がかりにならない）。
+		{"grant condition", check.Request{Principal: alice, Action: "payment:approve", Context: mfa},
+			check.Decision{Unmet: []string{"condition.aal", "condition.amr"}, StepUp: check.StepUp{AAL: 3}}},
+	} {
+		if got := e.decide(c.r); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: Decide = %+v, want %+v", c.name, got, c.want)
 		}
 	}
 }
