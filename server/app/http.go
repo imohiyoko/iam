@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/netip"
 	"time"
 
 	"github.com/imohiyoko/iam/authn/session"
@@ -168,14 +169,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 const maxBodyBytes = 1 << 20
 
 // withCommon はすべての応答に共通のヘッダーを付ける。リクエスト ID はログの相関に使う（design.md 6.4）。
-// 本文の大きさもここで制限する（未認証で呼べる操作があるため）。
-func withCommon(h http.Handler) http.Handler {
+// 本文の大きさもここで制限する（未認証で呼べる操作があるため）。接続元は trusted のプロキシを通して決める（ADR 0088）。
+func withCommon(h http.Handler, trusted []netip.Prefix) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		hdr := w.Header()
 		rid := id.NewExternal(id.Request)
 		ctx := context.WithValue(r.Context(), requestIDKey{}, rid)
-		ctx = context.WithValue(ctx, clientKey{}, clientOf(r))
+		ctx = context.WithValue(ctx, clientKey{}, clientOf(r, trusted))
 		// 生成されたハンドラ（strict server）は *http.Request と ResponseWriter を受け取らないため、
 		// Cookie の読み書きに使えるよう context に載せる。
 		ctx = context.WithValue(ctx, httpKey{}, httpPair{w: w, r: r})
