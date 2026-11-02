@@ -609,6 +609,7 @@ GET    /v1/admin/signing-keys
 
 - 当面はホスト先が管理 API で登録したファーストパーティのみ。同意画面なし、動的クライアント登録なし
 - 入力の限られた端末向けに、Device Authorization Grant を連携先ごとに許せる（フィーチャー `device_flow`。11.16）
+- 機密の連携先ごとに CIBA（poll・ping）を登録できる（フィーチャー `ciba`。11.19）
 - 将来のサードパーティ開放に備え `clients.trust_level` を持つ
 - ログアウトに関わる登録：`post_logout_redirect_uris`（完全一致）、`backchannel_logout_uri`（5.2）、`frontchannel_logout_uri` と
   `frontchannel_logout_session_required`（5.6。フィーチャー `oidc_logout`）
@@ -849,6 +850,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | Kerberos / SPNEGO（4.1、ADR 0107） | オフ | ― | Negotiate のログインと登録なし（設定の無い realm でも）。無効化は認証情報が 0 件になって完了 |
 | 本人の Personal Access Token（11.18、ADR 0109） | オフ | ― | PAT の API は 404。`iampat_` のトークンはどの経路でも通らない。無効化でトークンと realm のポリシーを消す |
 | WS-Federation（5.8、ADR 0110） | オフ | ― | `/wsfed` とメタデータは 404、RP の管理 API は `404 wsfed_disabled`。無効化は RP と署名の証明書を消して完了 |
+| CIBA（11.19、ADR 0114） | オフ | ― | backchannel authentication エンドポイントと本人の API は 404、CIBA の grant は `unsupported_grant_type`。Discovery に出さない。無効化は連携先の登録を外して完了 |
 
 ### 11.1 複数 realm
 
@@ -1080,6 +1082,25 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - 本人は `/v1/me/personal-access-tokens` で作る（直近の認証が要る）・一覧・取り消し。運営者は `credentials:revoke` で一覧・取り消し、
   侵害時の一括の無効化でも取り消す。消去で消し、統合で統合元のものを取り消す
 - 監査ログ `personal_access_token.created`・`revoked`・`policy_updated`
+
+### 11.19 CIBA
+
+連携先の前に本人がいない・ブラウザに送れない場面（コールセンター・店頭の端末など）で、本人の手元の端末で承認させる
+（OpenID Connect Client-Initiated Backchannel Authentication Core 1.0）。
+
+実装（ADR 0114）：
+
+- フィーチャー `ciba`。管理 API の連携先で `backchannel_token_delivery_mode`（`poll`・`ping`）を登録した機密の連携先だけが使える
+  （戻り先は無くてよい。ping は `backchannel_client_notification_endpoint` が要る）。push モードは持たない
+- `POST /oauth2/bc-authorize` が `auth_req_id`（256 bit）を返す。本人は `login_hint`（確認済みのメールアドレスかユーザーの公開 ID）か
+  `id_token_hint`（この連携先に発行した ID トークン）で指す。`binding_message` は 64 文字まで。期限は `oidc.ciba_ttl`（既定 5 分、
+  `requested_expiry` で短くできる）、間隔は `oidc.ciba_poll_interval`（既定 5 秒）
+- 本人の承認：フィーチャー `push_auth` で端末を登録していれば、プッシュで連携先の名前と binding_message を送り（番号の照合はしない）、
+  端末の署名で承認・拒否を受ける。承認は CIBA 用のセッション（`amr: [swk]`。ブラウザに渡さず、本人のセッションの一覧に出る）の系列に
+  結び付く。ほかに本人の API（`/v1/me/backchannel-requests`）で、今のセッションの系列で承認・拒否できる。判断は要求ごとに 1 回だけ
+- 連携先は token エンドポイントを `urn:openid:params:grant-type:ciba` でポーリングする（ping は通知を受けてから）。承認の後は
+  認可コードフローと同じトークン。CIBA の grant は zitadel/oidc の `op.Server` の前で受ける
+- 途中の状態は EphemeralStore に置く（Device Authorization Grant と同じ。複数インスタンスでは共有できるものが要る）
 
 ## 12. テスト
 

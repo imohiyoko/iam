@@ -54,7 +54,18 @@ type Client struct {
 	TokenExchange []byte
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	// CIBAMode は CIBA のトークンの受け取り方（backchannel_token_delivery_mode。CIBAPoll か CIBAPing）。空なら CIBA を使えない
+	// （フィーチャー ciba。ADR 0114）。
+	CIBAMode string
+	// CIBANotificationEndpoint は ping の通知先（backchannel_client_notification_endpoint。ping のときだけ）。
+	CIBANotificationEndpoint string
 }
+
+// CIBA のトークンの受け取り方（ADR 0114）。push は持たない。
+const (
+	CIBAPoll = "poll"
+	CIBAPing = "ping"
+)
 
 // ClientRepo は clients の Repository。
 type ClientRepo interface {

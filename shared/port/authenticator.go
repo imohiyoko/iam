@@ -176,6 +176,9 @@ type MethodChallenge struct {
 	Deliver func(ctx context.Context) error
 	// Events は、送信の後にコアが記録する監査ログ。
 	Events []MethodEvent
+	// Ref は、後で Callback の結果（MethodCallbackResult.Ref）と突き合わせるチャレンジの参照（BeginBackchannel だけ。ADR 0114）。
+	// 秘密を入れない。
+	Ref string
 }
 
 // MethodEvent は方式が残したい監査ログ（ADR 0104）。コアが種類を "method.<方式>.<Type>" にして、本人の公開 ID と一緒に記録する。
@@ -250,6 +253,9 @@ type MethodCallbackResult struct {
 	// Payload は呼び出し元に返す JSON（object）。nil なら {}。
 	Payload json.RawMessage
 	Events  []MethodEvent
+	// Ref は、応答したチャレンジの参照（BeginBackchannel が返した MethodChallenge.Ref と同じ。ADR 0114）。コアはこれで
+	// CIBA の要求に結果を記録する。応答でなければ空。
+	Ref string
 }
 
 // CallbackAuthenticator は、別の経路（本人の端末など）からの応答を受ける方式（任意。ADR 0104）。
@@ -410,4 +416,22 @@ type CredentialRepo interface {
 	Count(ctx context.Context, method string) (int, error)
 	// Purge は方式の認証情報を全 realm から最大 limit 件消し、消した件数を返す（フィーチャーの無効化）。
 	Purge(ctx context.Context, method string, limit int) (int, error)
+}
+
+// BackchannelRequest は、CIBA の要求を本人の端末に送るときの中身（ADR 0114）。本人に見せるもので、秘密を含まない。
+type BackchannelRequest struct {
+	// ClientName は連携先の名前。BindingMessage は連携先が付けた binding_message（無ければ空）。
+	ClientName     string
+	BindingMessage string
+	Scopes         []string
+	// ExpiresAt は要求の期限。チャレンジもこれより長くしない。
+	ExpiresAt time.Time
+}
+
+// BackchannelAuthenticator は、CIBA の本人の承認を受けられる方式（任意。ADR 0114）。BeginBackchannel は env.UserID の本人の端末に
+// 要求を送るチャレンジを返す（送信は Deliver）。結果は Callback が返す MethodCallbackResult.Ref で知らせ、コアは Complete
+// （State は BeginBackchannel が返したもの）で取り出す。本人が端末を持たなければ errs.NotFound。
+type BackchannelAuthenticator interface {
+	Authenticator
+	BeginBackchannel(ctx context.Context, env MethodEnv, req BackchannelRequest) (MethodChallenge, error)
 }

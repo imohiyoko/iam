@@ -408,7 +408,7 @@ Group のネスト、Org 階層（M7）。
 - ディレクトリ：LDAP / AD のバインド認証と同期、Kerberos / SPNEGO
 - 方式：WebAuthn の attestation と AAGUID の許可リスト、HOTP、SMS・音声、プッシュ、X.509・スマートカード、Verifiable Credentials（OpenID4VP）
 - リスクに応じた追加認証、新しい端末の検知、ボット対策、アカウント単位のロックアウト（下記）
-- Device Authorization Grant（下記）、本人の Personal Access Token（下記）
+- Device Authorization Grant（下記）、本人の Personal Access Token（下記）、CIBA（下記）
 
 #### Device Authorization Grant（ADR 0095）
 
@@ -567,6 +567,25 @@ realm ごとの規則で iam のユーザーに結び付く。
 - RSA-SHA256 の署名（RS256 のフィーチャーの後。.NET Framework の WIF の RP のため）、ほかの RP へのサインアウトの伝播（`wsignoutcleanup1.0`）、
   `wreq` のクレームの要求、暗号化したトークン、RP のメタデータからの登録
 
+#### CIBA（ADR 0114）
+
+**ゴール**：機密の連携先（コールセンター・店頭の端末など）が、本人をブラウザに送らずに、本人の手元の端末（プッシュの承認）か
+本人の API での承認でトークンを受け取れる（OpenID Connect CIBA Core 1.0 の poll・ping）。
+
+- [x] フィーチャー `ciba`（既定オフ）。オフなら Discovery・エンドポイント・本人の API・管理 API に何も出さず、CIBA の grant は `unsupported_grant_type`
+- [x] 連携先ごとの登録（`backchannel_token_delivery_mode` の poll・ping、ping の通知先）。機密の連携先だけ、push モードは拒む
+- [x] `POST /oauth2/bc-authorize`：`login_hint`（確認済みのメール・公開 ID）と `id_token_hint`（この連携先の ID トークン）のちょうど1つ、
+  `binding_message`、`client_notification_token`、`requested_expiry`、`acr_values`。誤りは `invalid_request`・`invalid_scope`・
+  `invalid_binding_message`・`unknown_user_id`、接続元と連携先ごとの回数の上限
+- [x] `auth_req_id` は 256 bit。状態は EphemeralStore に封をして置き、判断は1回だけ（プッシュと本人の API が同時でも）。
+  `authorization_pending`・`slow_down`（Device Authorization Grant と同じ関数）・`access_denied`・`expired_token`・`invalid_grant`
+- [x] 本人の端末：プッシュの方式（ADR 0104）に CIBA のチャレンジ（番号の代わりに binding_message と連携先の名前。端末は `context` で取る）
+  を足し、承認は CIBA 用のセッション（`amr: [swk]`、本人のセッションの一覧に出て失効できる）の系列に結び付ける
+- [x] 本人の API：`/v1/me/backchannel-requests` の一覧・承認・拒否。今のセッションの系列に結び付け、Org が使えない・acr を満たさなければ拒否
+- [x] ping の通知（Bearer の `client_notification_token`、転送を追わない、5 秒）、監査ログ（要求・承認・拒否・発行）、無効化で登録を外す、
+  memory・SQLite・PostgreSQL の契約テスト、要求の値の検査と端末の要求のファジング
+- push モード、`login_hint_token`・署名した要求（JAR）、`user_code`、ping の通知の再送、ホスト型の承認の画面、FAPI-CIBA
+
 ### M10 エンタープライズの運用
 
 - [x] 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作（ADR 0097）
@@ -587,7 +606,7 @@ realm ごとの規則で iam のユーザーに結び付く。
 
 - RS256、JWT のアクセストークン、`offline_access`、`profile` などのスコープ、`claims`、`form_post`、JAR、PAR
 - サードパーティの連携先、同意画面、動的クライアント登録、本人による許可の一覧と取り消し
-- SAML 2.0 IdP、Token Exchange、CIBA、DPoP、mTLS、FAPI 2.0、RFC 8414・9728
+- SAML 2.0 IdP、Token Exchange、CIBA（M9 で poll・ping。ADR 0114）、DPoP、mTLS、FAPI 2.0、RFC 8414・9728
 - サービスアカウントの自前の API 向けトークン（RFC 8707）、Workload Identity Federation
 - ロール・Group のクレーム、Shared Signals（CAEP・RISC）
 - SCIM 2.0（サーバーとクライアント）

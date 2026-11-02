@@ -153,6 +153,10 @@ type OIDC struct {
 	DevicePollInterval Duration `yaml:"device_poll_interval"`
 	// Impersonation は Token Exchange による運営者のなりすまし（フィーチャー impersonation。ADR 0099）。
 	Impersonation Impersonation `yaml:"impersonation"`
+	// CIBATTL は CIBA の auth_req_id の期限の上限（10 分以下。requested_expiry はこれより短くするときだけ効く。フィーチャー ciba。
+	// ADR 0114）。CIBAPollInterval は連携先のポーリングの最短の間隔（1 秒から 1 分）。
+	CIBATTL          Duration `yaml:"ciba_ttl"`
+	CIBAPollInterval Duration `yaml:"ciba_poll_interval"`
 }
 
 // Impersonation はなりすましの寿命と step-up の条件。
@@ -645,7 +649,8 @@ func Default() Config {
 		OIDC: OIDC{Impersonation: Impersonation{TokenTTL: Duration(10 * time.Minute), MaxAuthAge: Duration(5 * time.Minute), MinFactors: 2},
 			CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
 			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day),
-			DeviceCodeTTL: Duration(10 * time.Minute), DevicePollInterval: Duration(5 * time.Second)},
+			DeviceCodeTTL: Duration(10 * time.Minute), DevicePollInterval: Duration(5 * time.Second),
+			CIBATTL: Duration(5 * time.Minute), CIBAPollInterval: Duration(5 * time.Second)},
 		ServiceAccounts:      ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
 		PersonalAccessTokens: PersonalAccessTokens{MaxPerUser: 50},
 	}
@@ -846,6 +851,12 @@ func (c Config) Validate() error {
 	}
 	if o.DevicePollInterval < Duration(time.Second) || o.DevicePollInterval > Duration(time.Minute) {
 		problems = append(problems, "oidc.device_poll_interval must be within [1s, 1m]")
+	}
+	if o.CIBATTL < Duration(30*time.Second) || o.CIBATTL > Duration(10*time.Minute) {
+		problems = append(problems, "oidc.ciba_ttl must be within [30s, 10m]")
+	}
+	if o.CIBAPollInterval < Duration(time.Second) || o.CIBAPollInterval > Duration(time.Minute) {
+		problems = append(problems, "oidc.ciba_poll_interval must be within [1s, 1m]")
 	}
 	if im := o.Impersonation; im.TokenTTL <= 0 || im.TokenTTL > Duration(time.Hour) || im.MaxAuthAge <= 0 || im.MaxAuthAge > Duration(time.Hour) {
 		problems = append(problems, "oidc.impersonation: token_ttl and max_auth_age must be positive and at most 1h")

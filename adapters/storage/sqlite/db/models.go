@@ -40,6 +40,8 @@ type AuthnClient struct {
 	FrontchannelLogoutSessionRequired int64
 	DeviceGrant                       int64
 	TokenExchange                     []byte
+	CibaMode                          string
+	CibaNotificationEndpoint          string
 }
 
 type AuthnConnection struct {

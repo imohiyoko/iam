@@ -4,6 +4,9 @@
 // ブラウザにだけ返し、端末にはチャレンジの ID だけをプッシュで送る。端末は利用者が入れた番号と承認・拒否に署名して
 // POST /v1/login/methods/push:callback に送り、ブラウザは complete を呼び直して結果を受け取る（届くまで 202）。
 //
+// CIBA（ADR 0114）では、番号の代わりに連携先の名前と binding_message を持つチャレンジを送る（BeginBackchannel）。端末は
+// context で中身を取り、承認は番号 "00" に署名する（ログインのチャレンジの番号は 10〜99 なので通らない）。
+//
 // セキュリティ上重要なコード（13.2）。チャレンジは1回だけ応答でき、本人の・送った端末の署名だけを受ける。番号が違えば拒否として
 // 扱う。チャレンジの数と拒否の数をユーザーごとに数え、プッシュ疲れ（MFA fatigue）による誤承認を防ぐ。
 package push
@@ -88,6 +91,7 @@ var (
 	_ port.Authenticator             = Method{}
 	_ port.ConfigurableAuthenticator = Method{}
 	_ port.CallbackAuthenticator     = Method{}
+	_ port.BackchannelAuthenticator  = Method{}
 )
 
 // Info は方式の宣言。所持の要素（端末の鍵。ハードウェアにあるかは確かめないので swk）で、2要素目として AAL2 に届く。
@@ -144,7 +148,19 @@ type challenge struct {
 	Devices   []string  `json:"devices"` // 認証情報の内部 ID
 	Number    string    `json:"number"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// Backchannel は CIBA の要求のチャレンジ（ADR 0114）。番号の照合は無く（Number は空）、端末に見せる中身を持つ。
+	Backchannel *backchannel `json:"backchannel,omitempty"`
 }
+
+// backchannel は CIBA の要求のうち、端末に見せるもの（context で返す）。
+type backchannel struct {
+	Client         string   `json:"client"`
+	BindingMessage string   `json:"binding_message,omitempty"`
+	Scopes         []string `json:"scopes,omitempty"`
+}
+
+// backchannelNumber は、CIBA のチャレンジの承認で署名する番号（ログインのチャレンジの番号は 10〜99 なので、これでは通らない）。
+const backchannelNumber = "00"
 
 // response は端末の応答（complete が取り出す）。
 type response struct {
@@ -196,6 +212,38 @@ func (m Method) Begin(ctx context.Context, env port.MethodEnv, _ port.MethodRequ
 	if err != nil {
 		return port.MethodChallenge{}, err
 	}
+	n, err := rand.Int(rand.Reader, big.NewInt(90))
+	if err != nil {
+		return port.MethodChallenge{}, err
+	}
+	ch := challenge{Number: strconv.FormatInt(n.Int64()+10, 10), ExpiresAt: env.Now.Add(r.opts.ChallengeTTL)}
+	return r.begin(ctx, env, ch, true)
+}
+
+// BeginBackchannel は CIBA の要求のチャレンジを本人の全端末に送る（ADR 0114）。番号の照合の代わりに、連携先の名前と
+// binding_message を端末が context で取って見せる。期限は要求の期限（ただし 10 分まで）。接続元は連携先のサーバーなので、
+// 接続元ごとの数は数えない（ユーザーごとの数と、拒否が続いたときの停止は数える）。
+func (m Method) BeginBackchannel(ctx context.Context, env port.MethodEnv, req port.BackchannelRequest) (port.MethodChallenge, error) {
+	r, err := m.runtime()
+	if err != nil {
+		return port.MethodChallenge{}, err
+	}
+	exp := req.ExpiresAt
+	if limit := env.Now.Add(maxBackchannelTTL); exp.After(limit) {
+		exp = limit
+	}
+	if !exp.After(env.Now) || !validName(req.ClientName) || !validName(req.BindingMessage) {
+		return port.MethodChallenge{}, errInvalid
+	}
+	ch := challenge{ExpiresAt: exp, Backchannel: &backchannel{Client: req.ClientName, BindingMessage: req.BindingMessage, Scopes: slices.Clone(req.Scopes)}}
+	return r.begin(ctx, env, ch, false)
+}
+
+// maxBackchannelTTL は CIBA のチャレンジの期限の上限。
+const maxBackchannelTTL = 10 * time.Minute
+
+// begin は本人の全端末にチャレンジ ch を送るチャレンジを作る。perIP なら接続元ごとにも数える。
+func (r *runtime) begin(ctx context.Context, env port.MethodEnv, ch challenge, perIP bool) (port.MethodChallenge, error) {
 	if env.UserID == "" {
 		return port.MethodChallenge{}, rejected("first factor is not supported")
 	}
@@ -217,18 +265,16 @@ func (m Method) Begin(ctx context.Context, env port.MethodEnv, _ port.MethodRequ
 	if err := r.user.Allow(ctx, "challenge:user:"+env.UserID); err != nil {
 		return port.MethodChallenge{}, err
 	}
-	if err := r.ip.Allow(ctx, "challenge:ip:"+ratelimit.Bucket(env.ClientIP)); err != nil {
-		return port.MethodChallenge{}, err
+	if perIP {
+		if err := r.ip.Allow(ctx, "challenge:ip:"+ratelimit.Bucket(env.ClientIP)); err != nil {
+			return port.MethodChallenge{}, err
+		}
 	}
 	id, err := random(16)
 	if err != nil {
 		return port.MethodChallenge{}, err
 	}
-	n, err := rand.Int(rand.Reader, big.NewInt(90))
-	if err != nil {
-		return port.MethodChallenge{}, err
-	}
-	ch := challenge{UserID: env.UserID, Number: strconv.FormatInt(n.Int64()+10, 10), ExpiresAt: env.Now.Add(r.opts.ChallengeTTL)}
+	ch.UserID = env.UserID
 	msgs := make([]port.PushMessage, 0, len(cs))
 	for _, c := range cs {
 		d, err := readData(c)
@@ -246,12 +292,19 @@ func (m Method) Begin(ctx context.Context, env port.MethodEnv, _ port.MethodRequ
 	if err != nil {
 		return port.MethodChallenge{}, err
 	}
-	out, err := json.Marshal(map[string]any{"number": ch.Number, "expires_at": ch.ExpiresAt, "interval": PollInterval, "devices": len(msgs)})
+	payload := map[string]any{"expires_at": ch.ExpiresAt, "interval": PollInterval, "devices": len(msgs)}
+	var ref string
+	if ch.Backchannel == nil {
+		payload["number"] = ch.Number
+	} else {
+		ref = id
+	}
+	out, err := json.Marshal(payload)
 	if err != nil {
 		return port.MethodChallenge{}, err
 	}
-	ttl := r.opts.ChallengeTTL
-	return port.MethodChallenge{Payload: out, State: state,
+	ttl := ch.ExpiresAt.Sub(env.Now)
+	return port.MethodChallenge{Payload: out, State: state, Ref: ref,
 		Deliver: func(ctx context.Context) error {
 			if err := r.store.Set(ctx, "chal:"+id, raw, ttl); err != nil {
 				return err
@@ -269,8 +322,16 @@ func (m Method) Begin(ctx context.Context, env port.MethodEnv, _ port.MethodRequ
 			}
 			return nil
 		},
-		Events: []port.MethodEvent{{Type: "challenge_sent", UserID: env.UserID, Details: map[string]any{"devices": len(msgs)}}},
+		Events: []port.MethodEvent{{Type: "challenge_sent", UserID: env.UserID, Details: map[string]any{"devices": len(msgs), "kind": ch.kind()}}},
 	}, nil
+}
+
+// kind はチャレンジの種類（login か backchannel）。
+func (ch challenge) kind() string {
+	if ch.Backchannel != nil {
+		return "backchannel"
+	}
+	return "login"
 }
 
 func denyKey(userID string) string { return "deny:" + userID }
@@ -464,6 +525,8 @@ func (m Method) Callback(ctx context.Context, env port.MethodEnv, in port.Method
 		return r.respond(ctx, env, req)
 	case "token":
 		return r.updateToken(ctx, env, req)
+	case "context":
+		return r.context(ctx, env, req)
 	}
 	return port.MethodCallbackResult{}, errInvalid
 }
@@ -497,7 +560,8 @@ func (r *runtime) respond(ctx context.Context, env port.MethodEnv, req callbackI
 	if req.Decision == "deny" && number == "" {
 		number = "00"
 	}
-	if !numberRE.MatchString(number) && (req.Decision != "deny" || number != "00") {
+	// "00" は拒否と、CIBA のチャレンジの承認（ADR 0114）。ログインのチャレンジの承認では番号の違いになる。
+	if !numberRE.MatchString(number) && number != backchannelNumber {
 		return port.MethodCallbackResult{}, errInvalid
 	}
 	msg, ok := Message("respond", req.ChallengeID, req.DeviceID, req.Decision, number)
@@ -531,7 +595,11 @@ func (r *runtime) respond(ctx context.Context, env port.MethodEnv, req callbackI
 	result := resultDenied
 	if req.Decision == "approve" {
 		result = resultApproved
-		if subtle.ConstantTimeCompare([]byte(number), []byte(ch.Number)) != 1 {
+		want := ch.Number
+		if ch.Backchannel != nil {
+			want = backchannelNumber
+		}
+		if want == "" || subtle.ConstantTimeCompare([]byte(number), []byte(want)) != 1 {
 			result = resultNumberMismatch
 		}
 	}
@@ -558,7 +626,51 @@ func (r *runtime) respond(ctx context.Context, env port.MethodEnv, req callbackI
 	if err != nil {
 		return port.MethodCallbackResult{}, err
 	}
-	return port.MethodCallbackResult{Payload: out, Events: []port.MethodEvent{ev}}, nil
+	res := port.MethodCallbackResult{Payload: out, Events: []port.MethodEvent{ev}}
+	if ch.Backchannel != nil {
+		res.Ref = req.ChallengeID
+	}
+	return res, nil
+}
+
+// context は、本人の・送った端末に、チャレンジの中身（種類と期限、CIBA なら連携先の名前・binding_message・スコープ）を返す
+// （ADR 0114）。消さない。ログインのチャレンジの番号は返さない（端末に番号を見せると照合の意味が無い）。
+func (r *runtime) context(ctx context.Context, env port.MethodEnv, req callbackInput) (port.MethodCallbackResult, error) {
+	msg, ok := Message("context", req.ChallengeID, req.DeviceID)
+	if !ok {
+		return port.MethodCallbackResult{}, errInvalid
+	}
+	c, _, err := device(ctx, env, req.DeviceID, msg, req.Signature)
+	if err != nil {
+		return port.MethodCallbackResult{}, err
+	}
+	b, ok, err := r.store.Get(ctx, "chal:"+req.ChallengeID)
+	if err != nil {
+		return port.MethodCallbackResult{}, err
+	}
+	if !ok {
+		return port.MethodCallbackResult{}, rejected("unknown or answered challenge")
+	}
+	var ch challenge
+	if err := json.Unmarshal(b, &ch); err != nil {
+		return port.MethodCallbackResult{}, err
+	}
+	if ch.UserID != c.UserID || !slices.Contains(ch.Devices, c.ID) || !env.Now.Before(ch.ExpiresAt) {
+		return port.MethodCallbackResult{}, rejected("challenge for another user or device, or expired")
+	}
+	v := map[string]any{"kind": ch.kind(), "expires_at": ch.ExpiresAt}
+	if bc := ch.Backchannel; bc != nil {
+		v["client"] = bc.Client
+		v["scopes"] = bc.Scopes
+		if bc.BindingMessage != "" {
+			v["binding_message"] = bc.BindingMessage
+		}
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return port.MethodCallbackResult{}, err
+	}
+	return port.MethodCallbackResult{Payload: out}, nil
 }
 
 func (r *runtime) updateToken(ctx context.Context, env port.MethodEnv, req callbackInput) (port.MethodCallbackResult, error) {

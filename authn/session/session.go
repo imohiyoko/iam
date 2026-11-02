@@ -255,6 +255,10 @@ type Issue struct {
 	OrgFallback bool
 	// OrgEmail は OAuth のプロバイダが返したアドレス（Org の手がかり）。
 	OrgEmail string
+	// Backchannel は CIBA の承認で、ログインの系列だけのために発行するセッション（ADR 0114。トークンはブラウザに渡さない）。
+	// 本人の端末の署名がこの認証の要素なので2要素目の確認待ちにはせず、端末の記憶（ブラウザの端末ではない）も見ない。
+	// Org の選択とログインポリシー・警告・フックは通常のログインと同じに効く。
+	Backchannel bool
 }
 
 // Issued は発行したセッションと、クライアントに渡すトークン。
@@ -291,9 +295,12 @@ func (m *Manager) Committed(ctx context.Context, realmID string, is Issued) {
 func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, error) {
 	now := m.Clock.Now()
 	// 認証の後・セッションの作成の前に警告を評価する（10章、11.8 の post_authentication）。
-	restriction, methods, err := m.secondFactor(ctx, tx, in)
-	if err != nil {
-		return Issued{}, err
+	restriction, methods := port.RestrictionNone, []string(nil)
+	if !in.Backchannel {
+		var err error
+		if restriction, methods, err = m.secondFactor(ctx, tx, in); err != nil {
+			return Issued{}, err
+		}
 	}
 	if in.Recovery {
 		restriction, methods = port.RestrictionRecovery, nil
@@ -309,7 +316,7 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	ev := in.Evidence
 	ev.AMR = in.AuthMethods
 	var device DeviceResult
-	if restriction == port.RestrictionNone && m.Devices != nil {
+	if restriction == port.RestrictionNone && m.Devices != nil && !in.Backchannel {
 		if device, err = m.Devices.Observe(ctx, tx, DeviceLogin{RealmID: in.RealmID, UserID: in.UserID, UserPublicID: u.PublicID,
 			AuthMethods: in.AuthMethods, IP: in.IP, UserAgent: in.UserAgent, RequestID: in.RequestID}); err != nil {
 			return Issued{}, err
@@ -446,6 +453,9 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		return Issued{}, err
 	}
 	details := map[string]any{"amr": in.AuthMethods}
+	if in.Backchannel {
+		details["backchannel"] = true
+	}
 	if restriction != port.RestrictionNone {
 		details["restriction"] = string(restriction)
 	}
