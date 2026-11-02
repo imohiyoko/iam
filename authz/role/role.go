@@ -90,6 +90,8 @@ const (
 	ActionMeDelete           = "me:delete"
 	ActionMeMerge            = "me:merge"
 	ActionMeAcceptManagement = "me:accept_management" // Org の管理下に入る（ADR 0077）
+	ActionMeDeleteOrg        = "me:delete_org"        // 共有 Org の削除（4.10）
+	ActionMeDeleteManaged    = "me:delete_managed"    // 管理ユーザーのアカウントの削除（11.3、ADR 0076）
 )
 
 // SuspensionPerm は停止の種別ごとの停止・解除の権限（`suspensions:<category>`。4.11）。

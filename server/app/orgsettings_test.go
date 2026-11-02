@@ -137,6 +137,12 @@ func TestOrgSettingsLifetimes(t *testing.T) {
 			t.Fatalf("%s after max_auth_age: %d %v", path, code, out)
 		}
 	}
+	// Org の削除と管理ユーザーの削除も直近の認証を求める（権限の判定より先）。
+	for _, path := range []string{"/v1/me/orgs/" + acme + ":delete", "/v1/me/orgs/" + acme + "/members/x:delete-account"} {
+		if code, out, _ := l.post(t, s, path, nil); code != 401 || out["error"] != "reauthentication_required" {
+			t.Fatalf("%s after max_auth_age: %d %v", path, code, out)
+		}
+	}
 	l.advance(11 * time.Minute)
 	if code, _ := l.me(t, s); code != 401 {
 		t.Fatalf("after org idle timeout: %d", code)
