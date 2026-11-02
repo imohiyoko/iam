@@ -96,6 +96,8 @@ type state struct {
 	oidcTokens  map[string]port.OIDCToken
 	// eventSubs はイベントの Webhook の購読（ADR 0100）。
 	eventSubs map[string]port.EventSubscription
+	// dirGroups はディレクトリの同期が管理する Group の対応（ADR 0102）。キーは realm_id + connection_id + external_key。
+	dirGroups map[string]port.DirectoryGroup
 }
 
 // Storage はインメモリの Storage。
@@ -125,6 +127,7 @@ func New(clk clock.Clock) *Storage {
 		groupMembers: map[string]port.GroupMember{}, groupClosure: map[string]groupLink{}, attrDefs: map[string]port.AttributeDef{}, attrValues: map[string]port.UserAttribute{}, riskTypes: map[string]port.RiskType{}, namespaces: map[string]port.ActionNamespace{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 		invitations: map[string]port.Invitation{}, quotaGrants: map[string]port.QuotaGrant{}, orgDomains: map[string]port.OrgDomain{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
 		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{}, eventSubs: map[string]port.EventSubscription{},
+		dirGroups: map[string]port.DirectoryGroup{},
 	}}
 }
 
@@ -176,6 +179,7 @@ func (t *tx) EventSubscriptions() port.EventSubscriptionRepo {
 func (t *tx) Users() port.UserRepo                       { return users{t} }
 func (t *tx) Emails() port.EmailRepo                     { return emails{t} }
 func (t *tx) Identities() port.IdentityRepo              { return identities{t} }
+func (t *tx) DirectoryGroups() port.DirectoryGroupRepo   { return dirGroups{t} }
 func (t *tx) Passkeys() port.PasskeyRepo                 { return passkeys{t} }
 func (t *tx) TOTP() port.TOTPRepo                        { return totps{t} }
 func (t *tx) Credentials() port.CredentialRepo           { return authnCredentials{t} }

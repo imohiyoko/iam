@@ -33,7 +33,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | プッシュ通知の承認（番号の照合付き） | P | ❌ | |
 | X.509 クライアント証明書・スマートカード（PIV、CAC） | S P C | ✅ | フィーチャー `x509`（ADR 0103）。mTLS の専用の待ち受けかプロキシのヘッダー、OCSP・CRL、ハードウェアの CA で AAL3 |
 | Kerberos／SPNEGO | S P | ❌ | |
-| LDAP のバインド認証 | P | ❌ | |
+| LDAP のバインド認証 | P | ✅ | フィーチャー `ldap`（ADR 0102）。Active Directory も。ホスト型の画面は後続 |
 | 外部 IdP（OAuth／OIDC） | S P | ✅ | |
 | 外部 IdP（SAML 2.0） | S P C | ✅ | ADR 0098。Single Logout・暗号化された Assertion は後続 |
 | 運営者が発行するログインリンク | P | ✅ | |
@@ -132,7 +132,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | --- | --- | --- | --- |
 | SCIM 2.0 サーバー | S P C | ⛔ | design.md 1 章 |
 | SCIM クライアント（連携先へ送り出す） | S P | ❌ | |
-| LDAP／AD の同期 | P | ❌ | |
+| LDAP／AD の同期 | P | ✅ | ADR 0102。消えた人は利用停止（自動では消さない）、`memberOf` から Group。ネストしたグループは後続 |
 | JIT プロビジョニング | P | ✅ | Org 専用 SSO |
 | 一括インポート（パスワードハッシュ付き）・段階的な移行 | P | ❌ | |
 

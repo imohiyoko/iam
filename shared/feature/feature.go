@@ -43,6 +43,7 @@ const (
 	ACR                 = "acr"
 	SAML                = "saml"
 	X509                = "x509"
+	LDAP                = "ldap"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

@@ -68,6 +68,14 @@ type AuthnCredential struct {
 	LookupKeyID  string
 }
 
+type AuthnDirectoryGroup struct {
+	RealmID      string
+	ConnectionID string
+	ExternalKey  string
+	GroupID      string
+	CreatedAt    string
+}
+
 type AuthnOidcGrant struct {
 	ID           string
 	RealmID      string

@@ -178,7 +178,7 @@ user_identities      id, realm_id, user_id, connection_id, provider_subject
                      email_at_link（既定では持たない）, created_at, revoked_*
                      UNIQUE (connection_id, provider_subject)
 
-connections          id, realm_id, owner_org_id（NULL=realm 共通 / 値=Org 専用 SSO）, type（oauth2 / oidc / saml）, config
+connections          id, realm_id, owner_org_id（NULL=realm 共通 / 値=Org 専用 SSO）, type（oauth2 / oidc / saml / ldap）, config
 
 password_credentials id, user_id, hash（argon2id）, created_at, revoked_*（ADR 0101 で authn_credentials の方式 password へ移す。
                      起動時に移して空になる。次のリリースで消す）
@@ -237,6 +237,8 @@ installed_features   feature, state（enabling / active / disabling）, data_ver
 ```
 groups         id, realm_id, org_id（NULL=realm 全体）, name, UNIQUE (realm_id, org_id, name)（org_id が NULL の場合も一意になるよう、アダプタが DB に応じて実現する）
 group_members  group_id, member_type（user / service_account / group）, member_id, PK (group_id, member_type, member_id)
+authn_directory_groups  realm_id, connection_id, external_key（ディレクトリのグループの DN）, group_id, created_at
+               PK (realm_id, connection_id, external_key), UNIQUE (realm_id, group_id)。LDAP の同期が作った Group（ADR 0102）
 roles          id, realm_id, org_id（NULL=realm 共通）, name
 role_permissions  role_id, permission（"project:read" など）
 role_bindings  role_id, principal_type, principal_id
@@ -799,6 +801,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | Org の監査ログ（6.6） | オフ | Org | Org の管理者は監査ログを読めない（運営者の照会は常にある） |
 | イベントの Webhook の購読（6.7） | オフ | ― | 購読の API なし・配送しない（EventSink はそのまま） |
 | SAML 2.0 の外部 IdP（11.3、ADR 0098） | オフ | ― | SAML の connection を使わない（Org 専用には Org 管理ユーザーも要る） |
+| LDAP / Active Directory（11.3、ADR 0102） | オフ | ― | LDAP の connection を使わない・同期しない（Org 専用には Org 管理ユーザーも要る） |
 
 ### 11.1 複数 realm
 
@@ -841,6 +844,7 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 - 招待の `managed` で、新しく登録した人を最初から管理ユーザーにする。管理ユーザーは管理する Org に入れなければログインできず（停止・ログインポリシー）、Org の owner がアカウントを消せる
 - Org 専用 SSO（ADR 0077）：Org の owner が `/v1/me/orgs/{id}/connections` で OIDC の connection を登録する。その Org の管理ユーザーだけがログインでき、未登録なら証明済みドメインのアドレスで管理ユーザーとして作る。戻り先は固定、トークンエンドポイントは公開のアドレスに限る。ログインポリシー `require_sso`、`/v1/login/sso:discover` でドメインから探す
 - SAML 2.0（ADR 0098）：フィーチャー `saml`。Org の owner は `/v1/me/orgs/{id}/connections:saml`、運営者は `/v1/admin/connections:saml` で、IdP のメタデータ（XML か URL）から connection を登録する。iam は SP になり、AuthnRequest（HTTP-Redirect、署名は任意）を送り、ACS（`/login/saml/acs`、HTTP-POST）で受けた応答をホスト型の画面が `/v1/login/saml:complete` に渡す。署名を確かめた Assertion だけを受け（SHA-256 以上、暗号化された Assertion は受けない）、応答は始めたフローに結び付けて 1 回だけ受ける。外部 ID は NameID。ログイン・登録・連携の扱いは OIDC の connection と同じ。Single Logout は後続
+- LDAP / Active Directory（ADR 0102）：フィーチャー `ldap`。Org の owner は `/v1/me/orgs/{id}/connections:ldap`、運営者は `/v1/admin/connections:ldap` で、ディレクトリ（`ldaps://` か StartTLS 必須。CA と SPKI のピン）、サービスアカウント（パスワードは封をして置く）、検索の基点と絞り込み、属性の対応を登録する。`/v1/login/ldap/{connection}:login` は、サービスアカウントでエスケープした名前の項目をちょうど 1 件探し、その DN と本人のパスワードで bind する（空のパスワードは送らない）。外部 ID は `entryUUID`（AD は `objectGUID`）、amr は `pwd`。ログイン・登録・連携の扱いは OIDC の connection と同じ。同期（任意）は root が間隔ごとに全件をページングで読み、消えた・無効の人を利用停止にし（大量の停止は安全装置で止める）、`memberOf` から Group とメンバーをそろえる（同期が作った Group だけ）
 
 ### 11.4 Org 階層
 
@@ -1009,6 +1013,7 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
   RP-Initiated Logout の画面と Front-Channel Logout
 - JWT / JWK：lestrrat-go/jwx v4。WebAuthn：go-webauthn
 - SAML（SP）：XML 署名の検証は russellhaering/goxmldsig、プロトコルの確認は `authn/saml` の薄い層（ADR 0098）
+- LDAP：go-ldap/ldap/v3（ADR 0102）
 - セキュリティ上重要なコード（トークン、セッション、連携・統合、認可判定、fail-closed 判定）はディレクトリを分けて明示する
 
 ### 13.3 適合試験
@@ -1017,7 +1022,7 @@ OpenID Foundation の OIDC 適合試験と FIDO の WebAuthn 適合試験を回�
 
 ### 13.4 継続的な検査
 
-govulncheck、OSV-Scanner、Dependabot / Renovate、staticcheck、gosec、CodeQL、ファジング（JWT、WebAuthn の応答、OAuth のパラメータ、SAML、設定ファイル）、OpenSSF Scorecard。
+govulncheck、OSV-Scanner、Dependabot / Renovate、staticcheck、gosec、CodeQL、ファジング（JWT、WebAuthn の応答、OAuth のパラメータ、SAML、LDAP の絞り込みと属性、設定ファイル）、OpenSSF Scorecard。
 
 ### 13.5 脅威モデルと不変条件
 

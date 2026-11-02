@@ -138,6 +138,10 @@ func removeConnection(ctx context.Context, tx port.Tx, c port.Connection, now ti
 	if err != nil {
 		return 0, err
 	}
+	// ディレクトリの同期の Group の対応も外す（Group は残る。ADR 0102）。
+	if _, err := tx.DirectoryGroups().DeleteByConnection(ctx, c.RealmID, c.ID); err != nil {
+		return 0, err
+	}
 	return n, tx.Connections().Delete(ctx, c.RealmID, c.ID)
 }
 
