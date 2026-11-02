@@ -37,6 +37,7 @@ import (
 	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
+	"github.com/imohiyoko/iam/authn/wsfed"
 	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/eventlog"
@@ -88,6 +89,7 @@ var featureCatalog = map[string]struct {
 	// ADR 0109。
 	feature.PersonalAccessTokens: {pat.Feature, module + "/features/personalaccesstokens"},
 	feature.OpenID4VP:            {openid4vp.Feature, module + "/features/openid4vp"},
+	feature.WSFed:                {wsfed.Feature, module + "/features/wsfed"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

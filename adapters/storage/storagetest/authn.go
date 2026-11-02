@@ -84,6 +84,7 @@ var authnTests = []struct {
 	{"SigningKeys", testSigningKeys},
 	{"Grants", testGrants},
 	{"SessionLineage", testSessionLineage},
+	{"WSFed", testWSFed},
 }
 
 func notFound(what string, err error) error {

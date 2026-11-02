@@ -192,6 +192,32 @@ func (k *Keys) active(ctx context.Context, tx port.Tx, realmID, alg string) (por
 	return k.create(ctx, tx, realmID, alg)
 }
 
+// Published は公開している鍵（使っている鍵と、退役から RetiredKeyTTL の内の鍵）を返す。期限の過ぎた鍵は消す。
+func (k *Keys) Published(ctx context.Context, tx port.Tx, realmID string) ([]port.SigningKey, error) {
+	return k.published(ctx, tx, realmID)
+}
+
+// ECSigner は ES256 の使っている鍵（無ければ作る）と、その秘密鍵を返す（JWS 以外の署名。WS-Federation の XML 署名。ADR 0110）。
+func (k *Keys) ECSigner(ctx context.Context, tx port.Tx, realmID string) (port.SigningKey, *ecdsa.PrivateKey, error) {
+	key, err := k.active(ctx, tx, realmID, port.AlgES256)
+	if err != nil {
+		return port.SigningKey{}, nil, err
+	}
+	raw, err := k.Crypter.Open(ctx, sealPurpose(key.ID), key.Private)
+	if err != nil {
+		return port.SigningKey{}, nil, err
+	}
+	p, err := x509.ParsePKCS8PrivateKey(raw)
+	if err != nil {
+		return port.SigningKey{}, nil, err
+	}
+	sk, ok := p.(*ecdsa.PrivateKey)
+	if !ok {
+		return port.SigningKey{}, nil, errs.New(errs.KindInternal, "signing key %s is not ECDSA", key.ID)
+	}
+	return key, sk, nil
+}
+
 // Sign は claims（JSON）を alg の使っている鍵で署名した JWS（compact）を返す。ヘッダーに kid と typ を付ける（ADR 0040）。
 func (k *Keys) Sign(ctx context.Context, tx port.Tx, realmID, alg, typ string, claims []byte) (string, error) {
 	key, err := k.active(ctx, tx, realmID, alg)

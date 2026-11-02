@@ -805,6 +805,24 @@ func (e SuspensionTargetType) Valid() bool {
 	}
 }
 
+// Defines values for WSFedRelyingPartyInputTokenType.
+const (
+	Saml11 WSFedRelyingPartyInputTokenType = "saml11"
+	Saml20 WSFedRelyingPartyInputTokenType = "saml20"
+)
+
+// Valid indicates whether the value is a known member of the WSFedRelyingPartyInputTokenType enum.
+func (e WSFedRelyingPartyInputTokenType) Valid() bool {
+	switch e {
+	case Saml11:
+		return true
+	case Saml20:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListAuditEventsParamsResult.
 const (
 	Failure ListAuditEventsParamsResult = "failure"
@@ -2362,6 +2380,53 @@ type Validity struct {
 	ValidUntil *time.Time `json:"valid_until,omitempty"`
 }
 
+// WSFedClaim defines model for WSFedClaim.
+type WSFedClaim struct {
+	// Source `user_id`・`email`（確認済みのものだけ出す）・`org_id`・`amr`・`attribute:<キー>`（フィーチャー `custom_attributes`）
+	Source string `json:"source"`
+
+	// Type クレームの種類（絶対 URI）。SAML 1.1 では最後の `/` の後ろが AttributeName になる
+	Type string `json:"type"`
+}
+
+// WSFedRelyingParties defines model for WSFedRelyingParties.
+type WSFedRelyingParties struct {
+	RelyingParties []WSFedRelyingParty `json:"relying_parties"`
+}
+
+// WSFedRelyingParty defines model for WSFedRelyingParty.
+type WSFedRelyingParty struct {
+	Claims        []WSFedClaim `json:"claims"`
+	CreatedAt     time.Time    `json:"created_at"`
+	Id            string       `json:"id"`
+	Name          string       `json:"name"`
+	Realm         string       `json:"realm"`
+	ReplyUrls     []string     `json:"reply_urls"`
+	TokenLifetime int          `json:"token_lifetime"`
+	TokenType     string       `json:"token_type"`
+	UpdatedAt     time.Time    `json:"updated_at"`
+}
+
+// WSFedRelyingPartyInput defines model for WSFedRelyingPartyInput.
+type WSFedRelyingPartyInput struct {
+	// Claims 省けば `email` を `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress` に出す。空の配列ならクレームを出さない
+	Claims *[]WSFedClaim `json:"claims,omitempty"`
+	Name   string        `json:"name"`
+
+	// Realm `wtrealm`（絶対 URI）
+	Realm     string   `json:"realm"`
+	ReplyUrls []string `json:"reply_urls"`
+
+	// TokenLifetime Assertion の有効期間（秒。既定 3600）
+	TokenLifetime *int `json:"token_lifetime,omitempty"`
+
+	// TokenType 既定は saml11
+	TokenType *WSFedRelyingPartyInputTokenType `json:"token_type,omitempty"`
+}
+
+// WSFedRelyingPartyInputTokenType 既定は saml11
+type WSFedRelyingPartyInputTokenType string
+
 // ListAuditEventsParams defines parameters for ListAuditEvents.
 type ListAuditEventsParams struct {
 	Limit             *int                         `form:"limit,omitempty" json:"limit,omitempty"`
@@ -2747,6 +2812,12 @@ type IssueRecoveryLinkJSONRequestBody IssueRecoveryLinkJSONBody
 
 // SetUserRiskJSONRequestBody defines body for SetUserRisk for application/json ContentType.
 type SetUserRiskJSONRequestBody = RiskUpdate
+
+// CreateWSFedRelyingPartyJSONRequestBody defines body for CreateWSFedRelyingParty for application/json ContentType.
+type CreateWSFedRelyingPartyJSONRequestBody = WSFedRelyingPartyInput
+
+// UpdateWSFedRelyingPartyJSONRequestBody defines body for UpdateWSFedRelyingParty for application/json ContentType.
+type UpdateWSFedRelyingPartyJSONRequestBody = WSFedRelyingPartyInput
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -3140,6 +3211,21 @@ type ServerInterface interface {
 	// UnlockUser ユーザーのロック・待ち時間・失敗の回数を消す（フィーチャー account_lockout。ADR 0105）
 	// (POST /v1/admin/users/{id}:unlock)
 	UnlockUser(w http.ResponseWriter, r *http.Request, id string)
+	// ListWSFedRelyingParties WS-Federation の RP の一覧（ADR 0110）
+	// (GET /v1/admin/wsfed/relying-parties)
+	ListWSFedRelyingParties(w http.ResponseWriter, r *http.Request)
+	// CreateWSFedRelyingParty WS-Federation の RP を登録する（ADR 0110）
+	// (POST /v1/admin/wsfed/relying-parties)
+	CreateWSFedRelyingParty(w http.ResponseWriter, r *http.Request)
+	// GetWSFedRelyingParty WS-Federation の RP を返す
+	// (GET /v1/admin/wsfed/relying-parties/{id})
+	GetWSFedRelyingParty(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateWSFedRelyingParty WS-Federation の RP の登録を置き換える
+	// (PUT /v1/admin/wsfed/relying-parties/{id})
+	UpdateWSFedRelyingParty(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteWSFedRelyingParty WS-Federation の RP を消す
+	// (POST /v1/admin/wsfed/relying-parties/{id}:delete)
+	DeleteWSFedRelyingParty(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -6693,6 +6779,112 @@ func (siw *ServerInterfaceWrapper) UnlockUser(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListWSFedRelyingParties operation middleware
+func (siw *ServerInterfaceWrapper) ListWSFedRelyingParties(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWSFedRelyingParties(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWSFedRelyingParty operation middleware
+func (siw *ServerInterfaceWrapper) CreateWSFedRelyingParty(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWSFedRelyingParty(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWSFedRelyingParty operation middleware
+func (siw *ServerInterfaceWrapper) GetWSFedRelyingParty(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWSFedRelyingParty(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateWSFedRelyingParty operation middleware
+func (siw *ServerInterfaceWrapper) UpdateWSFedRelyingParty(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateWSFedRelyingParty(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWSFedRelyingParty operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWSFedRelyingParty(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWSFedRelyingParty(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -6943,6 +7135,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/personal-access-tokens/{token_id}:revoke", wrapper.RevokeUserPersonalAccessToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/personal-access-token-policy", wrapper.GetPersonalAccessTokenPolicy)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/personal-access-token-policy", wrapper.PutPersonalAccessTokenPolicy)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties", wrapper.ListWSFedRelyingParties)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties", wrapper.CreateWSFedRelyingParty)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}", wrapper.GetWSFedRelyingParty)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}", wrapper.UpdateWSFedRelyingParty)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}:delete", wrapper.DeleteWSFedRelyingParty)
 
 	return m
 }
@@ -16677,6 +16874,376 @@ func (response UnlockUser404JSONResponse) VisitUnlockUserResponse(w http.Respons
 	return err
 }
 
+type ListWSFedRelyingPartiesRequestObject struct {
+}
+
+type ListWSFedRelyingPartiesResponseObject interface {
+	VisitListWSFedRelyingPartiesResponse(w http.ResponseWriter) error
+}
+
+type ListWSFedRelyingParties200JSONResponse WSFedRelyingParties
+
+func (response ListWSFedRelyingParties200JSONResponse) VisitListWSFedRelyingPartiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWSFedRelyingParties401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListWSFedRelyingParties401JSONResponse) VisitListWSFedRelyingPartiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWSFedRelyingParties403JSONResponse Error
+
+func (response ListWSFedRelyingParties403JSONResponse) VisitListWSFedRelyingPartiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWSFedRelyingParties404JSONResponse Error
+
+func (response ListWSFedRelyingParties404JSONResponse) VisitListWSFedRelyingPartiesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWSFedRelyingPartyRequestObject struct {
+	Body *CreateWSFedRelyingPartyJSONRequestBody
+}
+
+type CreateWSFedRelyingPartyResponseObject interface {
+	VisitCreateWSFedRelyingPartyResponse(w http.ResponseWriter) error
+}
+
+type CreateWSFedRelyingParty201JSONResponse WSFedRelyingParty
+
+func (response CreateWSFedRelyingParty201JSONResponse) VisitCreateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWSFedRelyingParty400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateWSFedRelyingParty400JSONResponse) VisitCreateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWSFedRelyingParty401JSONResponse Error
+
+func (response CreateWSFedRelyingParty401JSONResponse) VisitCreateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWSFedRelyingParty403JSONResponse Error
+
+func (response CreateWSFedRelyingParty403JSONResponse) VisitCreateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWSFedRelyingParty404JSONResponse Error
+
+func (response CreateWSFedRelyingParty404JSONResponse) VisitCreateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWSFedRelyingParty409JSONResponse Error
+
+func (response CreateWSFedRelyingParty409JSONResponse) VisitCreateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWSFedRelyingPartyRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetWSFedRelyingPartyResponseObject interface {
+	VisitGetWSFedRelyingPartyResponse(w http.ResponseWriter) error
+}
+
+type GetWSFedRelyingParty200JSONResponse WSFedRelyingParty
+
+func (response GetWSFedRelyingParty200JSONResponse) VisitGetWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWSFedRelyingParty401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetWSFedRelyingParty401JSONResponse) VisitGetWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWSFedRelyingParty403JSONResponse Error
+
+func (response GetWSFedRelyingParty403JSONResponse) VisitGetWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWSFedRelyingParty404JSONResponse Error
+
+func (response GetWSFedRelyingParty404JSONResponse) VisitGetWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWSFedRelyingPartyRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateWSFedRelyingPartyJSONRequestBody
+}
+
+type UpdateWSFedRelyingPartyResponseObject interface {
+	VisitUpdateWSFedRelyingPartyResponse(w http.ResponseWriter) error
+}
+
+type UpdateWSFedRelyingParty200JSONResponse WSFedRelyingParty
+
+func (response UpdateWSFedRelyingParty200JSONResponse) VisitUpdateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWSFedRelyingParty400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateWSFedRelyingParty400JSONResponse) VisitUpdateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWSFedRelyingParty401JSONResponse Error
+
+func (response UpdateWSFedRelyingParty401JSONResponse) VisitUpdateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWSFedRelyingParty403JSONResponse Error
+
+func (response UpdateWSFedRelyingParty403JSONResponse) VisitUpdateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWSFedRelyingParty404JSONResponse Error
+
+func (response UpdateWSFedRelyingParty404JSONResponse) VisitUpdateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWSFedRelyingParty409JSONResponse Error
+
+func (response UpdateWSFedRelyingParty409JSONResponse) VisitUpdateWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWSFedRelyingPartyRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteWSFedRelyingPartyResponseObject interface {
+	VisitDeleteWSFedRelyingPartyResponse(w http.ResponseWriter) error
+}
+
+type DeleteWSFedRelyingParty204Response struct {
+}
+
+func (response DeleteWSFedRelyingParty204Response) VisitDeleteWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteWSFedRelyingParty401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteWSFedRelyingParty401JSONResponse) VisitDeleteWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWSFedRelyingParty403JSONResponse Error
+
+func (response DeleteWSFedRelyingParty403JSONResponse) VisitDeleteWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWSFedRelyingParty404JSONResponse Error
+
+func (response DeleteWSFedRelyingParty404JSONResponse) VisitDeleteWSFedRelyingPartyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetHealth ヘルスチェック
@@ -17069,6 +17636,21 @@ type StrictServerInterface interface {
 	// UnlockUser ユーザーのロック・待ち時間・失敗の回数を消す（フィーチャー account_lockout。ADR 0105）
 	// (POST /v1/admin/users/{id}:unlock)
 	UnlockUser(ctx context.Context, request UnlockUserRequestObject) (UnlockUserResponseObject, error)
+	// ListWSFedRelyingParties WS-Federation の RP の一覧（ADR 0110）
+	// (GET /v1/admin/wsfed/relying-parties)
+	ListWSFedRelyingParties(ctx context.Context, request ListWSFedRelyingPartiesRequestObject) (ListWSFedRelyingPartiesResponseObject, error)
+	// CreateWSFedRelyingParty WS-Federation の RP を登録する（ADR 0110）
+	// (POST /v1/admin/wsfed/relying-parties)
+	CreateWSFedRelyingParty(ctx context.Context, request CreateWSFedRelyingPartyRequestObject) (CreateWSFedRelyingPartyResponseObject, error)
+	// GetWSFedRelyingParty WS-Federation の RP を返す
+	// (GET /v1/admin/wsfed/relying-parties/{id})
+	GetWSFedRelyingParty(ctx context.Context, request GetWSFedRelyingPartyRequestObject) (GetWSFedRelyingPartyResponseObject, error)
+	// UpdateWSFedRelyingParty WS-Federation の RP の登録を置き換える
+	// (PUT /v1/admin/wsfed/relying-parties/{id})
+	UpdateWSFedRelyingParty(ctx context.Context, request UpdateWSFedRelyingPartyRequestObject) (UpdateWSFedRelyingPartyResponseObject, error)
+	// DeleteWSFedRelyingParty WS-Federation の RP を消す
+	// (POST /v1/admin/wsfed/relying-parties/{id}:delete)
+	DeleteWSFedRelyingParty(ctx context.Context, request DeleteWSFedRelyingPartyRequestObject) (DeleteWSFedRelyingPartyResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -20848,6 +21430,146 @@ func (sh *strictHandler) UnlockUser(w http.ResponseWriter, r *http.Request, id s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UnlockUserResponseObject); ok {
 		if err := validResponse.VisitUnlockUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWSFedRelyingParties operation middleware
+func (sh *strictHandler) ListWSFedRelyingParties(w http.ResponseWriter, r *http.Request) {
+	var request ListWSFedRelyingPartiesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWSFedRelyingParties(ctx, request.(ListWSFedRelyingPartiesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWSFedRelyingParties")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWSFedRelyingPartiesResponseObject); ok {
+		if err := validResponse.VisitListWSFedRelyingPartiesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWSFedRelyingParty operation middleware
+func (sh *strictHandler) CreateWSFedRelyingParty(w http.ResponseWriter, r *http.Request) {
+	var request CreateWSFedRelyingPartyRequestObject
+
+	var body CreateWSFedRelyingPartyJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWSFedRelyingParty(ctx, request.(CreateWSFedRelyingPartyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWSFedRelyingParty")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWSFedRelyingPartyResponseObject); ok {
+		if err := validResponse.VisitCreateWSFedRelyingPartyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWSFedRelyingParty operation middleware
+func (sh *strictHandler) GetWSFedRelyingParty(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetWSFedRelyingPartyRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWSFedRelyingParty(ctx, request.(GetWSFedRelyingPartyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWSFedRelyingParty")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWSFedRelyingPartyResponseObject); ok {
+		if err := validResponse.VisitGetWSFedRelyingPartyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateWSFedRelyingParty operation middleware
+func (sh *strictHandler) UpdateWSFedRelyingParty(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateWSFedRelyingPartyRequestObject
+
+	request.Id = id
+
+	var body UpdateWSFedRelyingPartyJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateWSFedRelyingParty(ctx, request.(UpdateWSFedRelyingPartyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateWSFedRelyingParty")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateWSFedRelyingPartyResponseObject); ok {
+		if err := validResponse.VisitUpdateWSFedRelyingPartyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWSFedRelyingParty operation middleware
+func (sh *strictHandler) DeleteWSFedRelyingParty(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteWSFedRelyingPartyRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWSFedRelyingParty(ctx, request.(DeleteWSFedRelyingPartyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWSFedRelyingParty")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteWSFedRelyingPartyResponseObject); ok {
+		if err := validResponse.VisitDeleteWSFedRelyingPartyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
