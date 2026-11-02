@@ -42,6 +42,7 @@ const (
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 	SAML                = "saml"
+	LDAP                = "ldap"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/imohiyoko/iam/authn/account"
+	dirldap "github.com/imohiyoko/iam/authn/method/ldap"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authz/role"
@@ -26,6 +27,10 @@ func orgConnectionOut(c port.Connection) (publicapi.OrgConnection, error) {
 			info.IdpCertificateExpiresAt = &in.IdPCertExpiresAt
 		}
 		return publicapi.OrgConnection{Id: c.ID, Type: publicapi.OrgConnectionTypeSaml, Saml: info, Scopes: []string{}, CreatedAt: c.CreatedAt}, err
+	}
+	if c.Type == dirldap.Type {
+		in, err := dirldap.InfoOf(c)
+		return publicapi.OrgConnection{Id: c.ID, Type: publicapi.OrgConnectionTypeLdap, Ldap: orgLDAPInfo(in), Scopes: []string{}, CreatedAt: c.CreatedAt}, err
 	}
 	in, err := oauth.Info(c)
 	return publicapi.OrgConnection{Id: c.ID, Type: publicapi.OrgConnectionTypeOidc, Issuer: in.Issuer, AuthorizationEndpoint: in.AuthURL, TokenEndpoint: in.TokenURL,
