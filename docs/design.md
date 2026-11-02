@@ -339,7 +339,7 @@ check(principal, action, resource, context) -> allow / deny
 - Org オフなら realm 全体の RBAC。実装は有効なフィーチャーに応じて起動時に組み立てる
 - 付与には条件（ADR 0084 の条件の言語）を付けられる。条件付きの付与は、主体の認証の文脈（amr・要素数・認証時刻・リスク）が条件を満たすときだけ効く。文脈はセッションかサービスアカウントの認証から組み立て、無ければ満たさない。条件だけで拒んだときは理由のコード（`unmet`）を返す。権限の引き上げの検査も、今の文脈で条件を満たす付与だけを数える
 - 管理 API の判定（`/v1/admin/authz:check`）は、主体の `sid` かアクセストークンを渡せば、IAM がその今のセッションから文脈を組み立てる（`attested`）。どちらも無ければ、realm の設定 `declared_context_clients` に載せたサービスアカウントの申告（`context`）だけを使い、申告は `attested` でない（付与の条件の `attested` と、名前空間・Org の要件を満たさない）。イントロスペクションは `amr`・`auth_time` に加えて、系列の今のセッションのリスクの点数（`risk`）を返す
-- 本人の重要な操作（`me:methods`・`me:password`・`me:recovery_codes`・`me:delete`・`me:merge`・`me:accept_management`・`me:delete_org`・`me:delete_managed`）は付与を問わず、直近の認証（max_auth_age。5.4）を既定として求め、加えて名前空間 `me` と active な Org の要件を求める（`auth_within` などで操作ごとに厳しくできる）。満たさなければ今までどおり 401 `reauthentication_required`。運営者の操作は管理 API の権限の判定で名前空間の要件が効く
+- 本人の重要な操作（`me:methods`・`me:password`・`me:recovery_codes`・`me:delete`・`me:merge`・`me:accept_management`・`me:delete_org`・`me:delete_managed`）は付与を問わず、直近の認証（max_auth_age。5.4）を既定として求め、加えて名前空間 `me` と active な Org の要件を求める（`auth_within` などで操作ごとに厳しくできる）。満たさなければ今までどおり 401 `reauthentication_required`（フィーチャー acr がオンなら RFC 9470 の `WWW-Authenticate` を足す。11.15）。運営者の操作は管理 API の権限の判定で名前空間の要件が効く
 - 付与で許した操作には、名前空間の要件（realm の設定。`/v1/admin/action-namespaces/{name}`、権限 `requirements:manage` は `resource_type = action_namespace` で名前空間に限れる）と Org の要件（Org の設定の `requirements`。階層がオンなら祖先の要件も）をすべて AND で求める。要件は `attested` を暗黙に AND し、名前空間の段階の境界は realm より厳しくする向きだけ。変えた後に自分がその設定を変えられなくなる要件は 409 `requirement_lockout` で拒む。要件は realm・Org ごとにキャッシュし、変更で捨てる。見ている条件（付与・名前空間・Org の要件）が残るリスクの種類は止められない（409 `risk_type_in_use`）
 - 将来 OpenFGA / Cedar 等に同じシグネチャで差し替えられる
 
@@ -507,7 +507,7 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 
 - ブラウザ：サーバーサイドセッション（Cookie）
 - 連携先：**ID トークンは JWT**（9.3）。**アクセストークンは不透明**で、イントロスペクション（RFC 7662）で確認する（ADR 0021）。リソースサーバーは結果を 5.3 の上限以内でキャッシュしてよい
-- ID トークンのクレーム：`sub`、`org_id`（Org オンのみ）、`amr`、`sid`、`email`（4.4）。Group / Role は載せない
+- ID トークンのクレーム：`sub`、`org_id`（Org オンのみ）、`amr`、`sid`、`email`（4.4）、`acr`（フィーチャー acr。11.15）。Group / Role は載せない
 - リフレッシュトークンはローテーションし、再利用を検知したらファミリーごと失効
 
 ### 5.2 セッション ID
@@ -713,6 +713,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | フロー フック（11.8） | オフ | ― | フックを一切呼ばない |
 | Token Exchange の委任（5.6） | オフ | ― | token-exchange の grant を受けない。交換のトークンは使えない |
 | なりすまし（5.6） | オフ | Token Exchange | `requested_subject` を受けない。なりすましのトークンは使えない |
+| acr・AAL と step-up（11.15） | オフ | ― | `acr` を出さず、`acr_values` を見ない。AAL で書く条件・ポリシーなし |
 
 ### 11.1 複数 realm
 
@@ -864,6 +865,24 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
   - 付与の削除・短縮で既存の予約が成り立たなくなる場合は、その操作を拒否する
 - IAM が拒否できない経路で上限を下回った場合：既存メンバーは外さず、新規を止めて `org.quota.exceeded` を出す
 - ホットパスでは判定しない
+
+### 11.15 acr・AAL と step-up
+
+認証の強さを NIST SP 800-63B の AAL で表し、OIDC の `acr` と RFC 9470 の step-up で外に伝える。ポリシーと条件を強さで書ける。
+
+実装（ADR 0093）：フィーチャー `acr`。
+
+- AAL はセッションの `amr` から求める（`shared/acr` の対応表。認証方式が強さを宣言するようになれば置き換える。ADR 0090）。
+  AAL2 は分類の違う 2 要素以上で所持を含むこと（パスワードと TOTP、本人確認つきの passkey）。メールのコードは amr が `otp` で
+  TOTP と区別できないので、メールのコードと TOTP は AAL1。passkey は attestation を確かめないので AAL3 に数えない
+- `acr` の値は `urn:iam:aal1`〜`urn:iam:aal3` と、IANA に登録された `phr`・`phrh`。届かないものは `0`。Discovery の
+  `acr_values_supported` は対応表で届く値
+- authorize の `acr_values` と `claims` の `id_token.acr` を受け、今のセッションが満たさなければログイン画面へ回す（step-up）。
+  ログインし直しても満たさなければ `unmet_authentication_requirements`。決めた `acr` は認可に持ち、ID トークン・UserInfo・
+  イントロスペクションに載せる
+- 条件の言語の `aal_at_least`（理由 `condition.aal`）と、Org のログインポリシーの `min_aal`（理由 `policy.min_aal`）
+- 判定の API は `unmet` と一緒に `step_up`（`acr_values`・`max_age`）を返す。公開 API の本人の重要な操作の 401 には
+  `WWW-Authenticate: Bearer error="insufficient_user_authentication"` を足す（本文は変えない）
 
 ## 12. テスト
 

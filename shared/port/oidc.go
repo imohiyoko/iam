@@ -120,6 +120,8 @@ type Grant struct {
 	Act []byte
 	// Audiences は交換で発行したトークンの aud（連携先の client_id か資源の URI。RFC 8707）。
 	Audiences []string
+	// ACR は認可したときに決めた acr（フィーチャー acr。ADR 0093）。空ならフィーチャーがオフで、acr を返さない。
+	ACR string
 }
 
 // 交換の認可の種類（Grant.Exchange）。

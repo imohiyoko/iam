@@ -56,7 +56,9 @@ type AuthRequest struct {
 	MaxAge *uint `json:"max_age,omitempty"`
 	// LoginAfter は prompt=login のとき、この時刻より後の本人確認を求める。
 	LoginAfter *time.Time `json:"login_after,omitempty"`
-	ExpiresAt  time.Time  `json:"expires_at"`
+	// ACR は要求された acr の値のうち対応するもの（要求の順。フィーチャー acr。ADR 0093）。空なら求めない。
+	ACR       []string  `json:"acr,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 const maxMaxAge = uint(100 * 365 * 24 * 60 * 60)
@@ -85,6 +87,8 @@ type Code struct {
 	// AuthTime はセッションで最後に本人確認した時刻。
 	AuthTime time.Time `json:"auth_time"`
 	AMR      []string  `json:"amr"`
+	// SelectedACR は ID トークンなどに載せる acr（フィーチャー acr。ADR 0093）。空なら載せない。
+	SelectedACR string `json:"selected_acr,omitempty"`
 }
 
 const (

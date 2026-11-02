@@ -24,6 +24,7 @@ import (
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authz/manage"
+	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/plugin"
 	"github.com/imohiyoko/iam/shared/realm"
@@ -51,6 +52,7 @@ var featureCatalog = map[string]struct {
 	feature.MultiRealm:       {realm.Feature, module + "/features/multirealm"},
 	feature.TokenExchange:    {provider.TokenExchangeFeature, module + "/features/tokenexchange"},
 	feature.Impersonation:    {provider.ImpersonationFeature, module + "/features/impersonation"},
+	feature.ACR:              {acr.Feature, module + "/features/acr"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

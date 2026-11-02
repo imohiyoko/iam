@@ -68,6 +68,8 @@ type Tokens struct {
 	TokenExchange bool
 	// Impersonation はなりすまし。フィーチャー impersonation が動いていなければ nil。
 	Impersonation *Impersonation
+	// ACR はフィーチャー acr が動いているか（ADR 0093）。偽なら、認可に acr があっても載せない（止めた後の認可を含む）。
+	ACR bool
 	// Issuer は iss（server.public_url）。
 	Issuer                               string
 	AccessTokenTTL, IDTokenTTL, GrantTTL time.Duration
@@ -114,7 +116,8 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 		return Issued{}, err
 	}
 	g := port.Grant{ID: id.New(id.Grant), RealmID: c.RealmID, ClientID: cl.ID, UserID: c.UserID, OrgID: c.OrgID, SID: c.SID,
-		Scopes: c.Scopes, AuthMethods: c.AMR, AuthTime: c.AuthTime, CreatedAt: now, ExpiresAt: now.Add(ttlOr(t.GrantTTL, DefaultRefreshTTL))}
+		Scopes: c.Scopes, AuthMethods: c.AMR, AuthTime: c.AuthTime, CreatedAt: now, ExpiresAt: now.Add(ttlOr(t.GrantTTL, DefaultRefreshTTL)),
+		ACR: c.SelectedACR}
 	if err := tx.Grants().Create(ctx, g); err != nil {
 		return Issued{}, err
 	}
@@ -156,6 +159,9 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 	claims["iss"], claims["aud"], claims["azp"] = t.Issuer, cl.PublicID, cl.PublicID
 	claims["iat"], claims["exp"] = now.Unix(), now.Add(ttlOr(t.IDTokenTTL, DefaultIDTokenTTL)).Unix()
 	claims["auth_time"], claims["amr"], claims["sid"] = g.AuthTime.Unix(), g.AuthMethods, g.SID
+	if t.ACR && g.ACR != "" {
+		claims["acr"] = g.ACR
+	}
 	if nonce != "" {
 		claims["nonce"] = nonce
 	}
@@ -336,9 +342,14 @@ func (t *Tokens) Validate(ctx context.Context, tx port.Tx, realmID, token string
 	return Access{Token: tok, Grant: g, Client: cl, Next: next}, nil
 }
 
-// UserInfo はアクセストークンの認可で見せてよいユーザーのクレームを返す（OIDC Core 5.3）。
+// UserInfo はアクセストークンの認可で見せてよいユーザーのクレームを返す（OIDC Core 5.3）。認可に acr があれば載せる
+// （ID トークンと同じ値。ADR 0093）。
 func (t *Tokens) UserInfo(ctx context.Context, tx port.Tx, a Access) (map[string]any, error) {
-	return t.userClaims(ctx, tx, a.Grant)
+	claims, err := t.userClaims(ctx, tx, a.Grant)
+	if err == nil && t.ACR && a.Grant.ACR != "" {
+		claims["acr"] = a.Grant.ACR
+	}
+	return claims, err
 }
 
 // 認可の失効の理由。
@@ -478,6 +489,8 @@ type Introspection struct {
 	OrgID     string   `json:"org_id,omitempty"`
 	AuthTime  int64    `json:"auth_time,omitempty"`
 	AMR       []string `json:"amr,omitempty"`
+	// ACR は認可の acr（フィーチャー acr。RFC 9470 6、ADR 0093）。
+	ACR string `json:"acr,omitempty"`
 	// Risk はログインの系列の今のセッションのリスクの点数（種類 → 点数。ADR 0084）。毎回セッションから求める。
 	Risk map[string]int `json:"risk,omitempty"`
 	// Act は Token Exchange で発行したトークンの行為者（RFC 8693 4.1。ADR 0099）。
@@ -529,9 +542,13 @@ func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token stri
 	if tok.Kind == port.TokenRefresh {
 		typ = "refresh_token"
 	}
+	acrValue := ""
+	if t.ACR {
+		acrValue = g.ACR
+	}
 	out := Introspection{Active: true, Scope: strings.Join(g.Scopes, " "), ClientID: cl.PublicID, TokenType: typ, Exp: tok.ExpiresAt.Unix(),
 		Iat: tok.CreatedAt.Unix(), Sub: u.PublicID, Aud: []string{cl.PublicID}, Iss: t.Issuer, SID: g.SID, OrgID: orgPublicID,
-		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods, Risk: risk}
+		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods, ACR: acrValue, Risk: risk}
 	return out, exchangeIntrospection(&out, g)
 }
 

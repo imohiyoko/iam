@@ -34,6 +34,7 @@ const (
 	FlowHooks           = "flow_hooks"
 	TokenExchange       = "token_exchange"
 	Impersonation       = "impersonation"
+	ACR                 = "acr"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

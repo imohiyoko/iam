@@ -35,9 +35,9 @@ UPDATE authn_signing_keys SET retired_at = $1 WHERE realm_id = $2 AND id = $3;
 DELETE FROM authn_signing_keys WHERE realm_id = $1 AND id = $2;
 
 -- name: CreateGrant :exec
-INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason,
+INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr,
     exchange, parent_id, actor_user_id, act, audiences)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19);
 
 -- name: GetGrant :one
 SELECT * FROM authn_oidc_grants WHERE realm_id = $1 AND id = $2;

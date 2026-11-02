@@ -63,6 +63,7 @@ type AuthnOidcGrant struct {
 	ExpiresAt    string
 	RevokedAt    sql.NullString
 	RevokeReason string
+	Acr          string
 	Exchange     string
 	ParentID     string
 	ActorUserID  string

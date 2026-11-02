@@ -69,6 +69,9 @@ func policyOut(p *org.LoginPolicy) *publicapi.OrgLoginPolicy {
 	if len(p.IPAllowlist) > 0 {
 		out.IpAllowlist = &p.IPAllowlist
 	}
+	if p.MinAAL != 0 {
+		out.MinAal = &p.MinAAL
+	}
 	return &out
 }
 
@@ -89,6 +92,9 @@ func policyIn(p *publicapi.OrgLoginPolicy) *org.LoginPolicy {
 	if p.IpAllowlist != nil {
 		out.IPAllowlist = *p.IpAllowlist
 	}
+	if p.MinAal != nil {
+		out.MinAAL = *p.MinAal
+	}
 	return &out
 }
 
@@ -102,11 +108,19 @@ func settingsIn(abs, idle, auth *int64) (org.Settings, error) {
 	return org.Settings{AbsoluteLifetime: duration(abs), IdleTimeout: duration(idle), MaxAuthAge: duration(auth)}, nil
 }
 
-// orgRequirementsIn は Org の要件を realm のリスクの種類の一覧で確かめ、保存の形にする（ADR 0084）。
-func orgRequirementsIn(ctx context.Context, tx port.Tx, realmID string, rs check.Requirements) (map[string]json.RawMessage, error) {
+// orgRequirementsIn は Org o の要件を realm のリスクの種類の一覧で確かめ、保存の形にする（ADR 0084）。
+func (a *App) orgRequirementsIn(ctx context.Context, tx port.Tx, o port.Org, rs check.Requirements) (map[string]json.RawMessage, error) {
 	if len(rs) == 0 {
 		return nil, nil
 	}
+	prev, err := check.OrgRequirements(o.Settings)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.aalAllowed(rs, prev); err != nil {
+		return nil, err
+	}
+	realmID := o.RealmID
 	rows, err := tx.RiskTypes().List(ctx, realmID)
 	if err != nil {
 		return nil, err
@@ -169,7 +183,7 @@ func adminSettingsView(v publicapi.OrgSettingsView) adminapi.OrgSettingsView {
 		MaxAuthAgeSeconds: v.Settings.MaxAuthAgeSeconds, Requirements: v.Settings.Requirements}
 	if p := v.Settings.LoginPolicy; p != nil {
 		out.Settings.LoginPolicy = &adminapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist,
-			RequireSso: p.RequireSso}
+			RequireSso: p.RequireSso, MinAal: p.MinAal}
 	}
 	if v.Settings.Warnings != nil {
 		w := make(map[string]adminapi.OrgSettingsWarnings, len(*v.Settings.Warnings))
@@ -243,7 +257,7 @@ func (s publicServer) PutMyOrgSettings(ctx context.Context, req publicapi.PutMyO
 		if err != nil {
 			return err
 		}
-		if st.Requirements, err = orgRequirementsIn(ctx, tx, s.a.realm.ID, rs); err != nil {
+		if st.Requirements, err = s.a.orgRequirementsIn(ctx, tx, o, rs); err != nil {
 			return err
 		}
 		if o, err = s.a.orgs.UpdateSettings(ctx, tx, o, st, au.Actor(), requestID(ctx)); err != nil {
@@ -362,7 +376,7 @@ func (s adminServer) putOrgSettings(ctx context.Context, req adminapi.PutOrgSett
 	st.Warnings = actionsIn(b.Warnings)
 	if p := b.LoginPolicy; p != nil {
 		st.LoginPolicy = policyIn(&publicapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist,
-			RequireSso: p.RequireSso})
+			RequireSso: p.RequireSso, MinAal: p.MinAal})
 	}
 	rs, err := requirementsIn(b.Requirements)
 	if o, ok, err := outcomeOf(nil, err); !ok {
@@ -373,7 +387,7 @@ func (s adminServer) putOrgSettings(ctx context.Context, req adminapi.PutOrgSett
 		if err != nil {
 			return err
 		}
-		if st.Requirements, err = orgRequirementsIn(ctx, tx, s.a.realm.ID, rs); err != nil {
+		if st.Requirements, err = s.a.orgRequirementsIn(ctx, tx, cur, rs); err != nil {
 			return err
 		}
 		if cur, err = s.a.orgs.UpdateSettings(ctx, tx, cur, st, p.Actor, requestID(ctx)); err != nil {

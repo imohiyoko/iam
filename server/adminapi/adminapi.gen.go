@@ -687,9 +687,12 @@ type CheckResult struct {
 	// Reasons 主体が使えないときの理由のコード（4.9）
 	Reasons *[]string `json:"reasons,omitempty"`
 
+	// StepUp 認証をやり直せば満たせる条件（フィーチャー acr。ADR 0093）。`unmet` を返すときだけ。リソースサーバーは RFC 9470 の `WWW-Authenticate: Bearer error="insufficient_user_authentication"` に、`acr_values` と `max_age` として載せられる
+	StepUp *StepUp `json:"step_up,omitempty"`
+
 	// Unmet 条件で拒んだときの、満たさなかった条件の理由のコード（`condition.amr`・`condition.factors`・`condition.auth_age`・
-	// `condition.risk.<種類>`・`condition.attested`。ADR 0084）。付与の条件だけで拒み、その付与が条件を満たせば許されたときに
-	// 限って返す。連携先はこれを見て step-up を促せる
+	// `condition.risk.<種類>`・`condition.attested`・`condition.aal`。ADR 0084、0093）。付与の条件だけで拒み、その付与が
+	// 条件を満たせば許されたときに限って返す。連携先はこれを見て step-up を促せる
 	Unmet *[]string `json:"unmet,omitempty"`
 }
 
@@ -910,6 +913,9 @@ type OrgLoginPolicy struct {
 
 	// MembershipEmailDomains Membership に結び付けたメール（無ければ primary、確認済み）のドメインがこのどれかであること
 	MembershipEmailDomains *[]string `json:"membership_email_domains,omitempty"`
+
+	// MinAal amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（理由は policy.min_aal）。フィーチャー acr も要る（ADR 0093）
+	MinAal *int `json:"min_aal,omitempty"`
 
 	// RequirePasskey passkey で本人確認したセッションだけを入れる
 	RequirePasskey *bool `json:"require_passkey,omitempty"`
@@ -1188,7 +1194,8 @@ type RoleBindingInput struct {
 	// Condition 付与の条件（ADR 0084）。条件を満たすときだけ付与が効く。型付きの木で、各節はちょうど1つの項目を持つ：
 	// `all`・`any`（子の配列）、`amr_has`（手段の配列。いずれかを使った）、`factors_at_least`（1〜3）、
 	// `auth_within`（認証からの秒。1〜86400）、`risk_below`（`{type, score}`。点数が未満。score は 1〜100）、
-	// `risk_at_most`（`{type, level}`。level は low / medium / high）、`attested`（true。文脈を IAM が確かめた）。
+	// `risk_at_most`（`{type, level}`。level は low / medium / high）、`attested`（true。文脈を IAM が確かめた）、
+	// `aal_at_least`（1〜3。amr から求めた AAL。フィーチャー acr が要る。ADR 0093）。
 	// 深さ 4・葉 16 まで。リスクの種類は realm の一覧で有効なものだけ。外れれば `400 invalid_condition`。
 	Condition   *map[string]interface{} `json:"condition,omitempty"`
 	PrincipalId string                  `json:"principal_id"`
@@ -1278,6 +1285,15 @@ type ServiceAccountInput struct {
 	OrgId      *string    `json:"org_id,omitempty"`
 	ValidFrom  *time.Time `json:"valid_from,omitempty"`
 	ValidUntil *time.Time `json:"valid_until,omitempty"`
+}
+
+// StepUp 認証をやり直せば満たせる条件（フィーチャー acr。ADR 0093）。`unmet` を返すときだけ。リソースサーバーは RFC 9470 の `WWW-Authenticate: Bearer error="insufficient_user_authentication"` に、`acr_values` と `max_age` として載せられる
+type StepUp struct {
+	// AcrValues 求める acr の値（`urn:iam:aal<n>`）。AAL を求めないときは無い
+	AcrValues *string `json:"acr_values,omitempty"`
+
+	// MaxAge 求める認証からの経過の上限（秒）。求めないときは無い
+	MaxAge *int `json:"max_age,omitempty"`
 }
 
 // SuspendRequest defines model for SuspendRequest.

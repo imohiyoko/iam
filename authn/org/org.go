@@ -69,6 +69,8 @@ type Service struct {
 	Rules Rules
 	// LoginPolicies は Org のログインポリシー（フィーチャー org_login_policy）が active か。
 	LoginPolicies bool
+	// ACR はフィーチャー acr が active か（ログインポリシーの min_aal。ADR 0093）。
+	ACR bool
 	// Quotas は Quota（フィーチャー quota）が active か。QuotaCount は数えるもの（11.14）。
 	Quotas     bool
 	QuotaCount QuotaCount
