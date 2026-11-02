@@ -76,24 +76,26 @@ type AuthnOidcToken struct {
 }
 
 type AuthnPasskey struct {
-	ID             string
-	PublicID       string
-	RealmID        string
-	UserID         string
-	CredentialID   []byte
-	PublicKey      []byte
-	Alg            int64
-	SignCount      int64
-	Flags          int64
-	Aaguid         []byte
-	Transports     string
-	Name           string
-	CreatedAt      string
-	LastUsedAt     sql.NullString
-	RevokedAt      sql.NullString
-	RevokeReason   string
-	PreferredOrgID string
-	UserHandle     []byte
+	ID                string
+	PublicID          string
+	RealmID           string
+	UserID            string
+	CredentialID      []byte
+	PublicKey         []byte
+	Alg               int64
+	SignCount         int64
+	Flags             int64
+	Aaguid            []byte
+	Transports        string
+	Name              string
+	CreatedAt         string
+	LastUsedAt        sql.NullString
+	RevokedAt         sql.NullString
+	RevokeReason      string
+	PreferredOrgID    string
+	UserHandle        []byte
+	AttestationFormat string
+	Attested          int64
 }
 
 type AuthnPasswordCredential struct {

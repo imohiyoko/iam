@@ -7,6 +7,8 @@
 //   - 署名の回数が戻った（複製の疑い）応答は拒否する
 //   - 無効化した passkey ではログインできず、同じ credential_id は再登録できない（4.6）
 //   - user handle はユーザーの公開 ID。内部 ID は認証器に渡さない（ADR 0045）
+//   - フィーチャー passkey_attestation が動いていれば、登録とログイン（1要素目・2要素目）のたびに認証器のポリシーで判定する
+//     （ADR 0096）。判定は保存した passkey とメモリのメタデータだけで行い、外部に問い合わせない
 package passkey
 
 import (
@@ -28,11 +30,13 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/eventlog"
+	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/pii"
 	"github.com/imohiyoko/iam/shared/port"
@@ -47,6 +51,36 @@ var ErrPasskeyExists = errs.WithCode(errs.KindConflict, "passkey_exists", "the p
 // ErrPasskeyRevoked は、登録しようとした passkey が無効化済みであること（再登録の拒否。4.6）。
 // 本人は認証器で所有を示した後なので、理由を返してよい。
 var ErrPasskeyRevoked = errs.WithCode(errs.KindConflict, "passkey_revoked", "the passkey was revoked and cannot be registered again")
+
+// AttestationFeature は attestation と認証器のポリシーの宣言（features/passkeyattestation が登録する。ADR 0096）。
+var AttestationFeature = feature.Feature{Name: feature.PasskeyAttestation, DataVersion: 1}
+
+// CodeNotAllowed は、認証器が realm の段のポリシー（ADR 0096）で許されないことのコード。
+const CodeNotAllowed = "passkey_not_allowed"
+
+// ErrNotAllowed は、登録しようとした passkey の認証器が realm の段のポリシーで許されないこと（ADR 0096）。
+// 本人はログイン済みで、認証器で所有を示した後なので、理由を返してよい。どの条件に外れたかは監査ログにだけ残す。
+var ErrNotAllowed = errs.WithCode(errs.KindFailedPrecondition, CodeNotAllowed, "the authenticator is not allowed by the passkey policy")
+
+// NotAllowedError は、ログインに使った passkey の認証器がポリシーで許されないこと（本人確認の後の拒否。errs.Denial）。
+type NotAllowedError struct {
+	PasskeyID string // 公開 ID
+	Decision  attestation.Decision
+}
+
+func (e *NotAllowedError) Error() string { return "passkey not allowed: " + e.Decision.Reason }
+
+// Reasons は拒否理由のコード（どの条件に外れたかは返さない）。
+func (e *NotAllowedError) Reasons() []string { return []string{CodeNotAllowed} }
+
+// notAllowedRegistration は登録の拒否（ErrNotAllowed）に、監査ログに残す判定を付けたもの。
+type notAllowedRegistration struct {
+	decision attestation.Decision
+	result   attestation.Result
+}
+
+func (e *notAllowedRegistration) Error() string { return "passkey not allowed: " + e.decision.Reason }
+func (e *notAllowedRegistration) Unwrap() error { return ErrNotAllowed }
 
 // passkey によるログインの amr（RFC 8176）。本人確認（UV）があれば "user" も付ける。
 const (
@@ -72,6 +106,27 @@ type Config struct {
 	TTL time.Duration
 }
 
+// Attestation は attestation と認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。
+type Attestation struct {
+	// Metadata は認証器のメタデータ（MDS の BLOB と設定した信頼の起点）。全 realm で共有する。
+	Metadata *attestation.Metadata
+	// Conveyance は登録で求める attestation（none・indirect・direct・enterprise）。空なら none。
+	Conveyance protocol.ConveyancePreference
+	// Policy は realm の段のポリシー。nil なら認証器の状態（status report）だけで判定する。
+	Policy *attestation.Policy
+}
+
+// Evaluate は保存した passkey p を、realm の段のポリシーと追加の段 extra で判定する。
+func (a *Attestation) Evaluate(now time.Time, p port.Passkey, extra ...attestation.Tiered) attestation.Decision {
+	tiers := append([]attestation.Tiered{{Tier: "realm", Policy: a.Policy}}, extra...)
+	return a.Metadata.Evaluate(now, Authenticator(p), tiers...)
+}
+
+// Authenticator は保存した passkey の判定の材料。
+func Authenticator(p port.Passkey) attestation.Authenticator {
+	return attestation.Authenticator{AAGUID: p.AAGUID, Format: p.AttestationFormat, Attested: p.Attested}
+}
+
 // Service は passkey の登録とログインを扱う。New で作る。
 type Service struct {
 	Storage  port.Storage
@@ -81,6 +136,9 @@ type Service struct {
 	Accounts *account.Service
 	Sessions *session.Manager
 	Log      *slog.Logger
+	// Attestation は attestation と認証器のポリシー。nil ならフィーチャー passkey_attestation が動いていない
+	// （attestation は求めず、判定もしない）。
+	Attestation *Attestation
 
 	cfg    Config
 	wa     *webauthn.WebAuthn
@@ -281,14 +339,18 @@ func (s *Service) BeginRegister(ctx context.Context, realmID, userID string) (St
 	if err != nil {
 		return Started{}, err
 	}
-	creation, sd, err := s.wa.BeginRegistration(wu,
+	opts := []webauthn.RegistrationOption{
 		webauthn.WithCredentialParameters(s.params),
 		webauthn.WithExclusions(webauthn.Credentials(wu.credentials).CredentialDescriptors()),
 		webauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{
 			ResidentKey: protocol.ResidentKeyRequirementRequired, RequireResidentKey: protocol.ResidentKeyRequired(),
 			UserVerification: protocol.VerificationPreferred,
 		}),
-	)
+	}
+	if s.Attestation != nil && s.Attestation.Conveyance != "" {
+		opts = append(opts, webauthn.WithConveyancePreference(s.Attestation.Conveyance))
+	}
+	creation, sd, err := s.wa.BeginRegistration(wu, opts...)
 	if err != nil {
 		return Started{}, err
 	}
@@ -318,6 +380,9 @@ func (s *Service) FinishRegister(ctx context.Context, realmID, userID string, in
 		s.recordFailure(ctx, realmID, "passkey.registration_failed", in.Client, err)
 		if errors.Is(err, ErrPasskeyExists) || errors.Is(err, ErrPasskeyRevoked) {
 			return port.Passkey{}, err
+		}
+		if errors.Is(err, ErrNotAllowed) {
+			return port.Passkey{}, ErrNotAllowed
 		}
 		return port.Passkey{}, ErrAuthFailed
 	}
@@ -359,7 +424,22 @@ func (s *Service) finishRegister(ctx context.Context, realmID, userID, name stri
 		}
 		p = port.Passkey{ID: id.New(id.Passkey), PublicID: id.NewExternal(id.Passkey), RealmID: realmID, UserID: u.ID,
 			CredentialID: c.ID, PublicKey: c.PublicKey, Alg: alg, SignCount: c.Authenticator.SignCount,
-			Flags: uint8(c.Flags.ProtocolValue()), AAGUID: c.Authenticator.AAGUID, Transports: ts, Name: name, CreatedAt: s.Clock.Now()}
+			Flags: uint8(c.Flags.ProtocolValue()), AAGUID: c.Authenticator.AAGUID, Transports: ts, Name: name, CreatedAt: s.Clock.Now(),
+			AttestationFormat: c.AttestationFormat}
+		details := map[string]any{"passkey_id": p.PublicID, "alg": alg, "backup_eligible": c.Flags.BackupEligible}
+		if s.Attestation != nil {
+			// 証明書の連なりを信頼の起点に照らし、realm の段のポリシーで判定する（ADR 0096）。
+			r := s.Attestation.Metadata.Verify(ctx, &parsed.Response.AttestationObject)
+			p.Attested = r.Attested
+			d := s.Attestation.Evaluate(p.CreatedAt, p)
+			if !d.Allowed {
+				return &notAllowedRegistration{decision: d, result: r}
+			}
+			for k, v := range d.Audit() {
+				details[k] = v
+			}
+			details["attestation_format"], details["attested"] = r.Format, r.Attested
+		}
 		if err := tx.Passkeys().Create(ctx, p); err != nil {
 			if errors.Is(err, errs.Conflict) {
 				// 有効な passkey は上で確かめたので、無効化済みの credential（か同時の登録）。
@@ -369,8 +449,7 @@ func (s *Service) finishRegister(ctx context.Context, realmID, userID, name stri
 		}
 		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
 			Type: "passkey.registered", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
-			IP: in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID,
-			Details: map[string]any{"passkey_id": p.PublicID, "alg": alg, "backup_eligible": c.Flags.BackupEligible},
+			IP: in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID, Details: details,
 		})
 		return err
 	})
@@ -478,6 +557,9 @@ func (s *Service) finishLogin(ctx context.Context, realmID string, in Login) (Re
 		if err := s.used(ctx, tx, used, c, now); err != nil {
 			return err
 		}
+		if err := s.allowed(used, now); err != nil {
+			return err
+		}
 		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
 			return err
 		}
@@ -496,7 +578,7 @@ func (s *Service) finishLogin(ctx context.Context, realmID string, in Login) (Re
 		_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
 			Type: "login.succeeded", Result: audit.ResultSuccess, RealmID: realmID, Actor: audit.Actor{Type: "user", ID: u.PublicID},
 			SessionID: is.Session.ID, IP: in.Client.IP, UserAgent: in.Client.UserAgent, RequestID: in.Client.RequestID,
-			Details: map[string]any{"method": "passkey", "passkey_id": used.PublicID},
+			Details: s.loginDetails(used, now),
 		})
 		return err
 	})
@@ -504,6 +586,29 @@ func (s *Service) finishLogin(ctx context.Context, realmID string, in Login) (Re
 		s.Sessions.Committed(ctx, realmID, out.Session)
 	}
 	return out, err
+}
+
+// allowed は、ログインに使った passkey p の認証器が realm の段のポリシーで許されるかを確かめる（ADR 0096）。
+// 署名を確かめた後（本人確認の後）なので、拒否は理由のコードつきの *NotAllowedError。
+func (s *Service) allowed(p port.Passkey, now time.Time) error {
+	if s.Attestation == nil {
+		return nil
+	}
+	if d := s.Attestation.Evaluate(now, p); !d.Allowed {
+		return &NotAllowedError{PasskeyID: p.PublicID, Decision: d}
+	}
+	return nil
+}
+
+// loginDetails はログインの成功の監査ログの詳細。
+func (s *Service) loginDetails(p port.Passkey, now time.Time) map[string]any {
+	out := map[string]any{"method": "passkey", "passkey_id": p.PublicID}
+	if s.Attestation != nil {
+		for k, v := range s.Attestation.Evaluate(now, p).Audit() {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // used は署名の回数を確かめ、使ったことを記録する。回数が戻った応答（複製の疑い）は拒否する。
@@ -542,11 +647,20 @@ func (s *Service) BeginVerify(ctx context.Context, realmID, userID string) (Star
 // （セッションの発行と同じトランザクションにするため）。失敗は ErrAuthFailed。
 func (s *Service) Verify(ctx context.Context, tx port.Tx, realmID, userID, flowID string, response []byte) (port.Passkey, error) {
 	p, err := s.verify(ctx, tx, realmID, userID, flowID, response)
+	if na, ok := errors.AsType[*NotAllowedError](err); ok {
+		// 署名を確かめた後の、ポリシーによる拒否。呼び出し側のトランザクションは戻るので、監査ログは RecordDenied で残す。
+		return port.Passkey{}, na
+	}
 	if err != nil {
 		s.logger().DebugContext(ctx, "passkey verification failed", "error", err)
 		return port.Passkey{}, ErrAuthFailed
 	}
 	return p, nil
+}
+
+// RecordDenied は、2要素目の確認（Verify）がポリシーで拒否されたことを監査ログに残す（呼び出し側のトランザクションの後に呼ぶ）。
+func (s *Service) RecordDenied(ctx context.Context, realmID string, c Client, err *NotAllowedError) {
+	s.recordFailure(ctx, realmID, "login.failed", c, err)
 }
 
 func (s *Service) verify(ctx context.Context, tx port.Tx, realmID, userID, flowID string, response []byte) (port.Passkey, error) {
@@ -574,19 +688,39 @@ func (s *Service) verify(ctx context.Context, tx port.Tx, realmID, userID, flowI
 	}
 	for _, p := range active {
 		if bytes.Equal(p.CredentialID, c.ID) {
-			return p, s.used(ctx, tx, p, c, s.Clock.Now())
+			now := s.Clock.Now()
+			if err := s.used(ctx, tx, p, c, now); err != nil {
+				return port.Passkey{}, err
+			}
+			return p, s.allowed(p, now)
 		}
 	}
 	return port.Passkey{}, errors.New("credential not found")
 }
 
 // recordFailure は失敗を監査ログに残す（理由は内部向け。6.1）。
+// 認証器のポリシーによる拒否なら、AAGUID と判定も残す（ADR 0096）。
 func (s *Service) recordFailure(ctx context.Context, realmID, typ string, c Client, cause error) {
+	details := map[string]any{"method": "passkey", "reason": cause.Error()}
+	if na, ok := errors.AsType[*NotAllowedError](cause); ok {
+		details["passkey_id"] = na.PasskeyID
+		for k, v := range na.Decision.Audit() {
+			details[k] = v
+		}
+	}
+	if na, ok := errors.AsType[*notAllowedRegistration](cause); ok {
+		for k, v := range na.decision.Audit() {
+			details[k] = v
+		}
+		details["attestation_format"], details["attested"] = na.result.Format, na.result.Attested
+		if na.result.Detail != "" {
+			details["attestation_detail"] = na.result.Detail
+		}
+	}
 	err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		_, err := eventlog.Record(ctx, tx, s.Clock, audit.Event{
 			Type: typ, Result: audit.ResultFailure, RealmID: realmID, Actor: audit.Actor{Type: "anonymous"},
-			IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
-			Details: map[string]any{"method": "passkey", "reason": cause.Error()},
+			IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID, Details: details,
 		})
 		return err
 	})

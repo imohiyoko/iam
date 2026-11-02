@@ -15,6 +15,7 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/notify"
+	"github.com/imohiyoko/iam/authn/passkey"
 
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -69,6 +70,9 @@ type Service struct {
 	Rules Rules
 	// LoginPolicies は Org のログインポリシー（フィーチャー org_login_policy）が active か。
 	LoginPolicies bool
+	// Passkeys は認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。nil ならフィーチャーが動いておらず、
+	// ログインポリシーの passkey を判定しない。
+	Passkeys *passkey.Attestation
 	// Quotas は Quota（フィーチャー quota）が active か。QuotaCount は数えるもの（11.14）。
 	Quotas     bool
 	QuotaCount QuotaCount

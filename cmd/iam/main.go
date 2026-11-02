@@ -180,6 +180,15 @@ func build(ctx context.Context, cfg config.Config, log *slog.Logger, stdout io.W
 			return fail(err)
 		}
 	}
+	if cfg.FIDOMDS.Driver != "" {
+		mf, err := plugin.FIDOMDS(cfg.FIDOMDS.Driver)
+		if err != nil {
+			return fail(err)
+		}
+		if d.FIDOMDS, err = mf(ctx, pc(cfg.FIDOMDS)); err != nil {
+			return fail(err)
+		}
+	}
 	return d, closeFn, nil
 }
 

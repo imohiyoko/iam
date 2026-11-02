@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"time"
 
 	"github.com/imohiyoko/iam/authn/org"
+	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/feature"
@@ -102,6 +104,23 @@ var cleaners = map[string]cleaner{
 		rs, err := tx.Realms().List(ctx)
 		return max(len(rs)-1, 0), err
 	}, Hint: "realms other than the default cannot be deleted yet: keep multi_realm enabled while they exist"},
+	// Org のログインポリシーの passkey と、realm の設定の passkey_policy を外す（ADR 0096）。設定ファイルの realm.passkey_policy は
+	// 運用者が消す（フィーチャーが止まっていれば使わない）。登録済みの passkey の attestation の列は残す。
+	feature.PasskeyAttestation: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		n, err := eachOrg(ctx, tx, -1, func(o port.Org) (bool, error) { return org.HasPasskeyPolicy(o) })
+		if err != nil {
+			return 0, err
+		}
+		r, err := eachRealmPasskeyPolicy(ctx, tx, -1, time.Time{}, false)
+		return n + r, err
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		n, err := eachOrg(ctx, tx, limit, func(o port.Org) (bool, error) { return org.ClearPasskeyPolicy(ctx, tx, o, now) })
+		if err != nil || n >= limit {
+			return n, err
+		}
+		r, err := eachRealmPasskeyPolicy(ctx, tx, limit-n, now, true)
+		return n + r, err
+	}},
 	feature.Password: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.Passwords().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Passwords().Purge(ctx, limit)
@@ -142,6 +161,42 @@ func eachOwnedConnections(ctx context.Context, tx port.Tx, limit int, now time.T
 			if n += c; err != nil {
 				return n, err
 			}
+		}
+	}
+	return n, nil
+}
+
+// eachRealmPasskeyPolicy は、設定に認証器のポリシー（passkey_policy）を持つ realm の行を数える。purge なら limit（0 以上なら）
+// まで、ポリシーを null（無し）にする（ADR 0096）。
+func eachRealmPasskeyPolicy(ctx context.Context, tx port.Tx, limit int, now time.Time, purge bool) (int, error) {
+	rs, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range rs {
+		if limit >= 0 && n >= limit {
+			break
+		}
+		var m map[string]json.RawMessage
+		if len(r.Settings) == 0 || json.Unmarshal(r.Settings, &m) != nil {
+			continue
+		}
+		var p *attestation.Policy
+		if raw, ok := m["passkey_policy"]; !ok || json.Unmarshal(raw, &p) != nil || p.Empty() {
+			continue
+		}
+		n++
+		if !purge {
+			continue
+		}
+		m["passkey_policy"] = json.RawMessage("null")
+		if r.Settings, err = json.Marshal(m); err != nil {
+			return n, err
+		}
+		r.UpdatedAt = now
+		if err := tx.Realms().Update(ctx, r); err != nil {
+			return n, err
 		}
 	}
 	return n, nil

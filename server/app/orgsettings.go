@@ -69,6 +69,7 @@ func policyOut(p *org.LoginPolicy) *publicapi.OrgLoginPolicy {
 	if len(p.IPAllowlist) > 0 {
 		out.IpAllowlist = &p.IPAllowlist
 	}
+	out.Passkey = passkeyPolicyOut[publicapi.PasskeyPolicy](p.Passkey)
 	return &out
 }
 
@@ -89,6 +90,7 @@ func policyIn(p *publicapi.OrgLoginPolicy) *org.LoginPolicy {
 	if p.IpAllowlist != nil {
 		out.IPAllowlist = *p.IpAllowlist
 	}
+	out.Passkey = passkeyPolicyIn(p.Passkey)
 	return &out
 }
 
@@ -169,7 +171,7 @@ func adminSettingsView(v publicapi.OrgSettingsView) adminapi.OrgSettingsView {
 		MaxAuthAgeSeconds: v.Settings.MaxAuthAgeSeconds, Requirements: v.Settings.Requirements}
 	if p := v.Settings.LoginPolicy; p != nil {
 		out.Settings.LoginPolicy = &adminapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist,
-			RequireSso: p.RequireSso}
+			RequireSso: p.RequireSso, Passkey: passkeyPolicyOut[adminapi.PasskeyPolicy](passkeyPolicyIn(p.Passkey))}
 	}
 	if v.Settings.Warnings != nil {
 		w := make(map[string]adminapi.OrgSettingsWarnings, len(*v.Settings.Warnings))
@@ -362,7 +364,7 @@ func (s adminServer) putOrgSettings(ctx context.Context, req adminapi.PutOrgSett
 	st.Warnings = actionsIn(b.Warnings)
 	if p := b.LoginPolicy; p != nil {
 		st.LoginPolicy = policyIn(&publicapi.OrgLoginPolicy{RequirePasskey: p.RequirePasskey, MembershipEmailDomains: p.MembershipEmailDomains, IpAllowlist: p.IpAllowlist,
-			RequireSso: p.RequireSso})
+			RequireSso: p.RequireSso, Passkey: passkeyPolicyOut[publicapi.PasskeyPolicy](passkeyPolicyIn(p.Passkey))})
 	}
 	rs, err := requirementsIn(b.Requirements)
 	if o, ok, err := outcomeOf(nil, err); !ok {

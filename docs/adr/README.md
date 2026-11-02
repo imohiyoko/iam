@@ -97,3 +97,4 @@
 | [0083](0083-multi-realm.md) | 複数 realm は1つの App のまま要求ごとに realm を決め、realm ごとのサービスの組に渡す | 承認 |
 | [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |
 | [0085](0085-my-groups-and-group-scoped-read.md) | 本人の Group の一覧と、Group に限った所属の参照 | 承認 |
+| [0096](0096-passkey-attestation.md) | passkey の attestation を MDS と設定の信頼の起点で確かめ、認証器のポリシーを realm と Org の段で判定する | 承認 |
