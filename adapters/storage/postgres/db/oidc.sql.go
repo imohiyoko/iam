@@ -47,8 +47,8 @@ const createClient = `-- name: CreateClient :exec
 
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
     id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at, token_exchange, device_grant,
-    dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+    ciba_mode, ciba_notification_endpoint, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
 `
 
 type CreateClientParams struct {
@@ -70,6 +70,8 @@ type CreateClientParams struct {
 	UpdatedAt                         string
 	TokenExchange                     []byte
 	DeviceGrant                       int64
+	CibaMode                          string
+	CibaNotificationEndpoint          string
 	DpopBoundAccessTokens             int64
 	TlsBoundAccessTokens              int64
 	TlsAuthField                      string
@@ -97,6 +99,8 @@ func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) erro
 		arg.UpdatedAt,
 		arg.TokenExchange,
 		arg.DeviceGrant,
+		arg.CibaMode,
+		arg.CibaNotificationEndpoint,
 		arg.DpopBoundAccessTokens,
 		arg.TlsBoundAccessTokens,
 		arg.TlsAuthField,
@@ -310,7 +314,7 @@ func (q *Queries) EraseUserGrants(ctx context.Context, arg EraseUserGrantsParams
 }
 
 const getClient = `-- name: GetClient :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value FROM authn_clients WHERE realm_id = $1 AND id = $2
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = $1 AND id = $2
 `
 
 type GetClientParams struct {
@@ -344,12 +348,14 @@ func (q *Queries) GetClient(ctx context.Context, arg GetClientParams) (AuthnClie
 		&i.TlsBoundAccessTokens,
 		&i.TlsAuthField,
 		&i.TlsAuthValue,
+		&i.CibaMode,
+		&i.CibaNotificationEndpoint,
 	)
 	return i, err
 }
 
 const getClientByPublicID = `-- name: GetClientByPublicID :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value FROM authn_clients WHERE realm_id = $1 AND public_id = $2
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = $1 AND public_id = $2
 `
 
 type GetClientByPublicIDParams struct {
@@ -383,6 +389,8 @@ func (q *Queries) GetClientByPublicID(ctx context.Context, arg GetClientByPublic
 		&i.TlsBoundAccessTokens,
 		&i.TlsAuthField,
 		&i.TlsAuthValue,
+		&i.CibaMode,
+		&i.CibaNotificationEndpoint,
 	)
 	return i, err
 }
@@ -451,7 +459,7 @@ func (q *Queries) GetOIDCToken(ctx context.Context, arg GetOIDCTokenParams) (Aut
 }
 
 const listClients = `-- name: ListClients :many
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value FROM authn_clients WHERE realm_id = $1 ORDER BY created_at, id
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = $1 ORDER BY created_at, id
 `
 
 func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClient, error) {
@@ -486,6 +494,8 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 			&i.TlsBoundAccessTokens,
 			&i.TlsAuthField,
 			&i.TlsAuthValue,
+			&i.CibaMode,
+			&i.CibaNotificationEndpoint,
 		); err != nil {
 			return nil, err
 		}
@@ -692,8 +702,8 @@ func (q *Queries) RevokeGrant(ctx context.Context, arg RevokeGrantParams) (int64
 const updateClient = `-- name: UpdateClient :execrows
 UPDATE authn_clients SET name = $1, trust_level = $2, redirect_uris = $3, post_logout_redirect_uris = $4, auth_method = $5, secret_hash = $6, jwks = $7,
     id_token_alg = $8, backchannel_logout_uri = $9, frontchannel_logout_uri = $10, frontchannel_logout_session_required = $11, updated_at = $12, token_exchange = $13, device_grant = $14,
-    dpop_bound_access_tokens = $15, tls_bound_access_tokens = $16, tls_auth_field = $17, tls_auth_value = $18
-WHERE realm_id = $19 AND id = $20
+    ciba_mode = $15, ciba_notification_endpoint = $16, dpop_bound_access_tokens = $17, tls_bound_access_tokens = $18, tls_auth_field = $19, tls_auth_value = $20
+WHERE realm_id = $21 AND id = $22
 `
 
 type UpdateClientParams struct {
@@ -711,6 +721,8 @@ type UpdateClientParams struct {
 	UpdatedAt                         string
 	TokenExchange                     []byte
 	DeviceGrant                       int64
+	CibaMode                          string
+	CibaNotificationEndpoint          string
 	DpopBoundAccessTokens             int64
 	TlsBoundAccessTokens              int64
 	TlsAuthField                      string
@@ -735,6 +747,8 @@ func (q *Queries) UpdateClient(ctx context.Context, arg UpdateClientParams) (int
 		arg.UpdatedAt,
 		arg.TokenExchange,
 		arg.DeviceGrant,
+		arg.CibaMode,
+		arg.CibaNotificationEndpoint,
 		arg.DpopBoundAccessTokens,
 		arg.TlsBoundAccessTokens,
 		arg.TlsAuthField,

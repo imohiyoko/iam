@@ -311,6 +311,9 @@ func (s *oidcServer) senderConstraintDiscovery(d *discovery) {
 	if s.a.device != nil {
 		d.MTLSEndpointAliases["device_authorization_endpoint"] = s.mtlsAlias(oidcDeviceAuth)
 	}
+	if s.a.ciba != nil {
+		d.MTLSEndpointAliases["backchannel_authentication_endpoint"] = s.mtlsAlias(oidcBackchannel)
+	}
 }
 
 // ---------------------------------------------------------------------------

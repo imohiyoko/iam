@@ -150,6 +150,8 @@ oidc:
   #   trust_anchors: [/etc/iam/client-ca.pem]  # tls_client_auth の連携先の証明書の CA
   #   intermediates: []
   #   endpoint_url: https://mtls.id.example.com  # mTLS の専用の待ち受けの外のオリジン（Discovery の mtls_endpoint_aliases）
+  ciba_ttl: 5m  # CIBA の auth_req_id の期限の上限（30秒から10分。フィーチャー ciba。ADR 0114）
+  ciba_poll_interval: 5s  # CIBA の連携先のポーリングの最短の間隔（1秒から1分）
 
 service_accounts:  # 汎用サービスアカウント（フィーチャー service_accounts。ADR 0074）
   token_ttl: 10m  # client credentials で発行するアクセストークンの寿命（1時間以下）

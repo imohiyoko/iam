@@ -35,7 +35,7 @@ mTLS（RFC 8705）」。S）。決めることは次のとおり。
 - アクセストークンは要求で示した鍵・証明書に結び付ける。リフレッシュトークンは公開クライアント（`none`）だけ結び付け
   （RFC 9449 5、RFC 8705 4）、次のリフレッシュで同じ鍵・証明書を求める。合わなければ使用済みにせずに `invalid_grant`
   （鍵を持たない盗んだ人にトークンを焼かせない）。機密の連携先のリフレッシュトークンは連携先の認証が守るので結び付けない
-- 認可コードの交換・リフレッシュ・Device Authorization Grant・Token Exchange のどれでも同じ。Token Exchange は結び付けた
+- 認可コードの交換・リフレッシュ・Device Authorization Grant・CIBA・Token Exchange のどれでも同じ。Token Exchange は結び付けた
   `subject_token`・`actor_token` に同じ鍵・証明書を求める（盗んだトークンを交換で Bearer にさせない）
 - 認可要求の `dpop_jkt`（RFC 9449 10）を受け、認可コードの交換で同じ鍵の証明を求める
 - 監査ログ `oidc.authorized` に `dpop_jkt`・`x5t#S256` を残す
@@ -59,7 +59,7 @@ mTLS（RFC 8705）」。S）。決めることは次のとおり。
 ### OAuth の mTLS（RFC 8705）
 
 - 証明書は ADR 0103 のコアの経路でだけ受ける（mTLS の専用の待ち受けか、`proxies` に書いたプロキシのヘッダー）。秘密鍵の所持は TLS の
-  CertificateVerify で確かめてある。フィーチャーが動いていれば、専用の待ち受けは token・introspect・revoke・userinfo・device_authorization も通す
+  CertificateVerify で確かめてある。フィーチャーが動いていれば、専用の待ち受けは token・introspect・revoke・userinfo・device_authorization・bc-authorize（CIBA）も通す
   （オフなら今までどおり方式のパスだけ）
 - `tls_client_auth`（2.1）：`oidc.mtls.trust_anchors`（と `intermediates`）までの連鎖、`clientAuth` の用途、期限（Clock）を確かめ、
   登録した 1 つの項目（`tls_client_auth_subject_dn`・`_san_dns`・`_san_uri`・`_san_ip`・`_san_email`）と照合する。DN は RFC 4514 の文字列の完全一致

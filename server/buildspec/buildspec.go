@@ -94,6 +94,8 @@ var featureCatalog = map[string]struct {
 	// ADR 0113。
 	feature.DPoP:           {dpop.Feature, module + "/features/dpop"},
 	feature.MTLSClientAuth: {provider.MTLSFeature, module + "/features/mtlsclientauth"},
+	// ADR 0114。
+	feature.CIBA: {provider.CIBAFeature, module + "/features/ciba"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

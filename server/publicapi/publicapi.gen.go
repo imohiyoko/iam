@@ -508,6 +508,20 @@ func (e InviteToOrgJSONBodyRole) Valid() bool {
 	}
 }
 
+// BackchannelRequest 本人宛ての CIBA の要求（ADR 0114）。`auth_req_id` は含めない
+type BackchannelRequest struct {
+	// BindingMessage 連携先が付けた確認の文言（無ければ省く）
+	BindingMessage *string   `json:"binding_message,omitempty"`
+	ClientId       string    `json:"client_id"`
+	ClientName     string    `json:"client_name"`
+	CreatedAt      time.Time `json:"created_at"`
+	ExpiresAt      time.Time `json:"expires_at"`
+
+	// Id 本人の API で使う要求の ID
+	Id     string   `json:"id"`
+	Scopes []string `json:"scopes"`
+}
+
 // CheckResult defines model for CheckResult.
 type CheckResult struct {
 	Allowed bool `json:"allowed"`
@@ -2002,6 +2016,15 @@ type ServerInterface interface {
 	// UpdateMyAttributes 自分のカスタム属性の値を書く
 	// (PATCH /v1/me/attributes)
 	UpdateMyAttributes(w http.ResponseWriter, r *http.Request)
+	// ListMyBackchannelRequests 本人宛ての未決の CIBA の要求の一覧（フィーチャー ciba。ADR 0114）
+	// (GET /v1/me/backchannel-requests)
+	ListMyBackchannelRequests(w http.ResponseWriter, r *http.Request)
+	// ApproveMyBackchannelRequest 本人宛ての CIBA の要求を承認する
+	// (POST /v1/me/backchannel-requests/{id}:approve)
+	ApproveMyBackchannelRequest(w http.ResponseWriter, r *http.Request, id string)
+	// DenyMyBackchannelRequest 本人宛ての CIBA の要求を拒否する
+	// (POST /v1/me/backchannel-requests/{id}:deny)
+	DenyMyBackchannelRequest(w http.ResponseWriter, r *http.Request, id string)
 	// RevokeMyCredential 認証方式のプラグインの認証情報を無効化する
 	// (POST /v1/me/credentials/{id}:revoke)
 	RevokeMyCredential(w http.ResponseWriter, r *http.Request, id string)
@@ -2840,6 +2863,72 @@ func (siw *ServerInterfaceWrapper) UpdateMyAttributes(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateMyAttributes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyBackchannelRequests operation middleware
+func (siw *ServerInterfaceWrapper) ListMyBackchannelRequests(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyBackchannelRequests(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApproveMyBackchannelRequest operation middleware
+func (siw *ServerInterfaceWrapper) ApproveMyBackchannelRequest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApproveMyBackchannelRequest(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DenyMyBackchannelRequest operation middleware
+func (siw *ServerInterfaceWrapper) DenyMyBackchannelRequest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DenyMyBackchannelRequest(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5486,6 +5575,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/personal-access-tokens", wrapper.CreateMyPersonalAccessToken)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/personal-access-tokens/{id}:revoke", wrapper.RevokeMyPersonalAccessToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/personal-access-token-policy", wrapper.GetMyPersonalAccessTokenPolicy)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/backchannel-requests", wrapper.ListMyBackchannelRequests)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/backchannel-requests/{id}:approve", wrapper.ApproveMyBackchannelRequest)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/backchannel-requests/{id}:deny", wrapper.DenyMyBackchannelRequest)
 
 	return m
 }
@@ -7401,6 +7493,159 @@ func (response UpdateMyAttributes403JSONResponse) VisitUpdateMyAttributesRespons
 type UpdateMyAttributes404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response UpdateMyAttributes404JSONResponse) VisitUpdateMyAttributesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyBackchannelRequestsRequestObject struct {
+}
+
+type ListMyBackchannelRequestsResponseObject interface {
+	VisitListMyBackchannelRequestsResponse(w http.ResponseWriter) error
+}
+
+type ListMyBackchannelRequests200JSONResponse struct {
+	BackchannelRequests []BackchannelRequest `json:"backchannel_requests"`
+}
+
+func (response ListMyBackchannelRequests200JSONResponse) VisitListMyBackchannelRequestsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyBackchannelRequests401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyBackchannelRequests401JSONResponse) VisitListMyBackchannelRequestsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyBackchannelRequests404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyBackchannelRequests404JSONResponse) VisitListMyBackchannelRequestsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveMyBackchannelRequestRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ApproveMyBackchannelRequestResponseObject interface {
+	VisitApproveMyBackchannelRequestResponse(w http.ResponseWriter) error
+}
+
+type ApproveMyBackchannelRequest204Response struct {
+}
+
+func (response ApproveMyBackchannelRequest204Response) VisitApproveMyBackchannelRequestResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ApproveMyBackchannelRequest401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ApproveMyBackchannelRequest401JSONResponse) VisitApproveMyBackchannelRequestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveMyBackchannelRequest403JSONResponse struct{ DeniedJSONResponse }
+
+func (response ApproveMyBackchannelRequest403JSONResponse) VisitApproveMyBackchannelRequestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveMyBackchannelRequest404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ApproveMyBackchannelRequest404JSONResponse) VisitApproveMyBackchannelRequestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DenyMyBackchannelRequestRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DenyMyBackchannelRequestResponseObject interface {
+	VisitDenyMyBackchannelRequestResponse(w http.ResponseWriter) error
+}
+
+type DenyMyBackchannelRequest204Response struct {
+}
+
+func (response DenyMyBackchannelRequest204Response) VisitDenyMyBackchannelRequestResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DenyMyBackchannelRequest401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DenyMyBackchannelRequest401JSONResponse) VisitDenyMyBackchannelRequestResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DenyMyBackchannelRequest404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DenyMyBackchannelRequest404JSONResponse) VisitDenyMyBackchannelRequestResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -13866,6 +14111,15 @@ type StrictServerInterface interface {
 	// UpdateMyAttributes 自分のカスタム属性の値を書く
 	// (PATCH /v1/me/attributes)
 	UpdateMyAttributes(ctx context.Context, request UpdateMyAttributesRequestObject) (UpdateMyAttributesResponseObject, error)
+	// ListMyBackchannelRequests 本人宛ての未決の CIBA の要求の一覧（フィーチャー ciba。ADR 0114）
+	// (GET /v1/me/backchannel-requests)
+	ListMyBackchannelRequests(ctx context.Context, request ListMyBackchannelRequestsRequestObject) (ListMyBackchannelRequestsResponseObject, error)
+	// ApproveMyBackchannelRequest 本人宛ての CIBA の要求を承認する
+	// (POST /v1/me/backchannel-requests/{id}:approve)
+	ApproveMyBackchannelRequest(ctx context.Context, request ApproveMyBackchannelRequestRequestObject) (ApproveMyBackchannelRequestResponseObject, error)
+	// DenyMyBackchannelRequest 本人宛ての CIBA の要求を拒否する
+	// (POST /v1/me/backchannel-requests/{id}:deny)
+	DenyMyBackchannelRequest(ctx context.Context, request DenyMyBackchannelRequestRequestObject) (DenyMyBackchannelRequestResponseObject, error)
 	// RevokeMyCredential 認証方式のプラグインの認証情報を無効化する
 	// (POST /v1/me/credentials/{id}:revoke)
 	RevokeMyCredential(ctx context.Context, request RevokeMyCredentialRequestObject) (RevokeMyCredentialResponseObject, error)
@@ -15008,6 +15262,82 @@ func (sh *strictHandler) UpdateMyAttributes(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateMyAttributesResponseObject); ok {
 		if err := validResponse.VisitUpdateMyAttributesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyBackchannelRequests operation middleware
+func (sh *strictHandler) ListMyBackchannelRequests(w http.ResponseWriter, r *http.Request) {
+	var request ListMyBackchannelRequestsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyBackchannelRequests(ctx, request.(ListMyBackchannelRequestsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyBackchannelRequests")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyBackchannelRequestsResponseObject); ok {
+		if err := validResponse.VisitListMyBackchannelRequestsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApproveMyBackchannelRequest operation middleware
+func (sh *strictHandler) ApproveMyBackchannelRequest(w http.ResponseWriter, r *http.Request, id string) {
+	var request ApproveMyBackchannelRequestRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApproveMyBackchannelRequest(ctx, request.(ApproveMyBackchannelRequestRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApproveMyBackchannelRequest")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApproveMyBackchannelRequestResponseObject); ok {
+		if err := validResponse.VisitApproveMyBackchannelRequestResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DenyMyBackchannelRequest operation middleware
+func (sh *strictHandler) DenyMyBackchannelRequest(w http.ResponseWriter, r *http.Request, id string) {
+	var request DenyMyBackchannelRequestRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DenyMyBackchannelRequest(ctx, request.(DenyMyBackchannelRequestRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DenyMyBackchannelRequest")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DenyMyBackchannelRequestResponseObject); ok {
+		if err := validResponse.VisitDenyMyBackchannelRequestResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

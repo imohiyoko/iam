@@ -29,6 +29,8 @@ func testClients(t *testing.T, h Harness) {
 	b.DeviceGrant, b.RedirectURIs = true, []string{}
 	b.TokenExchange = []byte(`{"audiences":["https://api.example.com"]}`)
 	b.FrontchannelLogoutURI, b.FrontchannelLogoutSessionRequired = "https://b.example.com/fcl?x=1", true
+	// CIBA の ping の連携先（ADR 0114）。
+	b.CIBAMode, b.CIBANotificationEndpoint = port.CIBAPing, "https://b.example.com/ciba"
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Clients()
 		for _, c := range []port.Client{a, b} {
@@ -58,6 +60,7 @@ func testClients(t *testing.T, h Harness) {
 		a.DeviceGrant = true
 		a.TokenExchange = []byte(`{"impersonation":true}`)
 		a.FrontchannelLogoutURI, a.FrontchannelLogoutSessionRequired = "https://x.example.com/fcl", true
+		a.CIBAMode = port.CIBAPoll
 		if err := repo.Update(ctx, a); err != nil {
 			return err
 		}

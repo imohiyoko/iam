@@ -63,6 +63,8 @@ const (
 	// 証明書に結び付けたトークン（ADR 0113）。
 	DPoP           = "dpop"
 	MTLSClientAuth = "mtls_client_auth"
+	// CIBA は OpenID Connect Client-Initiated Backchannel Authentication（ADR 0114）。
+	CIBA = "ciba"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

@@ -17,7 +17,7 @@ import (
 
 // clientOut は連携先を返す形にする。フィーチャー device_flow・dpop・mtls_client_auth が止まっていれば、その許可の有無を返さない。
 func (a *App) clientOut(c port.Client, secret string) (adminapi.Client, error) {
-	out, err := clientOutBase(c, secret, a.device != nil)
+	out, err := clientOutBase(c, secret, a.device != nil, a.ciba != nil)
 	if err != nil {
 		return out, err
 	}
@@ -45,7 +45,8 @@ func (a *App) clientOut(c port.Client, secret string) (adminapi.Client, error) {
 	return out, nil
 }
 
-func clientOutBase(c port.Client, secret string, deviceFlow bool) (adminapi.Client, error) {
+// clientOutBase は deviceFlow（device_flow）と ciba（ADR 0114）が止まっていれば、その登録を返さない。
+func clientOutBase(c port.Client, secret string, deviceFlow, ciba bool) (adminapi.Client, error) {
 	out := adminapi.Client{ClientId: c.PublicID, Name: c.Name, TrustLevel: adminapi.ClientTrustLevel(c.TrustLevel),
 		RedirectUris: c.RedirectURIs, PostLogoutRedirectUris: c.PostLogoutRedirectURIs, TokenEndpointAuthMethod: c.AuthMethod,
 		IdTokenSignedResponseAlg: c.IDTokenAlg, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
@@ -75,6 +76,12 @@ func clientOutBase(c port.Client, secret string, deviceFlow bool) (adminapi.Clie
 	if deviceFlow {
 		out.DeviceAuthorizationGrant = &c.DeviceGrant
 	}
+	if ciba && c.CIBAMode != "" {
+		out.BackchannelTokenDeliveryMode = &c.CIBAMode
+		if c.CIBANotificationEndpoint != "" {
+			out.BackchannelClientNotificationEndpoint = &c.CIBANotificationEndpoint
+		}
+	}
 	return out, nil
 }
 
@@ -94,6 +101,12 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.FrontchannelLogoutUri != nil {
 		in.FrontchannelLogoutURI = *b.FrontchannelLogoutUri
+	}
+	if b.BackchannelTokenDeliveryMode != nil {
+		in.CIBAMode = string(*b.BackchannelTokenDeliveryMode)
+	}
+	if b.BackchannelClientNotificationEndpoint != nil {
+		in.CIBANotificationEndpoint = *b.BackchannelClientNotificationEndpoint
 	}
 	if b.FrontchannelLogoutSessionRequired != nil {
 		in.FrontchannelLogoutSessionRequired = *b.FrontchannelLogoutSessionRequired

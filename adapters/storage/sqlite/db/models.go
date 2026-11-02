@@ -44,6 +44,8 @@ type AuthnClient struct {
 	TlsBoundAccessTokens              int64
 	TlsAuthField                      string
 	TlsAuthValue                      string
+	CibaMode                          string
+	CibaNotificationEndpoint          string
 }
 
 type AuthnConnection struct {

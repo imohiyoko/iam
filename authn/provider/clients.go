@@ -56,6 +56,8 @@ type Clients struct {
 	FrontChannel bool
 	// DPoP と MTLS はフィーチャー dpop・mtls_client_auth が動いているか（ADR 0113）。
 	DPoP, MTLS bool
+	// CIBA は CIBA の登録を受け付けるか（フィーチャー ciba。ADR 0114）。
+	CIBA bool
 }
 
 // ClientInput は登録・変更の内容。
@@ -78,6 +80,10 @@ type ClientInput struct {
 	TLSBoundAccessTokens  bool
 	TLSAuthField          string
 	TLSAuthValue          string
+	// CIBAMode は CIBA のトークンの受け取り方（backchannel_token_delivery_mode。空・poll・ping）、CIBANotificationEndpoint は
+	// ping の通知先（フィーチャー ciba。ADR 0114）。
+	CIBAMode                 string
+	CIBANotificationEndpoint string
 }
 
 // ValidRedirectURI は連携先の URI に使えるか（絶対 URL、https か loopback の http、フラグメントと userinfo なし）を返す。
@@ -128,7 +134,7 @@ func Origin(s string) (string, bool) {
 	return o, true
 }
 
-func (in ClientInput) normalize(deviceFlow bool) (ClientInput, error) {
+func (in ClientInput) normalize(deviceFlow, ciba bool) (ClientInput, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || utf8.RuneCountInString(in.Name) > MaxClientNameLength {
 		return in, invalidClient("name")
@@ -136,8 +142,11 @@ func (in ClientInput) normalize(deviceFlow bool) (ClientInput, error) {
 	if in.DeviceGrant && !deviceFlow {
 		return in, invalidClient("device_authorization_grant")
 	}
-	// Device Authorization Grant だけを使う連携先（CLI など）は戻り先を持たなくてよい。
-	if (len(in.RedirectURIs) == 0 && !in.DeviceGrant) || len(in.RedirectURIs) > MaxRedirectURIs || len(in.PostLogoutRedirectURIs) > MaxRedirectURIs {
+	if err := in.checkCIBA(ciba); err != nil {
+		return in, err
+	}
+	// Device Authorization Grant・CIBA だけを使う連携先（CLI・コールセンターなど）は戻り先を持たなくてよい。
+	if (len(in.RedirectURIs) == 0 && !in.DeviceGrant && in.CIBAMode == "") || len(in.RedirectURIs) > MaxRedirectURIs || len(in.PostLogoutRedirectURIs) > MaxRedirectURIs {
 		return in, invalidClient("redirect_uris")
 	}
 	for _, u := range append(slices.Clone(in.RedirectURIs), in.PostLogoutRedirectURIs...) {
@@ -200,6 +209,34 @@ func (in ClientInput) normalize(deviceFlow bool) (ClientInput, error) {
 	return in, nil
 }
 
+// checkCIBA は CIBA の登録を確かめる（ADR 0114）。フィーチャーが動いていなければ登録できない。機密の連携先だけで、push モードは
+// 持たない。ping は通知先（連携先の URI の条件。https かループバックの http）が要り、poll では通知先を持たない。
+func (in ClientInput) checkCIBA(enabled bool) error {
+	switch in.CIBAMode {
+	case "":
+		if in.CIBANotificationEndpoint != "" {
+			return invalidClient("backchannel_client_notification_endpoint requires backchannel_token_delivery_mode ping")
+		}
+		return nil
+	case port.CIBAPoll, port.CIBAPing:
+	default:
+		return invalidClient("backchannel_token_delivery_mode")
+	}
+	if !enabled {
+		return invalidClient("backchannel_token_delivery_mode: the ciba feature is not enabled")
+	}
+	if in.AuthMethod == port.ClientAuthNone {
+		return invalidClient("backchannel_token_delivery_mode requires a confidential client")
+	}
+	if in.CIBAMode == port.CIBAPoll && in.CIBANotificationEndpoint != "" {
+		return invalidClient("backchannel_client_notification_endpoint is only for ping")
+	}
+	if in.CIBAMode == port.CIBAPing && !ValidRedirectURI(in.CIBANotificationEndpoint) {
+		return invalidClient("backchannel_client_notification_endpoint")
+	}
+	return nil
+}
+
 // publicOnly は JWK が秘密の項目（RFC 7518 の d・p・q など、対称鍵の k、AKP の priv）を持たないかを返す。
 func publicOnly(k jwk.Key) bool {
 	b, err := json.Marshal(k)
@@ -243,6 +280,9 @@ func (c *Clients) record(ctx context.Context, tx port.Tx, realmID string, actor 
 	if cl.TLSAuthField != "" {
 		details["tls_client_auth_"+cl.TLSAuthField] = cl.TLSAuthValue
 	}
+	if cl.CIBAMode != "" {
+		details["backchannel_token_delivery_mode"] = cl.CIBAMode
+	}
 	_, err := eventlog.Record(ctx, tx, c.Clock, audit.Event{Type: typ, Result: audit.ResultSuccess, RealmID: realmID, Actor: actor,
 		RequestID: requestID, Details: details})
 	return err
@@ -279,7 +319,7 @@ func (c *Clients) checkSenderConstraint(in ClientInput, prev port.Client) error 
 
 // Create は連携先を登録する。client_secret なら秘密を1度だけ返す（保存するのはハッシュだけ）。
 func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
-	in, err := in.normalize(c.DeviceFlow)
+	in, err := in.normalize(c.DeviceFlow, c.CIBA)
 	if err != nil {
 		return port.Client{}, "", err
 	}
@@ -295,7 +335,8 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 		IDTokenAlg: in.IDTokenAlg, BackchannelLogoutURI: in.BackchannelLogoutURI, DeviceGrant: in.DeviceGrant,
 		FrontchannelLogoutURI: in.FrontchannelLogoutURI, FrontchannelLogoutSessionRequired: in.FrontchannelLogoutSessionRequired,
 		DPoPBoundAccessTokens: in.DPoPBoundAccessTokens, TLSBoundAccessTokens: in.TLSBoundAccessTokens, TLSAuthField: in.TLSAuthField,
-		TLSAuthValue: in.TLSAuthValue, CreatedAt: now, UpdatedAt: now}
+		TLSAuthValue: in.TLSAuthValue, CIBAMode: in.CIBAMode, CIBANotificationEndpoint: in.CIBANotificationEndpoint,
+		CreatedAt: now, UpdatedAt: now}
 	var secret string
 	if cl.AuthMethod == port.ClientAuthSecret {
 		if secret, cl.SecretHash, err = newSecret(); err != nil {
@@ -310,7 +351,7 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 
 // Update は連携先の内容を置き換える。認証方式を client_secret に変えたときは新しい秘密を返す。
 func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
-	in, err := in.normalize(c.DeviceFlow)
+	in, err := in.normalize(c.DeviceFlow, c.CIBA)
 	if err != nil {
 		return port.Client{}, "", err
 	}
@@ -331,6 +372,7 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	cl.Name, cl.RedirectURIs, cl.PostLogoutRedirectURIs, cl.AuthMethod = in.Name, in.RedirectURIs, in.PostLogoutRedirectURIs, in.AuthMethod
 	cl.JWKS, cl.IDTokenAlg, cl.BackchannelLogoutURI, cl.UpdatedAt = in.JWKS, in.IDTokenAlg, in.BackchannelLogoutURI, c.Clock.Now()
 	cl.DeviceGrant = in.DeviceGrant
+	cl.CIBAMode, cl.CIBANotificationEndpoint = in.CIBAMode, in.CIBANotificationEndpoint
 	cl.FrontchannelLogoutURI, cl.FrontchannelLogoutSessionRequired = in.FrontchannelLogoutURI, in.FrontchannelLogoutSessionRequired
 	cl.DPoPBoundAccessTokens, cl.TLSBoundAccessTokens = in.DPoPBoundAccessTokens, in.TLSBoundAccessTokens
 	cl.TLSAuthField, cl.TLSAuthValue = in.TLSAuthField, in.TLSAuthValue

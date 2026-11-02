@@ -38,6 +38,7 @@ import (
 //	POST /oauth2/device_authorization       Device Authorization Grant の開始（RFC 8628。フィーチャー device_flow）
 //	GET  /oauth2/device                     user_code の入力と承認の画面（POST で承認・拒否）
 //	GET  /oauth2/end_session                RP-Initiated Logout（POST も可。フィーチャー oidc_logout。endsession.go）
+//	POST /oauth2/bc-authorize               CIBA の開始（フィーチャー ciba。ciba.go）
 
 const (
 	oidcAuthorize  = "/oauth2/authorize"
@@ -77,7 +78,13 @@ func newOIDCHandler(a *App) http.Handler {
 	mux.Handle(oidc.DiscoveryEndpoint, ops)
 	mux.Handle(oidcKeys, ops)
 	// DPoP の nonce（ADR 0113）は token エンドポイントと UserInfo の応答に付ける。
-	mux.Handle(oidcToken, a.withDPoPNonce(ops))
+	if a.ciba != nil {
+		// CIBA の grant は op.Server の前で受ける（ADR 0114）。
+		mux.Handle(oidcToken, a.withDPoPNonce(srv.withCIBAToken(ops)))
+		mux.HandleFunc(oidcBackchannel, srv.backchannelAuthorize)
+	} else {
+		mux.Handle(oidcToken, a.withDPoPNonce(ops))
+	}
 	mux.Handle(oidcIntrospect, ops)
 	mux.Handle(oidcRevoke, ops)
 	// 認可要求とその続きはブラウザのセッションを見る。
@@ -236,7 +243,7 @@ func (a *App) hardwareAAL() bool { return a.methods.MaxAAL() >= 3 }
 // acrActive はフィーチャー acr（ADR 0093）が動いているか。
 func (a *App) acrActive() bool { return a.plan.IsActive(feature.ACR) }
 
-// discovery は Discovery の応答。zitadel/oidc の型に無い Front-Channel Logout の項目を足す。
+// discovery は Discovery の応答。zitadel/oidc の型に無い Front-Channel Logout と CIBA の項目を足す。
 type discovery struct {
 	*oidc.DiscoveryConfiguration
 	FrontChannelLogoutSupported        bool `json:"frontchannel_logout_supported,omitempty"`
@@ -245,6 +252,10 @@ type discovery struct {
 	DPoPSigningAlgValuesSupported         []string          `json:"dpop_signing_alg_values_supported,omitempty"`
 	TLSClientCertificateBoundAccessTokens bool              `json:"tls_client_certificate_bound_access_tokens,omitempty"`
 	MTLSEndpointAliases                   map[string]string `json:"mtls_endpoint_aliases,omitempty"`
+	// CIBA（CIBA Core 4。フィーチャー ciba）。
+	BackchannelAuthenticationEndpoint      string   `json:"backchannel_authentication_endpoint,omitempty"`
+	BackchannelTokenDeliveryModesSupported []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
+	BackchannelUserCodeParameterSupported  *bool    `json:"backchannel_user_code_parameter_supported,omitempty"`
 }
 
 func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Response, error) {
@@ -285,6 +296,14 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 	if s.a.device != nil {
 		d.DeviceAuthorizationEndpoint = s.endpoint(oidcDeviceAuth)
 		d.GrantTypesSupported = append(slices.Clone(d.GrantTypesSupported), oidc.GrantTypeDeviceCode)
+	}
+	// CIBA（フィーチャー ciba。オフなら出さない。ADR 0114）。署名した要求と user_code は扱わない。
+	if s.a.ciba != nil {
+		no := false
+		d.BackchannelAuthenticationEndpoint = s.endpoint(oidcBackchannel)
+		d.BackchannelTokenDeliveryModesSupported = []string{port.CIBAPoll, port.CIBAPing}
+		d.BackchannelUserCodeParameterSupported = &no
+		d.GrantTypesSupported = append(slices.Clone(d.GrantTypesSupported), oidc.GrantType(provider.GrantTypeCIBA))
 	}
 	s.senderConstraintDiscovery(&d)
 	return op.NewResponse(d), nil

@@ -204,6 +204,18 @@ var cleaners = map[string]cleaner{
 	// DPoP と OAuth の mTLS（ADR 0113）。連携先の設定を外し、結び付けたトークンを消す。
 	feature.DPoP:           dpopCleaner,
 	feature.MTLSClientAuth: mtlsCleaner,
+	// 連携先の CIBA の登録（モードと ping の通知先）を外す（ADR 0114）。途中の要求は EphemeralStore にあり、期限で消える。
+	feature.CIBA: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.CIBAMode != "" || c.CIBANotificationEndpoint != "", nil })
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
+			if c.CIBAMode == "" && c.CIBANotificationEndpoint == "" {
+				return false, nil
+			}
+			c.CIBAMode, c.CIBANotificationEndpoint, c.UpdatedAt = "", "", now
+			return true, tx.Clients().Update(ctx, c)
+		})
+	}},
 }
 
 // eachClient は全 realm の連携先に fn を呼び、true を返した数を数える。limit が 0 以上なら、その数で止める。
