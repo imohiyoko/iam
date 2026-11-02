@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strings"
@@ -513,5 +514,36 @@ func TestDisableTokenExchangeWithData(t *testing.T) {
 	}
 	if res, err := l.a.DisableFeature(ctx, feature.TokenExchange, true); err != nil || !res.Done || res.Purged != 1 {
 		t.Fatalf("purge token_exchange: %+v %v", res, err)
+	}
+}
+
+// TestTokenExchangeNoBackchannelLogout は、ログインの系列が終わっても、交換しただけの連携先には Logout Token を送らないことを
+// 確かめる（交換の認可は失効する。ADR 0099）。
+func TestTokenExchangeNoBackchannelLogout(t *testing.T) {
+	l := exchangeEnv(t, nil, feature.TokenExchange)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	recv := &bclReceiver{}
+	srv := httptest.NewServer(recv)
+	defer srv.Close()
+	web := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	api := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "redirect_uris": []string{"https://api.example.com/cb"},
+		"backchannel_logout_uri": srv.URL + "/bcl"})
+	down := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	if code, out := l.setExchange(t, owner, api.clientID, map[string]any{"audiences": []string{down.clientID},
+		"subject_clients": []string{web.clientID}}); code != 200 {
+		t.Fatalf("set policy: %d %v", code, out)
+	}
+	code, cookie := web.login(t, "alice@example.com", nil)
+	_, tok := web.exchange(t, code, nil)
+	x := api.delegate(t, tok["access_token"].(string), down.clientID)
+	if code, _ := l.meDo(t, "POST", cookie, "/v1/logout", nil); code != 204 {
+		t.Fatalf("logout: %d", code)
+	}
+	l.flushLogout(t)
+	if got := recv.take(); len(got) != 0 {
+		t.Fatalf("logout tokens to the exchanging client: %d", len(got))
+	}
+	if in := down.introspect(t, x); in["active"] != false {
+		t.Fatalf("after logout: %v", in)
 	}
 }
