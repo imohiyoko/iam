@@ -5,6 +5,7 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/errs"
@@ -63,6 +64,23 @@ func (r orgs) List(_ context.Context, realmID, afterID string, limit int) ([]por
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (r orgs) Search(_ context.Context, realmID string, f port.OrgSearch) ([]port.Org, error) {
+	var out []port.Org
+	for _, o := range r.t.s.orgs {
+		if o.RealmID != realmID || o.PublicID <= f.After || (f.Kind != "" && o.Kind != f.Kind) || (f.ParentID != "" && o.ParentID != f.ParentID) ||
+			!strings.HasPrefix(o.Name, f.NamePrefix) || !matchTri(f.Deleted, o.DeletedAt != nil) ||
+			!matchTri(f.Suspended, suspendedAt(r.t.s.suspensions, realmID, port.SuspensionTargetOrg, o.ID, f.Now)) {
+			continue
+		}
+		out = append(out, cloneOrg(o))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PublicID < out[j].PublicID })
+	if len(out) > f.Limit {
+		out = out[:f.Limit]
 	}
 	return out, nil
 }

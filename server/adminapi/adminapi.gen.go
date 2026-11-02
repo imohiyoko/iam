@@ -18,6 +18,27 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AdminSigningKeyState.
+const (
+	AdminSigningKeyStateActive  AdminSigningKeyState = "active"
+	AdminSigningKeyStateExpired AdminSigningKeyState = "expired"
+	AdminSigningKeyStateRetired AdminSigningKeyState = "retired"
+)
+
+// Valid indicates whether the value is a known member of the AdminSigningKeyState enum.
+func (e AdminSigningKeyState) Valid() bool {
+	switch e {
+	case AdminSigningKeyStateActive:
+		return true
+	case AdminSigningKeyStateExpired:
+		return true
+	case AdminSigningKeyStateRetired:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminUserStatus.
 const (
 	AdminUserStatusActive  AdminUserStatus = "active"
@@ -33,6 +54,75 @@ func (e AdminUserStatus) Valid() bool {
 	case AdminUserStatusDeleted:
 		return true
 	case AdminUserStatusMerged:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUserDetailStatus.
+const (
+	AdminUserDetailStatusActive  AdminUserDetailStatus = "active"
+	AdminUserDetailStatusDeleted AdminUserDetailStatus = "deleted"
+	AdminUserDetailStatusMerged  AdminUserDetailStatus = "merged"
+)
+
+// Valid indicates whether the value is a known member of the AdminUserDetailStatus enum.
+func (e AdminUserDetailStatus) Valid() bool {
+	switch e {
+	case AdminUserDetailStatusActive:
+		return true
+	case AdminUserDetailStatusDeleted:
+		return true
+	case AdminUserDetailStatusMerged:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUserEmailVerifiedVia.
+const (
+	AdminUserEmailVerifiedViaAdmin         AdminUserEmailVerifiedVia = "admin"
+	AdminUserEmailVerifiedViaCode          AdminUserEmailVerifiedVia = "code"
+	AdminUserEmailVerifiedViaInvitation    AdminUserEmailVerifiedVia = "invitation"
+	AdminUserEmailVerifiedViaOauthProvider AdminUserEmailVerifiedVia = "oauth_provider"
+	AdminUserEmailVerifiedViaSso           AdminUserEmailVerifiedVia = "sso"
+)
+
+// Valid indicates whether the value is a known member of the AdminUserEmailVerifiedVia enum.
+func (e AdminUserEmailVerifiedVia) Valid() bool {
+	switch e {
+	case AdminUserEmailVerifiedViaAdmin:
+		return true
+	case AdminUserEmailVerifiedViaCode:
+		return true
+	case AdminUserEmailVerifiedViaInvitation:
+		return true
+	case AdminUserEmailVerifiedViaOauthProvider:
+		return true
+	case AdminUserEmailVerifiedViaSso:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUserSummaryStatus.
+const (
+	AdminUserSummaryStatusActive  AdminUserSummaryStatus = "active"
+	AdminUserSummaryStatusDeleted AdminUserSummaryStatus = "deleted"
+	AdminUserSummaryStatusMerged  AdminUserSummaryStatus = "merged"
+)
+
+// Valid indicates whether the value is a known member of the AdminUserSummaryStatus enum.
+func (e AdminUserSummaryStatus) Valid() bool {
+	switch e {
+	case AdminUserSummaryStatusActive:
+		return true
+	case AdminUserSummaryStatusDeleted:
+		return true
+	case AdminUserSummaryStatusMerged:
 		return true
 	default:
 		return false
@@ -218,16 +308,16 @@ func (e MembershipStatus) Valid() bool {
 
 // Defines values for OrgKind.
 const (
-	Personal OrgKind = "personal"
-	Shared   OrgKind = "shared"
+	OrgKindPersonal OrgKind = "personal"
+	OrgKindShared   OrgKind = "shared"
 )
 
 // Valid indicates whether the value is a known member of the OrgKind enum.
 func (e OrgKind) Valid() bool {
 	switch e {
-	case Personal:
+	case OrgKindPersonal:
 		return true
-	case Shared:
+	case OrgKindShared:
 		return true
 	default:
 		return false
@@ -537,6 +627,45 @@ func (e SuspensionTargetType) Valid() bool {
 	}
 }
 
+// Defines values for ListOrgsParamsKind.
+const (
+	ListOrgsParamsKindPersonal ListOrgsParamsKind = "personal"
+	ListOrgsParamsKindShared   ListOrgsParamsKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the ListOrgsParamsKind enum.
+func (e ListOrgsParamsKind) Valid() bool {
+	switch e {
+	case ListOrgsParamsKindPersonal:
+		return true
+	case ListOrgsParamsKindShared:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListOrgsParamsStatus.
+const (
+	ListOrgsParamsStatusActive    ListOrgsParamsStatus = "active"
+	ListOrgsParamsStatusDeleted   ListOrgsParamsStatus = "deleted"
+	ListOrgsParamsStatusSuspended ListOrgsParamsStatus = "suspended"
+)
+
+// Valid indicates whether the value is a known member of the ListOrgsParamsStatus enum.
+func (e ListOrgsParamsStatus) Valid() bool {
+	switch e {
+	case ListOrgsParamsStatusActive:
+		return true
+	case ListOrgsParamsStatusDeleted:
+		return true
+	case ListOrgsParamsStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RotateSigningKeyJSONBodyAlg.
 const (
 	RotateSigningKeyJSONBodyAlgES256   RotateSigningKeyJSONBodyAlg = "ES256"
@@ -570,6 +699,30 @@ func (e IssueServiceAccountToken200JSONResponseBodyTokenType) Valid() bool {
 	}
 }
 
+// Defines values for ListUsersParamsStatus.
+const (
+	ListUsersParamsStatusActive    ListUsersParamsStatus = "active"
+	ListUsersParamsStatusDeleted   ListUsersParamsStatus = "deleted"
+	ListUsersParamsStatusMerged    ListUsersParamsStatus = "merged"
+	ListUsersParamsStatusSuspended ListUsersParamsStatus = "suspended"
+)
+
+// Valid indicates whether the value is a known member of the ListUsersParamsStatus enum.
+func (e ListUsersParamsStatus) Valid() bool {
+	switch e {
+	case ListUsersParamsStatusActive:
+		return true
+	case ListUsersParamsStatusDeleted:
+		return true
+	case ListUsersParamsStatusMerged:
+		return true
+	case ListUsersParamsStatusSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
 // ActionNamespace defines model for ActionNamespace.
 type ActionNamespace struct {
 	// Bands リスクの種類 → 段階の境界
@@ -592,6 +745,57 @@ type ActionNamespaceInput struct {
 	Requirements *map[string]map[string]interface{} `json:"requirements,omitempty"`
 }
 
+// AdminConnection defines model for AdminConnection.
+type AdminConnection struct {
+	// ActiveIdentities 有効な外部 ID の紐付けの数
+	ActiveIdentities      int       `json:"active_identities"`
+	AuthorizationEndpoint *string   `json:"authorization_endpoint,omitempty"`
+	ClientId              string    `json:"client_id"`
+	CreatedAt             time.Time `json:"created_at"`
+	Id                    string    `json:"id"`
+	Issuer                *string   `json:"issuer,omitempty"`
+
+	// OwnerOrgId Org 専用 SSO の connection の Org（公開 ID）
+	OwnerOrgId    *string  `json:"owner_org_id,omitempty"`
+	RedirectUris  []string `json:"redirect_uris"`
+	Scopes        []string `json:"scopes"`
+	Slug          string   `json:"slug"`
+	TokenEndpoint *string  `json:"token_endpoint,omitempty"`
+	Type          string   `json:"type"`
+}
+
+// AdminSession defines model for AdminSession.
+type AdminSession struct {
+	// ActiveOrgId active な Org の公開 ID（フィーチャー org が動いているときだけ）
+	ActiveOrgId     *string   `json:"active_org_id,omitempty"`
+	AuthMethods     []string  `json:"auth_methods"`
+	AuthenticatedAt time.Time `json:"authenticated_at"`
+	CreatedAt       time.Time `json:"created_at"`
+	ExpiresAt       time.Time `json:"expires_at"`
+
+	// Id 公開のセッション ID（ses_…）
+	Id         string    `json:"id"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+
+	// Restriction 使える操作の制限（second_factor / enroll / recovery / deletion_pending）。無ければ制限なし
+	Restriction *string `json:"restriction,omitempty"`
+}
+
+// AdminSigningKey defines model for AdminSigningKey.
+type AdminSigningKey struct {
+	Alg       string    `json:"alg"`
+	CreatedAt time.Time `json:"created_at"`
+	Kid       string    `json:"kid"`
+
+	// PublishedUntil JWKS に残す期限（退役した鍵だけ）
+	PublishedUntil *time.Time           `json:"published_until,omitempty"`
+	RetiredAt      *time.Time           `json:"retired_at,omitempty"`
+	State          AdminSigningKeyState `json:"state"`
+}
+
+// AdminSigningKeyState defines model for AdminSigningKey.State.
+type AdminSigningKeyState string
+
 // AdminUser defines model for AdminUser.
 type AdminUser struct {
 	// DeletionScheduledAt 削除の予定（猶予期間の終わり）
@@ -605,6 +809,85 @@ type AdminUser struct {
 
 // AdminUserStatus defines model for AdminUser.Status.
 type AdminUserStatus string
+
+// AdminUserDetail defines model for AdminUserDetail.
+type AdminUserDetail struct {
+	CreatedAt   time.Time       `json:"created_at"`
+	Credentials UserCredentials `json:"credentials"`
+
+	// DeletionScheduledAt 削除の予定（猶予期間の終わり）
+	DeletionScheduledAt *time.Time       `json:"deletion_scheduled_at,omitempty"`
+	Emails              []AdminUserEmail `json:"emails"`
+
+	// Id 公開のユーザー ID
+	Id        string `json:"id"`
+	LegalHold *bool  `json:"legal_hold,omitempty"`
+
+	// ManagedByOrgId 管理する Org の公開 ID（Org 管理ユーザーのときだけ）
+	ManagedByOrgId *string `json:"managed_by_org_id,omitempty"`
+
+	// Memberships Membership（終了したものも含む。フィーチャー org が動いているときだけ）
+	Memberships *[]Membership `json:"memberships,omitempty"`
+
+	// MergedInto 統合先のユーザーの公開 ID（merged のときだけ）
+	MergedInto *string `json:"merged_into,omitempty"`
+
+	// RecoveryCodesRemaining 未使用のリカバリーコードの数
+	RecoveryCodesRemaining *int                  `json:"recovery_codes_remaining,omitempty"`
+	Status                 AdminUserDetailStatus `json:"status"`
+
+	// Suspended 今停止中か
+	Suspended bool `json:"suspended"`
+
+	// Suspensions 停止の一覧（解除・終了したものも含む。開始の時刻の順）
+	Suspensions []Suspension `json:"suspensions"`
+	ValidFrom   *time.Time   `json:"valid_from,omitempty"`
+	ValidUntil  *time.Time   `json:"valid_until,omitempty"`
+}
+
+// AdminUserDetailStatus defines model for AdminUserDetail.Status.
+type AdminUserDetailStatus string
+
+// AdminUserEmail defines model for AdminUserEmail.
+type AdminUserEmail struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Email アドレス（`include_pii=true` と `pii:read` のときだけ）
+	Email *string `json:"email,omitempty"`
+
+	// Id メールの公開 ID
+	Id          string                     `json:"id"`
+	Primary     bool                       `json:"primary"`
+	Verified    bool                       `json:"verified"`
+	VerifiedVia *AdminUserEmailVerifiedVia `json:"verified_via,omitempty"`
+}
+
+// AdminUserEmailVerifiedVia defines model for AdminUserEmail.VerifiedVia.
+type AdminUserEmailVerifiedVia string
+
+// AdminUserSummary defines model for AdminUserSummary.
+type AdminUserSummary struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeletionScheduledAt 削除の予定（猶予期間の終わり）
+	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
+
+	// Id 公開のユーザー ID
+	Id        string `json:"id"`
+	LegalHold *bool  `json:"legal_hold,omitempty"`
+
+	// ManagedByOrgId 管理する Org の公開 ID（Org 管理ユーザーのときだけ）
+	ManagedByOrgId *string                `json:"managed_by_org_id,omitempty"`
+	Status         AdminUserSummaryStatus `json:"status"`
+
+	// Suspended 今停止中か
+	Suspended  bool       `json:"suspended"`
+	ValidFrom  *time.Time `json:"valid_from,omitempty"`
+	ValidUntil *time.Time `json:"valid_until,omitempty"`
+}
+
+// AdminUserSummaryStatus defines model for AdminUserSummary.Status.
+type AdminUserSummaryStatus string
 
 // AttributeDef defines model for AttributeDef.
 type AttributeDef struct {
@@ -758,6 +1041,31 @@ type DeclaredContext struct {
 	Amr      *[]string       `json:"amr,omitempty"`
 	AuthTime *time.Time      `json:"auth_time,omitempty"`
 	Risk     *map[string]int `json:"risk,omitempty"`
+}
+
+// EffectiveRoleBinding defines model for EffectiveRoleBinding.
+type EffectiveRoleBinding struct {
+	// Condition 付与の条件（ADR 0084）。無ければ条件なし
+	Condition *map[string]interface{} `json:"condition,omitempty"`
+	CreatedAt time.Time               `json:"created_at"`
+	Id        string                  `json:"id"`
+
+	// OrgId Org の範囲の付与の Org（公開 ID）。無ければ realm の範囲
+	OrgId *string `json:"org_id,omitempty"`
+
+	// PrincipalId 付与の主体の公開 ID（Group の付与では Group）
+	PrincipalId string `json:"principal_id"`
+
+	// PrincipalType user / group / service_account
+	PrincipalType string  `json:"principal_type"`
+	ResourceId    *string `json:"resource_id,omitempty"`
+	ResourceType  *string `json:"resource_type,omitempty"`
+
+	// Role 組み込みのロールの名前か、独自のロールの ID
+	Role string `json:"role"`
+
+	// ViaGroupId この Group の所属を通して効く（Group の付与のときだけ）
+	ViaGroupId *string `json:"via_group_id,omitempty"`
 }
 
 // Error defines model for Error.
@@ -971,6 +1279,19 @@ type OrgSettingsView struct {
 
 // OrgSettingsViewEffectiveWarnings defines model for OrgSettingsView.Effective.Warnings.
 type OrgSettingsViewEffectiveWarnings string
+
+// PrincipalGroup defines model for PrincipalGroup.
+type PrincipalGroup struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Direct 直接の所属か（false はネストで含む Group）
+	Direct bool   `json:"direct"`
+	Id     string `json:"id"`
+	Name   string `json:"name"`
+
+	// OrgId Org の範囲の Group の Org（公開 ID）。無ければ realm の範囲
+	OrgId *string `json:"org_id,omitempty"`
+}
 
 // QuotaGrant defines model for QuotaGrant.
 type QuotaGrant struct {
@@ -1389,6 +1710,34 @@ type CreateConnectionJSONBody struct {
 	Slug         string   `json:"slug"`
 }
 
+// UpdateConnectionJSONBody defines parameters for UpdateConnection.
+type UpdateConnectionJSONBody struct {
+	ClientId     string   `json:"client_id"`
+	ClientSecret *string  `json:"client_secret,omitempty"`
+	RedirectUris []string `json:"redirect_uris"`
+}
+
+// DeleteConnectionJSONBody defines parameters for DeleteConnection.
+type DeleteConnectionJSONBody struct {
+	RevokeIdentities *bool `json:"revoke_identities,omitempty"`
+}
+
+// ListOrgsParams defines parameters for ListOrgs.
+type ListOrgsParams struct {
+	Limit      *int                  `form:"limit,omitempty" json:"limit,omitempty"`
+	After      *string               `form:"after,omitempty" json:"after,omitempty"`
+	NamePrefix *string               `form:"name_prefix,omitempty" json:"name_prefix,omitempty"`
+	ParentId   *string               `form:"parent_id,omitempty" json:"parent_id,omitempty"`
+	Kind       *ListOrgsParamsKind   `form:"kind,omitempty" json:"kind,omitempty"`
+	Status     *ListOrgsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// ListOrgsParamsKind defines parameters for ListOrgs.
+type ListOrgsParamsKind string
+
+// ListOrgsParamsStatus defines parameters for ListOrgs.
+type ListOrgsParamsStatus string
+
 // CreateOrgJSONBody defines parameters for CreateOrg.
 type CreateOrgJSONBody struct {
 	Name string `json:"name"`
@@ -1462,8 +1811,38 @@ type IssueServiceAccountTokenParams struct {
 // IssueServiceAccountToken200JSONResponseBodyTokenType defines parameters for IssueServiceAccountToken.
 type IssueServiceAccountToken200JSONResponseBodyTokenType string
 
+// ListUsersParams defines parameters for ListUsers.
+type ListUsersParams struct {
+	Limit      *int                   `form:"limit,omitempty" json:"limit,omitempty"`
+	After      *string                `form:"after,omitempty" json:"after,omitempty"`
+	Email      *string                `form:"email,omitempty" json:"email,omitempty"`
+	Connection *string                `form:"connection,omitempty" json:"connection,omitempty"`
+	Subject    *string                `form:"subject,omitempty" json:"subject,omitempty"`
+	Status     *ListUsersParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	OrgId      *string                `form:"org_id,omitempty" json:"org_id,omitempty"`
+
+	// CreatedFrom この時刻以後に作成
+	CreatedFrom *time.Time `form:"created_from,omitempty" json:"created_from,omitempty"`
+
+	// CreatedBefore この時刻より前に作成
+	CreatedBefore *time.Time `form:"created_before,omitempty" json:"created_before,omitempty"`
+}
+
+// ListUsersParamsStatus defines parameters for ListUsers.
+type ListUsersParamsStatus string
+
 // CreateUserJSONBody defines parameters for CreateUser.
 type CreateUserJSONBody struct {
+	Email string `json:"email"`
+}
+
+// GetUserParams defines parameters for GetUser.
+type GetUserParams struct {
+	IncludePii *bool `form:"include_pii,omitempty" json:"include_pii,omitempty"`
+}
+
+// AddUserEmailJSONBody defines parameters for AddUserEmail.
+type AddUserEmailJSONBody struct {
 	Email string `json:"email"`
 }
 
@@ -1508,6 +1887,12 @@ type UpdateClientJSONRequestBody = ClientInput
 
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody CreateConnectionJSONBody
+
+// UpdateConnectionJSONRequestBody defines body for UpdateConnection for application/json ContentType.
+type UpdateConnectionJSONRequestBody UpdateConnectionJSONBody
+
+// DeleteConnectionJSONRequestBody defines body for DeleteConnection for application/json ContentType.
+type DeleteConnectionJSONRequestBody DeleteConnectionJSONBody
 
 // CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
 type CreateGroupJSONRequestBody = GroupInput
@@ -1605,6 +1990,9 @@ type UpdateUserJSONRequestBody = UpdateUser
 // UpdateUserAttributesJSONRequestBody defines body for UpdateUserAttributes for application/json ContentType.
 type UpdateUserAttributesJSONRequestBody = UserAttributes
 
+// AddUserEmailJSONRequestBody defines body for AddUserEmail for application/json ContentType.
+type AddUserEmailJSONRequestBody AddUserEmailJSONBody
+
 // SuspendUserJSONRequestBody defines body for SuspendUser for application/json ContentType.
 type SuspendUserJSONRequestBody = SuspendRequest
 
@@ -1667,9 +2055,21 @@ type ServerInterface interface {
 	// RotateClientSecret client_secret を新しくする
 	// (POST /v1/admin/clients/{id}:rotate-secret)
 	RotateClientSecret(w http.ResponseWriter, r *http.Request, id string)
+	// ListConnections IdP 接続の一覧（ADR 0097）
+	// (GET /v1/admin/connections)
+	ListConnections(w http.ResponseWriter, r *http.Request)
 	// CreateConnection IdP 接続（OAuth / OIDC）を登録する
 	// (POST /v1/admin/connections)
 	CreateConnection(w http.ResponseWriter, r *http.Request)
+	// GetConnection IdP 接続を返す（ADR 0097）
+	// (GET /v1/admin/connections/{id})
+	GetConnection(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateConnection IdP 接続のクライアント ID・シークレット・戻り先を置き換える（ADR 0097）
+	// (PUT /v1/admin/connections/{id})
+	UpdateConnection(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteConnection IdP 接続を消す（ADR 0097）
+	// (POST /v1/admin/connections/{id}:delete)
+	DeleteConnection(w http.ResponseWriter, r *http.Request, id string)
 	// ListGroups realm の範囲の Group の一覧（3.2）
 	// (GET /v1/admin/groups)
 	ListGroups(w http.ResponseWriter, r *http.Request)
@@ -1703,6 +2103,9 @@ type ServerInterface interface {
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(w http.ResponseWriter, r *http.Request, id string)
+	// ListOrgs Org の一覧・検索（ADR 0097）
+	// (GET /v1/admin/orgs)
+	ListOrgs(w http.ResponseWriter, r *http.Request, params ListOrgsParams)
 	// CreateOrg 共有 Org を作り、ユーザーを owner にする（運営者。realm の `org_creation` に関わらず作れる。4.11）
 	// (POST /v1/admin/orgs)
 	CreateOrg(w http.ResponseWriter, r *http.Request)
@@ -1823,6 +2226,12 @@ type ServerInterface interface {
 	// RevokeServiceAccountCredential 認証情報を無効化する
 	// (POST /v1/admin/service-accounts/{id}/credentials/{credential_id}:revoke)
 	RevokeServiceAccountCredential(w http.ResponseWriter, r *http.Request, id string, credentialId string)
+	// ListServiceAccountGroups サービスアカウントが所属する Group の逆引き（ADR 0097）
+	// (GET /v1/admin/service-accounts/{id}/groups)
+	ListServiceAccountGroups(w http.ResponseWriter, r *http.Request, id string)
+	// ListServiceAccountRoleBindings サービスアカウントに効くロールの付与の逆引き（ADR 0097）
+	// (GET /v1/admin/service-accounts/{id}/role-bindings)
+	ListServiceAccountRoleBindings(w http.ResponseWriter, r *http.Request, id string)
 	// ListServiceAccountSuspensions サービスアカウントの停止の一覧（解除・終了したものも含む）
 	// (GET /v1/admin/service-accounts/{id}/suspensions)
 	ListServiceAccountSuspensions(w http.ResponseWriter, r *http.Request, id string)
@@ -1838,6 +2247,9 @@ type ServerInterface interface {
 	// SetSessionRisk セッションのリスクの点数を更新する（ADR 0084）
 	// (POST /v1/admin/sessions/{id}:risk)
 	SetSessionRisk(w http.ResponseWriter, r *http.Request, id string)
+	// ListSigningKeys ID トークンの署名鍵の一覧（ADR 0097）
+	// (GET /v1/admin/signing-keys)
+	ListSigningKeys(w http.ResponseWriter, r *http.Request)
 	// RotateSigningKey ID トークンの署名鍵を新しくする（9.3）
 	// (POST /v1/admin/signing-keys:rotate)
 	RotateSigningKey(w http.ResponseWriter, r *http.Request)
@@ -1847,9 +2259,15 @@ type ServerInterface interface {
 	// IssueServiceAccountToken client credentials でアクセストークンを発行する（RFC 6749 4.4、ADR 0074）
 	// (POST /v1/admin/token)
 	IssueServiceAccountToken(w http.ResponseWriter, r *http.Request, params IssueServiceAccountTokenParams)
+	// ListUsers ユーザーの一覧・検索（ADR 0097）
+	// (GET /v1/admin/users)
+	ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams)
 	// CreateUser ユーザーを登録する（確認の経路 `admin`。4.1）
 	// (POST /v1/admin/users)
 	CreateUser(w http.ResponseWriter, r *http.Request)
+	// GetUser ユーザーの詳細（ADR 0097）
+	// (GET /v1/admin/users/{id})
+	GetUser(w http.ResponseWriter, r *http.Request, id string, params GetUserParams)
 	// UpdateUser ユーザーの有効期間を変更する（4.8）
 	// (PATCH /v1/admin/users/{id})
 	UpdateUser(w http.ResponseWriter, r *http.Request, id string)
@@ -1868,9 +2286,33 @@ type ServerInterface interface {
 	// RevokeAllUserCredentials 侵害時の初動として、ユーザーの全認証情報と全セッションを無効化する（4.6）
 	// (POST /v1/admin/users/{id}/credentials:revoke-all)
 	RevokeAllUserCredentials(w http.ResponseWriter, r *http.Request, id string)
+	// AddUserEmail 運営者がユーザーにメールを足す（確認の経路 `admin`。ADR 0097）
+	// (POST /v1/admin/users/{id}/emails)
+	AddUserEmail(w http.ResponseWriter, r *http.Request, id string)
+	// MakeUserEmailPrimary 運営者がユーザーの primary のメールを変える（ADR 0097）
+	// (POST /v1/admin/users/{id}/emails/{email_id}:make-primary)
+	MakeUserEmailPrimary(w http.ResponseWriter, r *http.Request, id string, emailId string)
+	// RemoveUserEmail 運営者がユーザーのメールを消す（ADR 0097）
+	// (POST /v1/admin/users/{id}/emails/{email_id}:remove)
+	RemoveUserEmail(w http.ResponseWriter, r *http.Request, id string, emailId string)
+	// ListUserGroups ユーザーが所属する Group の逆引き（ADR 0097）
+	// (GET /v1/admin/users/{id}/groups)
+	ListUserGroups(w http.ResponseWriter, r *http.Request, id string)
+	// ListUserMemberships ユーザーの Membership の一覧（終了したものも含む。ADR 0097）
+	// (GET /v1/admin/users/{id}/memberships)
+	ListUserMemberships(w http.ResponseWriter, r *http.Request, id string)
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)
 	RevokeUserPassword(w http.ResponseWriter, r *http.Request, id string)
+	// ListUserRoleBindings ユーザーに効くロールの付与の逆引き（ADR 0097）
+	// (GET /v1/admin/users/{id}/role-bindings)
+	ListUserRoleBindings(w http.ResponseWriter, r *http.Request, id string)
+	// ListUserSessions ユーザーの有効なセッションの一覧（ADR 0097）
+	// (GET /v1/admin/users/{id}/sessions)
+	ListUserSessions(w http.ResponseWriter, r *http.Request, id string)
+	// RevokeAllUserSessions ユーザーの全セッションを失効させる（ADR 0097）
+	// (POST /v1/admin/users/{id}/sessions:revoke-all)
+	RevokeAllUserSessions(w http.ResponseWriter, r *http.Request, id string)
 	// ListUserSuspensions ユーザーの停止の一覧（解除・終了したものも含む）
 	// (GET /v1/admin/users/{id}/suspensions)
 	ListUserSuspensions(w http.ResponseWriter, r *http.Request, id string)
@@ -2198,11 +2640,103 @@ func (siw *ServerInterfaceWrapper) RotateClientSecret(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ListConnections operation middleware
+func (siw *ServerInterfaceWrapper) ListConnections(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConnections(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateConnection operation middleware
 func (siw *ServerInterfaceWrapper) CreateConnection(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateConnection(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetConnection operation middleware
+func (siw *ServerInterfaceWrapper) GetConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetConnection(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateConnection operation middleware
+func (siw *ServerInterfaceWrapper) UpdateConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateConnection(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteConnection operation middleware
+func (siw *ServerInterfaceWrapper) DeleteConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteConnection(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2465,6 +2999,104 @@ func (siw *ServerInterfaceWrapper) ClaimNotification(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ClaimNotification(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOrgs operation middleware
+func (siw *ServerInterfaceWrapper) ListOrgs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListOrgsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "name_prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "name_prefix", r.URL.Query(), &params.NamePrefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name_prefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name_prefix", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "parent_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "parent_id", r.URL.Query(), &params.ParentId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "parent_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "parent_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrgs(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3500,6 +4132,58 @@ func (siw *ServerInterfaceWrapper) RevokeServiceAccountCredential(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
+// ListServiceAccountGroups operation middleware
+func (siw *ServerInterfaceWrapper) ListServiceAccountGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListServiceAccountGroups(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListServiceAccountRoleBindings operation middleware
+func (siw *ServerInterfaceWrapper) ListServiceAccountRoleBindings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListServiceAccountRoleBindings(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListServiceAccountSuspensions operation middleware
 func (siw *ServerInterfaceWrapper) ListServiceAccountSuspensions(w http.ResponseWriter, r *http.Request) {
 
@@ -3630,6 +4314,20 @@ func (siw *ServerInterfaceWrapper) SetSessionRisk(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListSigningKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListSigningKeys(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSigningKeys(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RotateSigningKey operation middleware
 func (siw *ServerInterfaceWrapper) RotateSigningKey(w http.ResponseWriter, r *http.Request) {
 
@@ -3711,11 +4409,190 @@ func (siw *ServerInterfaceWrapper) IssueServiceAccountToken(w http.ResponseWrite
 	handler.ServeHTTP(w, r)
 }
 
+// ListUsers operation middleware
+func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListUsersParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "email" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "email", r.URL.Query(), &params.Email, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "email"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "email", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "connection" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "connection", r.URL.Query(), &params.Connection, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "connection"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "subject" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "subject", r.URL.Query(), &params.Subject, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "subject"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subject", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "org_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "org_id", r.URL.Query(), &params.OrgId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "org_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "created_from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "created_from", r.URL.Query(), &params.CreatedFrom, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "created_from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "created_from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "created_before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "created_before", r.URL.Query(), &params.CreatedBefore, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "created_before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "created_before", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUsers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateUser operation middleware
 func (siw *ServerInterfaceWrapper) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateUser(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetUser operation middleware
+func (siw *ServerInterfaceWrapper) GetUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetUserParams
+
+	// ------------- Optional query parameter "include_pii" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "include_pii", r.URL.Query(), &params.IncludePii, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "include_pii"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_pii", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUser(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3890,6 +4767,154 @@ func (siw *ServerInterfaceWrapper) RevokeAllUserCredentials(w http.ResponseWrite
 	handler.ServeHTTP(w, r)
 }
 
+// AddUserEmail operation middleware
+func (siw *ServerInterfaceWrapper) AddUserEmail(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddUserEmail(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MakeUserEmailPrimary operation middleware
+func (siw *ServerInterfaceWrapper) MakeUserEmailPrimary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "email_id" -------------
+	var emailId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "email_id", r.PathValue("email_id"), &emailId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "email_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MakeUserEmailPrimary(w, r, id, emailId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveUserEmail operation middleware
+func (siw *ServerInterfaceWrapper) RemoveUserEmail(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "email_id" -------------
+	var emailId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "email_id", r.PathValue("email_id"), &emailId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "email_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveUserEmail(w, r, id, emailId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUserGroups operation middleware
+func (siw *ServerInterfaceWrapper) ListUserGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUserGroups(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUserMemberships operation middleware
+func (siw *ServerInterfaceWrapper) ListUserMemberships(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUserMemberships(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RevokeUserPassword operation middleware
 func (siw *ServerInterfaceWrapper) RevokeUserPassword(w http.ResponseWriter, r *http.Request) {
 
@@ -3907,6 +4932,84 @@ func (siw *ServerInterfaceWrapper) RevokeUserPassword(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeUserPassword(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUserRoleBindings operation middleware
+func (siw *ServerInterfaceWrapper) ListUserRoleBindings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUserRoleBindings(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUserSessions operation middleware
+func (siw *ServerInterfaceWrapper) ListUserSessions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUserSessions(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeAllUserSessions operation middleware
+func (siw *ServerInterfaceWrapper) RevokeAllUserSessions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeAllUserSessions(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4246,6 +5349,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/healthz", wrapper.GetHealth)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/notifications/{id}:claim", wrapper.ClaimNotification)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users", wrapper.ListUsers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users", wrapper.CreateUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:login_link", wrapper.IssueLoginLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:recovery_link", wrapper.IssueRecoveryLink)
@@ -4253,6 +5357,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials/{credential_id}:revoke", wrapper.RevokeUserCredential)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/password:revoke", wrapper.RevokeUserPassword)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials:revoke-all", wrapper.RevokeAllUserCredentials)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}", wrapper.GetUser)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/users/{id}", wrapper.UpdateUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:delete", wrapper.DeleteUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:cancel-deletion", wrapper.CancelUserDeletion)
@@ -4267,7 +5372,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/risk-types/{name}", wrapper.PutRiskType)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/action-namespaces/{name}", wrapper.GetActionNamespace)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/action-namespaces/{name}", wrapper.PutActionNamespace)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/connections", wrapper.ListConnections)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs", wrapper.ListOrgs)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs", wrapper.CreateOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.GetOrg)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.UpdateOrg)
@@ -4329,6 +5436,20 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/suspensions", wrapper.ListServiceAccountSuspensions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/suspensions", wrapper.SuspendServiceAccount)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/token", wrapper.IssueServiceAccountToken)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/memberships", wrapper.ListUserMemberships)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/sessions", wrapper.ListUserSessions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/sessions:revoke-all", wrapper.RevokeAllUserSessions)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/role-bindings", wrapper.ListUserRoleBindings)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/groups", wrapper.ListUserGroups)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/role-bindings", wrapper.ListServiceAccountRoleBindings)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/service-accounts/{id}/groups", wrapper.ListServiceAccountGroups)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/emails", wrapper.AddUserEmail)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/emails/{email_id}:remove", wrapper.RemoveUserEmail)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/emails/{email_id}:make-primary", wrapper.MakeUserEmailPrimary)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/connections/{id}", wrapper.GetConnection)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/connections/{id}", wrapper.UpdateConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections/{id}:delete", wrapper.DeleteConnection)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/signing-keys", wrapper.ListSigningKeys)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/realms", wrapper.ListRealms)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/realms", wrapper.CreateRealm)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/realms/{realm_id}", wrapper.GetRealm)
@@ -5284,6 +6405,57 @@ func (response RotateClientSecret409JSONResponse) VisitRotateClientSecretRespons
 	return err
 }
 
+type ListConnectionsRequestObject struct {
+}
+
+type ListConnectionsResponseObject interface {
+	VisitListConnectionsResponse(w http.ResponseWriter) error
+}
+
+type ListConnections200JSONResponse struct {
+	Connections []AdminConnection `json:"connections"`
+}
+
+func (response ListConnections200JSONResponse) VisitListConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnections401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListConnections401JSONResponse) VisitListConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnections403JSONResponse Error
+
+func (response ListConnections403JSONResponse) VisitListConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateConnectionRequestObject struct {
 	Body *CreateConnectionJSONRequestBody
 }
@@ -5354,6 +6526,245 @@ func (response CreateConnection403JSONResponse) VisitCreateConnectionResponse(w 
 type CreateConnection409JSONResponse Error
 
 func (response CreateConnection409JSONResponse) VisitCreateConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetConnectionRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetConnectionResponseObject interface {
+	VisitGetConnectionResponse(w http.ResponseWriter) error
+}
+
+type GetConnection200JSONResponse AdminConnection
+
+func (response GetConnection200JSONResponse) VisitGetConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetConnection401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetConnection401JSONResponse) VisitGetConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetConnection403JSONResponse Error
+
+func (response GetConnection403JSONResponse) VisitGetConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetConnection404JSONResponse Error
+
+func (response GetConnection404JSONResponse) VisitGetConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateConnectionRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateConnectionJSONRequestBody
+}
+
+type UpdateConnectionResponseObject interface {
+	VisitUpdateConnectionResponse(w http.ResponseWriter) error
+}
+
+type UpdateConnection200JSONResponse AdminConnection
+
+func (response UpdateConnection200JSONResponse) VisitUpdateConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateConnection400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateConnection400JSONResponse) VisitUpdateConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateConnection401JSONResponse Error
+
+func (response UpdateConnection401JSONResponse) VisitUpdateConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateConnection403JSONResponse Error
+
+func (response UpdateConnection403JSONResponse) VisitUpdateConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateConnection404JSONResponse Error
+
+func (response UpdateConnection404JSONResponse) VisitUpdateConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateConnection409JSONResponse Error
+
+func (response UpdateConnection409JSONResponse) VisitUpdateConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteConnectionRequestObject struct {
+	Id   string `json:"id"`
+	Body *DeleteConnectionJSONRequestBody
+}
+
+type DeleteConnectionResponseObject interface {
+	VisitDeleteConnectionResponse(w http.ResponseWriter) error
+}
+
+type DeleteConnection200JSONResponse struct {
+	// IdentitiesRevoked 無効化した外部 ID の紐付けの数
+	IdentitiesRevoked int `json:"identities_revoked"`
+}
+
+func (response DeleteConnection200JSONResponse) VisitDeleteConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteConnection401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteConnection401JSONResponse) VisitDeleteConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteConnection403JSONResponse Error
+
+func (response DeleteConnection403JSONResponse) VisitDeleteConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteConnection404JSONResponse Error
+
+func (response DeleteConnection404JSONResponse) VisitDeleteConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteConnection409JSONResponse Error
+
+func (response DeleteConnection409JSONResponse) VisitDeleteConnectionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -6212,6 +7623,88 @@ func (response ClaimNotification403JSONResponse) VisitClaimNotificationResponse(
 type ClaimNotification404JSONResponse Error
 
 func (response ClaimNotification404JSONResponse) VisitClaimNotificationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgsRequestObject struct {
+	Params ListOrgsParams
+}
+
+type ListOrgsResponseObject interface {
+	VisitListOrgsResponse(w http.ResponseWriter) error
+}
+
+type ListOrgs200JSONResponse struct {
+	// NextCursor 続きがあるときだけ
+	NextCursor *string `json:"next_cursor,omitempty"`
+	Orgs       []Org   `json:"orgs"`
+}
+
+func (response ListOrgs200JSONResponse) VisitListOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgs400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListOrgs400JSONResponse) VisitListOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgs401JSONResponse Error
+
+func (response ListOrgs401JSONResponse) VisitListOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgs403JSONResponse Error
+
+func (response ListOrgs403JSONResponse) VisitListOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgs404JSONResponse Error
+
+func (response ListOrgs404JSONResponse) VisitListOrgsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -9361,6 +10854,138 @@ func (response RevokeServiceAccountCredential404JSONResponse) VisitRevokeService
 	return err
 }
 
+type ListServiceAccountGroupsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListServiceAccountGroupsResponseObject interface {
+	VisitListServiceAccountGroupsResponse(w http.ResponseWriter) error
+}
+
+type ListServiceAccountGroups200JSONResponse struct {
+	Groups []PrincipalGroup `json:"groups"`
+}
+
+func (response ListServiceAccountGroups200JSONResponse) VisitListServiceAccountGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountGroups401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListServiceAccountGroups401JSONResponse) VisitListServiceAccountGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountGroups403JSONResponse Error
+
+func (response ListServiceAccountGroups403JSONResponse) VisitListServiceAccountGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountGroups404JSONResponse Error
+
+func (response ListServiceAccountGroups404JSONResponse) VisitListServiceAccountGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountRoleBindingsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListServiceAccountRoleBindingsResponseObject interface {
+	VisitListServiceAccountRoleBindingsResponse(w http.ResponseWriter) error
+}
+
+type ListServiceAccountRoleBindings200JSONResponse struct {
+	Bindings []EffectiveRoleBinding `json:"bindings"`
+}
+
+func (response ListServiceAccountRoleBindings200JSONResponse) VisitListServiceAccountRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountRoleBindings401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListServiceAccountRoleBindings401JSONResponse) VisitListServiceAccountRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountRoleBindings403JSONResponse Error
+
+func (response ListServiceAccountRoleBindings403JSONResponse) VisitListServiceAccountRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccountRoleBindings404JSONResponse Error
+
+func (response ListServiceAccountRoleBindings404JSONResponse) VisitListServiceAccountRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListServiceAccountSuspensionsRequestObject struct {
 	Id string `json:"id"`
 }
@@ -9733,6 +11358,57 @@ func (response SetSessionRisk404JSONResponse) VisitSetSessionRiskResponse(w http
 	return err
 }
 
+type ListSigningKeysRequestObject struct {
+}
+
+type ListSigningKeysResponseObject interface {
+	VisitListSigningKeysResponse(w http.ResponseWriter) error
+}
+
+type ListSigningKeys200JSONResponse struct {
+	Keys []AdminSigningKey `json:"keys"`
+}
+
+func (response ListSigningKeys200JSONResponse) VisitListSigningKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSigningKeys401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListSigningKeys401JSONResponse) VisitListSigningKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSigningKeys403JSONResponse Error
+
+func (response ListSigningKeys403JSONResponse) VisitListSigningKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RotateSigningKeyRequestObject struct {
 	Body *RotateSigningKeyJSONRequestBody
 }
@@ -9958,6 +11634,74 @@ func (response IssueServiceAccountToken404JSONResponse) VisitIssueServiceAccount
 	return err
 }
 
+type ListUsersRequestObject struct {
+	Params ListUsersParams
+}
+
+type ListUsersResponseObject interface {
+	VisitListUsersResponse(w http.ResponseWriter) error
+}
+
+type ListUsers200JSONResponse struct {
+	// NextCursor 続きがあるときだけ
+	NextCursor *string            `json:"next_cursor,omitempty"`
+	Users      []AdminUserSummary `json:"users"`
+}
+
+func (response ListUsers200JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUsers400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListUsers400JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUsers401JSONResponse Error
+
+func (response ListUsers401JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUsers403JSONResponse Error
+
+func (response ListUsers403JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateUserRequestObject struct {
 	Body *CreateUserJSONRequestBody
 }
@@ -10035,6 +11779,71 @@ func (response CreateUser409JSONResponse) VisitCreateUserResponse(w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserRequestObject struct {
+	Id     string `json:"id"`
+	Params GetUserParams
+}
+
+type GetUserResponseObject interface {
+	VisitGetUserResponse(w http.ResponseWriter) error
+}
+
+type GetUser200JSONResponse AdminUserDetail
+
+func (response GetUser200JSONResponse) VisitGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUser401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetUser401JSONResponse) VisitGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUser403JSONResponse Error
+
+func (response GetUser403JSONResponse) VisitGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUser404JSONResponse Error
+
+func (response GetUser404JSONResponse) VisitGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -10462,6 +12271,377 @@ func (response RevokeAllUserCredentials404JSONResponse) VisitRevokeAllUserCreden
 	return err
 }
 
+type AddUserEmailRequestObject struct {
+	Id   string `json:"id"`
+	Body *AddUserEmailJSONRequestBody
+}
+
+type AddUserEmailResponseObject interface {
+	VisitAddUserEmailResponse(w http.ResponseWriter) error
+}
+
+type AddUserEmail201JSONResponse AdminUserEmail
+
+func (response AddUserEmail201JSONResponse) VisitAddUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddUserEmail400JSONResponse struct{ ErrorJSONResponse }
+
+func (response AddUserEmail400JSONResponse) VisitAddUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddUserEmail401JSONResponse Error
+
+func (response AddUserEmail401JSONResponse) VisitAddUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddUserEmail403JSONResponse Error
+
+func (response AddUserEmail403JSONResponse) VisitAddUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddUserEmail404JSONResponse Error
+
+func (response AddUserEmail404JSONResponse) VisitAddUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddUserEmail409JSONResponse Error
+
+func (response AddUserEmail409JSONResponse) VisitAddUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MakeUserEmailPrimaryRequestObject struct {
+	Id      string `json:"id"`
+	EmailId string `json:"email_id"`
+}
+
+type MakeUserEmailPrimaryResponseObject interface {
+	VisitMakeUserEmailPrimaryResponse(w http.ResponseWriter) error
+}
+
+type MakeUserEmailPrimary204Response struct {
+}
+
+func (response MakeUserEmailPrimary204Response) VisitMakeUserEmailPrimaryResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type MakeUserEmailPrimary401JSONResponse struct{ ErrorJSONResponse }
+
+func (response MakeUserEmailPrimary401JSONResponse) VisitMakeUserEmailPrimaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MakeUserEmailPrimary403JSONResponse Error
+
+func (response MakeUserEmailPrimary403JSONResponse) VisitMakeUserEmailPrimaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MakeUserEmailPrimary404JSONResponse Error
+
+func (response MakeUserEmailPrimary404JSONResponse) VisitMakeUserEmailPrimaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MakeUserEmailPrimary409JSONResponse Error
+
+func (response MakeUserEmailPrimary409JSONResponse) VisitMakeUserEmailPrimaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveUserEmailRequestObject struct {
+	Id      string `json:"id"`
+	EmailId string `json:"email_id"`
+}
+
+type RemoveUserEmailResponseObject interface {
+	VisitRemoveUserEmailResponse(w http.ResponseWriter) error
+}
+
+type RemoveUserEmail204Response struct {
+}
+
+func (response RemoveUserEmail204Response) VisitRemoveUserEmailResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveUserEmail401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RemoveUserEmail401JSONResponse) VisitRemoveUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveUserEmail403JSONResponse Error
+
+func (response RemoveUserEmail403JSONResponse) VisitRemoveUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveUserEmail404JSONResponse Error
+
+func (response RemoveUserEmail404JSONResponse) VisitRemoveUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveUserEmail409JSONResponse Error
+
+func (response RemoveUserEmail409JSONResponse) VisitRemoveUserEmailResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserGroupsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListUserGroupsResponseObject interface {
+	VisitListUserGroupsResponse(w http.ResponseWriter) error
+}
+
+type ListUserGroups200JSONResponse struct {
+	Groups []PrincipalGroup `json:"groups"`
+}
+
+func (response ListUserGroups200JSONResponse) VisitListUserGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserGroups401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListUserGroups401JSONResponse) VisitListUserGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserGroups403JSONResponse Error
+
+func (response ListUserGroups403JSONResponse) VisitListUserGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserGroups404JSONResponse Error
+
+func (response ListUserGroups404JSONResponse) VisitListUserGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserMembershipsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListUserMembershipsResponseObject interface {
+	VisitListUserMembershipsResponse(w http.ResponseWriter) error
+}
+
+type ListUserMemberships200JSONResponse struct {
+	Memberships []Membership `json:"memberships"`
+}
+
+func (response ListUserMemberships200JSONResponse) VisitListUserMembershipsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserMemberships401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListUserMemberships401JSONResponse) VisitListUserMembershipsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserMemberships403JSONResponse Error
+
+func (response ListUserMemberships403JSONResponse) VisitListUserMembershipsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserMemberships404JSONResponse Error
+
+func (response ListUserMemberships404JSONResponse) VisitListUserMembershipsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RevokeUserPasswordRequestObject struct {
 	Id string `json:"id"`
 }
@@ -10509,6 +12689,205 @@ func (response RevokeUserPassword403JSONResponse) VisitRevokeUserPasswordRespons
 type RevokeUserPassword404JSONResponse Error
 
 func (response RevokeUserPassword404JSONResponse) VisitRevokeUserPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserRoleBindingsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListUserRoleBindingsResponseObject interface {
+	VisitListUserRoleBindingsResponse(w http.ResponseWriter) error
+}
+
+type ListUserRoleBindings200JSONResponse struct {
+	Bindings []EffectiveRoleBinding `json:"bindings"`
+}
+
+func (response ListUserRoleBindings200JSONResponse) VisitListUserRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserRoleBindings401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListUserRoleBindings401JSONResponse) VisitListUserRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserRoleBindings403JSONResponse Error
+
+func (response ListUserRoleBindings403JSONResponse) VisitListUserRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserRoleBindings404JSONResponse Error
+
+func (response ListUserRoleBindings404JSONResponse) VisitListUserRoleBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserSessionsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListUserSessionsResponseObject interface {
+	VisitListUserSessionsResponse(w http.ResponseWriter) error
+}
+
+type ListUserSessions200JSONResponse struct {
+	Sessions []AdminSession `json:"sessions"`
+}
+
+func (response ListUserSessions200JSONResponse) VisitListUserSessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserSessions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListUserSessions401JSONResponse) VisitListUserSessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserSessions403JSONResponse Error
+
+func (response ListUserSessions403JSONResponse) VisitListUserSessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserSessions404JSONResponse Error
+
+func (response ListUserSessions404JSONResponse) VisitListUserSessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAllUserSessionsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RevokeAllUserSessionsResponseObject interface {
+	VisitRevokeAllUserSessionsResponse(w http.ResponseWriter) error
+}
+
+type RevokeAllUserSessions200JSONResponse struct {
+	// Sessions 失効させたセッションの数
+	Sessions int `json:"sessions"`
+}
+
+func (response RevokeAllUserSessions200JSONResponse) VisitRevokeAllUserSessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAllUserSessions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RevokeAllUserSessions401JSONResponse) VisitRevokeAllUserSessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAllUserSessions403JSONResponse Error
+
+func (response RevokeAllUserSessions403JSONResponse) VisitRevokeAllUserSessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAllUserSessions404JSONResponse Error
+
+func (response RevokeAllUserSessions404JSONResponse) VisitRevokeAllUserSessionsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -11208,9 +13587,21 @@ type StrictServerInterface interface {
 	// RotateClientSecret client_secret を新しくする
 	// (POST /v1/admin/clients/{id}:rotate-secret)
 	RotateClientSecret(ctx context.Context, request RotateClientSecretRequestObject) (RotateClientSecretResponseObject, error)
+	// ListConnections IdP 接続の一覧（ADR 0097）
+	// (GET /v1/admin/connections)
+	ListConnections(ctx context.Context, request ListConnectionsRequestObject) (ListConnectionsResponseObject, error)
 	// CreateConnection IdP 接続（OAuth / OIDC）を登録する
 	// (POST /v1/admin/connections)
 	CreateConnection(ctx context.Context, request CreateConnectionRequestObject) (CreateConnectionResponseObject, error)
+	// GetConnection IdP 接続を返す（ADR 0097）
+	// (GET /v1/admin/connections/{id})
+	GetConnection(ctx context.Context, request GetConnectionRequestObject) (GetConnectionResponseObject, error)
+	// UpdateConnection IdP 接続のクライアント ID・シークレット・戻り先を置き換える（ADR 0097）
+	// (PUT /v1/admin/connections/{id})
+	UpdateConnection(ctx context.Context, request UpdateConnectionRequestObject) (UpdateConnectionResponseObject, error)
+	// DeleteConnection IdP 接続を消す（ADR 0097）
+	// (POST /v1/admin/connections/{id}:delete)
+	DeleteConnection(ctx context.Context, request DeleteConnectionRequestObject) (DeleteConnectionResponseObject, error)
 	// ListGroups realm の範囲の Group の一覧（3.2）
 	// (GET /v1/admin/groups)
 	ListGroups(ctx context.Context, request ListGroupsRequestObject) (ListGroupsResponseObject, error)
@@ -11244,6 +13635,9 @@ type StrictServerInterface interface {
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(ctx context.Context, request ClaimNotificationRequestObject) (ClaimNotificationResponseObject, error)
+	// ListOrgs Org の一覧・検索（ADR 0097）
+	// (GET /v1/admin/orgs)
+	ListOrgs(ctx context.Context, request ListOrgsRequestObject) (ListOrgsResponseObject, error)
 	// CreateOrg 共有 Org を作り、ユーザーを owner にする（運営者。realm の `org_creation` に関わらず作れる。4.11）
 	// (POST /v1/admin/orgs)
 	CreateOrg(ctx context.Context, request CreateOrgRequestObject) (CreateOrgResponseObject, error)
@@ -11364,6 +13758,12 @@ type StrictServerInterface interface {
 	// RevokeServiceAccountCredential 認証情報を無効化する
 	// (POST /v1/admin/service-accounts/{id}/credentials/{credential_id}:revoke)
 	RevokeServiceAccountCredential(ctx context.Context, request RevokeServiceAccountCredentialRequestObject) (RevokeServiceAccountCredentialResponseObject, error)
+	// ListServiceAccountGroups サービスアカウントが所属する Group の逆引き（ADR 0097）
+	// (GET /v1/admin/service-accounts/{id}/groups)
+	ListServiceAccountGroups(ctx context.Context, request ListServiceAccountGroupsRequestObject) (ListServiceAccountGroupsResponseObject, error)
+	// ListServiceAccountRoleBindings サービスアカウントに効くロールの付与の逆引き（ADR 0097）
+	// (GET /v1/admin/service-accounts/{id}/role-bindings)
+	ListServiceAccountRoleBindings(ctx context.Context, request ListServiceAccountRoleBindingsRequestObject) (ListServiceAccountRoleBindingsResponseObject, error)
 	// ListServiceAccountSuspensions サービスアカウントの停止の一覧（解除・終了したものも含む）
 	// (GET /v1/admin/service-accounts/{id}/suspensions)
 	ListServiceAccountSuspensions(ctx context.Context, request ListServiceAccountSuspensionsRequestObject) (ListServiceAccountSuspensionsResponseObject, error)
@@ -11379,6 +13779,9 @@ type StrictServerInterface interface {
 	// SetSessionRisk セッションのリスクの点数を更新する（ADR 0084）
 	// (POST /v1/admin/sessions/{id}:risk)
 	SetSessionRisk(ctx context.Context, request SetSessionRiskRequestObject) (SetSessionRiskResponseObject, error)
+	// ListSigningKeys ID トークンの署名鍵の一覧（ADR 0097）
+	// (GET /v1/admin/signing-keys)
+	ListSigningKeys(ctx context.Context, request ListSigningKeysRequestObject) (ListSigningKeysResponseObject, error)
 	// RotateSigningKey ID トークンの署名鍵を新しくする（9.3）
 	// (POST /v1/admin/signing-keys:rotate)
 	RotateSigningKey(ctx context.Context, request RotateSigningKeyRequestObject) (RotateSigningKeyResponseObject, error)
@@ -11388,9 +13791,15 @@ type StrictServerInterface interface {
 	// IssueServiceAccountToken client credentials でアクセストークンを発行する（RFC 6749 4.4、ADR 0074）
 	// (POST /v1/admin/token)
 	IssueServiceAccountToken(ctx context.Context, request IssueServiceAccountTokenRequestObject) (IssueServiceAccountTokenResponseObject, error)
+	// ListUsers ユーザーの一覧・検索（ADR 0097）
+	// (GET /v1/admin/users)
+	ListUsers(ctx context.Context, request ListUsersRequestObject) (ListUsersResponseObject, error)
 	// CreateUser ユーザーを登録する（確認の経路 `admin`。4.1）
 	// (POST /v1/admin/users)
 	CreateUser(ctx context.Context, request CreateUserRequestObject) (CreateUserResponseObject, error)
+	// GetUser ユーザーの詳細（ADR 0097）
+	// (GET /v1/admin/users/{id})
+	GetUser(ctx context.Context, request GetUserRequestObject) (GetUserResponseObject, error)
 	// UpdateUser ユーザーの有効期間を変更する（4.8）
 	// (PATCH /v1/admin/users/{id})
 	UpdateUser(ctx context.Context, request UpdateUserRequestObject) (UpdateUserResponseObject, error)
@@ -11409,9 +13818,33 @@ type StrictServerInterface interface {
 	// RevokeAllUserCredentials 侵害時の初動として、ユーザーの全認証情報と全セッションを無効化する（4.6）
 	// (POST /v1/admin/users/{id}/credentials:revoke-all)
 	RevokeAllUserCredentials(ctx context.Context, request RevokeAllUserCredentialsRequestObject) (RevokeAllUserCredentialsResponseObject, error)
+	// AddUserEmail 運営者がユーザーにメールを足す（確認の経路 `admin`。ADR 0097）
+	// (POST /v1/admin/users/{id}/emails)
+	AddUserEmail(ctx context.Context, request AddUserEmailRequestObject) (AddUserEmailResponseObject, error)
+	// MakeUserEmailPrimary 運営者がユーザーの primary のメールを変える（ADR 0097）
+	// (POST /v1/admin/users/{id}/emails/{email_id}:make-primary)
+	MakeUserEmailPrimary(ctx context.Context, request MakeUserEmailPrimaryRequestObject) (MakeUserEmailPrimaryResponseObject, error)
+	// RemoveUserEmail 運営者がユーザーのメールを消す（ADR 0097）
+	// (POST /v1/admin/users/{id}/emails/{email_id}:remove)
+	RemoveUserEmail(ctx context.Context, request RemoveUserEmailRequestObject) (RemoveUserEmailResponseObject, error)
+	// ListUserGroups ユーザーが所属する Group の逆引き（ADR 0097）
+	// (GET /v1/admin/users/{id}/groups)
+	ListUserGroups(ctx context.Context, request ListUserGroupsRequestObject) (ListUserGroupsResponseObject, error)
+	// ListUserMemberships ユーザーの Membership の一覧（終了したものも含む。ADR 0097）
+	// (GET /v1/admin/users/{id}/memberships)
+	ListUserMemberships(ctx context.Context, request ListUserMembershipsRequestObject) (ListUserMembershipsResponseObject, error)
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)
 	RevokeUserPassword(ctx context.Context, request RevokeUserPasswordRequestObject) (RevokeUserPasswordResponseObject, error)
+	// ListUserRoleBindings ユーザーに効くロールの付与の逆引き（ADR 0097）
+	// (GET /v1/admin/users/{id}/role-bindings)
+	ListUserRoleBindings(ctx context.Context, request ListUserRoleBindingsRequestObject) (ListUserRoleBindingsResponseObject, error)
+	// ListUserSessions ユーザーの有効なセッションの一覧（ADR 0097）
+	// (GET /v1/admin/users/{id}/sessions)
+	ListUserSessions(ctx context.Context, request ListUserSessionsRequestObject) (ListUserSessionsResponseObject, error)
+	// RevokeAllUserSessions ユーザーの全セッションを失効させる（ADR 0097）
+	// (POST /v1/admin/users/{id}/sessions:revoke-all)
+	RevokeAllUserSessions(ctx context.Context, request RevokeAllUserSessionsRequestObject) (RevokeAllUserSessionsResponseObject, error)
 	// ListUserSuspensions ユーザーの停止の一覧（解除・終了したものも含む）
 	// (GET /v1/admin/users/{id}/suspensions)
 	ListUserSuspensions(ctx context.Context, request ListUserSuspensionsRequestObject) (ListUserSuspensionsResponseObject, error)
@@ -11871,6 +14304,30 @@ func (sh *strictHandler) RotateClientSecret(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// ListConnections operation middleware
+func (sh *strictHandler) ListConnections(w http.ResponseWriter, r *http.Request) {
+	var request ListConnectionsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConnections(ctx, request.(ListConnectionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConnections")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConnectionsResponseObject); ok {
+		if err := validResponse.VisitListConnectionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // CreateConnection operation middleware
 func (sh *strictHandler) CreateConnection(w http.ResponseWriter, r *http.Request) {
 	var request CreateConnectionRequestObject
@@ -11895,6 +14352,101 @@ func (sh *strictHandler) CreateConnection(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateConnectionResponseObject); ok {
 		if err := validResponse.VisitCreateConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetConnection operation middleware
+func (sh *strictHandler) GetConnection(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetConnectionRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetConnection(ctx, request.(GetConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetConnectionResponseObject); ok {
+		if err := validResponse.VisitGetConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateConnection operation middleware
+func (sh *strictHandler) UpdateConnection(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateConnectionRequestObject
+
+	request.Id = id
+
+	var body UpdateConnectionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateConnection(ctx, request.(UpdateConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateConnectionResponseObject); ok {
+		if err := validResponse.VisitUpdateConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteConnection operation middleware
+func (sh *strictHandler) DeleteConnection(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteConnectionRequestObject
+
+	request.Id = id
+
+	var body DeleteConnectionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteConnection(ctx, request.(DeleteConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteConnectionResponseObject); ok {
+		if err := validResponse.VisitDeleteConnectionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -12219,6 +14771,32 @@ func (sh *strictHandler) ClaimNotification(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ClaimNotificationResponseObject); ok {
 		if err := validResponse.VisitClaimNotificationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOrgs operation middleware
+func (sh *strictHandler) ListOrgs(w http.ResponseWriter, r *http.Request, params ListOrgsParams) {
+	var request ListOrgsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrgs(ctx, request.(ListOrgsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrgs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrgsResponseObject); ok {
+		if err := validResponse.VisitListOrgsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -13383,6 +15961,58 @@ func (sh *strictHandler) RevokeServiceAccountCredential(w http.ResponseWriter, r
 	}
 }
 
+// ListServiceAccountGroups operation middleware
+func (sh *strictHandler) ListServiceAccountGroups(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListServiceAccountGroupsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListServiceAccountGroups(ctx, request.(ListServiceAccountGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListServiceAccountGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListServiceAccountGroupsResponseObject); ok {
+		if err := validResponse.VisitListServiceAccountGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListServiceAccountRoleBindings operation middleware
+func (sh *strictHandler) ListServiceAccountRoleBindings(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListServiceAccountRoleBindingsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListServiceAccountRoleBindings(ctx, request.(ListServiceAccountRoleBindingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListServiceAccountRoleBindings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListServiceAccountRoleBindingsResponseObject); ok {
+		if err := validResponse.VisitListServiceAccountRoleBindingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListServiceAccountSuspensions operation middleware
 func (sh *strictHandler) ListServiceAccountSuspensions(w http.ResponseWriter, r *http.Request, id string) {
 	var request ListServiceAccountSuspensionsRequestObject
@@ -13527,6 +16157,30 @@ func (sh *strictHandler) SetSessionRisk(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+// ListSigningKeys operation middleware
+func (sh *strictHandler) ListSigningKeys(w http.ResponseWriter, r *http.Request) {
+	var request ListSigningKeysRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSigningKeys(ctx, request.(ListSigningKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSigningKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSigningKeysResponseObject); ok {
+		if err := validResponse.VisitListSigningKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RotateSigningKey operation middleware
 func (sh *strictHandler) RotateSigningKey(w http.ResponseWriter, r *http.Request) {
 	var request RotateSigningKeyRequestObject
@@ -13628,6 +16282,32 @@ func (sh *strictHandler) IssueServiceAccountToken(w http.ResponseWriter, r *http
 	}
 }
 
+// ListUsers operation middleware
+func (sh *strictHandler) ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams) {
+	var request ListUsersRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUsers(ctx, request.(ListUsersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUsers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUsersResponseObject); ok {
+		if err := validResponse.VisitListUsersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // CreateUser operation middleware
 func (sh *strictHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var request CreateUserRequestObject
@@ -13652,6 +16332,33 @@ func (sh *strictHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateUserResponseObject); ok {
 		if err := validResponse.VisitCreateUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUser operation middleware
+func (sh *strictHandler) GetUser(w http.ResponseWriter, r *http.Request, id string, params GetUserParams) {
+	var request GetUserRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUser(ctx, request.(GetUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUserResponseObject); ok {
+		if err := validResponse.VisitGetUserResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -13830,6 +16537,145 @@ func (sh *strictHandler) RevokeAllUserCredentials(w http.ResponseWriter, r *http
 	}
 }
 
+// AddUserEmail operation middleware
+func (sh *strictHandler) AddUserEmail(w http.ResponseWriter, r *http.Request, id string) {
+	var request AddUserEmailRequestObject
+
+	request.Id = id
+
+	var body AddUserEmailJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddUserEmail(ctx, request.(AddUserEmailRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddUserEmail")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddUserEmailResponseObject); ok {
+		if err := validResponse.VisitAddUserEmailResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MakeUserEmailPrimary operation middleware
+func (sh *strictHandler) MakeUserEmailPrimary(w http.ResponseWriter, r *http.Request, id string, emailId string) {
+	var request MakeUserEmailPrimaryRequestObject
+
+	request.Id = id
+	request.EmailId = emailId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MakeUserEmailPrimary(ctx, request.(MakeUserEmailPrimaryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MakeUserEmailPrimary")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MakeUserEmailPrimaryResponseObject); ok {
+		if err := validResponse.VisitMakeUserEmailPrimaryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveUserEmail operation middleware
+func (sh *strictHandler) RemoveUserEmail(w http.ResponseWriter, r *http.Request, id string, emailId string) {
+	var request RemoveUserEmailRequestObject
+
+	request.Id = id
+	request.EmailId = emailId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveUserEmail(ctx, request.(RemoveUserEmailRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveUserEmail")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveUserEmailResponseObject); ok {
+		if err := validResponse.VisitRemoveUserEmailResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUserGroups operation middleware
+func (sh *strictHandler) ListUserGroups(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListUserGroupsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUserGroups(ctx, request.(ListUserGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUserGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUserGroupsResponseObject); ok {
+		if err := validResponse.VisitListUserGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUserMemberships operation middleware
+func (sh *strictHandler) ListUserMemberships(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListUserMembershipsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUserMemberships(ctx, request.(ListUserMembershipsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUserMemberships")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUserMembershipsResponseObject); ok {
+		if err := validResponse.VisitListUserMembershipsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RevokeUserPassword operation middleware
 func (sh *strictHandler) RevokeUserPassword(w http.ResponseWriter, r *http.Request, id string) {
 	var request RevokeUserPasswordRequestObject
@@ -13849,6 +16695,84 @@ func (sh *strictHandler) RevokeUserPassword(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeUserPasswordResponseObject); ok {
 		if err := validResponse.VisitRevokeUserPasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUserRoleBindings operation middleware
+func (sh *strictHandler) ListUserRoleBindings(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListUserRoleBindingsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUserRoleBindings(ctx, request.(ListUserRoleBindingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUserRoleBindings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUserRoleBindingsResponseObject); ok {
+		if err := validResponse.VisitListUserRoleBindingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUserSessions operation middleware
+func (sh *strictHandler) ListUserSessions(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListUserSessionsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUserSessions(ctx, request.(ListUserSessionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUserSessions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUserSessionsResponseObject); ok {
+		if err := validResponse.VisitListUserSessionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeAllUserSessions operation middleware
+func (sh *strictHandler) RevokeAllUserSessions(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevokeAllUserSessionsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeAllUserSessions(ctx, request.(RevokeAllUserSessionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeAllUserSessions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeAllUserSessionsResponseObject); ok {
+		if err := validResponse.VisitRevokeAllUserSessionsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

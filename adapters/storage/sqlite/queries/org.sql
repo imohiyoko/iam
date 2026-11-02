@@ -40,6 +40,18 @@ SELECT * FROM memberships WHERE realm_id = ? AND user_id = ? ORDER BY created_at
 -- name: ListMembershipsByOrg :many
 SELECT * FROM memberships WHERE realm_id = ? AND org_id = ? AND public_id > sqlc.arg(after) ORDER BY public_id LIMIT sqlc.arg(lim);
 
+-- name: SearchOrgs :many
+SELECT o.* FROM orgs o
+WHERE o.realm_id = sqlc.arg(realm_id) AND o.public_id > sqlc.arg(after)
+    AND (sqlc.arg(kind) = '' OR o.kind = sqlc.arg(kind))
+    AND (sqlc.arg(parent_org_id) = '' OR o.parent_org_id = sqlc.arg(parent_org_id))
+    AND (sqlc.arg(name_from) = '' OR (o.name >= sqlc.arg(name_from) AND o.name < sqlc.arg(name_to)))
+    AND (sqlc.arg(deleted) = '' OR (sqlc.arg(deleted) = 'yes') = (o.deleted_at IS NOT NULL))
+    AND (sqlc.arg(suspended) = '' OR (sqlc.arg(suspended) = 'yes') = EXISTS (SELECT 1 FROM authn_suspensions s
+        WHERE s.realm_id = o.realm_id AND s.target_type = 'org' AND s.target_id = o.id AND s.starts_at <= sqlc.arg(now)
+            AND (s.ends_at IS NULL OR s.ends_at > sqlc.arg(now)) AND (s.lifted_at IS NULL OR s.lifted_at > sqlc.arg(now))))
+ORDER BY o.public_id LIMIT sqlc.arg(lim);
+
 -- name: CountActiveMemberships :one
 SELECT count(*) FROM memberships WHERE realm_id = ? AND org_id = ? AND status = 'active' AND org_role = ?;
 

@@ -1241,6 +1241,81 @@ func (q *Queries) PurgeQuotaGrants(ctx context.Context, lim int64) (int64, error
 	return result.RowsAffected()
 }
 
+const searchOrgs = `-- name: SearchOrgs :many
+SELECT o.id, o.public_id, o.realm_id, o.kind, o.name, o.personal_owner_id, o.valid_from, o.valid_until, o.created_at, o.updated_at, o.deletion_scheduled_at, o.deleted_at, o.settings, o.parent_org_id FROM orgs o
+WHERE o.realm_id = ?1 AND o.public_id > ?2
+    AND (?3 = '' OR o.kind = ?3)
+    AND (?4 = '' OR o.parent_org_id = ?4)
+    AND (?5 = '' OR (o.name >= ?5 AND o.name < ?6))
+    AND (?7 = '' OR (?7 = 'yes') = (o.deleted_at IS NOT NULL))
+    AND (?8 = '' OR (?8 = 'yes') = EXISTS (SELECT 1 FROM authn_suspensions s
+        WHERE s.realm_id = o.realm_id AND s.target_type = 'org' AND s.target_id = o.id AND s.starts_at <= ?9
+            AND (s.ends_at IS NULL OR s.ends_at > ?9) AND (s.lifted_at IS NULL OR s.lifted_at > ?9)))
+ORDER BY o.public_id LIMIT ?10
+`
+
+type SearchOrgsParams struct {
+	RealmID     string
+	After       string
+	Kind        interface{}
+	ParentOrgID interface{}
+	NameFrom    interface{}
+	NameTo      string
+	Deleted     interface{}
+	Suspended   interface{}
+	Now         string
+	Lim         int64
+}
+
+func (q *Queries) SearchOrgs(ctx context.Context, arg SearchOrgsParams) ([]Org, error) {
+	rows, err := q.db.QueryContext(ctx, searchOrgs,
+		arg.RealmID,
+		arg.After,
+		arg.Kind,
+		arg.ParentOrgID,
+		arg.NameFrom,
+		arg.NameTo,
+		arg.Deleted,
+		arg.Suspended,
+		arg.Now,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Org
+	for rows.Next() {
+		var i Org
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.Kind,
+			&i.Name,
+			&i.PersonalOwnerID,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletionScheduledAt,
+			&i.DeletedAt,
+			&i.Settings,
+			&i.ParentOrgID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setOrgDeletion = `-- name: SetOrgDeletion :execrows
 UPDATE orgs SET deletion_scheduled_at = ?, deleted_at = ?, updated_at = ? WHERE realm_id = ? AND id = ?
 `

@@ -180,6 +180,57 @@ func (s *Service) NewConnection(ctx context.Context, realmID, slug, preset, clie
 	return port.Connection{ID: id.NewExternal(id.Connection), RealmID: realmID, Slug: slug, Type: Type, Config: b, CreatedAt: s.Clock.Now()}, nil
 }
 
+// UpdateConnection は運営者の connection のクライアント ID・戻り先と、clientSecret が nil でなければクライアントシークレットを
+// 置き換えた設定を返す（ADR 0097）。slug・種類・プロバイダのエンドポイントは変えない。changed は変わった項目の名前（監査ログ用。
+// シークレットは値を比べず、渡されたら含める）。
+func (s *Service) UpdateConnection(ctx context.Context, c port.Connection, clientID string, clientSecret *string, redirectURIs []string) (port.Connection, []string, error) {
+	if c.Type != Type {
+		return port.Connection{}, nil, errs.New(errs.KindInvalid, "connection %s is not an oauth connection", c.ID)
+	}
+	if clientSecret != nil && *clientSecret == "" {
+		return port.Connection{}, nil, errs.New(errs.KindInvalid, "oauth connection: client secret must not be empty")
+	}
+	if len(redirectURIs) > 20 || slices.ContainsFunc(append([]string{clientID, deref(clientSecret)}, redirectURIs...), func(v string) bool { return len(v) > 2048 }) {
+		return port.Connection{}, nil, errs.New(errs.KindInvalid, "oauth connection: value too long")
+	}
+	var cfg Config
+	if err := json.Unmarshal(c.Config, &cfg); err != nil {
+		return port.Connection{}, nil, fmt.Errorf("oauth: connection %s: %w", c.ID, err)
+	}
+	var changed []string
+	if cfg.ClientID != clientID {
+		changed = append(changed, "client_id")
+	}
+	if !slices.Equal(cfg.RedirectURIs, redirectURIs) {
+		changed = append(changed, "redirect_uris")
+	}
+	cfg.ClientID, cfg.RedirectURIs = clientID, slices.Clone(redirectURIs)
+	if clientSecret != nil {
+		sealed, err := s.Crypter.Seal(ctx, secretPurpose, []byte(*clientSecret))
+		if err != nil {
+			return port.Connection{}, nil, err
+		}
+		cfg.ClientSecret = sealed
+		changed = append(changed, "client_secret")
+	}
+	if err := cfg.Validate(s.Dev); err != nil {
+		return port.Connection{}, nil, err
+	}
+	b, err := json.Marshal(cfg) // #nosec G117 -- シークレットは Seal で封をしたもの
+	if err != nil {
+		return port.Connection{}, nil, err
+	}
+	c.Config = b
+	return c, changed, nil
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 func (s *Service) connection(ctx context.Context, realmID, slug string) (port.Connection, Config, error) {
 	var c port.Connection
 	err := s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {

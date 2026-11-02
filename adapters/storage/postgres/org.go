@@ -43,6 +43,18 @@ func (r orgs) List(ctx context.Context, realmID, afterID string, limit int) ([]p
 	return rows(rs, err, toOrg)
 }
 
+func (r orgs) Search(ctx context.Context, realmID string, f port.OrgSearch) ([]port.Org, error) {
+	var to string
+	if f.NamePrefix != "" {
+		// 前方一致を範囲で表す（名前はバイトの順で比べる。U+10FFFF は名前に現れない最大の文字として使う）。
+		to = f.NamePrefix + "\U0010FFFF"
+	}
+	rs, err := r.q.SearchOrgs(ctx, db.SearchOrgsParams{RealmID: realmID, After: f.After, Kind: string(f.Kind), ParentOrgID: f.ParentID,
+		NameFrom: f.NamePrefix, NameTo: to, Deleted: tristate(f.Deleted), Suspended: tristate(f.Suspended), Now: formatTime(f.Now),
+		Lim: int64(f.Limit)})
+	return rows(rs, err, toOrg)
+}
+
 func (r orgs) GetPersonal(ctx context.Context, realmID, userID string) (port.Org, error) {
 	row, err := r.q.GetPersonalOrg(ctx, db.GetPersonalOrgParams{RealmID: realmID, PersonalOwnerID: userID})
 	return one(row, err, toOrg)

@@ -97,3 +97,4 @@
 | [0083](0083-multi-realm.md) | 複数 realm は1つの App のまま要求ごとに realm を決め、realm ごとのサービスの組に渡す | 承認 |
 | [0084](0084-auth-context-and-risk-in-authz.md) | 認証の文脈とリスクを認可の条件にする | 承認 |
 | [0085](0085-my-groups-and-group-scoped-read.md) | 本人の Group の一覧と、Group に限った所属の参照 | 承認 |
+| [0097](0097-admin-read-api.md) | 管理 API の一覧・取得・検索は運営者ロールに読み取りの権限を足し、メールはブラインドインデックスの完全一致で引く | 承認 |

@@ -69,6 +69,32 @@ type UserRepo interface {
 	Erase(ctx context.Context, realmID, id string, at time.Time) error
 	// SetMerged は active なユーザーを統合済み（merged、統合先 into）にし、削除の予定を外す（11.6）。active でなければ errs.NotFound。
 	SetMerged(ctx context.Context, realmID, id, into string, at time.Time) error
+	// Search は運営者の検索（ADR 0097）。f に合うユーザーを公開 ID の順に、f.After より後から最大 f.Limit 件返す。
+	Search(ctx context.Context, realmID string, f UserSearch) ([]User, error)
+}
+
+// Tristate は「問わない・はい・いいえ」の絞り込み。
+type Tristate int
+
+const (
+	TriAny Tristate = iota
+	TriYes
+	TriNo
+)
+
+// UserSearch は UserRepo.Search の絞り込み。空の値は絞り込まない。
+type UserSearch struct {
+	UserID string // 内部 ID（メールや外部 ID から引いたもの）
+	Status UserStatus
+	// Suspended は Now の時点で停止中か（StartsAt ≤ Now < min(EndsAt, LiftedAt) の停止があるか）。
+	Suspended Tristate
+	// OrgID は active な Membership を持つ Org（内部 ID）。
+	OrgID string
+	// CreatedFrom ≤ 作成時刻 < CreatedBefore。nil は制限なし。
+	CreatedFrom, CreatedBefore *time.Time
+	Now                        time.Time
+	After                      string // 公開 ID。この次から
+	Limit                      int
 }
 
 // VerifiedVia はメールを確認済みとみなした経路（design.md 4.1）。
@@ -146,6 +172,8 @@ type IdentityRepo interface {
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
 	// ListByUser はユーザーの外部 ID を作成時刻の順（同時刻は ID の順）に返す。
 	ListByUser(ctx context.Context, realmID, userID string) ([]Identity, error)
+	// CountActiveByConnection は connection の、無効化されていない紐付けの数を返す（connection の削除。ADR 0097）。
+	CountActiveByConnection(ctx context.Context, realmID, connectionID string) (int, error)
 }
 
 // Passkey は passkeys の1行（design.md 3.1、9.4）。公開鍵は COSE の形で持つ（秘密ではない）。
@@ -373,6 +401,8 @@ type ConnectionRepo interface {
 	ListByOwner(ctx context.Context, realmID, orgID string) ([]Connection, error)
 	// CountOwned は realm の Org 専用の connection の数を返す（フィーチャーの無効化で数える。11.12）。
 	CountOwned(ctx context.Context, realmID string) (int, error)
+	// UpdateConfig は設定を置き換える（運営者の変更。ADR 0097）。無ければ errs.NotFound。
+	UpdateConfig(ctx context.Context, realmID, id string, config []byte) error
 	// Delete は connection を消す。無ければ errs.NotFound。
 	Delete(ctx context.Context, realmID, id string) error
 }
@@ -576,6 +606,22 @@ type OrgRepo interface {
 	// を Org toID に移す（統合で、統合元の個人 Org の中身を新しい Org に移す。11.6）。ID は変えない。ロールの付与は移さない
 	// （移した先では owner が付け直す）。移す先に同じ名前の Group・ロールがあれば errs.Conflict。
 	MoveContents(ctx context.Context, realmID, fromID, toID string) error
+	// Search は運営者の検索（ADR 0097）。f に合う Org を公開 ID の順に、f.After より後から最大 f.Limit 件返す。
+	Search(ctx context.Context, realmID string, f OrgSearch) ([]Org, error)
+}
+
+// OrgSearch は OrgRepo.Search の絞り込み。空の値は絞り込まない。
+type OrgSearch struct {
+	Kind     OrgKind
+	ParentID string // 親の内部 ID
+	// NamePrefix は名前の前方一致（バイトの比較。大文字と小文字は区別する）。名前は平文で持つ。
+	NamePrefix string
+	Deleted    Tristate
+	// Suspended は Now の時点で停止中か。
+	Suspended Tristate
+	Now       time.Time
+	After     string // 公開 ID。この次から
+	Limit     int
 }
 
 // MembershipStatus は Membership の状態（design.md 3.1）。
