@@ -86,7 +86,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | SAML 2.0 IdP | S P C | ❌ | |
 | WS-Federation、CAS | P | ❌ | |
 | OAuth AS メタデータ（RFC 8414）、Protected Resource Metadata（RFC 9728） | S | ❌ | |
-| Device Authorization Grant（RFC 8628） | S P | ❌ | |
+| Device Authorization Grant（RFC 8628） | S P | ✅ | フィーチャー `device_flow`（ADR 0095） |
 | CIBA | S | ❌ | |
 | FAPI 2.0 | S C | ❌ | |
 | OpenID4VCI | S | ❌ | |

@@ -29,6 +29,8 @@ import (
 //	POST /oauth2/introspect                 イントロスペクション（RFC 7662。機密の連携先だけ）
 //	POST /oauth2/revoke                     失効（RFC 7009）
 //	GET  /oauth2/userinfo                   UserInfo（POST も可）
+//	POST /oauth2/device_authorization       Device Authorization Grant の開始（RFC 8628。フィーチャー device_flow）
+//	GET  /oauth2/device                     user_code の入力と承認の画面（POST で承認・拒否）
 
 const (
 	oidcAuthorize  = "/oauth2/authorize"
@@ -38,6 +40,8 @@ const (
 	oidcKeys       = "/oauth2/keys"
 	oidcIntrospect = "/oauth2/introspect"
 	oidcRevoke     = "/oauth2/revoke"
+	oidcDeviceAuth = "/oauth2/device_authorization"
+	oidcDevice     = "/oauth2/device"
 )
 
 // isOIDC は OIDC Provider のパスかを返す。
@@ -51,13 +55,17 @@ func newOIDCHandler(a *App) http.Handler {
 		return nil
 	}
 	srv := &oidcServer{a: a}
-	ops := op.RegisterServer(srv, op.Endpoints{
+	endpoints := op.Endpoints{
 		Authorization: op.NewEndpoint(oidcAuthorize),
 		Token:         op.NewEndpoint(oidcToken),
 		JwksURI:       op.NewEndpoint(oidcKeys),
 		Introspection: op.NewEndpoint(oidcIntrospect),
 		Revocation:    op.NewEndpoint(oidcRevoke),
-	}, op.WithServerCORSOptions(nil))
+	}
+	if a.device != nil {
+		endpoints.DeviceAuthorization = op.NewEndpoint(oidcDeviceAuth)
+	}
+	ops := op.RegisterServer(srv, endpoints, op.WithServerCORSOptions(nil))
 	mux := http.NewServeMux()
 	mux.Handle(oidc.DiscoveryEndpoint, ops)
 	mux.Handle(oidcKeys, ops)
@@ -68,6 +76,11 @@ func newOIDCHandler(a *App) http.Handler {
 	mux.Handle(oidcAuthorize, a.withSession(ops))
 	mux.Handle(oidcResume, a.withSession(http.HandlerFunc(srv.resume)))
 	mux.HandleFunc(oidcUserinfo, srv.userinfo)
+	if a.device != nil {
+		mux.Handle(oidcDeviceAuth, ops)
+		// 承認の画面はブラウザのセッションを見る。書き込み（POST）は別オリジンから受けない（CSRF。Cookie も SameSite=Lax）。
+		mux.Handle(oidcDevice, a.withSession(http.NewCrossOriginProtection().Handler(http.HandlerFunc(srv.deviceVerify))))
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if srv.cors(w, r) {
@@ -164,6 +177,7 @@ func (s *oidcServer) fail(ctx context.Context, err error) error {
 
 var (
 	grantTypes              = []oidc.GrantType{oidc.GrantTypeCode, oidc.GrantTypeRefreshToken}
+	deviceGrantTypes        = append(slices.Clone(grantTypes), oidc.GrantTypeDeviceCode)
 	confidentialAuthMethods = []oidc.AuthMethod{oidc.AuthMethodBasic, oidc.AuthMethodPost, oidc.AuthMethodPrivateKeyJWT}
 	authMethods             = append(slices.Clone(confidentialAuthMethods), oidc.AuthMethodNone)
 	assertionAlgs           = []string{"ES256", "ES384", "EdDSA", "PS256", "RS256"}
@@ -186,32 +200,37 @@ func (s *oidcServer) claims() []string {
 }
 
 func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Response, error) {
-	return op.NewResponse(&oidc.DiscoveryConfiguration{
-		Issuer:                            s.a.issuer,
-		AuthorizationEndpoint:             s.endpoint(oidcAuthorize),
-		TokenEndpoint:                     s.endpoint(oidcToken),
-		UserinfoEndpoint:                  s.endpoint(oidcUserinfo),
-		JwksURI:                           s.endpoint(oidcKeys),
-		ScopesSupported:                   s.scopes(),
-		ResponseTypesSupported:            []string{string(oidc.ResponseTypeCode)},
-		ResponseModesSupported:            []string{string(oidc.ResponseModeQuery)},
-		GrantTypesSupported:               grantTypes,
-		SubjectTypesSupported:             []string{"public"},
-		IDTokenSigningAlgValuesSupported:  provider.Algs,
-		TokenEndpointAuthMethodsSupported: authMethods,
+	d := &oidc.DiscoveryConfiguration{
+		Issuer:                                     s.a.issuer,
+		AuthorizationEndpoint:                      s.endpoint(oidcAuthorize),
+		TokenEndpoint:                              s.endpoint(oidcToken),
+		UserinfoEndpoint:                           s.endpoint(oidcUserinfo),
+		JwksURI:                                    s.endpoint(oidcKeys),
+		ScopesSupported:                            s.scopes(),
+		ResponseTypesSupported:                     []string{string(oidc.ResponseTypeCode)},
+		ResponseModesSupported:                     []string{string(oidc.ResponseModeQuery)},
+		GrantTypesSupported:                        grantTypes,
+		SubjectTypesSupported:                      []string{"public"},
+		IDTokenSigningAlgValuesSupported:           provider.Algs,
+		TokenEndpointAuthMethodsSupported:          authMethods,
 		TokenEndpointAuthSigningAlgValuesSupported: assertionAlgs,
-		ClaimsSupported:                                    s.claims(),
-		CodeChallengeMethodsSupported:                      []oidc.CodeChallengeMethod{oidc.CodeChallengeMethodS256},
-		ClaimTypesSupported:                                []string{"normal"},
-		IntrospectionEndpoint:                              s.endpoint(oidcIntrospect),
-		IntrospectionEndpointAuthMethodsSupported:          confidentialAuthMethods,
+		ClaimsSupported:                            s.claims(),
+		CodeChallengeMethodsSupported:              []oidc.CodeChallengeMethod{oidc.CodeChallengeMethodS256},
+		ClaimTypesSupported:                        []string{"normal"},
+		IntrospectionEndpoint:                      s.endpoint(oidcIntrospect),
+		IntrospectionEndpointAuthMethodsSupported:  confidentialAuthMethods,
 		IntrospectionEndpointAuthSigningAlgValuesSupported: assertionAlgs,
-		RevocationEndpoint:                                 s.endpoint(oidcRevoke),
-		RevocationEndpointAuthMethodsSupported:             authMethods,
-		RevocationEndpointAuthSigningAlgValuesSupported:    assertionAlgs,
-		BackChannelLogoutSupported:                         true,
-		BackChannelLogoutSessionSupported:                  true,
-	}), nil
+		RevocationEndpoint:                              s.endpoint(oidcRevoke),
+		RevocationEndpointAuthMethodsSupported:          authMethods,
+		RevocationEndpointAuthSigningAlgValuesSupported: assertionAlgs,
+		BackChannelLogoutSupported:                      true,
+		BackChannelLogoutSessionSupported:               true,
+	}
+	// Device Authorization Grant（フィーチャー device_flow。オフなら出さない）。
+	if s.a.device != nil {
+		d.DeviceAuthorizationEndpoint, d.GrantTypesSupported = s.endpoint(oidcDeviceAuth), deviceGrantTypes
+	}
+	return op.NewResponse(d), nil
 }
 
 func (s *oidcServer) Keys(ctx context.Context, _ *op.Request[struct{}]) (*op.Response, error) {
@@ -229,8 +248,16 @@ func (s *oidcServer) Keys(ctx context.Context, _ *op.Request[struct{}]) (*op.Res
 	return resp, nil
 }
 
-// opClient は連携先を op.Client にする。
-type opClient struct{ c port.Client }
+// opClient は連携先を op.Client にする。device は Device Authorization Grant を許すか（フィーチャーが動いていて、
+// 連携先で許したとき）。
+type opClient struct {
+	c      port.Client
+	device bool
+}
+
+func (s *oidcServer) opClient(c port.Client) opClient {
+	return opClient{c: c, device: s.a.device != nil && c.DeviceGrant}
+}
 
 func (c opClient) GetID() string                    { return c.c.PublicID }
 func (c opClient) RedirectURIs() []string           { return c.c.RedirectURIs }
@@ -257,8 +284,13 @@ func (c opClient) AuthMethod() oidc.AuthMethod {
 func (opClient) ResponseTypes() []oidc.ResponseType {
 	return []oidc.ResponseType{oidc.ResponseTypeCode}
 }
-func (opClient) GrantTypes() []oidc.GrantType { return grantTypes }
-func (opClient) LoginURL(string) string       { return "" }
+func (c opClient) GrantTypes() []oidc.GrantType {
+	if c.device {
+		return deviceGrantTypes
+	}
+	return grantTypes
+}
+func (opClient) LoginURL(string) string { return "" }
 func (opClient) AccessTokenType() op.AccessTokenType {
 	return op.AccessTokenTypeBearer
 }
@@ -300,7 +332,7 @@ func (s *oidcServer) VerifyAuthRequest(ctx context.Context, r *op.Request[oidc.A
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
-	return &op.ClientRequest[oidc.AuthRequest]{Request: r, Client: opClient{cl}}, nil
+	return &op.ClientRequest[oidc.AuthRequest]{Request: r, Client: s.opClient(cl)}, nil
 }
 
 // Authorize は検証済みの認可要求（戻り先・スコープ・response_type は op が確かめた）を受け、ログイン済みなら認可コードを、
@@ -408,7 +440,7 @@ func (s *oidcServer) resume(w http.ResponseWriter, r *http.Request) {
 		s.a.unavailable(w, r, err)
 		return
 	}
-	if op.ValidateAuthReqRedirectURI(opClient{cl}, req.RedirectURI, oidc.ResponseTypeCode) != nil {
+	if op.ValidateAuthReqRedirectURI(s.opClient(cl), req.RedirectURI, oidc.ResponseTypeCode) != nil {
 		http.Error(w, "The application's redirect URI is no longer registered.", http.StatusBadRequest)
 		return
 	}
@@ -423,18 +455,18 @@ func (s *oidcServer) resume(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, red.URL, http.StatusFound)
 }
 
-// VerifyClient は token エンドポイントと revoke エンドポイントでの連携先の認証（client_secret_basic / post、
+// VerifyClient は token・revoke・device_authorization エンドポイントでの連携先の認証（client_secret_basic / post、
 // private_key_jwt、none）。
 func (s *oidcServer) VerifyClient(ctx context.Context, r *op.Request[op.ClientCredentials]) (op.Client, error) {
 	aud := []string{s.endpoint(oidcToken), s.a.issuer}
-	if r.URL != nil && r.URL.Path == oidcRevoke {
-		aud = []string{s.endpoint(oidcRevoke), s.a.issuer}
+	if r.URL != nil && (r.URL.Path == oidcRevoke || r.URL.Path == oidcDeviceAuth) {
+		aud = []string{s.endpoint(r.URL.Path), s.a.issuer}
 	}
 	cl, err := s.authenticate(ctx, r.Data, aud, false)
 	if err != nil {
 		return nil, err
 	}
-	return opClient{cl}, nil
+	return s.opClient(cl), nil
 }
 
 // authenticate は連携先を認証する。confidential なら client_secret か private_key_jwt を求める。

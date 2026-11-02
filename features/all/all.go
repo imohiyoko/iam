@@ -4,6 +4,7 @@ package all
 import (
 	_ "github.com/imohiyoko/iam/features/accountmerge"
 	_ "github.com/imohiyoko/iam/features/customattributes"
+	_ "github.com/imohiyoko/iam/features/deviceflow"
 	_ "github.com/imohiyoko/iam/features/flowhooks"
 	_ "github.com/imohiyoko/iam/features/multirealm"
 	_ "github.com/imohiyoko/iam/features/nestedgroups"

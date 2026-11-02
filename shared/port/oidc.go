@@ -42,8 +42,10 @@ type Client struct {
 	IDTokenAlg string
 	// BackchannelLogoutURI は Back-Channel Logout の送り先（空なら送らない。5.2）。
 	BackchannelLogoutURI string
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// DeviceGrant は Device Authorization Grant（RFC 8628）を許す（フィーチャー device_flow。ADR 0095）。
+	DeviceGrant bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // ClientRepo は clients の Repository。

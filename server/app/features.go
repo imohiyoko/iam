@@ -106,6 +106,46 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Passwords().Purge(ctx, limit)
 		}},
+	// 連携先の Device Authorization Grant の許可を外す（ADR 0095）。途中の要求は EphemeralStore にあり、期限で消える。
+	feature.DeviceFlow: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.DeviceGrant, nil })
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
+			if !c.DeviceGrant {
+				return false, nil
+			}
+			c.DeviceGrant, c.UpdatedAt = false, now
+			return true, tx.Clients().Update(ctx, c)
+		})
+	}},
+}
+
+// eachClient は全 realm の連携先に fn を呼び、true を返した数を数える。limit が 0 以上なら、その数で止める。
+func eachClient(ctx context.Context, tx port.Tx, limit int, fn func(port.Client) (bool, error)) (int, error) {
+	realms, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range realms {
+		cs, err := tx.Clients().List(ctx, r.ID)
+		if err != nil {
+			return n, err
+		}
+		for _, c := range cs {
+			if limit >= 0 && n >= limit {
+				return n, nil
+			}
+			ok, err := fn(c)
+			if err != nil {
+				return n, err
+			}
+			if ok {
+				n++
+			}
+		}
+	}
+	return n, nil
 }
 
 // eachOwnedConnections は全 realm の Org 専用の connection を数える。purge なら limit（0 以上なら）まで消す。

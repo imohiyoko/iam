@@ -550,6 +550,7 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 ### 5.5 連携先
 
 - 当面はホスト先が管理 API で登録したファーストパーティのみ。同意画面なし、動的クライアント登録なし
+- 入力の限られた端末向けに、Device Authorization Grant を連携先ごとに許せる（フィーチャー `device_flow`。11.15）
 - 将来のサードパーティ開放に備え `clients.trust_level` を持つ
 
 ## 6. 監査ログとイベント出力
@@ -701,6 +702,7 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 | アカウント統合（11.6） | オフ | ― | 統合 API なし |
 | カスタム属性（11.7） | オフ | ― | 属性の読み書きなし |
 | フロー フック（11.8） | オフ | ― | フックを一切呼ばない |
+| Device Authorization Grant（11.15） | オフ | ― | device_authorization エンドポイントと承認の画面なし。Discovery に出さない |
 
 ### 11.1 複数 realm
 
@@ -852,6 +854,21 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
   - 付与の削除・短縮で既存の予約が成り立たなくなる場合は、その操作を拒否する
 - IAM が拒否できない経路で上限を下回った場合：既存メンバーは外さず、新規を止めて `org.quota.exceeded` を出す
 - ホットパスでは判定しない
+
+### 11.15 Device Authorization Grant
+
+入力の限られた端末（テレビ・CLI など）が、OAuth 2.0 Device Authorization Grant（RFC 8628）でログインを任せる。
+
+実装（ADR 0095）：
+
+- フィーチャー `device_flow`。管理 API の連携先で `device_authorization_grant` を許したものだけが使える（戻り先は無くてよい）
+- `POST /oauth2/device_authorization` が device_code（256 bit）と user_code（子音 8 桁、`XXXX-XXXX`）を返す。期限は
+  `oidc.device_code_ttl`（既定 10 分）、間隔は `oidc.device_poll_interval`（既定 5 秒）
+- 本人は `/oauth2/device`（ホスト型の画面）でログインし、user_code を入れ、連携先の名前とスコープを見て許可か拒否を選ぶ。
+  照合は本人と接続元ごとに数える
+- 端末は token エンドポイントを `urn:ietf:params:oauth:grant-type:device_code` でポーリングする（`authorization_pending`・
+  `slow_down`・`access_denied`・`expired_token`）。承認の後は認可コードフローと同じトークン（ログインの系列に結び付く。5.2）
+- 途中の状態は EphemeralStore に置く（認可コードと同じ。複数インスタンスでは共有できるものが要る）
 
 ## 12. テスト
 

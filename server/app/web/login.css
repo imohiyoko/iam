@@ -13,3 +13,6 @@ button.link { background: none; color: var(--accent); width: auto; padding: 0; }
 .or { text-align: center; color: var(--muted); margin-top: 1.5rem; }
 #message { min-height: 1.5em; }
 #message.error { color: var(--error); }
+button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--muted); }
+.user-code { font-size: 1.5rem; letter-spacing: .1em; text-align: center; }
+.warning { color: var(--muted); font-size: .9rem; }

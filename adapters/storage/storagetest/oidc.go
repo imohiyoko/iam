@@ -24,6 +24,8 @@ func testClients(t *testing.T, h Harness) {
 	a, b := mk("A", T0.Add(time.Second)), mk("B", T0)
 	b.AuthMethod, b.SecretHash, b.JWKS, b.IDTokenAlg = port.ClientAuthPrivateKeyJWT, nil, []byte(`{"keys":[]}`), port.AlgES256
 	b.PostLogoutRedirectURIs, b.BackchannelLogoutURI = []string{"https://b.example.com/"}, "https://b.example.com/bcl"
+	// Device Authorization Grant だけの連携先は戻り先を持たない（ADR 0095）。
+	b.DeviceGrant, b.RedirectURIs = true, []string{}
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Clients()
 		for _, c := range []port.Client{a, b} {
@@ -50,6 +52,7 @@ func testClients(t *testing.T, h Harness) {
 			return fmt.Errorf("list = %+v, %v", list, err)
 		}
 		a.Name, a.RedirectURIs, a.SecretHash, a.UpdatedAt = "A2", []string{"https://x.example.com/"}, []byte{9}, T0.Add(time.Hour)
+		a.DeviceGrant = true
 		if err := repo.Update(ctx, a); err != nil {
 			return err
 		}

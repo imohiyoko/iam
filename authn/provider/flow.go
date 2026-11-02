@@ -85,6 +85,8 @@ type Code struct {
 	// AuthTime はセッションで最後に本人確認した時刻。
 	AuthTime time.Time `json:"auth_time"`
 	AMR      []string  `json:"amr"`
+	// GrantType は認可コード以外で作ったときの grant_type（Device Authorization Grant。監査ログに残す）。
+	GrantType string `json:"grant_type,omitempty"`
 }
 
 const (

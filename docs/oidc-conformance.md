@@ -19,6 +19,7 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 | state の受け渡し | `TestOIDCAuthorizationCodeFlow` |
 | リフレッシュ（ローテーションと再利用検知）、イントロスペクション、失効 | `TestOIDCRefreshIntrospectRevoke`、`TestOIDCE2EStandardRP`（rs で RFC 7662） |
 | Back-Channel Logout | `TestOIDCBackchannelLogout` |
+| Device Authorization Grant（RFC 8628。フィーチャー `device_flow`） | `TestDeviceFlow`、`TestDeviceFlowClients`、`TestDeviceFlowE2EStandardRP`（zitadel/oidc の rp で Discovery から）、`TestDeviceFlow`（authn/provider） |
 
 ## 既知の差異
 
@@ -35,3 +36,6 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 - リフレッシュで出す ID トークンには `nonce` を入れない（OIDC Core 12.2。最初の nonce を照合する RP では、リフレッシュの後の
   照合を外す）
 - `offline_access` は扱わない（リフレッシュトークンもログインの系列に結び付く。ADR 0066）
+- Device Authorization Grant（ADR 0095）は `openid` スコープを求め、認可コードフローと同じく ID トークンを返す（OAuth だけの
+  device_authorization は受けない）。ID トークンに `nonce` は無い。`verification_uri_complete` で開いても確認の画面を省かない。
+  zitadel/oidc の `op.Server` の `DeviceAuthorization`・`DeviceToken` で受け、状態は `authn/provider` が EphemeralStore に置く

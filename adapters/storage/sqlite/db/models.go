@@ -36,6 +36,7 @@ type AuthnClient struct {
 	BackchannelLogoutUri   string
 	CreatedAt              string
 	UpdatedAt              string
+	DeviceGrant            int64
 }
 
 type AuthnConnection struct {

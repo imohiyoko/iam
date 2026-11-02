@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/clock"
+	"github.com/imohiyoko/iam/shared/feature"
 )
 
 // E2E（roadmap M5）：本物の HTTPS のサーバーに、ふつうの RP（zitadel/oidc の rp と rs。ES256）と、ML-DSA-65 を自分で
@@ -32,7 +34,8 @@ type e2e struct {
 	http   *http.Client
 }
 
-func newE2E(t *testing.T) *e2e {
+// newE2E は features（既定でオンのものに加えて有効にするフィーチャー）を有効にして起動する。
+func newE2E(t *testing.T, features ...string) *e2e {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -40,11 +43,24 @@ func newE2E(t *testing.T) *e2e {
 	}
 	issuer := "https://" + ln.Addr().String()
 	// RP は ID トークンの iat・exp を実際の時刻で確かめるので、偽の時計を今に合わせる。
+	var binary []feature.Feature
+	if len(features) > 0 {
+		binary = feature.Registered()
+	}
 	l := newLoginEnvDeps(t, func(c *config.Config) {
 		c.Server.PublicURL = issuer
 		// passkey の RP ID に IP アドレスは使えない（この試験では passkey を使わない）。
 		c.Passkey.RPID, c.Passkey.Origins = "localhost", []string{"https://localhost"}
-	}, nil, func(d *Deps) {
+		if len(features) > 0 {
+			names := slices.Clone(features)
+			for _, f := range feature.Registered() {
+				if f.DefaultEnabled {
+					names = append(names, f.Name)
+				}
+			}
+			c.Features = &names
+		}
+	}, binary, func(d *Deps) {
 		d.Clock.(*clock.Fake).Set(time.Now().UTC().Truncate(time.Second))
 	})
 	srv := httptest.NewUnstartedServer(l.a.PublicHandler())

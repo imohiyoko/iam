@@ -50,6 +50,8 @@ func invalidClient(msg string) error {
 // Clients は連携先を管理する。
 type Clients struct {
 	Clock clock.Clock
+	// DeviceFlow は Device Authorization Grant を許せるか（フィーチャー device_flow。ADR 0095）。
+	DeviceFlow bool
 }
 
 // ClientInput は登録・変更の内容。
@@ -62,6 +64,8 @@ type ClientInput struct {
 	JWKS                 []byte
 	IDTokenAlg           string
 	BackchannelLogoutURI string
+	// DeviceGrant は Device Authorization Grant を許す（フィーチャー device_flow。ADR 0095）。
+	DeviceGrant bool
 }
 
 // ValidRedirectURI は連携先の URI に使えるか（絶対 URL、https か loopback の http、フラグメントと userinfo なし）を返す。
@@ -83,12 +87,16 @@ func ValidRedirectURI(s string) bool {
 	return false
 }
 
-func (in ClientInput) normalize() (ClientInput, error) {
+func (in ClientInput) normalize(deviceFlow bool) (ClientInput, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || utf8.RuneCountInString(in.Name) > MaxClientNameLength {
 		return in, invalidClient("name")
 	}
-	if len(in.RedirectURIs) == 0 || len(in.RedirectURIs) > MaxRedirectURIs || len(in.PostLogoutRedirectURIs) > MaxRedirectURIs {
+	if in.DeviceGrant && !deviceFlow {
+		return in, invalidClient("device_authorization_grant")
+	}
+	// Device Authorization Grant だけを使う連携先（CLI など）は戻り先を持たなくてよい。
+	if (len(in.RedirectURIs) == 0 && !in.DeviceGrant) || len(in.RedirectURIs) > MaxRedirectURIs || len(in.PostLogoutRedirectURIs) > MaxRedirectURIs {
 		return in, invalidClient("redirect_uris")
 	}
 	for _, u := range append(slices.Clone(in.RedirectURIs), in.PostLogoutRedirectURIs...) {
@@ -97,6 +105,9 @@ func (in ClientInput) normalize() (ClientInput, error) {
 		}
 	}
 	in.RedirectURIs = slices.Compact(slices.Clone(in.RedirectURIs))
+	if in.RedirectURIs == nil {
+		in.RedirectURIs = []string{}
+	}
 	if in.PostLogoutRedirectURIs == nil {
 		in.PostLogoutRedirectURIs = []string{}
 	}
@@ -165,22 +176,26 @@ func newSecret() (string, []byte, error) {
 }
 
 func (c *Clients) record(ctx context.Context, tx port.Tx, realmID string, actor audit.Actor, requestID, typ string, cl port.Client) error {
+	details := map[string]any{"client_id": cl.PublicID, "name": cl.Name, "auth_method": cl.AuthMethod,
+		"id_token_alg": cl.IDTokenAlg, "redirect_uris": cl.RedirectURIs}
+	if cl.DeviceGrant {
+		details["device_authorization_grant"] = true
+	}
 	_, err := eventlog.Record(ctx, tx, c.Clock, audit.Event{Type: typ, Result: audit.ResultSuccess, RealmID: realmID, Actor: actor,
-		RequestID: requestID, Details: map[string]any{"client_id": cl.PublicID, "name": cl.Name, "auth_method": cl.AuthMethod,
-			"id_token_alg": cl.IDTokenAlg, "redirect_uris": cl.RedirectURIs}})
+		RequestID: requestID, Details: details})
 	return err
 }
 
 // Create は連携先を登録する。client_secret なら秘密を1度だけ返す（保存するのはハッシュだけ）。
 func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
-	in, err := in.normalize()
+	in, err := in.normalize(c.DeviceFlow)
 	if err != nil {
 		return port.Client{}, "", err
 	}
 	now := c.Clock.Now()
 	cl := port.Client{ID: id.New(id.Client), PublicID: id.NewExternal(id.Client), RealmID: realmID, Name: in.Name, TrustLevel: port.TrustFirstParty,
 		RedirectURIs: in.RedirectURIs, PostLogoutRedirectURIs: in.PostLogoutRedirectURIs, AuthMethod: in.AuthMethod, JWKS: in.JWKS,
-		IDTokenAlg: in.IDTokenAlg, BackchannelLogoutURI: in.BackchannelLogoutURI, CreatedAt: now, UpdatedAt: now}
+		IDTokenAlg: in.IDTokenAlg, BackchannelLogoutURI: in.BackchannelLogoutURI, DeviceGrant: in.DeviceGrant, CreatedAt: now, UpdatedAt: now}
 	var secret string
 	if cl.AuthMethod == port.ClientAuthSecret {
 		if secret, cl.SecretHash, err = newSecret(); err != nil {
@@ -195,7 +210,7 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 
 // Update は連携先の内容を置き換える。認証方式を client_secret に変えたときは新しい秘密を返す。
 func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
-	in, err := in.normalize()
+	in, err := in.normalize(c.DeviceFlow)
 	if err != nil {
 		return port.Client{}, "", err
 	}
@@ -209,6 +224,7 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	}
 	cl.Name, cl.RedirectURIs, cl.PostLogoutRedirectURIs, cl.AuthMethod = in.Name, in.RedirectURIs, in.PostLogoutRedirectURIs, in.AuthMethod
 	cl.JWKS, cl.IDTokenAlg, cl.BackchannelLogoutURI, cl.UpdatedAt = in.JWKS, in.IDTokenAlg, in.BackchannelLogoutURI, c.Clock.Now()
+	cl.DeviceGrant = in.DeviceGrant
 	if err := tx.Clients().Update(ctx, cl); err != nil {
 		return port.Client{}, "", err
 	}

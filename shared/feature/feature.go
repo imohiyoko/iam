@@ -32,6 +32,7 @@ const (
 	AccountMerge        = "account_merge"
 	CustomAttributes    = "custom_attributes"
 	FlowHooks           = "flow_hooks"
+	DeviceFlow          = "device_flow"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

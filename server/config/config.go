@@ -99,6 +99,10 @@ type OIDC struct {
 	RefreshTokenTTL Duration `yaml:"refresh_token_ttl"`
 	// RetiredKeyTTL はローテーションで退役した署名鍵を JWKS に残す期間（id_token_ttl より長くする）。
 	RetiredKeyTTL Duration `yaml:"retired_key_ttl"`
+	// DeviceCodeTTL は Device Authorization Grant の device_code と user_code の寿命（30 分以下。フィーチャー device_flow）。
+	DeviceCodeTTL Duration `yaml:"device_code_ttl"`
+	// DevicePollInterval は端末のポーリングの最短の間隔（1 秒から 1 分。速すぎれば slow_down で延ばす）。
+	DevicePollInterval Duration `yaml:"device_poll_interval"`
 }
 
 // Passkey は passkey の Relying Party の設定。省略した項目は server.public_url から決める。
@@ -431,7 +435,8 @@ func Default() Config {
 		OrgDomains: OrgDomains{Recheck: Duration(day), Grace: Duration(7 * day)},
 		IDs:        IDs{Internal: "uuidv7", External: "random"},
 		OIDC: OIDC{CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
-			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day)},
+			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day),
+			DeviceCodeTTL: Duration(10 * time.Minute), DevicePollInterval: Duration(5 * time.Second)},
 		ServiceAccounts: ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
 	}
 }
@@ -582,6 +587,12 @@ func (c Config) Validate() error {
 	}
 	if o.RetiredKeyTTL <= o.IDTokenTTL {
 		problems = append(problems, "oidc.retired_key_ttl must be longer than oidc.id_token_ttl")
+	}
+	if o.DeviceCodeTTL <= 0 || o.DeviceCodeTTL > Duration(30*time.Minute) {
+		problems = append(problems, "oidc.device_code_ttl must be positive and at most 30m")
+	}
+	if o.DevicePollInterval < Duration(time.Second) || o.DevicePollInterval > Duration(time.Minute) {
+		problems = append(problems, "oidc.device_poll_interval must be within [1s, 1m]")
 	}
 	if t := c.ServiceAccounts.TokenTTL; t <= 0 || t > Duration(time.Hour) {
 		problems = append(problems, "service_accounts.token_ttl must be positive and at most 1h")

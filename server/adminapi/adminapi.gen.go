@@ -712,8 +712,11 @@ type Client struct {
 	ClientId             string  `json:"client_id"`
 
 	// ClientSecret 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す）
-	ClientSecret             *string                 `json:"client_secret,omitempty"`
-	CreatedAt                time.Time               `json:"created_at"`
+	ClientSecret *string   `json:"client_secret,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+
+	// DeviceAuthorizationGrant フィーチャー `device_flow` が動いているときだけ返す
+	DeviceAuthorizationGrant *bool                   `json:"device_authorization_grant,omitempty"`
 	IdTokenSignedResponseAlg string                  `json:"id_token_signed_response_alg"`
 	Jwks                     *map[string]interface{} `json:"jwks,omitempty"`
 	Name                     string                  `json:"name"`
@@ -729,13 +732,18 @@ type ClientTrustLevel string
 
 // ClientInput defines model for ClientInput.
 type ClientInput struct {
-	BackchannelLogoutUri     *string                              `json:"backchannel_logout_uri,omitempty"`
+	BackchannelLogoutUri *string `json:"backchannel_logout_uri,omitempty"`
+
+	// DeviceAuthorizationGrant Device Authorization Grant（RFC 8628）を許す。フィーチャー `device_flow` が動いているときだけ true にできる（ADR 0095）
+	DeviceAuthorizationGrant *bool                                `json:"device_authorization_grant,omitempty"`
 	IdTokenSignedResponseAlg *ClientInputIdTokenSignedResponseAlg `json:"id_token_signed_response_alg,omitempty"`
 
 	// Jwks `private_key_jwt` の公開鍵（JWKS）
-	Jwks                    *map[string]interface{}            `json:"jwks,omitempty"`
-	Name                    string                             `json:"name"`
-	PostLogoutRedirectUris  *[]string                          `json:"post_logout_redirect_uris,omitempty"`
+	Jwks                   *map[string]interface{} `json:"jwks,omitempty"`
+	Name                   string                  `json:"name"`
+	PostLogoutRedirectUris *[]string               `json:"post_logout_redirect_uris,omitempty"`
+
+	// RedirectUris 1 つ以上。`device_authorization_grant` を許す連携先だけは空でよい
 	RedirectUris            []string                           `json:"redirect_uris"`
 	TokenEndpointAuthMethod ClientInputTokenEndpointAuthMethod `json:"token_endpoint_auth_method"`
 }
