@@ -53,10 +53,16 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 		}
 		api.ServeHTTP(w, r)
 	}))
+	// WS-Federation（ADR 0110）は別のオリジンの RP からのトップレベルの遷移で届く。フィーチャーがオフなら API と同じ 404。
+	federation := newWSFedHandler(a)
 	endpoints := a.withLoginGuard(http.HandlerFunc(a.methodEndpoint))
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSAMLACS(r) {
 			login.ServeHTTP(w, r)
+			return
+		}
+		if federation != nil && isWSFed(r.URL.Path) {
+			federation.ServeHTTP(w, r)
 			return
 		}
 		// 方式のエンドポイント（ADR 0108）はウォレットなど、ブラウザでない相手から別オリジンで届く。

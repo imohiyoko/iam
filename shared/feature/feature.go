@@ -57,6 +57,8 @@ const (
 	PersonalAccessTokens = "personal_access_tokens"
 	// ADR 0108。
 	OpenID4VP = "openid4vp"
+	// WSFed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。
+	WSFed = "wsfed"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

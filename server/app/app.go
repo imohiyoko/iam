@@ -49,6 +49,7 @@ import (
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
+	"github.com/imohiyoko/iam/authn/wsfed"
 	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/server/config"
@@ -126,6 +127,9 @@ type App struct {
 	oauth  *oauth.Service
 	// saml は外部 IdP としての SAML 2.0（ADR 0098）。フィーチャー saml が動いていなければ nil。
 	saml *saml.Service
+	// wsfed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。フィーチャー wsfed が動いていないか、
+	// issuer（server.public_url）が無ければ nil。
+	wsfed *wsfed.Service
 	// ldap は LDAP / Active Directory のバインド認証と同期（ADR 0102）。フィーチャー ldap が動いていなければ nil。
 	ldap *dirldap.Service
 	// metadata は認証器のメタデータ（フィーチャー passkey_attestation。ADR 0096）。root だけが持ち、全 realm で共有する。
@@ -485,6 +489,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	// Token Exchange（ADR 0099）。なりすましは token_exchange に依存する（Requires）ので、動いていれば両方動いている。
 	a.tokens.TokenExchange = plan.IsActive(feature.TokenExchange)
+	a.wsfed = nil
+	if plan.IsActive(feature.WSFed) && a.issuer != "" {
+		// RP に渡すトークンは realm の issuer と ES256 の鍵で署名する（ADR 0110）。
+		a.wsfed = &wsfed.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Tokens: a.tokens,
+			Issuer: a.issuer, Attributes: a.attributes != nil, Log: d.Logger}
+	}
 	if plan.IsActive(feature.Impersonation) {
 		a.impersonationLimit = a.limiter(cfg.Security.Login.RateLimit.PerAccount)
 		a.tokens.Impersonation = &provider.Impersonation{TTL: cfg.OIDC.Impersonation.TokenTTL.D(), Notify: a.notify, Authorize: a.authorizeImpersonation}

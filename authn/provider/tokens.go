@@ -191,6 +191,19 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 	return Issued{AccessToken: token, RefreshToken: refresh, ExpiresIn: ttl, IDToken: idToken, Scopes: g.Scopes, Grant: g}, nil
 }
 
+// SubjectClaims は、ID トークン以外で本人を連携先に渡すとき（WS-Federation。ADR 0110）のクレーム。中身は ID トークンと同じ
+// （sub、org_id、email と attributes）で、email と attributes はスコープの代わりに引数で選ぶ。orgID は Org の内部 ID（空なら Org なし）。
+func (t *Tokens) SubjectClaims(ctx context.Context, tx port.Tx, realmID, userID, orgID string, email, attributes bool) (map[string]any, error) {
+	g := port.Grant{RealmID: realmID, UserID: userID, OrgID: orgID}
+	if email {
+		g.Scopes = append(g.Scopes, ScopeEmail)
+	}
+	if attributes {
+		g.Scopes = append(g.Scopes, ScopeAttributes)
+	}
+	return t.userClaims(ctx, tx, g)
+}
+
 // userClaims は sub と、スコープで許したユーザーのクレーム（org_id、attributes、email）を返す。ID トークンと UserInfo で共通。
 // メールは Org の文脈で見せてよいもの（Membership に結び付けたメール。4.4）だけ。
 func (t *Tokens) userClaims(ctx context.Context, tx port.Tx, g port.Grant) (map[string]any, error) {
