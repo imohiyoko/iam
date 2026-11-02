@@ -44,6 +44,11 @@ const (
 	SAML                = "saml"
 	X509                = "x509"
 	LDAP                = "ldap"
+	// ADR 0105。
+	AccountLockout    = "account_lockout"
+	DeviceRecognition = "device_recognition"
+	LoginRisk         = "login_risk"
+	BotProtection     = "bot_protection"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

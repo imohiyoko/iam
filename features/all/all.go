@@ -2,15 +2,19 @@
 package all
 
 import (
+	_ "github.com/imohiyoko/iam/features/accountlockout"
 	_ "github.com/imohiyoko/iam/features/accountmerge"
 	_ "github.com/imohiyoko/iam/features/acr"
+	_ "github.com/imohiyoko/iam/features/botprotection"
 	_ "github.com/imohiyoko/iam/features/customattributes"
 	_ "github.com/imohiyoko/iam/features/deviceflow"
+	_ "github.com/imohiyoko/iam/features/devicerecognition"
 	_ "github.com/imohiyoko/iam/features/eventsubscriptions"
 	_ "github.com/imohiyoko/iam/features/flowhooks"
 	_ "github.com/imohiyoko/iam/features/hotp"
 	_ "github.com/imohiyoko/iam/features/impersonation"
 	_ "github.com/imohiyoko/iam/features/ldap"
+	_ "github.com/imohiyoko/iam/features/loginrisk"
 	_ "github.com/imohiyoko/iam/features/multirealm"
 	_ "github.com/imohiyoko/iam/features/nestedgroups"
 	_ "github.com/imohiyoko/iam/features/oidclogout"

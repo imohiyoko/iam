@@ -47,10 +47,10 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 2 要素目の強制と登録の要求 | P C | ✅ | passkey と TOTP に固定 |
 | step-up（RFC 9470） | S P | ✅ | フィーチャー acr（ADR 0093）。判定の API の `step_up`、公開 API の `WWW-Authenticate` |
 | `acr`・`acr_values`・AAL | S（OIDC、SP 800-63B） | ✅ | フィーチャー acr（ADR 0093）。AAL3・`phrh` は、ハードウェアの CA を設定した X.509（ADR 0103）で届く |
-| リスクに応じた追加認証 | P | △ | リスクは認可に効く（ADR 0084） |
-| 新しい端末・異常な場所の検知 | P | △ | `new_device` は ignore |
-| ブルートフォース対策・ロックアウト | P C | △ | レートリミットはある。アカウント単位のロックは要確認 |
-| ボット対策（CAPTCHA など） | P | ❌ | |
+| リスクに応じた追加認証 | P | ✅ | フィーチャー `login_risk`（ADR 0105）。端末・国・ASN・impossible travel を点数にし、`risk_at_most` と `aal_at_least` で step-up |
+| 新しい端末・異常な場所の検知 | P | ✅ | フィーチャー `device_recognition`・`login_risk`（ADR 0105）。通知 `new_device_login`、警告 `new_device`、端末の一覧と削除。GeoIP の mmdb のアダプタは後続 |
+| ブルートフォース対策・ロックアウト | P C | ✅ | レートリミットと、フィーチャー `account_lockout`（ADR 0105）の接続元を問わない待ち時間とロック、運営者の解除 |
+| ボット対策（CAPTCHA など） | P | △ | フィーチャー `bot_protection`（ADR 0105）。siteverify の検証のポート。ホスト型の画面のウィジェットは後続 |
 | Shared Signals（CAEP、RISC） | S | ❌ | |
 
 ## 3. アカウントとセルフサービス

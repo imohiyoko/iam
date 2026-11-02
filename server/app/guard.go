@@ -37,7 +37,7 @@ func (a *App) withLoginGuard(h http.Handler) http.Handler {
 		}
 		start := time.Now()
 		bw := &bufferedWriter{w: w}
-		a.limitIP(bw, r, h)
+		a.limitIP(bw, r, a.withBotCheck(bw, h))
 		if wait := floor - time.Since(start); wait > 0 {
 			t := time.NewTimer(wait)
 			select {

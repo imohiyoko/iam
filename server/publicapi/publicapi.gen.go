@@ -780,6 +780,24 @@ type MyCredential struct {
 	Method string `json:"method"`
 }
 
+// MyDevice defines model for MyDevice.
+type MyDevice struct {
+	// Confirmed 強い認証（AAL2 以上）のログインに使われたか
+	Confirmed bool `json:"confirmed"`
+
+	// Country 最後のログインの国（ISO 3166-1 alpha-2。フィーチャー login_risk と GeoIP があるときだけ）
+	Country   *string   `json:"country,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Current 今のリクエストの端末か
+	Current    bool      `json:"current"`
+	Id         string    `json:"id"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+
+	// UserAgent 最後のログインの User-Agent
+	UserAgent *string `json:"user_agent,omitempty"`
+}
+
 // MyEmail defines model for MyEmail.
 type MyEmail struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -1274,8 +1292,14 @@ type WarningAction string
 // WarningSeverity defines model for Warning.Severity.
 type WarningSeverity string
 
+// BotToken defines model for BotToken.
+type BotToken = string
+
 // BadRequest defines model for BadRequest.
 type BadRequest = Error
+
+// BotCheckRequired defines model for BotCheckRequired.
+type BotCheckRequired = Error
 
 // Conflict defines model for Conflict.
 type Conflict = Error
@@ -1306,6 +1330,13 @@ type StartEmailLoginJSONBody struct {
 	Email string `json:"email"`
 }
 
+// StartEmailLoginParams defines parameters for StartEmailLogin.
+type StartEmailLoginParams struct {
+	// IAMBotToken ボットの確認（CAPTCHA・Turnstile など）のトークン（フィーチャー bot_protection。ADR 0105）。求められたときに無いか
+	// 通らなければ `403 bot_check_required`。
+	IAMBotToken *BotToken `json:"IAM-Bot-Token,omitempty"`
+}
+
 // VerifyEmailLoginJSONBody defines parameters for VerifyEmailLogin.
 type VerifyEmailLoginJSONBody struct {
 	Code        *string `json:"code,omitempty"`
@@ -1318,6 +1349,13 @@ type VerifyEmailLoginJSONBody struct {
 type RedeemLoginLinkJSONBody struct {
 	ReturnToken *bool  `json:"return_token,omitempty"`
 	Token       string `json:"token"`
+}
+
+// CompleteMethodLoginParams defines parameters for CompleteMethodLogin.
+type CompleteMethodLoginParams struct {
+	// IAMBotToken ボットの確認（CAPTCHA・Turnstile など）のトークン（フィーチャー bot_protection。ADR 0105）。求められたときに無いか
+	// 通らなければ `403 bot_check_required`。
+	IAMBotToken *BotToken `json:"IAM-Bot-Token,omitempty"`
 }
 
 // StartOAuthLoginJSONBody defines parameters for StartOAuthLogin.
@@ -1345,6 +1383,13 @@ type PasswordLoginJSONBody struct {
 	Email       string `json:"email"`
 	Password    string `json:"password"`
 	ReturnToken *bool  `json:"return_token,omitempty"`
+}
+
+// PasswordLoginParams defines parameters for PasswordLogin.
+type PasswordLoginParams struct {
+	// IAMBotToken ボットの確認（CAPTCHA・Turnstile など）のトークン（フィーチャー bot_protection。ADR 0105）。求められたときに無いか
+	// 通らなければ `403 bot_check_required`。
+	IAMBotToken *BotToken `json:"IAM-Bot-Token,omitempty"`
 }
 
 // CompleteSAMLLoginJSONBody defines parameters for CompleteSAMLLogin.
@@ -1557,9 +1602,23 @@ type RedeemRecoveryCodeJSONBody struct {
 	ReturnToken *bool  `json:"return_token,omitempty"`
 }
 
+// RedeemRecoveryCodeParams defines parameters for RedeemRecoveryCode.
+type RedeemRecoveryCodeParams struct {
+	// IAMBotToken ボットの確認（CAPTCHA・Turnstile など）のトークン（フィーチャー bot_protection。ADR 0105）。求められたときに無いか
+	// 通らなければ `403 bot_check_required`。
+	IAMBotToken *BotToken `json:"IAM-Bot-Token,omitempty"`
+}
+
 // StartEmailRecoveryJSONBody defines parameters for StartEmailRecovery.
 type StartEmailRecoveryJSONBody struct {
 	Email string `json:"email"`
+}
+
+// StartEmailRecoveryParams defines parameters for StartEmailRecovery.
+type StartEmailRecoveryParams struct {
+	// IAMBotToken ボットの確認（CAPTCHA・Turnstile など）のトークン（フィーチャー bot_protection。ADR 0105）。求められたときに無いか
+	// 通らなければ `403 bot_check_required`。
+	IAMBotToken *BotToken `json:"IAM-Bot-Token,omitempty"`
 }
 
 // VerifyEmailRecoveryJSONBody defines parameters for VerifyEmailRecovery.
@@ -1763,7 +1822,7 @@ type ServerInterface interface {
 	AcceptInvitation(w http.ResponseWriter, r *http.Request)
 	// StartEmailLogin メールのコード・マジックリンクによる登録・ログインを始める
 	// (POST /v1/login/email:start)
-	StartEmailLogin(w http.ResponseWriter, r *http.Request)
+	StartEmailLogin(w http.ResponseWriter, r *http.Request, params StartEmailLoginParams)
 	// VerifyEmailLogin コードかマジックリンクのトークンでフローを完了する
 	// (POST /v1/login/email:verify)
 	VerifyEmailLogin(w http.ResponseWriter, r *http.Request)
@@ -1778,7 +1837,7 @@ type ServerInterface interface {
 	BeginMethodLogin(w http.ResponseWriter, r *http.Request, method string)
 	// CompleteMethodLogin 認証方式のプラグインでログインを完了する（1要素目）
 	// (POST /v1/login/methods/{method}:complete)
-	CompleteMethodLogin(w http.ResponseWriter, r *http.Request, method string)
+	CompleteMethodLogin(w http.ResponseWriter, r *http.Request, method string, params CompleteMethodLoginParams)
 	// StartOAuthLogin 外部プロバイダ（OAuth / OIDC）による登録・ログインを始める
 	// (POST /v1/login/oauth/{connection}:start)
 	StartOAuthLogin(w http.ResponseWriter, r *http.Request, connection string)
@@ -1793,7 +1852,7 @@ type ServerInterface interface {
 	StartPasskeyLogin(w http.ResponseWriter, r *http.Request)
 	// PasswordLogin メールとパスワードでログインする（フィーチャー password）
 	// (POST /v1/login/password)
-	PasswordLogin(w http.ResponseWriter, r *http.Request)
+	PasswordLogin(w http.ResponseWriter, r *http.Request, params PasswordLoginParams)
 	// StartSAMLLogin 外部 IdP（SAML 2.0）による登録・ログインを始める（ADR 0098）
 	// (POST /v1/login/saml/{connection}:start)
 	StartSAMLLogin(w http.ResponseWriter, r *http.Request, connection string)
@@ -1842,6 +1901,12 @@ type ServerInterface interface {
 	// CompleteEnrollCredential 認証方式のプラグインの認証情報の登録を完了する
 	// (POST /v1/me/credentials/{method}:enroll-complete)
 	CompleteEnrollCredential(w http.ResponseWriter, r *http.Request, method string)
+	// ListMyDevices 本人がログインした端末の一覧（フィーチャー device_recognition。ADR 0105）
+	// (GET /v1/me/devices)
+	ListMyDevices(w http.ResponseWriter, r *http.Request)
+	// ForgetMyDevice 本人の端末を忘れる（次にその端末で入れば新しい端末になる）
+	// (DELETE /v1/me/devices/{id})
+	ForgetMyDevice(w http.ResponseWriter, r *http.Request, id string)
 	// MakeMyEmailPrimary 確認済みのメールを primary にする
 	// (POST /v1/me/emails/{id}:make-primary)
 	MakeMyEmailPrimary(w http.ResponseWriter, r *http.Request, id string)
@@ -2072,10 +2137,10 @@ type ServerInterface interface {
 	CheckMyAuthz(w http.ResponseWriter, r *http.Request)
 	// RedeemRecoveryCode 確認済みのメールアドレスとリカバリーコードで復旧を始める（4.12）
 	// (POST /v1/recovery/code:redeem)
-	RedeemRecoveryCode(w http.ResponseWriter, r *http.Request)
+	RedeemRecoveryCode(w http.ResponseWriter, r *http.Request, params RedeemRecoveryCodeParams)
 	// StartEmailRecovery 確認済みのメールによる復旧を始める（4.12）
 	// (POST /v1/recovery/email:start)
-	StartEmailRecovery(w http.ResponseWriter, r *http.Request)
+	StartEmailRecovery(w http.ResponseWriter, r *http.Request, params StartEmailRecoveryParams)
 	// VerifyEmailRecovery メールのコードかリンクのトークンで復旧専用のセッションを得る
 	// (POST /v1/recovery/email:verify)
 	VerifyEmailRecovery(w http.ResponseWriter, r *http.Request)
@@ -2141,8 +2206,35 @@ func (siw *ServerInterfaceWrapper) AcceptInvitation(w http.ResponseWriter, r *ht
 // StartEmailLogin operation middleware
 func (siw *ServerInterfaceWrapper) StartEmailLogin(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StartEmailLoginParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "IAM-Bot-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("IAM-Bot-Token")]; found {
+		var IAMBotToken BotToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "IAM-Bot-Token", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "IAM-Bot-Token", valueList[0], &IAMBotToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "IAM-Bot-Token", Err: err})
+			return
+		}
+
+		params.IAMBotToken = &IAMBotToken
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.StartEmailLogin(w, r)
+		siw.Handler.StartEmailLogin(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2247,8 +2339,32 @@ func (siw *ServerInterfaceWrapper) CompleteMethodLogin(w http.ResponseWriter, r 
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CompleteMethodLoginParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "IAM-Bot-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("IAM-Bot-Token")]; found {
+		var IAMBotToken BotToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "IAM-Bot-Token", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "IAM-Bot-Token", valueList[0], &IAMBotToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "IAM-Bot-Token", Err: err})
+			return
+		}
+
+		params.IAMBotToken = &IAMBotToken
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CompleteMethodLogin(w, r, method)
+		siw.Handler.CompleteMethodLogin(w, r, method, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2329,8 +2445,35 @@ func (siw *ServerInterfaceWrapper) StartPasskeyLogin(w http.ResponseWriter, r *h
 // PasswordLogin operation middleware
 func (siw *ServerInterfaceWrapper) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PasswordLoginParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "IAM-Bot-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("IAM-Bot-Token")]; found {
+		var IAMBotToken BotToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "IAM-Bot-Token", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "IAM-Bot-Token", valueList[0], &IAMBotToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "IAM-Bot-Token", Err: err})
+			return
+		}
+
+		params.IAMBotToken = &IAMBotToken
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PasswordLogin(w, r)
+		siw.Handler.PasswordLogin(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2627,6 +2770,46 @@ func (siw *ServerInterfaceWrapper) CompleteEnrollCredential(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CompleteEnrollCredential(w, r, method)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyDevices operation middleware
+func (siw *ServerInterfaceWrapper) ListMyDevices(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyDevices(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ForgetMyDevice operation middleware
+func (siw *ServerInterfaceWrapper) ForgetMyDevice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ForgetMyDevice(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4728,8 +4911,35 @@ func (siw *ServerInterfaceWrapper) CheckMyAuthz(w http.ResponseWriter, r *http.R
 // RedeemRecoveryCode operation middleware
 func (siw *ServerInterfaceWrapper) RedeemRecoveryCode(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RedeemRecoveryCodeParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "IAM-Bot-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("IAM-Bot-Token")]; found {
+		var IAMBotToken BotToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "IAM-Bot-Token", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "IAM-Bot-Token", valueList[0], &IAMBotToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "IAM-Bot-Token", Err: err})
+			return
+		}
+
+		params.IAMBotToken = &IAMBotToken
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.RedeemRecoveryCode(w, r)
+		siw.Handler.RedeemRecoveryCode(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4742,8 +4952,35 @@ func (siw *ServerInterfaceWrapper) RedeemRecoveryCode(w http.ResponseWriter, r *
 // StartEmailRecovery operation middleware
 func (siw *ServerInterfaceWrapper) StartEmailRecovery(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StartEmailRecoveryParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "IAM-Bot-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("IAM-Bot-Token")]; found {
+		var IAMBotToken BotToken
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "IAM-Bot-Token", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "IAM-Bot-Token", valueList[0], &IAMBotToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "IAM-Bot-Token", Err: err})
+			return
+		}
+
+		params.IAMBotToken = &IAMBotToken
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.StartEmailRecovery(w, r)
+		siw.Handler.StartEmailRecovery(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4947,6 +5184,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me", wrapper.GetMe)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/sessions", wrapper.ListMySessions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/sessions/{id}:revoke", wrapper.RevokeMySession)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/devices", wrapper.ListMyDevices)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/v1/me/devices/{id}", wrapper.ForgetMyDevice)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/methods", wrapper.ListMyMethods)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/emails:start", wrapper.StartAddEmail)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/emails:verify", wrapper.VerifyAddEmail)
@@ -5031,6 +5270,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 }
 
 type BadRequestJSONResponse Error
+
+type BotCheckRequiredJSONResponse Error
 
 type ConflictJSONResponse Error
 
@@ -5205,7 +5446,8 @@ func (response AcceptInvitation409JSONResponse) VisitAcceptInvitationResponse(w 
 }
 
 type StartEmailLoginRequestObject struct {
-	Body *StartEmailLoginJSONRequestBody
+	Params StartEmailLoginParams
+	Body   *StartEmailLoginJSONRequestBody
 }
 
 type StartEmailLoginResponseObject interface {
@@ -5239,6 +5481,20 @@ func (response StartEmailLogin400JSONResponse) VisitStartEmailLoginResponse(w ht
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailLogin403JSONResponse struct{ BotCheckRequiredJSONResponse }
+
+func (response StartEmailLogin403JSONResponse) VisitStartEmailLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -5580,6 +5836,7 @@ func (response BeginMethodLogin429JSONResponse) VisitBeginMethodLoginResponse(w 
 
 type CompleteMethodLoginRequestObject struct {
 	Method string `json:"method"`
+	Params CompleteMethodLoginParams
 	Body   *CompleteMethodLoginJSONRequestBody
 }
 
@@ -5937,7 +6194,8 @@ func (response StartPasskeyLogin429JSONResponse) VisitStartPasskeyLoginResponse(
 }
 
 type PasswordLoginRequestObject struct {
-	Body *PasswordLoginJSONRequestBody
+	Params PasswordLoginParams
+	Body   *PasswordLoginJSONRequestBody
 }
 
 type PasswordLoginResponseObject interface {
@@ -7017,6 +7275,101 @@ func (response CompleteEnrollCredential429JSONResponse) VisitCompleteEnrollCrede
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
 	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyDevicesRequestObject struct {
+}
+
+type ListMyDevicesResponseObject interface {
+	VisitListMyDevicesResponse(w http.ResponseWriter) error
+}
+
+type ListMyDevices200JSONResponse struct {
+	Devices []MyDevice `json:"devices"`
+}
+
+func (response ListMyDevices200JSONResponse) VisitListMyDevicesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyDevices401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyDevices401JSONResponse) VisitListMyDevicesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyDevices404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyDevices404JSONResponse) VisitListMyDevicesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetMyDeviceRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ForgetMyDeviceResponseObject interface {
+	VisitForgetMyDeviceResponse(w http.ResponseWriter) error
+}
+
+type ForgetMyDevice204Response struct {
+}
+
+func (response ForgetMyDevice204Response) VisitForgetMyDeviceResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ForgetMyDevice401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ForgetMyDevice401JSONResponse) VisitForgetMyDeviceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ForgetMyDevice404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ForgetMyDevice404JSONResponse) VisitForgetMyDeviceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -12395,7 +12748,8 @@ func (response CheckMyAuthz401JSONResponse) VisitCheckMyAuthzResponse(w http.Res
 }
 
 type RedeemRecoveryCodeRequestObject struct {
-	Body *RedeemRecoveryCodeJSONRequestBody
+	Params RedeemRecoveryCodeParams
+	Body   *RedeemRecoveryCodeJSONRequestBody
 }
 
 type RedeemRecoveryCodeResponseObject interface {
@@ -12474,7 +12828,8 @@ func (response RedeemRecoveryCode429JSONResponse) VisitRedeemRecoveryCodeRespons
 }
 
 type StartEmailRecoveryRequestObject struct {
-	Body *StartEmailRecoveryJSONRequestBody
+	Params StartEmailRecoveryParams
+	Body   *StartEmailRecoveryJSONRequestBody
 }
 
 type StartEmailRecoveryResponseObject interface {
@@ -12508,6 +12863,20 @@ func (response StartEmailRecovery400JSONResponse) VisitStartEmailRecoveryRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartEmailRecovery403JSONResponse struct{ BotCheckRequiredJSONResponse }
+
+func (response StartEmailRecovery403JSONResponse) VisitStartEmailRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -12844,6 +13213,12 @@ type StrictServerInterface interface {
 	// CompleteEnrollCredential 認証方式のプラグインの認証情報の登録を完了する
 	// (POST /v1/me/credentials/{method}:enroll-complete)
 	CompleteEnrollCredential(ctx context.Context, request CompleteEnrollCredentialRequestObject) (CompleteEnrollCredentialResponseObject, error)
+	// ListMyDevices 本人がログインした端末の一覧（フィーチャー device_recognition。ADR 0105）
+	// (GET /v1/me/devices)
+	ListMyDevices(ctx context.Context, request ListMyDevicesRequestObject) (ListMyDevicesResponseObject, error)
+	// ForgetMyDevice 本人の端末を忘れる（次にその端末で入れば新しい端末になる）
+	// (DELETE /v1/me/devices/{id})
+	ForgetMyDevice(ctx context.Context, request ForgetMyDeviceRequestObject) (ForgetMyDeviceResponseObject, error)
 	// MakeMyEmailPrimary 確認済みのメールを primary にする
 	// (POST /v1/me/emails/{id}:make-primary)
 	MakeMyEmailPrimary(ctx context.Context, request MakeMyEmailPrimaryRequestObject) (MakeMyEmailPrimaryResponseObject, error)
@@ -13208,8 +13583,10 @@ func (sh *strictHandler) AcceptInvitation(w http.ResponseWriter, r *http.Request
 }
 
 // StartEmailLogin operation middleware
-func (sh *strictHandler) StartEmailLogin(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) StartEmailLogin(w http.ResponseWriter, r *http.Request, params StartEmailLoginParams) {
 	var request StartEmailLoginRequestObject
+
+	request.Params = params
 
 	var body StartEmailLoginJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -13370,10 +13747,11 @@ func (sh *strictHandler) BeginMethodLogin(w http.ResponseWriter, r *http.Request
 }
 
 // CompleteMethodLogin operation middleware
-func (sh *strictHandler) CompleteMethodLogin(w http.ResponseWriter, r *http.Request, method string) {
+func (sh *strictHandler) CompleteMethodLogin(w http.ResponseWriter, r *http.Request, method string, params CompleteMethodLoginParams) {
 	var request CompleteMethodLoginRequestObject
 
 	request.Method = method
+	request.Params = params
 
 	var body CompleteMethodLoginJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -13525,8 +13903,10 @@ func (sh *strictHandler) StartPasskeyLogin(w http.ResponseWriter, r *http.Reques
 }
 
 // PasswordLogin operation middleware
-func (sh *strictHandler) PasswordLogin(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) PasswordLogin(w http.ResponseWriter, r *http.Request, params PasswordLoginParams) {
 	var request PasswordLoginRequestObject
+
+	request.Params = params
 
 	var body PasswordLoginJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -14016,6 +14396,56 @@ func (sh *strictHandler) CompleteEnrollCredential(w http.ResponseWriter, r *http
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CompleteEnrollCredentialResponseObject); ok {
 		if err := validResponse.VisitCompleteEnrollCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyDevices operation middleware
+func (sh *strictHandler) ListMyDevices(w http.ResponseWriter, r *http.Request) {
+	var request ListMyDevicesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyDevices(ctx, request.(ListMyDevicesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyDevices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyDevicesResponseObject); ok {
+		if err := validResponse.VisitListMyDevicesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ForgetMyDevice operation middleware
+func (sh *strictHandler) ForgetMyDevice(w http.ResponseWriter, r *http.Request, id string) {
+	var request ForgetMyDeviceRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ForgetMyDevice(ctx, request.(ForgetMyDeviceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ForgetMyDevice")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ForgetMyDeviceResponseObject); ok {
+		if err := validResponse.VisitForgetMyDeviceResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -16230,8 +16660,10 @@ func (sh *strictHandler) CheckMyAuthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // RedeemRecoveryCode operation middleware
-func (sh *strictHandler) RedeemRecoveryCode(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) RedeemRecoveryCode(w http.ResponseWriter, r *http.Request, params RedeemRecoveryCodeParams) {
 	var request RedeemRecoveryCodeRequestObject
+
+	request.Params = params
 
 	var body RedeemRecoveryCodeJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {
@@ -16261,8 +16693,10 @@ func (sh *strictHandler) RedeemRecoveryCode(w http.ResponseWriter, r *http.Reque
 }
 
 // StartEmailRecovery operation middleware
-func (sh *strictHandler) StartEmailRecovery(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) StartEmailRecovery(w http.ResponseWriter, r *http.Request, params StartEmailRecoveryParams) {
 	var request StartEmailRecoveryRequestObject
+
+	request.Params = params
 
 	var body StartEmailRecoveryJSONRequestBody
 	if err := runtime.BindJSONBody(r, &body); err != nil {

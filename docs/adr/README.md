@@ -114,4 +114,5 @@
 | [0100](0100-audit-query-and-event-subscriptions.md) | 監査ログは索引の列で照会してペイロードで確かめ直し、Webhook の購読は監査ログを outbox にして購読ごとの位置で送る | 承認 |
 | [0101](0101-port-totp-and-password.md) | TOTP とパスワードを認証方式のポートに載せ、方式専用の表から authn_credentials へ起動時に移す | 承認 |
 | [0102](0102-ldap.md) | LDAP / Active Directory は外部 ID の connection として扱い、サービスアカウントで探して本人で bind し、同期は止めることだけを自動にする | 承認 |
+| [0105](0105-risk-based-login-protection.md) | ログインの守りは、アカウント単位のロックアウト・端末の記憶・ログインのリスクの点数・ボット対策の 4 つのフィーチャーに分ける | 承認 |
 | [0103](0103-x509-client-certificates.md) | X.509 のクライアント証明書（スマートカードを含む）は認証方式のプラグインにし、証明書はコアが mTLS かプロキシのヘッダーから渡す | 承認 |

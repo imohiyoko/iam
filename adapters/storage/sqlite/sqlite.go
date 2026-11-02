@@ -195,6 +195,7 @@ func (t *tx) DirectoryGroups() port.DirectoryGroupRepo   { return dirGroups{t.q}
 func (t *tx) Passkeys() port.PasskeyRepo                 { return passkeys{t.q} }
 func (t *tx) TOTP() port.TOTPRepo                        { return totps{t.q} }
 func (t *tx) Credentials() port.CredentialRepo           { return authnCredentials{t.q} }
+func (t *tx) KnownDevices() port.KnownDeviceRepo         { return knownDevices{t.q} }
 func (t *tx) Passwords() port.PasswordRepo               { return passwords{t.q} }
 func (t *tx) RecoveryCodes() port.RecoveryCodeRepo       { return recoveryCodes{t.q} }
 func (t *tx) Suspensions() port.SuspensionRepo           { return suspensions{t.q} }

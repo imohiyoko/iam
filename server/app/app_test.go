@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	botdev "github.com/imohiyoko/iam/adapters/botcheck/dev"
 	ephemeral "github.com/imohiyoko/iam/adapters/ephemeral/memory"
 	"github.com/imohiyoko/iam/adapters/eventsink/stdout"
 	"github.com/imohiyoko/iam/adapters/keystore/keyfile"
@@ -25,6 +26,9 @@ import (
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/port"
 )
+
+// testBotToken はテストのボットの確認で通るトークン。
+const testBotToken = "human"
 
 type env struct {
 	cfg  config.Config
@@ -56,6 +60,8 @@ func newEnv(t *testing.T) *env {
 	return &env{cfg: cfg, out: out, logs: logs, deps: Deps{
 		Storage: memory.New(clk), Ephemeral: ephemeral.New(clk), KeyStore: ks,
 		EventSink: stdout.New(out), Notifier: &dev.Notifier{Log: log}, Clock: clk, Logger: log,
+		// フィーチャー bot_protection を有効にするテストのため（ADR 0105）。
+		BotVerifier: botdev.Verifier{Token: testBotToken},
 	}}
 }
 

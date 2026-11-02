@@ -24,6 +24,9 @@ const (
 	CodePasswordBreached     = "password_breached"
 	// CodeRecoveredViaEmail はメールによるアカウントの復旧（4.12）。deny にすればメールでは復旧できない。
 	CodeRecoveredViaEmail = "recovered_via_email"
+	// CodeNewDevice は前に端末を持っていたユーザーの、知らない端末からのログイン（フィーチャー device_recognition。ADR 0105）。
+	// deny は設定できない（拒めば端末が記録されず、二度と入れない）。
+	CodeNewDevice = "new_device"
 )
 
 // Action は警告への対応。
@@ -53,6 +56,8 @@ type Evidence struct {
 	PasswordBreached *bool
 	// RecoveredViaEmail はメールでアカウントを復旧したか（復旧専用のセッションの発行のとき）。
 	RecoveredViaEmail bool
+	// NewDevice は前に端末を持っていたユーザーの、知らない端末か（フィーチャー device_recognition。ADR 0105）。
+	NewDevice bool
 }
 
 // Warning は評価の結果の1件。sessions.warnings と監査ログに残し、本人に返す。
@@ -78,6 +83,7 @@ var Rules = []Rule{
 	{Code: CodeOAuthEmailUnverified, Severity: Medium, Default: Warn, Check: oauthEmailUnverified},
 	{Code: CodePasswordBreached, Severity: High, Default: Warn, Check: passwordBreached},
 	{Code: CodeRecoveredViaEmail, Severity: Medium, Default: Warn, Check: recoveredViaEmail},
+	{Code: CodeNewDevice, Severity: Low, Default: Ignore, Check: newDevice},
 }
 
 // factorOf は amr の値を要素の種類に分ける（RFC 8176）。分からない値は数えない。
@@ -112,6 +118,8 @@ func passwordBreached(ev Evidence) (map[string]any, bool) {
 
 func recoveredViaEmail(ev Evidence) (map[string]any, bool) { return nil, ev.RecoveredViaEmail }
 
+func newDevice(ev Evidence) (map[string]any, bool) { return nil, ev.NewDevice }
+
 // Evaluator はルールを評価し、アクションを決める。
 type Evaluator struct {
 	rules   []Rule
@@ -135,6 +143,9 @@ func Validate(actions map[string]Action) error {
 		}
 		if a != Ignore && a != Warn && a != Deny {
 			problems = append(problems, fmt.Sprintf("%s: unknown action %q (ignore, warn or deny)", code, a))
+		}
+		if code == CodeNewDevice && a == Deny {
+			problems = append(problems, fmt.Sprintf("%s: deny is not allowed (a denied device is never remembered)", code))
 		}
 	}
 	slices.Sort(problems)

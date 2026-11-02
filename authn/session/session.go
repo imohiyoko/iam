@@ -117,6 +117,29 @@ type Manager struct {
 	Hooks *hook.Runner
 	// Methods は動いている認証方式のプラグイン（ADR 0092）。2要素目に使える方式の認証情報を、2要素目として数える。
 	Methods *method.Set
+	// Devices は本人確認を終えたログインの端末を記録する（フィーチャー device_recognition。ADR 0105）。nil なら記録しない。
+	Devices DeviceObserver
+}
+
+// DeviceObserver はログインした端末を記録し、新しい端末かとリスクの点数を返す（ADR 0105）。Issue のトランザクションで、
+// 制限の無いセッションを発行するときだけ呼ぶ。
+type DeviceObserver interface {
+	Observe(ctx context.Context, tx port.Tx, in DeviceLogin) (DeviceResult, error)
+}
+
+// DeviceLogin はログインの内容。
+type DeviceLogin struct {
+	RealmID, UserID, UserPublicID string
+	AuthMethods                   []string
+	IP, UserAgent, RequestID      string
+}
+
+// DeviceResult は端末の記録の結果。
+type DeviceResult struct {
+	// New は前に端末を持っていたユーザーの、知らない端末か（警告 new_device）。
+	New bool
+	// Risk はログインのリスクの点数（フィーチャー login_risk。動いていなければ nil）。
+	Risk map[string]int
 }
 
 // LineageHook はログインの系列（sid）が終わったことを受け取る（authn/provider）。失効と同じトランザクションで呼ぶ。
@@ -285,6 +308,14 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	}
 	ev := in.Evidence
 	ev.AMR = in.AuthMethods
+	var device DeviceResult
+	if restriction == port.RestrictionNone && m.Devices != nil {
+		if device, err = m.Devices.Observe(ctx, tx, DeviceLogin{RealmID: in.RealmID, UserID: in.UserID, UserPublicID: u.PublicID,
+			AuthMethods: in.AuthMethods, IP: in.IP, UserAgent: in.UserAgent, RequestID: in.RequestID}); err != nil {
+			return Issued{}, err
+		}
+		ev.NewDevice = device.New
+	}
 	// 該当した警告はすべて（ignore のものも）セッションに残し、Org の段のアクションを後から当てはめる（2.8、10章）。
 	hits := m.Warnings.Hits(ev)
 	if restriction != port.RestrictionNone {
@@ -309,6 +340,14 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		if scores, dropped, err = hookRisk(ctx, tx, in.RealmID, res.Risk); err != nil {
 			return Issued{}, err
 		}
+	}
+	// 組み込みの評価器（login_risk）の点数は一覧で有効な種類だけ入れ、フックの点数と種類ごとに大きい方をとる（ADR 0105）。
+	var builtin map[string]int
+	if len(device.Risk) > 0 {
+		if builtin, _, err = hookRisk(ctx, tx, in.RealmID, device.Risk); err != nil {
+			return Issued{}, err
+		}
+		scores = mergeRisk(scores, builtin)
 	}
 	riskJSON, err := encodeRisk(scores)
 	if err != nil {
@@ -454,6 +493,12 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 		_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
 			Type: "session.risk_updated", Result: audit.ResultSuccess, RealmID: in.RealmID, OrgID: orgPublicID,
 			Actor: actor, SessionID: s.ID, RequestID: in.RequestID, Details: rd,
+		})
+	}
+	if err == nil && len(builtin) > 0 {
+		_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
+			Type: "session.risk_updated", Result: audit.ResultSuccess, RealmID: in.RealmID, OrgID: orgPublicID,
+			Actor: actor, SessionID: s.ID, RequestID: in.RequestID, Details: map[string]any{"source": riskSourceLogin, "risk": builtin},
 		})
 	}
 	return Issued{Session: s, Token: token, Warnings: warnings, Replaced: replaced, SecondFactorMethods: methods, OrgChoices: choices,

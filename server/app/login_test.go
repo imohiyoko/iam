@@ -58,6 +58,10 @@ type loginEnv struct {
 	ua     string // 空でなければ各リクエストの User-Agent
 	out    bytes.Buffer
 	codes  []string // claim で受け取ったコード（秘密が漏れないことの確認用）
+	// device が nil でなければ、端末の Cookie（ADR 0105）を送り、応答で置き直された値で書き換える（ブラウザの代わり）。
+	device *string
+	// hdr は各リクエストに足すヘッダー（名前と値の組。呼び出しごとのヘッダーが優先）。
+	hdr []string
 }
 
 func newLoginEnv(t *testing.T) *loginEnv {
@@ -116,11 +120,24 @@ func (l *loginEnv) do(t *testing.T, h http.Handler, method, path string, body an
 	if l.ua != "" {
 		r.Header.Set("User-Agent", l.ua)
 	}
+	for i := 0; i+1 < len(l.hdr); i += 2 {
+		r.Header.Set(l.hdr[i], l.hdr[i+1])
+	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		r.Header.Set(hdr[i], hdr[i+1])
 	}
+	if l.device != nil && *l.device != "" {
+		r.AddCookie(&http.Cookie{Name: deviceCookie, Value: *l.device})
+	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
+	if l.device != nil {
+		for _, c := range w.Result().Cookies() {
+			if c.Name == deviceCookie {
+				*l.device = c.Value
+			}
+		}
+	}
 	for k, v := range w.Header() {
 		l.out.WriteString(k + ": " + strings.Join(v, ",") + "\n")
 	}
