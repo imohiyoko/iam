@@ -39,6 +39,8 @@ type Flow struct {
 	// RequestTTL はログイン画面で待つ間の認可要求の期限（既定 10 分）。CodeTTL は認可コードの期限（既定 1 分）。
 	RequestTTL time.Duration
 	CodeTTL    time.Duration
+	// PushedTTL は PAR の request_uri の期限（既定 60 秒。フィーチャー par。ADR 0112）。
+	PushedTTL time.Duration
 }
 
 // AuthRequest は検証済みの認可要求。
@@ -57,7 +59,9 @@ type AuthRequest struct {
 	// LoginAfter は prompt=login のとき、この時刻より後の本人確認を求める。
 	LoginAfter *time.Time `json:"login_after,omitempty"`
 	// ACR は要求された acr の値のうち対応するもの（要求の順。フィーチャー acr。ADR 0093）。空なら求めない。
-	ACR       []string  `json:"acr,omitempty"`
+	ACR []string `json:"acr,omitempty"`
+	// Resource は resource（RFC 8707。フィーチャー resource_indicators。ADR 0112）。空なら IAM 自身に向けたトークン。
+	Resource  string    `json:"resource,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
 

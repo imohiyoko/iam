@@ -442,6 +442,11 @@ type ServiceAccountToken struct {
 	Hash             []byte
 	CreatedAt        time.Time
 	ExpiresAt        time.Time
+	// Audience は自前の API に向けたトークンの aud（登録したリソースの URI。RFC 8707、フィーチャー resource_indicators。
+	// ADR 0112）。空なら管理 API 向けのトークン。Audience のあるトークンは管理 API では使えない。
+	Audience string
+	// Scopes は Audience のリソースで許したスコープ。
+	Scopes []string
 }
 
 // ServiceAccountRepo は service_accounts と service_account_credentials、アクセストークンの Repository。

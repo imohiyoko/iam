@@ -16,6 +16,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
+	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/feature"
@@ -37,6 +38,9 @@ import (
 //	GET  /oauth2/device                     user_code の入力と承認の画面（POST で承認・拒否）
 //	GET  /oauth2/end_session                RP-Initiated Logout（POST も可。フィーチャー oidc_logout。endsession.go）
 //	POST /oauth2/bc-authorize               CIBA の開始（フィーチャー ciba。ciba.go）
+//	POST /oauth2/par                        Pushed Authorization Requests（RFC 9126。フィーチャー par。par.go）
+//	GET  /.well-known/oauth-authorization-server  OAuth 2.0 Authorization Server Metadata（RFC 8414。Discovery と同じ内容）
+//	GET  /.well-known/oauth-protected-resource    Protected Resource Metadata（RFC 9728。IAM 自身の API）
 
 const (
 	oidcAuthorize  = "/oauth2/authorize"
@@ -48,11 +52,15 @@ const (
 	oidcRevoke     = "/oauth2/revoke"
 	oidcDeviceAuth = "/oauth2/device_authorization"
 	oidcDevice     = "/oauth2/device"
+	oidcPAR        = "/oauth2/par"
+	// wellKnownAS と wellKnownResource は RFC 8414・9728 の既知の場所（ADR 0112）。
+	wellKnownAS       = "/.well-known/oauth-authorization-server"
+	wellKnownResource = "/.well-known/oauth-protected-resource"
 )
 
 // isOIDC は OIDC Provider のパスかを返す。
 func isOIDC(path string) bool {
-	return path == oidc.DiscoveryEndpoint || strings.HasPrefix(path, "/oauth2/")
+	return path == oidc.DiscoveryEndpoint || path == wellKnownAS || path == wellKnownResource || strings.HasPrefix(path, "/oauth2/")
 }
 
 // newOIDCHandler は OIDC Provider のハンドラを返す。issuer（server.public_url）が無ければ nil。
@@ -88,6 +96,11 @@ func newOIDCHandler(a *App) http.Handler {
 	mux.Handle(oidcAuthorize, a.withSession(ops))
 	mux.Handle(oidcResume, a.withSession(http.HandlerFunc(srv.resume)))
 	mux.HandleFunc(oidcUserinfo, srv.userinfo)
+	mux.HandleFunc(wellKnownAS, srv.authorizationServerMetadata)
+	mux.HandleFunc(wellKnownResource, srv.protectedResourceMetadata)
+	if a.par {
+		mux.HandleFunc(oidcPAR, srv.pushAuthorization)
+	}
 	if a.device != nil {
 		mux.Handle(oidcDeviceAuth, ops)
 		// 承認の画面はブラウザのセッションを見る。書き込み（POST）は別オリジンから受けない（CSRF。Cookie も SameSite=Lax）。
@@ -113,8 +126,8 @@ func newOIDCHandler(a *App) http.Handler {
 // CORS を付けない。プリフライトに答えたら true。
 func (s *oidcServer) cors(w http.ResponseWriter, r *http.Request) bool {
 	origin := r.Header.Get("Origin")
-	public := r.URL.Path == oidc.DiscoveryEndpoint || r.URL.Path == oidcKeys
-	browser := r.URL.Path == oidcToken || r.URL.Path == oidcUserinfo || r.URL.Path == oidcRevoke
+	public := r.URL.Path == oidc.DiscoveryEndpoint || r.URL.Path == oidcKeys || r.URL.Path == wellKnownAS || r.URL.Path == wellKnownResource
+	browser := r.URL.Path == oidcToken || r.URL.Path == oidcUserinfo || r.URL.Path == oidcRevoke || r.URL.Path == oidcPAR
 	if origin == "" || !public && !browser {
 		return false
 	}
@@ -240,7 +253,8 @@ func (a *App) hardwareAAL() bool { return a.methods.MaxAAL() >= 3 }
 // acrActive はフィーチャー acr（ADR 0093）が動いているか。
 func (a *App) acrActive() bool { return a.plan.IsActive(feature.ACR) }
 
-// discovery は Discovery の応答。zitadel/oidc の型に無い Front-Channel Logout と CIBA の項目を足す。
+// discovery は Discovery の応答。zitadel/oidc の型に無い Front-Channel Logout、CIBA と PAR（RFC 9126 5）の項目を足す。
+// OAuth 2.0 Authorization Server Metadata（RFC 8414）も同じ内容を返す。
 type discovery struct {
 	*oidc.DiscoveryConfiguration
 	FrontChannelLogoutSupported        bool `json:"frontchannel_logout_supported,omitempty"`
@@ -249,9 +263,17 @@ type discovery struct {
 	BackchannelAuthenticationEndpoint      string   `json:"backchannel_authentication_endpoint,omitempty"`
 	BackchannelTokenDeliveryModesSupported []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
 	BackchannelUserCodeParameterSupported  *bool    `json:"backchannel_user_code_parameter_supported,omitempty"`
+	// PAR（RFC 9126 5。フィーチャー par）。
+	PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint,omitempty"`
+	RequirePushedAuthorizationRequests bool   `json:"require_pushed_authorization_requests,omitempty"`
 }
 
 func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Response, error) {
+	return op.NewResponse(s.metadata()), nil
+}
+
+// metadata は Discovery と Authorization Server Metadata（RFC 8414）の中身。
+func (s *oidcServer) metadata() discovery {
 	d := discovery{DiscoveryConfiguration: &oidc.DiscoveryConfiguration{
 		Issuer:                            s.a.issuer,
 		AuthorizationEndpoint:             s.endpoint(oidcAuthorize),
@@ -298,7 +320,12 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		d.BackchannelUserCodeParameterSupported = &no
 		d.GrantTypesSupported = append(slices.Clone(d.GrantTypesSupported), oidc.GrantType(provider.GrantTypeCIBA))
 	}
-	return op.NewResponse(d), nil
+	// PAR（フィーチャー par。ADR 0112）。
+	if s.a.par {
+		d.PushedAuthorizationRequestEndpoint = s.endpoint(oidcPAR)
+		d.RequirePushedAuthorizationRequests = s.a.settings.RequirePushedAuthorizationRequests
+	}
+	return d
 }
 
 func (s *oidcServer) Keys(ctx context.Context, _ *op.Request[struct{}]) (*op.Response, error) {
@@ -322,6 +349,10 @@ type opClient struct {
 	c        port.Client
 	device   bool
 	exchange bool
+	// resource は認可要求の resource（RFC 8707）で、この連携先に許したリソース。resourceErr は resource が使えないときの
+	// invalid_target（Authorize が戻り先に返す。ADR 0112）。
+	resource    *port.OAuthResource
+	resourceErr error
 }
 
 func (s *oidcServer) opClient(c port.Client) opClient {
@@ -378,8 +409,11 @@ func (opClient) RestrictAdditionalAccessTokenScopes() func([]string) []string {
 	return func(s []string) []string { return s }
 }
 
-// IsScopeAllowed は op に、標準でないスコープ（attributes）を残させる。使えるかは authorize が scopes で決める。
-func (opClient) IsScopeAllowed(sc string) bool        { return sc == provider.ScopeAttributes }
+// IsScopeAllowed は op に、標準でないスコープ（attributes と、resource のリソースのスコープ）を残させる。使えるかは
+// authorize が決める。
+func (c opClient) IsScopeAllowed(sc string) bool {
+	return sc == provider.ScopeAttributes || (c.resource != nil && slices.Contains(c.resource.Scopes, sc))
+}
 func (opClient) IDTokenUserinfoClaimsAssertion() bool { return false }
 func (opClient) ClockSkew() time.Duration             { return 0 }
 
@@ -393,7 +427,17 @@ func (s *oidcServer) client(ctx context.Context, clientID string) (port.Client, 
 	return cl, err
 }
 
+// VerifyAuthRequest は認可要求の連携先を確かめる。request_uri（PAR。RFC 9126 4）なら、預かったパラメーターだけを認可要求として
+// 読み替える。ここで返すエラーは戻り先に転送しない（画面に出す）。
 func (s *oidcServer) VerifyAuthRequest(ctx context.Context, r *op.Request[oidc.AuthRequest]) (*op.ClientRequest[oidc.AuthRequest], error) {
+	pushed := false
+	if uri := r.Form.Get("request_uri"); uri != "" {
+		var err error
+		if r, err = s.pushedRequest(ctx, r, uri); err != nil {
+			return nil, err
+		}
+		pushed = true
+	}
 	if r.Data.RequestParam != "" {
 		return nil, oidc.ErrRequestNotSupported()
 	}
@@ -407,47 +451,66 @@ func (s *oidcServer) VerifyAuthRequest(ctx context.Context, r *op.Request[oidc.A
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
-	return &op.ClientRequest[oidc.AuthRequest]{Request: r, Client: s.opClient(cl)}, nil
+	if !pushed && s.parRequired(cl) {
+		return nil, oidc.ErrInvalidRequest().WithDescription("pushed authorization request required")
+	}
+	return s.clientRequest(ctx, r, cl)
+}
+
+// clientRequest は認可要求に連携先を結び付ける。resource（RFC 8707）があれば、この連携先に許したリソースを引いておく
+// （フィーチャー resource_indicators がオフなら resource は見ない）。
+func (s *oidcServer) clientRequest(ctx context.Context, r *op.Request[oidc.AuthRequest], cl port.Client) (*op.ClientRequest[oidc.AuthRequest], error) {
+	oc := s.opClient(cl)
+	if res := r.Form["resource"]; s.a.resources != nil && len(res) > 0 {
+		x, err := s.resource(ctx, res, cl.PublicID)
+		switch {
+		case errors.Is(err, provider.ErrInvalidTarget):
+			oc.resourceErr = errInvalidTarget()
+		case err != nil:
+			return nil, s.fail(ctx, err)
+		default:
+			oc.resource = &x
+		}
+	}
+	return &op.ClientRequest[oidc.AuthRequest]{Request: r, Client: oc}, nil
+}
+
+// resource は連携先 clientID が resource に指定したリソースを返す。1 つだけ受ける。使えなければ provider.ErrInvalidTarget。
+func (s *oidcServer) resource(ctx context.Context, res []string, clientID string) (port.OAuthResource, error) {
+	if len(res) != 1 {
+		return port.OAuthResource{}, provider.ErrInvalidTarget
+	}
+	var x port.OAuthResource
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		x, err = provider.ResourceForClient(ctx, tx, s.a.realm.ID, res[0], clientID)
+		return err
+	})
+	return x, err
+}
+
+// errInvalidTarget は resource が使えないときのエラー（RFC 8707 2）。
+func errInvalidTarget() *oidc.Error {
+	return &oidc.Error{ErrorType: "invalid_target", Description: "the requested resource is not allowed"}
 }
 
 // Authorize は検証済みの認可要求（戻り先・スコープ・response_type は op が確かめた）を受け、ログイン済みなら認可コードを、
 // そうでなければログイン画面への転送を返す。ここで返すエラーは戻り先に転送される。
 func (s *oidcServer) Authorize(ctx context.Context, r *op.ClientRequest[oidc.AuthRequest]) (*op.Redirect, error) {
-	d := r.Data
-	if !slices.Contains(d.Scopes, provider.ScopeOpenID) {
-		return nil, oidc.ErrInvalidScope().WithDescription("the openid scope is required")
-	}
-	if d.ResponseMode != "" && d.ResponseMode != oidc.ResponseModeQuery {
-		return nil, oidc.ErrInvalidRequest().WithDescription("response_mode is not supported")
-	}
-	// PKCE は S256 だけで、どの連携先にも求める（OAuth 2.0 Security BCP）。
-	if d.CodeChallengeMethod != oidc.CodeChallengeMethodS256 || !provider.ValidPKCEValue(d.CodeChallenge) {
-		return nil, oidc.ErrInvalidRequest().WithDescription("code_challenge with S256 is required")
+	req, err := s.authRequest(r)
+	if err != nil {
+		return nil, err
 	}
 	now := s.a.deps.Clock.Now()
-	req := provider.AuthRequest{RealmID: s.a.realm.ID, ClientID: d.ClientID, RedirectURI: d.RedirectURI, State: d.State, Nonce: d.Nonce,
-		CodeChallenge: d.CodeChallenge, ResponseMode: string(d.ResponseMode), MaxAge: d.MaxAge}
-	for _, sc := range d.Scopes {
-		if slices.Contains(s.scopes(), sc) && !slices.Contains(req.Scopes, sc) {
-			req.Scopes = append(req.Scopes, sc)
-		}
-	}
-	if slices.Contains(d.Prompt, oidc.PromptLogin) {
+	if slices.Contains(r.Data.Prompt, oidc.PromptLogin) {
 		// op は prompt=login を max_age=0 にする。ログイン画面から戻るまでの時間を許すため、時刻で比べる。
 		req.MaxAge, req.LoginAfter = nil, &now
-	}
-	if s.a.acrActive() {
-		values, err := requestedACR(d.ACRValues, r.Form.Get("claims"))
-		if err != nil {
-			return nil, err
-		}
-		req.ACR = acr.Requested(values, s.a.hardwareAAL())
 	}
 	au, ok := authFrom(ctx)
 	if ok && req.Fresh(au.AuthenticatedAt, now) && acrMet(req, au.AuthMethods) {
 		return s.complete(ctx, req, au)
 	}
-	if slices.Contains(d.Prompt, oidc.PromptNone) {
+	if slices.Contains(r.Data.Prompt, oidc.PromptNone) {
 		return nil, oidc.ErrLoginRequired()
 	}
 	if len(req.ACR) > 0 && req.LoginAfter == nil {
@@ -460,6 +523,46 @@ func (s *oidcServer) Authorize(ctx context.Context, r *op.ClientRequest[oidc.Aut
 		return nil, s.fail(ctx, err)
 	}
 	return op.NewRedirect(s.a.loginURL(rid)), nil
+}
+
+// authRequest は op が確かめた認可要求を、IAM の規則（openid、response_mode、PKCE、スコープ、acr、resource）で確かめて
+// provider.AuthRequest にする。ログインの状態は見ない（PAR の受け付けでも使う）。
+func (s *oidcServer) authRequest(r *op.ClientRequest[oidc.AuthRequest]) (provider.AuthRequest, error) {
+	d := r.Data
+	if !slices.Contains(d.Scopes, provider.ScopeOpenID) {
+		return provider.AuthRequest{}, oidc.ErrInvalidScope().WithDescription("the openid scope is required")
+	}
+	if d.ResponseMode != "" && d.ResponseMode != oidc.ResponseModeQuery {
+		return provider.AuthRequest{}, oidc.ErrInvalidRequest().WithDescription("response_mode is not supported")
+	}
+	// PKCE は S256 だけで、どの連携先にも求める（OAuth 2.0 Security BCP）。
+	if d.CodeChallengeMethod != oidc.CodeChallengeMethodS256 || !provider.ValidPKCEValue(d.CodeChallenge) {
+		return provider.AuthRequest{}, oidc.ErrInvalidRequest().WithDescription("code_challenge with S256 is required")
+	}
+	oc, _ := r.Client.(opClient)
+	if oc.resourceErr != nil {
+		return provider.AuthRequest{}, oc.resourceErr
+	}
+	req := provider.AuthRequest{RealmID: s.a.realm.ID, ClientID: d.ClientID, RedirectURI: d.RedirectURI, State: d.State, Nonce: d.Nonce,
+		CodeChallenge: d.CodeChallenge, ResponseMode: string(d.ResponseMode), MaxAge: d.MaxAge}
+	allowed := s.scopes()
+	if oc.resource != nil {
+		// 自前の API に向けた認可（RFC 8707、ADR 0112）。リソースのスコープも選べ、アクセストークンの aud はリソースの URI。
+		req.Resource, allowed = oc.resource.URI, append(slices.Clone(allowed), oc.resource.Scopes...)
+	}
+	for _, sc := range d.Scopes {
+		if slices.Contains(allowed, sc) && !slices.Contains(req.Scopes, sc) {
+			req.Scopes = append(req.Scopes, sc)
+		}
+	}
+	if s.a.acrActive() {
+		values, err := requestedACR(d.ACRValues, r.Form.Get("claims"))
+		if err != nil {
+			return provider.AuthRequest{}, err
+		}
+		req.ACR = acr.Requested(values, s.a.hardwareAAL())
+	}
+	return req, nil
 }
 
 // loginURL はログイン画面の URL。ログインの後で oidcResume に戻る。realm をパスで指すときは接頭辞を付ける。
@@ -640,6 +743,10 @@ func (s *oidcServer) CodeExchange(ctx context.Context, r *op.ClientRequest[oidc.
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
+	// token エンドポイントの resource（RFC 8707 2.2）は、認可要求で指定したものと同じ 1 つに限る（ADR 0112）。
+	if res := s.tokenResources(r.Form); len(res) > 0 && (len(res) != 1 || res[0] != c.Resource || c.Resource == "") {
+		return nil, errInvalidTarget()
+	}
 	var out provider.Issued
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
@@ -653,6 +760,14 @@ func (s *oidcServer) CodeExchange(ctx context.Context, r *op.ClientRequest[oidc.
 		return nil, s.fail(ctx, err)
 	}
 	return tokenResponse(out), nil
+}
+
+// tokenResources は token エンドポイントの resource（RFC 8707）。フィーチャー resource_indicators がオフなら見ない。
+func (s *oidcServer) tokenResources(form url.Values) []string {
+	if s.a.resources == nil {
+		return nil
+	}
+	return form["resource"]
 }
 
 func tokenResponse(out provider.Issued) *op.Response {
@@ -670,11 +785,14 @@ func (s *oidcServer) RefreshToken(ctx context.Context, r *op.ClientRequest[oidc.
 	var out provider.Refreshed
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		out, err = s.a.tokens.Refresh(ctx, tx, cl, r.Data.RefreshToken, requestID(ctx))
+		out, err = s.a.tokens.Refresh(ctx, tx, cl, r.Data.RefreshToken, s.tokenResources(r.Form), requestID(ctx))
 		return err
 	})
 	if errors.Is(err, provider.ErrInvalidGrant) || (err == nil && out.Reused) {
 		return nil, oidc.ErrInvalidGrant()
+	}
+	if errors.Is(err, provider.ErrInvalidTarget) {
+		return nil, errInvalidTarget()
 	}
 	if err != nil {
 		return nil, s.fail(ctx, err)
@@ -690,6 +808,11 @@ func (s *oidcServer) Introspect(ctx context.Context, r *op.Request[op.Introspect
 	var out provider.Introspection
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
+		if serviceaccount.IsAccessToken(r.Data.Token) {
+			// サービスアカウントの、自前の API に向けたトークン（RFC 8707、ADR 0112）。管理 API 向けのものは active: false。
+			out, err = s.a.resourceTokenIntrospection(ctx, tx, r.Data.Token)
+			return err
+		}
 		if pat.Looks(r.Data.Token) {
 			// 本人の Personal Access Token（ADR 0109）。フィーチャーが動いていなければ active: false。
 			out, err = s.a.patIntrospection(ctx, tx, r.Data.Token)
@@ -733,11 +856,16 @@ func (s *oidcServer) userinfo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if provider.ResourceBound(a.Grant) {
+			// aud が自前の API のトークンは、IAM 自身の UserInfo では使えない（RFC 8707。ADR 0112）。
+			return provider.ErrInvalidToken
+		}
 		claims, err = s.a.tokens.UserInfo(ctx, tx, a)
 		return err
 	})
 	if errors.Is(err, provider.ErrInvalidToken) {
-		w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+		// RFC 9728 5.1：リソースのメタデータの場所を知らせる。
+		w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token", resource_metadata="`+s.endpoint(wellKnownResource)+`"`)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
 		return
 	}

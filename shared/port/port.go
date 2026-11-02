@@ -80,6 +80,8 @@ type Tx interface {
 	WSFed() WSFedRepo
 	// SAMLIdP は SAML の SP の登録と IdP の署名の証明書（フィーチャー saml_idp。ADR 0115）。
 	SAMLIdP() SAMLIdPRepo
+	// OAuthResources は自前の API（リソースサーバー）の登録（フィーチャー resource_indicators。ADR 0112）。
+	OAuthResources() OAuthResourceRepo
 }
 
 // Realm はユーザー集合の単位（design.md 3.1）。

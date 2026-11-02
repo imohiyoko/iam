@@ -92,6 +92,10 @@ type Authenticator struct {
 	Enabled bool
 	// DeliveryOnly は通知の配信用か（ロールの付与で決まる。authn は authz を import しないため、組み立てる側が渡す）。
 	DeliveryOnly func(ctx context.Context, tx port.Tx, a port.ServiceAccount) (bool, error)
+	// Resource は、サービスアカウント accountID が resource（RFC 8707）に指定してよい自前の API を返す（使えなければ
+	// errs.Invalid の invalid_target）。フィーチャー resource_indicators が動いていなければ nil で、resource は受け付けず、
+	// aud を持つトークンも使えない（ADR 0112）。
+	Resource func(ctx context.Context, tx port.Tx, realmID, uri, accountID string) (port.OAuthResource, error)
 }
 
 // Authenticated は確かめたサービスアカウントと、その認証の手段・時刻（認可の条件の文脈。ADR 0084）。
@@ -119,6 +123,10 @@ func (au Authenticator) Authenticate(ctx context.Context, tx port.Tx, realmID, b
 		if err != nil {
 			return Authenticated{}, err
 		}
+		if t.Audience != "" {
+			// 自前の API に向けたトークン（ADR 0112）は管理 API では使えない。
+			return Authenticated{}, ErrInvalid
+		}
 		accountID, out.Method, out.AuthTime = t.ServiceAccountID, method, t.CreatedAt
 	} else {
 		c, err := checkSecret(ctx, tx, realmID, bearer, TypeAPIKey, now)
@@ -136,6 +144,36 @@ func (au Authenticator) Authenticate(ctx context.Context, tx port.Tx, realmID, b
 	}
 	out.Account = a
 	return out, nil
+}
+
+// ResourceToken は自前の API に向けたアクセストークン（RFC 8707。ADR 0112）を確かめ、トークンとサービスアカウントを返す
+// （イントロスペクション）。管理 API 向けのトークン、使えないサービスアカウント、消えたリソース・許可から外れたサービスアカウント、
+// フィーチャーが止まっているときは ErrInvalid。
+func (au Authenticator) ResourceToken(ctx context.Context, tx port.Tx, realmID, bearer string, now time.Time) (port.ServiceAccountToken, port.ServiceAccount, error) {
+	if au.Resource == nil || !strings.HasPrefix(bearer, tokenPrefix) {
+		return port.ServiceAccountToken{}, port.ServiceAccount{}, ErrInvalid
+	}
+	t, _, err := checkToken(ctx, tx, realmID, bearer, now)
+	if err != nil {
+		return port.ServiceAccountToken{}, port.ServiceAccount{}, err
+	}
+	if t.Audience == "" {
+		return port.ServiceAccountToken{}, port.ServiceAccount{}, ErrInvalid
+	}
+	a, err := tx.ServiceAccounts().Get(ctx, realmID, t.ServiceAccountID)
+	if err != nil {
+		return port.ServiceAccountToken{}, port.ServiceAccount{}, invalidOr(err)
+	}
+	if err := au.usable(ctx, tx, a, now); err != nil {
+		return port.ServiceAccountToken{}, port.ServiceAccount{}, err
+	}
+	if _, err := au.Resource(ctx, tx, realmID, t.Audience, a.ID); err != nil {
+		if errors.Is(err, errs.Invalid) {
+			return port.ServiceAccountToken{}, port.ServiceAccount{}, ErrInvalid
+		}
+		return port.ServiceAccountToken{}, port.ServiceAccount{}, err
+	}
+	return t, a, nil
 }
 
 // usable はサービスアカウントが now に使えるか（削除・有効期間・停止・Org・フィーチャー）を確かめる。

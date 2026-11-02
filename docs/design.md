@@ -194,6 +194,8 @@ authn_retired_credential_lookups  realm_id, method, lookup, lookup_key_id, retir
 service_accounts     id, realm_id, org_id, name, valid_from, valid_until, created_at
 service_account_credentials  id, service_account_id, type（client_secret / private_key_jwt / api_key）
                      secret_hash or public_key, expires_at, revoked_*
+service_account_tokens  id, service_account_id, credential_id, hash, audience, scopes, expires_at
+                     audience が空なら管理 API 向け、あれば自前の API 向け（5.10、ADR 0112）
 
 orgs                 id, realm_id, kind（personal / shared）, personal_owner_id, parent_org_id（11.4）
                      slug, name, valid_from, valid_until, timezone（NULL=realm の既定）, session_settings, created_at
@@ -226,6 +228,8 @@ wsfed_certificates   realm_id, key_id（signing_keys の ID）, der, PK (realm_i
 saml_service_providers  id, realm_id, entity_id, name, config（ACS・SLO・証明書・NameID・属性・署名と暗号化。JSON）
                      UNIQUE (realm_id, entity_id)。SAML の SP（5.9、ADR 0115）
 saml_idp_certificates  realm_id, key_id, der, PK (realm_id, key_id)。SAML の IdP の署名鍵の自己署名の証明書
+oauth_resources      id, realm_id, uri（resource の値で aud になる）, name, scopes, clients, service_accounts
+                     UNIQUE (realm_id, uri)。自前の API（RFC 8707。5.10、ADR 0112）
 
 user_attributes      user_id, key, value, PK (user_id, key)（11.7 の汎用形。アダプタが別の持ち方を選んでもよい）
 
@@ -607,6 +611,7 @@ GET    /v1/admin/signing-keys
 - ログアウトに関わる登録：`post_logout_redirect_uris`（完全一致）、`backchannel_logout_uri`（5.2）、`frontchannel_logout_uri` と
   `frontchannel_logout_session_required`（5.6。フィーチャー `oidc_logout`）
 - 機密の連携先ごとに、Token Exchange で許す aud・受け付ける元の連携先・なりすましの可否を管理 API で置く（既定は何も許さない。5.7）
+- 連携先ごとに、認可要求を PAR で送らせられる（`require_pushed_authorization_requests`。フィーチャー `par`。5.10）
 
 ### 5.6 連携先からのログアウト
 
@@ -663,6 +668,24 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 - `/saml/idp/slo`：署名した LogoutRequest の本人（NameID・SessionIndex）がブラウザのセッションの本人ならセッションを失効させ（`POST /v1/logout` と同じ）、
   SP の SLO へ署名した LogoutResponse を返す。ほかの SP への伝播はしない
 - SP は管理 API（`/v1/admin/saml/service-providers`、`clients:manage`）で realm ごとに登録する。メタデータは `/saml/idp/metadata`（署名付き）
+
+### 5.10 PAR・メタデータ・自前の API に向けたトークン
+
+ADR 0112。
+
+- PAR（RFC 9126。フィーチャー `par`、既定オフ）：`POST /oauth2/par` で連携先を token エンドポイントと同じ方法で認証し、
+  authorize と同じ規則で確かめた認可要求を EphemeralStore に封をして預け、`request_uri`（既定 1 分、`oidc.par_request_uri_ttl`）を返す。
+  authorize の `request_uri` は 1 回だけ使え、預けたパラメーターだけを読む。連携先の登録か realm の設定
+  （既定の realm は `realm.require_pushed_authorization_requests`）で、PAR を通らない認可要求を拒める
+- メタデータ：`/.well-known/oauth-authorization-server`（RFC 8414。Discovery と同じ内容）と `/.well-known/oauth-protected-resource`
+  （RFC 9728。IAM 自身の UserInfo）。パスのある issuer（11.1）には `/.well-known/…/realms/{slug}` でも答える。UserInfo の `401` に
+  `resource_metadata` を付ける
+- 自前の API（RFC 8707。フィーチャー `resource_indicators`、既定オフ）：管理 API `/v1/admin/oauth/resources`（`clients:manage`）で
+  realm にリソース（URI・スコープ・要求してよい連携先とサービスアカウント）を登録する。認可コードフローと
+  サービスアカウントの `POST /v1/admin/token` で `resource` を 1 つ指定すると、アクセストークンの `aud` はその URI、スコープは
+  リソースのスコープから選ぶ。token エンドポイントの `resource` は認可で選んだものだけ。違えば `invalid_target`
+- リソースに向けたトークンは UserInfo と管理 API では使えない。イントロスペクションは `aud` とスコープを返す。リソースの削除・
+  許可の取り消し・フィーチャーの無効化は、発行済みのトークンにも次の検証から効く
 
 ## 6. 監査ログとイベント出力
 
@@ -864,6 +887,8 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | WS-Federation（5.8、ADR 0110） | オフ | ― | `/wsfed` とメタデータは 404、RP の管理 API は `404 wsfed_disabled`。無効化は RP と署名の証明書を消して完了 |
 | CIBA（11.19、ADR 0114） | オフ | ― | backchannel authentication エンドポイントと本人の API は 404、CIBA の grant は `unsupported_grant_type`。Discovery に出さない。無効化は連携先の登録を外して完了 |
 | SAML 2.0 の IdP（5.9、ADR 0115） | オフ | ― | `/saml/idp/*` は 404、SP の管理 API は `404 saml_idp_disabled`。無効化は SP の登録と署名の証明書を消して完了 |
+| PAR（5.10、ADR 0112） | オフ | ― | `/oauth2/par` は 404、`request_uri` は `request_uri_not_supported`、PAR の必須は効かず新しく置けない。無効化で連携先と realm の必須を外して完了 |
+| 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
 
 ### 11.1 複数 realm
 
@@ -888,6 +913,7 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 
 - 管理 API の `/v1/admin/service-accounts` で作る（権限 `service_accounts:manage`）。realm か Org（`org_id`）に属し、有効期間・停止（4.7）・論理削除を持つ。Org が削除・停止・有効期間の外なら使えない
 - `POST /v1/admin/token`（管理 API）が client credentials で不透明なアクセストークン（`sat_…`、既定 10 分）を発行する。検証のたびに状態を確かめるので、停止・削除・認証情報の無効化は次の要求から効く
+- `resource`（と `scope`）を付ければ、管理 API ではなく登録した自前の API に向けたトークンになる（フィーチャー `resource_indicators`。5.10、ADR 0112）
 - 配信用（2.4）は `iam service-account create` で作る。フィーチャーがオフでも作れ、認証できるのは配信用だけ
 - Org の管理者が公開 API で扱う口は後に回す
 

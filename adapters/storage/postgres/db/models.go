@@ -40,6 +40,7 @@ type AuthnClient struct {
 	FrontchannelLogoutSessionRequired int64
 	DeviceGrant                       int64
 	TokenExchange                     []byte
+	RequirePar                        int64
 	CibaMode                          string
 	CibaNotificationEndpoint          string
 }
@@ -89,6 +90,18 @@ type AuthnKnownDevice struct {
 	Data       []byte
 	CreatedAt  string
 	LastSeenAt string
+}
+
+type AuthnOauthResource struct {
+	ID              string
+	RealmID         string
+	Uri             string
+	Name            string
+	Scopes          string
+	Clients         string
+	ServiceAccounts string
+	CreatedAt       string
+	UpdatedAt       string
 }
 
 type AuthnOidcGrant struct {
@@ -228,6 +241,8 @@ type AuthnServiceAccountToken struct {
 	TokenHash        []byte
 	CreatedAt        string
 	ExpiresAt        string
+	Audience         string
+	Scopes           string
 }
 
 type AuthnSession struct {

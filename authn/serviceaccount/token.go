@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
@@ -33,7 +35,14 @@ var (
 	ErrUnsupportedGrant = errs.WithCode(errs.KindInvalid, "unsupported_grant_type", "unsupported grant_type")
 	// ErrInvalidRequest は認証の方法が無いか、複数ある。
 	ErrInvalidRequest = errs.WithCode(errs.KindInvalid, "invalid_request", "exactly one client authentication method is required")
+	// ErrInvalidTarget は resource が使えない（RFC 8707 2。登録されていない・許されていない・2 つ以上・フィーチャーが止まっている）。
+	ErrInvalidTarget = errs.WithCode(errs.KindInvalid, "invalid_target", "invalid resource")
+	// ErrInvalidScope は resource のスコープとして許されていないスコープ（RFC 6749 5.2）。
+	ErrInvalidScope = errs.WithCode(errs.KindInvalid, "invalid_scope", "invalid scope")
 )
+
+// maxScopeParam は scope の長さの上限。
+const maxScopeParam = 4096
 
 // AssertionReplay は client assertion の jti を覚える（1回だけ使える。RFC 7523 3）。
 type AssertionReplay interface {
@@ -47,6 +56,9 @@ type TokenRequest struct {
 	ClientSecret  string
 	AssertionType string
 	Assertion     string
+	// Resources は resource（RFC 8707）。指定するなら 1 つだけ。Scope は resource のスコープ（空白区切り）。resource が無ければ使わない。
+	Resources []string
+	Scope     string
 }
 
 // Issued は発行したアクセストークン。Token は1回だけ返す。
@@ -54,6 +66,9 @@ type Issued struct {
 	Token     string
 	ExpiresIn time.Duration
 	Account   port.ServiceAccount
+	// Audience と Scopes は自前の API に向けたトークンの aud とスコープ（ADR 0112）。管理 API 向けなら空。
+	Audience string
+	Scopes   []string
 }
 
 // Token はクライアントを認証し、アクセストークンを発行する。認証の失敗は ErrInvalidClient、ストレージの障害はそれ以外のエラー。
@@ -85,21 +100,60 @@ func (s *Service) Token(ctx context.Context, tx port.Tx, realmID string, req Tok
 	if err := s.usable(ctx, tx, a, now); err != nil {
 		return Issued{}, clientErr(err)
 	}
+	audience, scopes, err := s.target(ctx, tx, realmID, a.ID, req)
+	if err != nil {
+		return Issued{}, err
+	}
 	secret, h, err := newSecret()
 	if err != nil {
 		return Issued{}, err
 	}
 	t := port.ServiceAccountToken{ID: id.NewExternal(id.SAToken), RealmID: realmID, ServiceAccountID: a.ID, CredentialID: c.ID,
-		Hash: h, CreatedAt: now, ExpiresAt: now.Add(s.TokenTTL)}
+		Hash: h, CreatedAt: now, ExpiresAt: now.Add(s.TokenTTL), Audience: audience, Scopes: scopes}
 	if err := tx.ServiceAccounts().CreateToken(ctx, t); err != nil {
 		return Issued{}, err
 	}
 	actor := audit.Actor{Type: "service_account", ID: a.ID}
-	if err := s.record(ctx, tx, realmID, "service_account.token_issued", actor, requestID,
-		map[string]any{"service_account_id": a.ID, "credential_id": c.ID, "token_id": t.ID}); err != nil {
+	details := map[string]any{"service_account_id": a.ID, "credential_id": c.ID, "token_id": t.ID}
+	if audience != "" {
+		details["resource"], details["scopes"] = audience, scopes
+	}
+	if err := s.record(ctx, tx, realmID, "service_account.token_issued", actor, requestID, details); err != nil {
 		return Issued{}, err
 	}
-	return Issued{Token: t.ID + "." + secret, ExpiresIn: s.TokenTTL, Account: a}, nil
+	return Issued{Token: t.ID + "." + secret, ExpiresIn: s.TokenTTL, Account: a, Audience: audience, Scopes: scopes}, nil
+}
+
+// target は resource と scope から、自前の API に向けたトークンの aud とスコープを決める（RFC 8707、ADR 0112）。resource が
+// 無ければ管理 API 向け（空）。フィーチャーが止まっているときの resource は、管理 API 向けのトークンを渡さないよう invalid_target。
+func (s *Service) target(ctx context.Context, tx port.Tx, realmID, accountID string, req TokenRequest) (string, []string, error) {
+	if len(req.Resources) == 0 {
+		return "", nil, nil
+	}
+	if s.Resource == nil || len(req.Resources) != 1 {
+		return "", nil, ErrInvalidTarget
+	}
+	x, err := s.Resource(ctx, tx, realmID, req.Resources[0], accountID)
+	if errors.Is(err, errs.Invalid) {
+		return "", nil, ErrInvalidTarget
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	if len(req.Scope) > maxScopeParam {
+		return "", nil, ErrInvalidScope
+	}
+	requested := strings.Fields(req.Scope)
+	if len(requested) == 0 {
+		return x.URI, slices.Clone(x.Scopes), nil
+	}
+	for _, sc := range requested {
+		if !slices.Contains(x.Scopes, sc) {
+			return "", nil, ErrInvalidScope
+		}
+	}
+	slices.Sort(requested)
+	return x.URI, slices.Compact(requested), nil
 }
 
 // clientErr は認証の失敗を ErrInvalidClient にする（ストレージの障害はそのまま）。

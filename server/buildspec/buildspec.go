@@ -95,6 +95,9 @@ var featureCatalog = map[string]struct {
 	feature.CIBA: {provider.CIBAFeature, module + "/features/ciba"},
 	// ADR 0115。
 	feature.SAMLIdP: {samlidp.Feature, module + "/features/samlidp"},
+	// ADR 0112。
+	feature.PAR:                {provider.PARFeature, module + "/features/par"},
+	feature.ResourceIndicators: {provider.ResourceFeature, module + "/features/resourceindicators"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

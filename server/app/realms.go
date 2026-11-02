@@ -45,6 +45,8 @@ type realmSettings struct {
 	PasskeyPolicy *attestation.Policy `json:"passkey_policy"`
 	// DisabledMethods はこの realm で止める認証方式のプラグイン（ADR 0104。SMS など制限付きの認証器を realm ごとに止める）。
 	DisabledMethods []string `json:"disabled_methods"`
+	// RequirePushedAuthorizationRequests はこの realm のすべての連携先に PAR（RFC 9126）を求める（フィーチャー par。ADR 0112）。
+	RequirePushedAuthorizationRequests bool `json:"require_pushed_authorization_requests"`
 }
 
 // maxDisabledMethods は DisabledMethods の件数の上限（API の maxItems と同じ）。
@@ -66,6 +68,7 @@ func defaultRealmSettings(c config.Realm) realmSettings {
 		OrgDeletionGraceSeconds: int64(c.OrgDeletionGrace.D() / time.Second), UserDeletionGraceSeconds: int64(c.UserDeletionGrace.D() / time.Second),
 		EmailStorage: c.EmailStorage, QuotaCount: realmQuotaSettings(c.QuotaCount), DeclaredContextClients: slices.Clone(c.DeclaredContextClients),
 		PasskeyPolicy: normalizedPolicy(c.PasskeyPolicy), DisabledMethods: slices.Clone(c.DisabledMethods),
+		RequirePushedAuthorizationRequests: c.RequirePushedAuthorizationRequests,
 	}
 }
 
@@ -419,6 +422,17 @@ func (a *App) resolve(r *http.Request) (ra *App, rest string, ok bool) {
 	defer t.mu.RUnlock()
 	if x := t.byHost[normalizeHost(r.Host)]; x != nil {
 		return x, "", true
+	}
+	// RFC 8414 3.1・RFC 9728 3.1：issuer（resource）にパスがあれば、既知の場所はホストの直下の .well-known の後ろにパスを置く
+	// （/.well-known/oauth-authorization-server/realms/{slug}）。/realms/{slug}/.well-known/... と同じものを返す（ADR 0112）。
+	for _, wk := range []string{wellKnownAS, wellKnownResource} {
+		if tail, ok := strings.CutPrefix(r.URL.Path, wk+realmPathPrefix); ok {
+			x := t.bySlug[tail]
+			if x == nil || len(x.realm.Hosts) > 0 {
+				return nil, "", false
+			}
+			return x, wk, true
+		}
 	}
 	if !strings.HasPrefix(r.URL.Path, realmPathPrefix) {
 		return nil, "", true

@@ -269,7 +269,8 @@ func (q *Queries) CreateServiceAccountCredential(ctx context.Context, arg Create
 }
 
 const createServiceAccountToken = `-- name: CreateServiceAccountToken :exec
-INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_service_account_tokens (id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at, audience, scopes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateServiceAccountTokenParams struct {
@@ -280,6 +281,8 @@ type CreateServiceAccountTokenParams struct {
 	TokenHash        []byte
 	CreatedAt        string
 	ExpiresAt        string
+	Audience         string
+	Scopes           string
 }
 
 func (q *Queries) CreateServiceAccountToken(ctx context.Context, arg CreateServiceAccountTokenParams) error {
@@ -291,6 +294,8 @@ func (q *Queries) CreateServiceAccountToken(ctx context.Context, arg CreateServi
 		arg.TokenHash,
 		arg.CreatedAt,
 		arg.ExpiresAt,
+		arg.Audience,
+		arg.Scopes,
 	)
 	return err
 }
@@ -973,7 +978,7 @@ func (q *Queries) GetServiceAccountCredential(ctx context.Context, arg GetServic
 }
 
 const getServiceAccountToken = `-- name: GetServiceAccountToken :one
-SELECT id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at FROM authn_service_account_tokens WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, service_account_id, credential_id, token_hash, created_at, expires_at, audience, scopes FROM authn_service_account_tokens WHERE realm_id = ? AND id = ?
 `
 
 type GetServiceAccountTokenParams struct {
@@ -992,6 +997,8 @@ func (q *Queries) GetServiceAccountToken(ctx context.Context, arg GetServiceAcco
 		&i.TokenHash,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.Audience,
+		&i.Scopes,
 	)
 	return i, err
 }

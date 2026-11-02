@@ -63,6 +63,10 @@ const (
 	CIBA = "ciba"
 	// SAMLIdP は SAML 2.0 の IdP（iam が IdP。ADR 0115）。
 	SAMLIdP = "saml_idp"
+	// PAR は Pushed Authorization Requests（RFC 9126。ADR 0112）。
+	PAR = "par"
+	// ResourceIndicators は自前の API（リソースサーバー）向けのトークン（RFC 8707。ADR 0112）。
+	ResourceIndicators = "resource_indicators"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

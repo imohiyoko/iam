@@ -17,6 +17,7 @@ import (
 
 // clientOut は連携先を返す形にする。deviceFlow はフィーチャー device_flow が動いているか（オフなら許可の有無を返さない）。
 // ciba はフィーチャー ciba が動いているか（オフなら CIBA の登録を返さない。ADR 0114）。
+// require_pushed_authorization_requests は PAR を求める連携先だけ返す（求めないなら省く）。
 func clientOut(c port.Client, secret string, deviceFlow, ciba bool) (adminapi.Client, error) {
 	out := adminapi.Client{ClientId: c.PublicID, Name: c.Name, TrustLevel: adminapi.ClientTrustLevel(c.TrustLevel),
 		RedirectUris: c.RedirectURIs, PostLogoutRedirectUris: c.PostLogoutRedirectURIs, TokenEndpointAuthMethod: c.AuthMethod,
@@ -53,6 +54,9 @@ func clientOut(c port.Client, secret string, deviceFlow, ciba bool) (adminapi.Cl
 			out.BackchannelClientNotificationEndpoint = &c.CIBANotificationEndpoint
 		}
 	}
+	if c.RequirePAR {
+		out.RequirePushedAuthorizationRequests = &c.RequirePAR
+	}
 	return out, nil
 }
 
@@ -81,6 +85,9 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.FrontchannelLogoutSessionRequired != nil {
 		in.FrontchannelLogoutSessionRequired = *b.FrontchannelLogoutSessionRequired
+	}
+	if b.RequirePushedAuthorizationRequests != nil {
+		in.RequirePAR = *b.RequirePushedAuthorizationRequests
 	}
 	if b.Jwks != nil {
 		raw, err := json.Marshal(*b.Jwks)

@@ -120,6 +120,8 @@ const (
 	WSFedRelyingParty Prefix = "wrp"
 	// SAMLServiceProvider は SAML の SP の登録（ADR 0115）。
 	SAMLServiceProvider Prefix = "ssp"
+	// OAuthResource は自前の API（リソースサーバー。RFC 8707、ADR 0112）。
+	OAuthResource Prefix = "rsc"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。
