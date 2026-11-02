@@ -196,14 +196,14 @@ func testEventSubscriptions(t *testing.T, h Harness) {
 		if err != nil || got.URL != a.URL || !slices.Equal(got.EventTypes, a.EventTypes) || got.PII != "omit" || !got.Enabled ||
 			string(got.SecretCiphertext) != string(a.SecretCiphertext) || got.CursorSeq != 7 || got.CreatedBy != "usr_x" ||
 			!got.CreatedAt.Equal(a.CreatedAt) || got.NextAttemptAt != nil || got.LastDeliveredAt != nil {
-			return fmt.Errorf("Get = %+v, %v", got, err)
+			return fmt.Errorf("subscriptions Get = %+v, %v", got, err)
 		}
 		if _, err := tx.EventSubscriptions().Get(ctx, other, a.ID); !errors.Is(err, errs.NotFound) {
-			return fmt.Errorf("Get from another realm: want NotFound, got %v", err)
+			return fmt.Errorf("subscriptions Get from another realm: want NotFound, got %v", err)
 		}
 		list, err := tx.EventSubscriptions().List(ctx, r)
 		if err != nil || len(list) != 2 || list[0].ID != b.ID || list[1].ID != a.ID {
-			return fmt.Errorf("List = %+v, %v", list, err)
+			return fmt.Errorf("subscriptions List = %+v, %v", list, err)
 		}
 		a.URL, a.EventTypes, a.PII, a.Enabled, a.SecretCiphertext, a.UpdatedAt = "https://other.example.com/", []string{}, "pseudonymize", false, []byte{9}, T0.Add(time.Hour)
 		a.CursorSeq = 1000 // Update は配送の状態を変えない
@@ -213,7 +213,7 @@ func testEventSubscriptions(t *testing.T, h Harness) {
 		got, err = tx.EventSubscriptions().Get(ctx, r, a.ID)
 		if err != nil || got.URL != a.URL || len(got.EventTypes) != 0 || got.PII != "pseudonymize" || got.Enabled || string(got.SecretCiphertext) != "\x09" ||
 			!got.UpdatedAt.Equal(a.UpdatedAt) || got.CursorSeq != 7 {
-			return fmt.Errorf("Get after Update = %+v, %v", got, err)
+			return fmt.Errorf("subscriptions Get after Update = %+v, %v", got, err)
 		}
 		next, at := T0.Add(time.Minute), T0.Add(2*time.Minute)
 		if err := tx.EventSubscriptions().SetDelivery(ctx, r, a.ID, port.EventSubscriptionDelivery{CursorSeq: 20, Failures: 2, NextAttemptAt: &next,
@@ -228,7 +228,7 @@ func testEventSubscriptions(t *testing.T, h Harness) {
 		got, err = tx.EventSubscriptions().Get(ctx, r, a.ID)
 		if err != nil || got.CursorSeq != 20 || got.Failures != 3 || got.NextAttemptAt == nil || !got.NextAttemptAt.Equal(next) || got.LastError != "timeout" ||
 			got.LastDeliveredAt == nil || !got.LastDeliveredAt.Equal(at) || got.URL != a.URL {
-			return fmt.Errorf("Get after SetDelivery = %+v, %v", got, err)
+			return fmt.Errorf("subscriptions Get after SetDelivery = %+v, %v", got, err)
 		}
 		for _, err := range []error{
 			tx.EventSubscriptions().Update(ctx, port.EventSubscription{ID: a.ID, RealmID: other}),
@@ -243,7 +243,7 @@ func testEventSubscriptions(t *testing.T, h Harness) {
 			return err
 		}
 		if _, err := tx.EventSubscriptions().Get(ctx, r, a.ID); !errors.Is(err, errs.NotFound) {
-			return fmt.Errorf("Get after Delete: want NotFound, got %v", err)
+			return fmt.Errorf("subscriptions Get after Delete: want NotFound, got %v", err)
 		}
 		return nil
 	})
@@ -255,18 +255,18 @@ func testEventSubscriptions(t *testing.T, h Harness) {
 			}
 		}
 		if n, err := tx.EventSubscriptions().Count(ctx); err != nil || n != 3 {
-			return fmt.Errorf("Count = %d, %v", n, err)
+			return fmt.Errorf("subscriptions Count = %d, %v", n, err)
 		}
 		ids, err := tx.EventSubscriptions().Purge(ctx, 2)
 		if err != nil || len(ids) != 2 {
-			return fmt.Errorf("Purge(2) = %v, %v", ids, err)
+			return fmt.Errorf("subscriptions Purge(2) = %v, %v", ids, err)
 		}
 		ids, err = tx.EventSubscriptions().Purge(ctx, 10)
 		if err != nil || len(ids) != 1 {
-			return fmt.Errorf("Purge = %v, %v", ids, err)
+			return fmt.Errorf("subscriptions Purge = %v, %v", ids, err)
 		}
 		if n, err := tx.EventSubscriptions().Count(ctx); err != nil || n != 0 {
-			return fmt.Errorf("Count after Purge = %d, %v", n, err)
+			return fmt.Errorf("subscriptions Count after Purge = %d, %v", n, err)
 		}
 		return nil
 	})
@@ -298,10 +298,10 @@ func testEventSubscriptionsDue(t *testing.T, h Harness) {
 			got = append(got, d.ID)
 		}
 		if want := []string{fresh.ID, waitedLong.ID, waited.ID}; !slices.Equal(got, want) {
-			return fmt.Errorf("Due = %v, want %v", got, want)
+			return fmt.Errorf("subscriptions Due = %v, want %v", got, want)
 		}
 		if due, err := tx.EventSubscriptions().Due(ctx, now, 1); err != nil || len(due) != 1 || due[0].ID != fresh.ID {
-			return fmt.Errorf("Due(1) = %+v, %v", due, err)
+			return fmt.Errorf("subscriptions Due(1) = %+v, %v", due, err)
 		}
 		return nil
 	})
