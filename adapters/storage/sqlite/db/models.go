@@ -38,6 +38,7 @@ type AuthnClient struct {
 	UpdatedAt                         string
 	FrontchannelLogoutUri             string
 	FrontchannelLogoutSessionRequired int64
+	TokenExchange                     []byte
 }
 
 type AuthnConnection struct {
@@ -80,6 +81,11 @@ type AuthnOidcGrant struct {
 	RevokedAt    sql.NullString
 	RevokeReason string
 	Acr          string
+	Exchange     string
+	ParentID     string
+	ActorUserID  string
+	Act          []byte
+	Audiences    string
 }
 
 type AuthnOidcToken struct {

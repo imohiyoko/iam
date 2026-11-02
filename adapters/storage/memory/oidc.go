@@ -18,6 +18,7 @@ func cloneClient(c port.Client) port.Client {
 	c.PostLogoutRedirectURIs = slices.Clone(c.PostLogoutRedirectURIs)
 	c.SecretHash = slices.Clone(c.SecretHash)
 	c.JWKS = slices.Clone(c.JWKS)
+	c.TokenExchange = slices.Clone(c.TokenExchange)
 	return c
 }
 
@@ -135,6 +136,10 @@ type grants struct{ t *tx }
 func cloneGrant(g port.Grant) port.Grant {
 	g.Scopes, g.AuthMethods = slices.Clone(g.Scopes), slices.Clone(g.AuthMethods)
 	g.RevokedAt = cloneTime(g.RevokedAt)
+	g.Act = slices.Clone(g.Act)
+	if g.Audiences = slices.Clone(g.Audiences); len(g.Audiences) == 0 {
+		g.Audiences = nil
+	}
 	return g
 }
 
@@ -185,6 +190,31 @@ func (r grants) Revoke(_ context.Context, realmID, id string, at time.Time, reas
 		setKey(r.t, r.t.s.grants, id, g)
 	}
 	return nil
+}
+
+func (r grants) CountExchanged(_ context.Context, exchange string) (int, error) {
+	n := 0
+	for _, g := range r.t.s.grants {
+		if g.Exchange == exchange {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r grants) PurgeExchanged(_ context.Context, exchange string, limit int) (int, error) {
+	var ids []string
+	for _, g := range r.t.s.grants {
+		if g.Exchange == exchange {
+			ids = append(ids, g.ID)
+		}
+	}
+	slices.Sort(ids)
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	eraseGrants(r.t, func(g port.Grant) bool { return slices.Contains(ids, g.ID) })
+	return len(ids), nil
 }
 
 // ---------------------------------------------------------------------------

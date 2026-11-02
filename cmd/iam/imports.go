@@ -11,6 +11,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/eventsubscriptions"
 	_ "github.com/imohiyoko/iam/features/flowhooks"
 	_ "github.com/imohiyoko/iam/features/hotp"
+	_ "github.com/imohiyoko/iam/features/impersonation"
 	_ "github.com/imohiyoko/iam/features/multirealm"
 	_ "github.com/imohiyoko/iam/features/nestedgroups"
 	_ "github.com/imohiyoko/iam/features/oidclogout"
@@ -24,6 +25,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/quota"
 	_ "github.com/imohiyoko/iam/features/saml"
 	_ "github.com/imohiyoko/iam/features/serviceaccounts"
+	_ "github.com/imohiyoko/iam/features/tokenexchange"
 	_ "github.com/imohiyoko/iam/features/warnings"
 
 	// アダプタ。

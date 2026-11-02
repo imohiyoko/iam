@@ -2006,6 +2006,18 @@ type Suspensions struct {
 	Suspensions []Suspension `json:"suspensions"`
 }
 
+// TokenExchangePolicy defines model for TokenExchangePolicy.
+type TokenExchangePolicy struct {
+	// Audiences 交換で発行するトークンの aud に選べるもの（連携先の client_id か資源の URI）
+	Audiences []string `json:"audiences"`
+
+	// Impersonation 運営者のなりすまし（`requested_subject`）を許す（フィーチャー `impersonation`）
+	Impersonation *bool `json:"impersonation,omitempty"`
+
+	// SubjectClients この連携先自身のほかに、subject_token の aud として受け付ける連携先の client_id
+	SubjectClients *[]string `json:"subject_clients,omitempty"`
+}
+
 // UpdateUser defines model for UpdateUser.
 type UpdateUser struct {
 	ValidFrom  *time.Time `json:"valid_from,omitempty"`
@@ -2315,6 +2327,9 @@ type CreateClientJSONRequestBody = ClientInput
 // UpdateClientJSONRequestBody defines body for UpdateClient for application/json ContentType.
 type UpdateClientJSONRequestBody = ClientInput
 
+// SetClientTokenExchangeJSONRequestBody defines body for SetClientTokenExchange for application/json ContentType.
+type SetClientTokenExchangeJSONRequestBody = TokenExchangePolicy
+
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody CreateConnectionJSONBody
 
@@ -2497,6 +2512,12 @@ type ServerInterface interface {
 	// UpdateClient 連携先の内容を置き換える
 	// (PUT /v1/admin/clients/{id})
 	UpdateClient(w http.ResponseWriter, r *http.Request, id string)
+	// GetClientTokenExchange 連携先に許す Token Exchange（RFC 8693）を返す（ADR 0099）
+	// (GET /v1/admin/clients/{id}/token-exchange)
+	GetClientTokenExchange(w http.ResponseWriter, r *http.Request, id string)
+	// SetClientTokenExchange 連携先に許す Token Exchange を置き換える（ADR 0099）
+	// (PUT /v1/admin/clients/{id}/token-exchange)
+	SetClientTokenExchange(w http.ResponseWriter, r *http.Request, id string)
 	// DeleteClient 連携先を消す
 	// (POST /v1/admin/clients/{id}:delete)
 	DeleteClient(w http.ResponseWriter, r *http.Request, id string)
@@ -3283,6 +3304,58 @@ func (siw *ServerInterfaceWrapper) UpdateClient(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateClient(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClientTokenExchange operation middleware
+func (siw *ServerInterfaceWrapper) GetClientTokenExchange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClientTokenExchange(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetClientTokenExchange operation middleware
+func (siw *ServerInterfaceWrapper) SetClientTokenExchange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetClientTokenExchange(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -6296,6 +6369,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/clients/{id}", wrapper.UpdateClient)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients/{id}:rotate-secret", wrapper.RotateClientSecret)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients/{id}:delete", wrapper.DeleteClient)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/clients/{id}/token-exchange", wrapper.GetClientTokenExchange)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/clients/{id}/token-exchange", wrapper.SetClientTokenExchange)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/signing-keys:rotate", wrapper.RotateSigningKey)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/attributes", wrapper.ListAttributeDefs)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/attributes", wrapper.CreateAttributeDef)
@@ -7369,6 +7444,149 @@ func (response UpdateClient403JSONResponse) VisitUpdateClientResponse(w http.Res
 type UpdateClient404JSONResponse Error
 
 func (response UpdateClient404JSONResponse) VisitUpdateClientResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetClientTokenExchangeRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetClientTokenExchangeResponseObject interface {
+	VisitGetClientTokenExchangeResponse(w http.ResponseWriter) error
+}
+
+type GetClientTokenExchange200JSONResponse TokenExchangePolicy
+
+func (response GetClientTokenExchange200JSONResponse) VisitGetClientTokenExchangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetClientTokenExchange401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetClientTokenExchange401JSONResponse) VisitGetClientTokenExchangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetClientTokenExchange403JSONResponse Error
+
+func (response GetClientTokenExchange403JSONResponse) VisitGetClientTokenExchangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetClientTokenExchange404JSONResponse Error
+
+func (response GetClientTokenExchange404JSONResponse) VisitGetClientTokenExchangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetClientTokenExchangeRequestObject struct {
+	Id   string `json:"id"`
+	Body *SetClientTokenExchangeJSONRequestBody
+}
+
+type SetClientTokenExchangeResponseObject interface {
+	VisitSetClientTokenExchangeResponse(w http.ResponseWriter) error
+}
+
+type SetClientTokenExchange200JSONResponse TokenExchangePolicy
+
+func (response SetClientTokenExchange200JSONResponse) VisitSetClientTokenExchangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetClientTokenExchange400JSONResponse struct{ ErrorJSONResponse }
+
+func (response SetClientTokenExchange400JSONResponse) VisitSetClientTokenExchangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetClientTokenExchange401JSONResponse Error
+
+func (response SetClientTokenExchange401JSONResponse) VisitSetClientTokenExchangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetClientTokenExchange403JSONResponse Error
+
+func (response SetClientTokenExchange403JSONResponse) VisitSetClientTokenExchangeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetClientTokenExchange404JSONResponse Error
+
+func (response SetClientTokenExchange404JSONResponse) VisitSetClientTokenExchangeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -15309,6 +15527,12 @@ type StrictServerInterface interface {
 	// UpdateClient 連携先の内容を置き換える
 	// (PUT /v1/admin/clients/{id})
 	UpdateClient(ctx context.Context, request UpdateClientRequestObject) (UpdateClientResponseObject, error)
+	// GetClientTokenExchange 連携先に許す Token Exchange（RFC 8693）を返す（ADR 0099）
+	// (GET /v1/admin/clients/{id}/token-exchange)
+	GetClientTokenExchange(ctx context.Context, request GetClientTokenExchangeRequestObject) (GetClientTokenExchangeResponseObject, error)
+	// SetClientTokenExchange 連携先に許す Token Exchange を置き換える（ADR 0099）
+	// (PUT /v1/admin/clients/{id}/token-exchange)
+	SetClientTokenExchange(ctx context.Context, request SetClientTokenExchangeRequestObject) (SetClientTokenExchangeResponseObject, error)
 	// DeleteClient 連携先を消す
 	// (POST /v1/admin/clients/{id}:delete)
 	DeleteClient(ctx context.Context, request DeleteClientRequestObject) (DeleteClientResponseObject, error)
@@ -16084,6 +16308,65 @@ func (sh *strictHandler) UpdateClient(w http.ResponseWriter, r *http.Request, id
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateClientResponseObject); ok {
 		if err := validResponse.VisitUpdateClientResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetClientTokenExchange operation middleware
+func (sh *strictHandler) GetClientTokenExchange(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetClientTokenExchangeRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetClientTokenExchange(ctx, request.(GetClientTokenExchangeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetClientTokenExchange")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetClientTokenExchangeResponseObject); ok {
+		if err := validResponse.VisitGetClientTokenExchangeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetClientTokenExchange operation middleware
+func (sh *strictHandler) SetClientTokenExchange(w http.ResponseWriter, r *http.Request, id string) {
+	var request SetClientTokenExchangeRequestObject
+
+	request.Id = id
+
+	var body SetClientTokenExchangeJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetClientTokenExchange(ctx, request.(SetClientTokenExchangeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetClientTokenExchange")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetClientTokenExchangeResponseObject); ok {
+		if err := validResponse.VisitSetClientTokenExchangeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

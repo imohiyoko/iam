@@ -1691,6 +1691,52 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/clients/{id}/token-exchange:
+    get:
+      operationId: getClientTokenExchange
+      summary: 連携先に許す Token Exchange（RFC 8693）を返す（ADR 0099）
+      description: |
+        権限 `clients:manage`。フィーチャー `token_exchange` が動いていなければ `404 token_exchange_disabled`。
+        何も許していなければ、空の `audiences` を返す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 許している交換
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenExchangePolicy" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setClientTokenExchange
+      summary: 連携先に許す Token Exchange を置き換える（ADR 0099）
+      description: |
+        権限 `clients:manage`。既定は何も許さない。`audiences` に、交換で発行するトークンの aud に選べるもの（この realm の連携先の
+        client_id か、絶対 URI の資源。RFC 8707）を並べる。`audiences` が空なら何も許さない（`subject_clients` と `impersonation` も
+        持てない）。`subject_clients` は、この連携先自身のほかに subject_token の aud として受け付ける連携先の client_id。
+        `impersonation` はなりすましを許す（フィーチャー `impersonation` が動いていなければ `400 invalid_client_metadata`）。
+        公開クライアント（`none`）には許せない。それぞれ 20 件まで。`client.token_exchange_updated` を監査ログに残す。
+        フィーチャー `token_exchange` が動いていなければ `404 token_exchange_disabled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenExchangePolicy" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenExchangePolicy" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/signing-keys:rotate:
     post:
       operationId: rotateSigningKey
@@ -3644,6 +3690,23 @@ components:
         client_secret: { type: string, description: 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す） }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    TokenExchangePolicy:
+      type: object
+      required: [audiences]
+      properties:
+        audiences:
+          type: array
+          maxItems: 20
+          items: { type: string }
+          description: 交換で発行するトークンの aud に選べるもの（連携先の client_id か資源の URI）
+        subject_clients:
+          type: array
+          maxItems: 20
+          items: { type: string }
+          description: この連携先自身のほかに、subject_token の aud として受け付ける連携先の client_id
+        impersonation:
+          type: boolean
+          description: 運営者のなりすまし（`requested_subject`）を許す（フィーチャー `impersonation`）
     Clients:
       type: object
       required: [clients]

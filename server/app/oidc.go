@@ -28,7 +28,7 @@ import (
 //	GET  /oauth2/keys                       JWKS（ML-DSA-65 と ES256）
 //	GET  /oauth2/authorize                  認可要求。ログインしていなければログイン画面へ
 //	GET  /oauth2/authorize/resume           ログイン画面から戻って認可コードを発行する
-//	POST /oauth2/token                      認可コードの交換とリフレッシュ
+//	POST /oauth2/token                      認可コードの交換、リフレッシュ、Token Exchange（RFC 8693。フィーチャー token_exchange）
 //	POST /oauth2/introspect                 イントロスペクション（RFC 7662。機密の連携先だけ）
 //	POST /oauth2/revoke                     失効（RFC 7009）
 //	GET  /oauth2/userinfo                   UserInfo（POST も可）
@@ -178,6 +178,14 @@ var (
 	assertionAlgs           = []string{"ES256", "ES384", "EdDSA", "PS256", "RS256"}
 )
 
+// grantTypes は対応する grant_type。Token Exchange（ADR 0099）が動いていればそれも。
+func (s *oidcServer) grantTypes() []oidc.GrantType {
+	if s.a.tokens.TokenExchange {
+		return exchangeGrantTypes()
+	}
+	return grantTypes
+}
+
 // scopes は対応するスコープ。カスタム属性が動いていれば attributes も。
 func (s *oidcServer) scopes() []string {
 	if s.a.attributes != nil {
@@ -225,7 +233,7 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		ScopesSupported:                   s.scopes(),
 		ResponseTypesSupported:            []string{string(oidc.ResponseTypeCode)},
 		ResponseModesSupported:            []string{string(oidc.ResponseModeQuery)},
-		GrantTypesSupported:               grantTypes,
+		GrantTypesSupported:               s.grantTypes(),
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  provider.Algs,
 		TokenEndpointAuthMethodsSupported: authMethods,
@@ -267,8 +275,11 @@ func (s *oidcServer) Keys(ctx context.Context, _ *op.Request[struct{}]) (*op.Res
 	return resp, nil
 }
 
-// opClient は連携先を op.Client にする。
-type opClient struct{ c port.Client }
+// opClient は連携先を op.Client にする。exchange は Token Exchange を許した連携先か（フィーチャーが動いているときだけ真）。
+type opClient struct {
+	c        port.Client
+	exchange bool
+}
 
 func (c opClient) GetID() string                    { return c.c.PublicID }
 func (c opClient) RedirectURIs() []string           { return c.c.RedirectURIs }
@@ -295,8 +306,13 @@ func (c opClient) AuthMethod() oidc.AuthMethod {
 func (opClient) ResponseTypes() []oidc.ResponseType {
 	return []oidc.ResponseType{oidc.ResponseTypeCode}
 }
-func (opClient) GrantTypes() []oidc.GrantType { return grantTypes }
-func (opClient) LoginURL(string) string       { return "" }
+func (c opClient) GrantTypes() []oidc.GrantType {
+	if c.exchange {
+		return exchangeGrantTypes()
+	}
+	return grantTypes
+}
+func (opClient) LoginURL(string) string { return "" }
 func (opClient) AccessTokenType() op.AccessTokenType {
 	return op.AccessTokenTypeBearer
 }
@@ -338,7 +354,7 @@ func (s *oidcServer) VerifyAuthRequest(ctx context.Context, r *op.Request[oidc.A
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
-	return &op.ClientRequest[oidc.AuthRequest]{Request: r, Client: opClient{cl}}, nil
+	return &op.ClientRequest[oidc.AuthRequest]{Request: r, Client: opClient{c: cl}}, nil
 }
 
 // Authorize は検証済みの認可要求（戻り先・スコープ・response_type は op が確かめた）を受け、ログイン済みなら認可コードを、
@@ -504,7 +520,7 @@ func (s *oidcServer) resume(w http.ResponseWriter, r *http.Request) {
 		s.a.unavailable(w, r, err)
 		return
 	}
-	if op.ValidateAuthReqRedirectURI(opClient{cl}, req.RedirectURI, oidc.ResponseTypeCode) != nil {
+	if op.ValidateAuthReqRedirectURI(opClient{c: cl}, req.RedirectURI, oidc.ResponseTypeCode) != nil {
 		http.Error(w, "The application's redirect URI is no longer registered.", http.StatusBadRequest)
 		return
 	}
@@ -530,7 +546,8 @@ func (s *oidcServer) VerifyClient(ctx context.Context, r *op.Request[op.ClientCr
 	if err != nil {
 		return nil, err
 	}
-	return opClient{cl}, nil
+	_, exchange := provider.ParseExchangePolicy(cl.TokenExchange)
+	return opClient{c: cl, exchange: exchange && s.a.tokens.TokenExchange && cl.AuthMethod != port.ClientAuthNone}, nil
 }
 
 // authenticate は連携先を認証する。confidential なら client_secret か private_key_jwt を求める。

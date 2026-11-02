@@ -2,8 +2,8 @@
 
 -- name: CreateClient :exec
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
-    id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);
+    id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at, token_exchange)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17);
 
 -- name: GetClient :one
 SELECT * FROM authn_clients WHERE realm_id = $1 AND id = $2;
@@ -16,8 +16,8 @@ SELECT * FROM authn_clients WHERE realm_id = $1 ORDER BY created_at, id;
 
 -- name: UpdateClient :execrows
 UPDATE authn_clients SET name = $1, trust_level = $2, redirect_uris = $3, post_logout_redirect_uris = $4, auth_method = $5, secret_hash = $6, jwks = $7,
-    id_token_alg = $8, backchannel_logout_uri = $9, frontchannel_logout_uri = $10, frontchannel_logout_session_required = $11, updated_at = $12
-WHERE realm_id = $13 AND id = $14;
+    id_token_alg = $8, backchannel_logout_uri = $9, frontchannel_logout_uri = $10, frontchannel_logout_session_required = $11, updated_at = $12, token_exchange = $13
+WHERE realm_id = $14 AND id = $15;
 
 -- name: DeleteClient :execrows
 DELETE FROM authn_clients WHERE realm_id = $1 AND id = $2;
@@ -35,8 +35,9 @@ UPDATE authn_signing_keys SET retired_at = $1 WHERE realm_id = $2 AND id = $3;
 DELETE FROM authn_signing_keys WHERE realm_id = $1 AND id = $2;
 
 -- name: CreateGrant :exec
-INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
+INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr,
+    exchange, parent_id, actor_user_id, act, audiences)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19);
 
 -- name: GetGrant :one
 SELECT * FROM authn_oidc_grants WHERE realm_id = $1 AND id = $2;
@@ -51,10 +52,22 @@ UPDATE authn_oidc_grants SET
 WHERE realm_id = sqlc.arg(realm_id) AND id = sqlc.arg(id);
 
 -- name: EraseUserGrantTokens :exec
-DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_grants g WHERE g.realm_id = sqlc.arg(realm_id) AND g.user_id = sqlc.arg(user_id));
+DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_grants g WHERE g.realm_id = sqlc.arg(realm_id)
+    AND (g.user_id = sqlc.arg(user_id) OR g.actor_user_id = sqlc.arg(user_id)));
 
 -- name: EraseUserGrants :exec
-DELETE FROM authn_oidc_grants WHERE realm_id = $1 AND user_id = $2;
+DELETE FROM authn_oidc_grants WHERE realm_id = sqlc.arg(realm_id) AND (user_id = sqlc.arg(user_id) OR actor_user_id = sqlc.arg(user_id));
+
+-- name: CountExchangedGrants :one
+SELECT count(*) FROM authn_oidc_grants WHERE exchange = $1;
+
+-- name: PurgeExchangedGrantTokens :exec
+DELETE FROM authn_oidc_tokens WHERE grant_id IN (
+    SELECT g.id FROM authn_oidc_grants g WHERE g.exchange = sqlc.arg(exchange) ORDER BY g.id LIMIT sqlc.arg(lim)::bigint);
+
+-- name: PurgeExchangedGrants :execrows
+DELETE FROM authn_oidc_grants WHERE id IN (
+    SELECT g.id FROM authn_oidc_grants g WHERE g.exchange = sqlc.arg(exchange) ORDER BY g.id LIMIT sqlc.arg(lim)::bigint);
 
 -- name: DeleteClientGrantTokens :exec
 DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_grants g WHERE g.realm_id = sqlc.arg(realm_id) AND g.client_id = sqlc.arg(client_id));

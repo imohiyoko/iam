@@ -76,7 +76,8 @@ func (t *Tokens) LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, rea
 				return err
 			}
 		}
-		if cl.BackchannelLogoutURI == "" || sent[cl.ID] {
+		// 交換の認可（ADR 0099）は失効させるだけで、Logout Token は送らない（なりすましの系列は本人のものではない）。
+		if cl.BackchannelLogoutURI == "" || sent[cl.ID] || g.Exchange != "" {
 			continue
 		}
 		sent[cl.ID] = true

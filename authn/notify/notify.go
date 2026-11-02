@@ -31,6 +31,8 @@ const (
 	TypeAccountRecovery = "account_recovery"
 	// TypeAccountRecovered は復旧の完了の知らせ（確認済みの全メールへ。4.12）。
 	TypeAccountRecovered = "account_recovered"
+	// TypeImpersonated は運営者が本人になりすましたことの知らせ（確認済みの全メールへ。ADR 0099）。
+	TypeImpersonated = "impersonated"
 )
 
 // Secret は claim で1回だけ返すもの。
