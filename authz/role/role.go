@@ -79,6 +79,9 @@ const (
 	// PermRequirementsManage は操作の名前空間ごとの設定（要件と段階の境界。ADR 0084）。resource_type = action_namespace の
 	// リソース単位の付与で、1つの名前空間に限れる。
 	PermRequirementsManage = "requirements:manage"
+	// PermUsersImpersonate は Token Exchange による運営者のなりすまし（フィーチャー impersonation。ADR 0099）。realm:owner だけが
+	// 持ち、サポートの担当には独自のロールで渡す。対象のロールの権限をすべて持つことも求める（outranks）。
+	PermUsersImpersonate = "users:impersonate"
 	// PermAuditRead は監査ログの照会とチェーンの検証（ADR 0100）。PermAuditReadClientData は暗号化した IP と User-Agent の全文の復号。
 	PermAuditRead           = "audit:read"
 	PermAuditReadClientData = "audit:read_client_data"
@@ -124,7 +127,8 @@ func suspend(categories ...string) []string {
 
 var builtin = map[string][]string{
 	RealmOwner: append([]string{PermAuditRead, PermAuditReadClientData, PermEventSubscriptionsManage, PermRealmsManage, PermRiskTypesManage, PermRiskWrite, PermRequirementsManage, PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
-		PermCredentialsRevoke, PermSuspensionsAny, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermSigningKeysRead, PermUsersEmails},
+		PermCredentialsRevoke, PermSuspensionsAny, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermSigningKeysRead, PermUsersEmails,
+		PermUsersImpersonate},
 		suspend("tos_violation", "customer_request", "security_risk", "billing")...),
 	RealmAdmin: append([]string{PermAuditRead, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke,
 		PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermUsersEmails},

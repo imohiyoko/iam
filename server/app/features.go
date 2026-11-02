@@ -113,6 +113,9 @@ var cleaners = map[string]cleaner{
 		rs, err := tx.Realms().List(ctx)
 		return max(len(rs)-1, 0), err
 	}, Hint: "realms other than the default cannot be deleted yet: keep multi_realm enabled while they exist"},
+	// 連携先の許可と交換の認可を消す（ADR 0099）。
+	feature.TokenExchange: exchangeCleaner,
+	feature.Impersonation: impersonationCleaner,
 	// 購読と署名の鍵（データ鍵）を消す（ADR 0100）。
 	feature.EventSubscriptions: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.EventSubscriptions().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {

@@ -26,7 +26,7 @@ func toClient(r db.AuthnClient) (port.Client, error) {
 	c := port.Client{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, Name: r.Name, TrustLevel: r.TrustLevel, AuthMethod: r.AuthMethod,
 		SecretHash: r.SecretHash, JWKS: r.Jwks, IDTokenAlg: r.IDTokenAlg, BackchannelLogoutURI: r.BackchannelLogoutUri, DeviceGrant: r.DeviceGrant != 0,
 		FrontchannelLogoutURI: r.FrontchannelLogoutUri, FrontchannelLogoutSessionRequired: r.FrontchannelLogoutSessionRequired != 0,
-		CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		TokenExchange: r.TokenExchange, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	if p.err != nil {
 		return port.Client{}, p.err
 	}
@@ -49,7 +49,7 @@ func (r clients) Create(ctx context.Context, c port.Client) error {
 		TrustLevel: c.TrustLevel, RedirectUris: redirect, PostLogoutRedirectUris: logout, AuthMethod: c.AuthMethod, SecretHash: c.SecretHash,
 		Jwks: c.JWKS, IDTokenAlg: c.IDTokenAlg, BackchannelLogoutUri: c.BackchannelLogoutURI, DeviceGrant: boolInt(c.DeviceGrant), FrontchannelLogoutUri: c.FrontchannelLogoutURI,
 		FrontchannelLogoutSessionRequired: boolInt(c.FrontchannelLogoutSessionRequired), CreatedAt: formatTime(c.CreatedAt),
-		UpdatedAt: formatTime(c.UpdatedAt)}))
+		UpdatedAt: formatTime(c.UpdatedAt), TokenExchange: c.TokenExchange}))
 }
 
 func (r clients) Get(ctx context.Context, realmID, id string) (port.Client, error) {
@@ -78,8 +78,9 @@ func (r clients) Update(ctx context.Context, c port.Client) error {
 	}
 	n, err := r.q.UpdateClient(ctx, db.UpdateClientParams{Name: c.Name, TrustLevel: c.TrustLevel, RedirectUris: redirect,
 		PostLogoutRedirectUris: logout, AuthMethod: c.AuthMethod, SecretHash: c.SecretHash, Jwks: c.JWKS, IDTokenAlg: c.IDTokenAlg,
-		BackchannelLogoutUri: c.BackchannelLogoutURI, DeviceGrant: boolInt(c.DeviceGrant), FrontchannelLogoutUri: c.FrontchannelLogoutURI,
-		FrontchannelLogoutSessionRequired: boolInt(c.FrontchannelLogoutSessionRequired), UpdatedAt: formatTime(c.UpdatedAt), RealmID: c.RealmID, ID: c.ID})
+		BackchannelLogoutUri: c.BackchannelLogoutURI, FrontchannelLogoutUri: c.FrontchannelLogoutURI,
+		FrontchannelLogoutSessionRequired: boolInt(c.FrontchannelLogoutSessionRequired), UpdatedAt: formatTime(c.UpdatedAt),
+		TokenExchange: c.TokenExchange, DeviceGrant: boolInt(c.DeviceGrant), RealmID: c.RealmID, ID: c.ID})
 	return affected(n, err, "client")
 }
 
@@ -133,12 +134,18 @@ func toGrant(r db.AuthnOidcGrant) (port.Grant, error) {
 	var p times
 	g := port.Grant{ID: r.ID, RealmID: r.RealmID, ClientID: r.ClientID, UserID: r.UserID, OrgID: r.OrgID, SID: r.Sid,
 		AuthTime: p.at(r.AuthTime), CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.at(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt),
-		RevokeReason: r.RevokeReason, ACR: r.Acr}
+		RevokeReason: r.RevokeReason, ACR: r.Acr, Exchange: r.Exchange, ParentID: r.ParentID, ActorUserID: r.ActorUserID, Act: r.Act}
 	if p.err != nil {
 		return g, p.err
 	}
 	if err := json.Unmarshal([]byte(r.Scopes), &g.Scopes); err != nil {
 		return g, err
+	}
+	if err := json.Unmarshal([]byte(r.Audiences), &g.Audiences); err != nil {
+		return g, err
+	}
+	if len(g.Audiences) == 0 {
+		g.Audiences = nil
 	}
 	return g, json.Unmarshal([]byte(r.AuthMethods), &g.AuthMethods)
 }
@@ -147,7 +154,7 @@ func (r grants) Create(ctx context.Context, g port.Grant) error {
 	return mapErr(r.q.CreateGrant(ctx, db.CreateGrantParams{ID: g.ID, RealmID: g.RealmID, ClientID: g.ClientID, UserID: g.UserID, OrgID: g.OrgID,
 		Sid: g.SID, Scopes: jsonList(g.Scopes), AuthMethods: jsonList(g.AuthMethods), AuthTime: formatTime(g.AuthTime),
 		CreatedAt: formatTime(g.CreatedAt), ExpiresAt: formatTime(g.ExpiresAt), RevokedAt: nullTime(g.RevokedAt), RevokeReason: g.RevokeReason,
-		Acr: g.ACR}))
+		Acr: g.ACR, Exchange: g.Exchange, ParentID: g.ParentID, ActorUserID: g.ActorUserID, Act: g.Act, Audiences: jsonList(g.Audiences)}))
 }
 
 func (r grants) Get(ctx context.Context, realmID, id string) (port.Grant, error) {
@@ -163,6 +170,19 @@ func (r grants) ListBySID(ctx context.Context, realmID, sid string) ([]port.Gran
 func (r grants) Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error {
 	n, err := r.q.RevokeGrant(ctx, db.RevokeGrantParams{At: nullTime(&at), Reason: reason, RealmID: realmID, ID: id})
 	return affected(n, err, "grant")
+}
+
+func (r grants) CountExchanged(ctx context.Context, exchange string) (int, error) {
+	n, err := r.q.CountExchangedGrants(ctx, exchange)
+	return int(n), mapErr(err)
+}
+
+func (r grants) PurgeExchanged(ctx context.Context, exchange string, limit int) (int, error) {
+	if err := r.q.PurgeExchangedGrantTokens(ctx, db.PurgeExchangedGrantTokensParams{Exchange: exchange, Lim: int64(limit)}); err != nil {
+		return 0, mapErr(err)
+	}
+	n, err := r.q.PurgeExchangedGrants(ctx, db.PurgeExchangedGrantsParams{Exchange: exchange, Lim: int64(limit)})
+	return int(n), mapErr(err)
 }
 
 // ---------------------------------------------------------------------------

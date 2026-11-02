@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/port"
 )
@@ -26,6 +27,7 @@ func testClients(t *testing.T, h Harness) {
 	b.PostLogoutRedirectURIs, b.BackchannelLogoutURI = []string{"https://b.example.com/"}, "https://b.example.com/bcl"
 	// Device Authorization Grant だけの連携先は戻り先を持たない（ADR 0095）。
 	b.DeviceGrant, b.RedirectURIs = true, []string{}
+	b.TokenExchange = []byte(`{"audiences":["https://api.example.com"]}`)
 	b.FrontchannelLogoutURI, b.FrontchannelLogoutSessionRequired = "https://b.example.com/fcl?x=1", true
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Clients()
@@ -54,6 +56,7 @@ func testClients(t *testing.T, h Harness) {
 		}
 		a.Name, a.RedirectURIs, a.SecretHash, a.UpdatedAt = "A2", []string{"https://x.example.com/"}, []byte{9}, T0.Add(time.Hour)
 		a.DeviceGrant = true
+		a.TokenExchange = []byte(`{"impersonation":true}`)
 		a.FrontchannelLogoutURI, a.FrontchannelLogoutSessionRequired = "https://x.example.com/fcl", true
 		if err := repo.Update(ctx, a); err != nil {
 			return err
@@ -149,6 +152,16 @@ func testGrants(t *testing.T, h Harness) {
 		if err := notFound("other realm", func() error { _, err := repo.Get(ctx, other, g1.ID); return err }()); err != nil {
 			return err
 		}
+		// 交換の認可（ADR 0099）の項目も往復する。
+		x := mk(T0.Add(2 * time.Second))
+		x.SID, x.Exchange, x.ParentID, x.ActorUserID = "ses_other", port.ExchangeImpersonation, g1.ID, "usr_actor"
+		x.Act, x.Audiences = []byte(`{"sub":"usr_x"}`), []string{"https://api.example.com", "cli_b"}
+		if err := repo.Create(ctx, x); err != nil {
+			return err
+		}
+		if got, err := repo.Get(ctx, r, x.ID); err != nil || !reflect.DeepEqual(got, x) {
+			return fmt.Errorf("exchanged get = %+v, %v", got, err)
+		}
 		list, err := repo.ListBySID(ctx, r, sid)
 		if err != nil || len(list) != 2 || list[0].ID != g2.ID || list[0].ACR != "" || list[1].ACR != g1.ACR {
 			return fmt.Errorf("ListBySID = %+v, %v", list, err)
@@ -209,11 +222,27 @@ func testGrants(t *testing.T, h Harness) {
 		}
 		g3 := mk(T0)
 		t3 := tok(g3, port.TokenAccess)
-		if err := tx.Grants().Create(ctx, g3); err != nil {
-			return err
+		// 行為者として持つ交換の認可（なりすましの運営者）も、行為者の消去で消える。別のユーザーの認可は残る。
+		actor, target := newUser(r), newUser(r)
+		for _, x := range []port.User{actor, target} {
+			if err := tx.Users().Create(ctx, x); err != nil {
+				return err
+			}
 		}
-		if err := tx.OIDCTokens().Create(ctx, t3); err != nil {
-			return err
+		imp := mk(T0)
+		imp.UserID, imp.ActorUserID, imp.Exchange = target.ID, actor.ID, port.ExchangeImpersonation
+		t4 := tok(imp, port.TokenAccess)
+		kept := mk(T0)
+		kept.UserID = target.ID
+		for _, g := range []port.Grant{g3, imp, kept} {
+			if err := tx.Grants().Create(ctx, g); err != nil {
+				return err
+			}
+		}
+		for _, x := range []port.OIDCToken{t3, t4} {
+			if err := tx.OIDCTokens().Create(ctx, x); err != nil {
+				return err
+			}
 		}
 		if err := tx.Users().Erase(ctx, r, u.ID, T0.Add(time.Hour)); err != nil {
 			return err
@@ -221,7 +250,20 @@ func testGrants(t *testing.T, h Harness) {
 		if err := notFound("grant after erase", func() error { _, err := tx.Grants().Get(ctx, r, g3.ID); return err }()); err != nil {
 			return err
 		}
-		return notFound("token after erase", func() error { _, err := tx.OIDCTokens().Get(ctx, r, t3.ID); return err }())
+		if err := notFound("token after erase", func() error { _, err := tx.OIDCTokens().Get(ctx, r, t3.ID); return err }()); err != nil {
+			return err
+		}
+		if err := tx.Users().Erase(ctx, r, actor.ID, T0.Add(time.Hour)); err != nil {
+			return err
+		}
+		if err := notFound("actor grant after erase", func() error { _, err := tx.Grants().Get(ctx, r, imp.ID); return err }()); err != nil {
+			return err
+		}
+		if err := notFound("actor token after erase", func() error { _, err := tx.OIDCTokens().Get(ctx, r, t4.ID); return err }()); err != nil {
+			return err
+		}
+		_, err := tx.Grants().Get(ctx, r, kept.ID)
+		return err
 	})
 }
 
@@ -250,4 +292,19 @@ func testSessionLineage(t *testing.T, h Harness) {
 		}
 		return notFound("missing", func() error { _, err := tx.Sessions().GetCurrentBySID(ctx, r, "ses_missing"); return err }())
 	})
+}
+
+const isoExchangeSID = "ses_00000000000000000000000077"
+
+// exchangedGrantIsolationCase は交換の認可（ADR 0099）の realm の分離。
+var exchangedGrantIsolationCase = IsolationCase{
+	Name: "Grants.ListBySID(exchanged)",
+	Seed: func(ctx context.Context, tx port.Tx, _ clock.Clock, r string) error {
+		return tx.Grants().Create(ctx, port.Grant{ID: id.New(id.Grant), RealmID: r, ClientID: id.New(id.Client), UserID: id.New(id.User),
+			SID: isoExchangeSID, Scopes: []string{"openid"}, AuthMethods: []string{"pwd"}, AuthTime: T0, CreatedAt: T0, ExpiresAt: T0.Add(time.Hour),
+			Exchange: port.ExchangeDelegation, ParentID: id.New(id.Grant), Act: []byte(`{"sub":"cli_x"}`), Audiences: []string{"cli_y"}})
+	},
+	Query: func(ctx context.Context, tx port.Tx, r string) (int, error) {
+		return count(tx.Grants().ListBySID(ctx, r, isoExchangeSID))
+	},
 }

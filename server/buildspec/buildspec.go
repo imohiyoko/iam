@@ -56,6 +56,8 @@ var featureCatalog = map[string]struct {
 	feature.AccountMerge:       {merge.Feature, module + "/features/accountmerge"},
 	feature.MultiRealm:         {realm.Feature, module + "/features/multirealm"},
 	feature.PasskeyAttestation: {passkey.AttestationFeature, module + "/features/passkeyattestation"},
+	feature.TokenExchange:      {provider.TokenExchangeFeature, module + "/features/tokenexchange"},
+	feature.Impersonation:      {provider.ImpersonationFeature, module + "/features/impersonation"},
 	feature.ACR:                {acr.Feature, module + "/features/acr"},
 	feature.OIDCLogout:         {provider.LogoutFeature, module + "/features/oidclogout"},
 	feature.HOTP:               {hotp.Feature, module + "/features/hotp"},

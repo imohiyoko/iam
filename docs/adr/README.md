@@ -104,10 +104,11 @@
 | [0090](0090-authenticator-plugins.md) | 認証方式を共通のポートを持つプラグインにし、1 方式 1 ディレクトリで持つ | 承認 |
 | [0091](0091-process-roles.md) | 同じバイナリを役割ごとに別のプロセスで動かせるようにする | 承認 |
 | [0092](0092-authenticator-port-implementation.md) | 認証方式のポートは汎用の認証情報のストアと封をしたフローで動かし、HOTP を最初の方式にする | 承認 |
-| [0094](0094-oidc-rp-initiated-and-front-channel-logout.md) | RP-Initiated Logout はセッションと合う id_token_hint のときだけ確かめずに終え、Front-Channel Logout は完了の画面の iframe で知らせる | 承認 |
 | [0093](0093-acr-aal-step-up.md) | 認証の強さは amr から AAL を求めて acr で出し、足りなければ step-up（RFC 9470）を求める | 承認 |
+| [0094](0094-oidc-rp-initiated-and-front-channel-logout.md) | RP-Initiated Logout はセッションと合う id_token_hint のときだけ確かめずに終え、Front-Channel Logout は完了の画面の iframe で知らせる | 承認 |
 | [0095](0095-device-authorization-grant.md) | Device Authorization Grant は状態を EphemeralStore に置き、承認は本人のログインと確認の画面で行う | 承認 |
 | [0096](0096-passkey-attestation.md) | passkey の attestation を MDS と設定の信頼の起点で確かめ、認証器のポリシーを realm と Org の段で判定する | 承認 |
 | [0097](0097-admin-read-api.md) | 管理 API の一覧・取得・検索は運営者ロールに読み取りの権限を足し、メールはブラインドインデックスの完全一致で引く | 承認 |
 | [0098](0098-saml-sp.md) | 外部 IdP としての SAML 2.0 は goxmldsig で署名を確かめ、プロトコルの確認は自前の薄い層で行う | 承認 |
+| [0099](0099-token-exchange.md) | Token Exchange（RFC 8693）で委任となりすましを扱い、交換したトークンを元の認可とログインの系列に結び付ける | 承認 |
 | [0100](0100-audit-query-and-event-subscriptions.md) | 監査ログは索引の列で照会してペイロードで確かめ直し、Webhook の購読は監査ログを outbox にして購読ごとの位置で送る | 承認 |

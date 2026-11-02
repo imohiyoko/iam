@@ -28,7 +28,7 @@ import (
 //	GET  /oauth2/keys                       JWKS（ML-DSA-65 と ES256）
 //	GET  /oauth2/authorize                  認可要求。ログインしていなければログイン画面へ
 //	GET  /oauth2/authorize/resume           ログイン画面から戻って認可コードを発行する
-//	POST /oauth2/token                      認可コードの交換とリフレッシュ
+//	POST /oauth2/token                      認可コードの交換、リフレッシュ、Token Exchange（RFC 8693。フィーチャー token_exchange）
 //	POST /oauth2/introspect                 イントロスペクション（RFC 7662。機密の連携先だけ）
 //	POST /oauth2/revoke                     失効（RFC 7009）
 //	GET  /oauth2/userinfo                   UserInfo（POST も可）
@@ -186,11 +186,18 @@ func (s *oidcServer) fail(ctx context.Context, err error) error {
 
 var (
 	grantTypes              = []oidc.GrantType{oidc.GrantTypeCode, oidc.GrantTypeRefreshToken}
-	deviceGrantTypes        = append(slices.Clone(grantTypes), oidc.GrantTypeDeviceCode)
 	confidentialAuthMethods = []oidc.AuthMethod{oidc.AuthMethodBasic, oidc.AuthMethodPost, oidc.AuthMethodPrivateKeyJWT}
 	authMethods             = append(slices.Clone(confidentialAuthMethods), oidc.AuthMethodNone)
 	assertionAlgs           = []string{"ES256", "ES384", "EdDSA", "PS256", "RS256"}
 )
+
+// grantTypes は対応する grant_type。Token Exchange（ADR 0099）が動いていればそれも。
+func (s *oidcServer) grantTypes() []oidc.GrantType {
+	if s.a.tokens.TokenExchange {
+		return exchangeGrantTypes()
+	}
+	return grantTypes
+}
 
 // scopes は対応するスコープ。カスタム属性が動いていれば attributes も。
 func (s *oidcServer) scopes() []string {
@@ -239,7 +246,7 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		ScopesSupported:                   s.scopes(),
 		ResponseTypesSupported:            []string{string(oidc.ResponseTypeCode)},
 		ResponseModesSupported:            []string{string(oidc.ResponseModeQuery)},
-		GrantTypesSupported:               grantTypes,
+		GrantTypesSupported:               s.grantTypes(),
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  provider.Algs,
 		TokenEndpointAuthMethodsSupported: authMethods,
@@ -265,7 +272,8 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 	}
 	// Device Authorization Grant（フィーチャー device_flow。オフなら出さない）。
 	if s.a.device != nil {
-		d.DeviceAuthorizationEndpoint, d.GrantTypesSupported = s.endpoint(oidcDeviceAuth), deviceGrantTypes
+		d.DeviceAuthorizationEndpoint = s.endpoint(oidcDeviceAuth)
+		d.GrantTypesSupported = append(slices.Clone(d.GrantTypesSupported), oidc.GrantTypeDeviceCode)
 	}
 	return op.NewResponse(d), nil
 }
@@ -286,14 +294,17 @@ func (s *oidcServer) Keys(ctx context.Context, _ *op.Request[struct{}]) (*op.Res
 }
 
 // opClient は連携先を op.Client にする。device は Device Authorization Grant を許すか（フィーチャーが動いていて、
-// 連携先で許したとき）。
+// 連携先で許したとき）。exchange は Token Exchange を許した連携先か（フィーチャーが動いているときだけ真）。
 type opClient struct {
-	c      port.Client
-	device bool
+	c        port.Client
+	device   bool
+	exchange bool
 }
 
 func (s *oidcServer) opClient(c port.Client) opClient {
-	return opClient{c: c, device: s.a.device != nil && c.DeviceGrant}
+	_, exchange := provider.ParseExchangePolicy(c.TokenExchange)
+	return opClient{c: c, device: s.a.device != nil && c.DeviceGrant,
+		exchange: exchange && s.a.tokens.TokenExchange && c.AuthMethod != port.ClientAuthNone}
 }
 
 func (c opClient) GetID() string                    { return c.c.PublicID }
@@ -322,10 +333,14 @@ func (opClient) ResponseTypes() []oidc.ResponseType {
 	return []oidc.ResponseType{oidc.ResponseTypeCode}
 }
 func (c opClient) GrantTypes() []oidc.GrantType {
-	if c.device {
-		return deviceGrantTypes
+	gt := grantTypes
+	if c.exchange {
+		gt = exchangeGrantTypes()
 	}
-	return grantTypes
+	if c.device {
+		gt = append(slices.Clone(gt), oidc.GrantTypeDeviceCode)
+	}
+	return gt
 }
 func (opClient) LoginURL(string) string { return "" }
 func (opClient) AccessTokenType() op.AccessTokenType {

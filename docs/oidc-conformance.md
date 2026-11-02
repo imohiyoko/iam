@@ -20,6 +20,7 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 | リフレッシュ（ローテーションと再利用検知）、イントロスペクション、失効 | `TestOIDCRefreshIntrospectRevoke`、`TestOIDCE2EStandardRP`（rs で RFC 7662） |
 | Back-Channel Logout | `TestOIDCBackchannelLogout` |
 | Device Authorization Grant（RFC 8628。フィーチャー `device_flow`） | `TestDeviceFlow`、`TestDeviceFlowClients`、`TestDeviceFlowE2EStandardRP`（zitadel/oidc の rp で Discovery から）、`TestDeviceFlow`（authn/provider） |
+| Token Exchange（RFC 8693。`grant_types_supported`、`act`、`invalid_target`、元の失効の伝播。Basic OP の外） | `TestTokenExchangeDelegation`、`TestImpersonation`、`TestTokenExchangeOff` |
 | RP-Initiated Logout（`oidcc-rp-initiated-logout-*`。フィーチャー `oidc_logout`）：Discovery の `end_session_endpoint`、`id_token_hint`（期限切れ・改ざん・別の連携先・別の realm）、登録と一致しない `post_logout_redirect_uri` の拒否、`state` の受け渡し、確認の画面 | `TestOIDCRPInitiatedLogout`、`TestOIDCE2ERPInitiatedLogout`（zitadel/oidc の rp で）、`TestOIDCRPInitiatedLogoutMultiRealm`、`TestEndSessionRequest` |
 | Front-Channel Logout（`oidcc-frontchannel-*`）：`frontchannel_logout_uri` の iframe、`iss` と `sid`、CSP の `frame-src` | `TestOIDCRPInitiatedLogout`、`TestFrontChannelURLsAndHold` |
 | `acr_values`・`claims` の `id_token.acr`、ID トークンの `acr`（フィーチャー acr。ADR 0093） | `TestACRIDTokenAndStepUp`、`TestACRFeatureOff` |
@@ -45,6 +46,9 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 - Device Authorization Grant（ADR 0095）は `openid` スコープを求め、認可コードフローと同じく ID トークンを返す（OAuth だけの
   device_authorization は受けない）。ID トークンに `nonce` は無い。`verification_uri_complete` で開いても確認の画面を省かない。
   zitadel/oidc の `op.Server` の `DeviceAuthorization`・`DeviceToken` で受け、状態は `authn/provider` が EphemeralStore に置く
+- Token Exchange（RFC 8693。フィーチャー `token_exchange`、既定オフ）は、オンのときだけ `grant_types_supported` に
+  `urn:ietf:params:oauth:grant-type:token-exchange` を載せる。発行するのは `access_token` だけで、`refresh_token`・`id_token`・
+  `jwt` の `requested_token_type` は `invalid_request`。なりすましは Keycloak と同じ拡張のパラメーター `requested_subject` で求める（ADR 0099）
 - RP-Initiated Logout と Front-Channel Logout はフィーチャー `oidc_logout`（既定オフ。ADR 0094）。試験ではこれを有効にする
   - `id_token_hint` がブラウザのセッション（`sid` と `sub`）と合わない・無いときは確認の画面を出す。試験の「ログアウトの
     画面が出たら押す」の手順で進める

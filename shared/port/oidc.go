@@ -49,8 +49,11 @@ type Client struct {
 	FrontchannelLogoutURI string
 	// FrontchannelLogoutSessionRequired は FrontchannelLogoutURI に iss と sid を付けるか。
 	FrontchannelLogoutSessionRequired bool
-	CreatedAt                         time.Time
-	UpdatedAt                         time.Time
+	// TokenExchange は Token Exchange（RFC 8693）で許す交換（JSON。形は authn/provider の ExchangePolicy）。nil なら何も許さない
+	// （フィーチャー token_exchange。ADR 0099）。
+	TokenExchange []byte
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // ClientRepo は clients の Repository。
@@ -112,9 +115,27 @@ type Grant struct {
 	ExpiresAt    time.Time
 	RevokedAt    *time.Time
 	RevokeReason string
+	// Exchange は Token Exchange（RFC 8693）で作った認可の種類（ExchangeDelegation・ExchangeImpersonation）。空なら認可コードの
+	// 認可。交換の認可はアクセストークンだけを持つ（ADR 0099）。
+	Exchange string
+	// ParentID は交換の元の認可（内部 ID）。元が失効・期限切れなら、この認可も使えない。ID トークンを交換したときは空。
+	ParentID string
+	// ActorUserID は行為者のユーザー（内部 ID）。なりすましでは運営者で、SID はこのユーザーのログインの系列。委任では actor_token の
+	// ユーザー（無ければ空）。ユーザーの消去で、UserID と同じく認可を消す。
+	ActorUserID string
+	// Act は act クレーム（JSON の object。RFC 8693 4.1）。
+	Act []byte
+	// Audiences は交換で発行したトークンの aud（連携先の client_id か資源の URI。RFC 8707）。
+	Audiences []string
 	// ACR は認可したときに決めた acr（フィーチャー acr。ADR 0093）。空ならフィーチャーがオフで、acr を返さない。
 	ACR string
 }
+
+// 交換の認可の種類（Grant.Exchange）。
+const (
+	ExchangeDelegation    = "delegation"
+	ExchangeImpersonation = "impersonation"
+)
 
 // GrantRepo は oidc_grants の Repository。認可とそのトークンは、連携先の削除（ClientRepo.Delete）と
 // ユーザーの消去（UserRepo.Erase）で一緒に消える。
@@ -126,6 +147,10 @@ type GrantRepo interface {
 	ListBySID(ctx context.Context, realmID, sid string) ([]Grant, error)
 	// Revoke は at に失効させる。既に at 以前に失効していれば何もしない。無ければ errs.NotFound。
 	Revoke(ctx context.Context, realmID, id string, at time.Time, reason string) error
+	// CountExchanged は全 realm の、種類が exchange の交換の認可を数える（フィーチャーの無効化）。
+	CountExchanged(ctx context.Context, exchange string) (int, error)
+	// PurgeExchanged は全 realm の、種類が exchange の交換の認可を、そのトークンと一緒に最大 limit 件消し、消した件数を返す。
+	PurgeExchanged(ctx context.Context, exchange string, limit int) (int, error)
 }
 
 // トークンの種類。

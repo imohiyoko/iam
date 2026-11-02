@@ -584,6 +584,7 @@ GET    /v1/admin/signing-keys
 - 将来のサードパーティ開放に備え `clients.trust_level` を持つ
 - ログアウトに関わる登録：`post_logout_redirect_uris`（完全一致）、`backchannel_logout_uri`（5.2）、`frontchannel_logout_uri` と
   `frontchannel_logout_session_required`（5.6。フィーチャー `oidc_logout`）
+- 機密の連携先ごとに、Token Exchange で許す aud・受け付ける元の連携先・なりすましの可否を管理 API で置く（既定は何も許さない。5.7）
 
 ### 5.6 連携先からのログアウト
 
@@ -600,6 +601,15 @@ GET    /v1/admin/signing-keys
   `sid` を付ける）、読み終えたら戻り先に移る。開くものが無ければすぐ 302 で戻す。CSP の `frame-src` は開く連携先の
   オリジンだけ。`frontchannel_logout_uri` のオリジンは `redirect_uris` のどれかと同じであること
 - 複数 realm（11.1）でも realm ごとの issuer・鍵・連携先・セッションで動く
+
+### 5.7 Token Exchange
+
+RFC 8693。token エンドポイントで受け、不透明なアクセストークンだけを発行する（ADR 0099）。
+
+- 委任（`token_exchange`）：本人のアクセストークンか ID トークンを、行為者（`act`）付きのトークンに替える。aud は連携先ごとの許可の中から選び（RFC 8707 の `resource` も可）、スコープは縮めるだけ。重ねられるのは 4 回まで
+- なりすまし（`impersonation`）：運営者が自分のトークンと `requested_subject` で本人のトークンを得る。権限 `users:impersonate`・outranks・step-up（直近の多要素の認証）・レートリミットを満たしたときだけ。寿命は短く（既定 10 分）、監査ログと本人への通知を残す
+- 交換の認可は元の認可（`parent_id`）とログインの系列に結び付ける。元の失効・系列の終わり・本人が使えなくなることは交換したトークンにもすぐ効く。リフレッシュトークンは出さない
+- イントロスペクションは `act`・交換の `aud`、なりすましには `impersonation: true` を返す
 
 ## 6. 監査ログとイベント出力
 
@@ -777,6 +787,8 @@ GET    /v1/admin/signing-keys
 | フロー フック（11.8） | オフ | ― | フックを一切呼ばない |
 | HOTP（4.1、ADR 0092） | オフ | ― | HOTP の登録・照合なし。無効化は認証情報が 0 件になって完了 |
 | OIDC のログアウト（5.6） | オフ | ― | `end_session_endpoint` と Front-Channel Logout なし（Back-Channel Logout は動く） |
+| Token Exchange の委任（5.7） | オフ | ― | token-exchange の grant を受けない。交換のトークンは使えない |
+| なりすまし（5.7） | オフ | Token Exchange | `requested_subject` を受けない。なりすましのトークンは使えない |
 | acr・AAL と step-up（11.15） | オフ | ― | `acr` を出さず、`acr_values` を見ない。AAL で書く条件・ポリシーなし |
 | Device Authorization Grant（11.16） | オフ | ― | device_authorization エンドポイントと承認の画面なし。Discovery に出さない |
 | Org の監査ログ（6.6） | オフ | Org | Org の管理者は監査ログを読めない（運営者の照会は常にある） |
