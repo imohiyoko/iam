@@ -49,6 +49,9 @@ type Config struct {
 
 	Outbox Outbox `yaml:"outbox"`
 
+	// OrgDomains は証明済みのドメインの確かめ直し（フィーチャー org_managed_users。ADR 0087）。
+	OrgDomains OrgDomains `yaml:"org_domains"`
+
 	// IDs は採番の方式（ADR 0045）。
 	IDs IDs `yaml:"ids"`
 
@@ -321,6 +324,14 @@ type Outbox struct {
 	Batch    int      `yaml:"batch"`
 }
 
+// OrgDomains は証明済みのドメインの確かめ直しの設定（ADR 0087）。
+type OrgDomains struct {
+	// Recheck は1つのドメインの TXT を確かめ直す間隔。0 なら確かめ直さない。
+	Recheck Duration `yaml:"recheck"`
+	// Grace は TXT が見つからなくなってから証明を外すまでの猶予。
+	Grace Duration `yaml:"grace"`
+}
+
 // Duration は "30s"、"720h" などの形の時間。日数は "30d" と書ける。
 type Duration time.Duration
 
@@ -386,8 +397,9 @@ func Default() Config {
 			Login: Login{MinResponseTime: Duration(300 * time.Millisecond),
 				RateLimit: RateLimit{Window: Duration(10 * time.Minute), PerIP: 100, PerAccount: 5, PerAccountTotal: 20}},
 		},
-		Outbox: Outbox{Interval: Duration(time.Second), Batch: 100},
-		IDs:    IDs{Internal: "uuidv7", External: "random"},
+		Outbox:     Outbox{Interval: Duration(time.Second), Batch: 100},
+		OrgDomains: OrgDomains{Recheck: Duration(day), Grace: Duration(7 * day)},
+		IDs:        IDs{Internal: "uuidv7", External: "random"},
 		OIDC: OIDC{CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
 			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day)},
 		ServiceAccounts: ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
@@ -617,6 +629,9 @@ func (c Config) Validate() error {
 	}
 	if c.Outbox.Interval.D() <= 0 {
 		problems = append(problems, "outbox.interval must be positive")
+	}
+	if c.OrgDomains.Recheck.D() < 0 || c.OrgDomains.Grace.D() < 0 {
+		problems = append(problems, "org_domains.recheck and org_domains.grace must not be negative")
 	}
 	problems = append(problems, c.validatePasskey()...)
 	problems = append(problems, c.validateHooks()...)
