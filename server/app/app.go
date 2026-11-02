@@ -34,6 +34,7 @@ import (
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method"
+	dirldap "github.com/imohiyoko/iam/authn/method/ldap"
 	pwm "github.com/imohiyoko/iam/authn/method/password"
 	totpm "github.com/imohiyoko/iam/authn/method/totp"
 	"github.com/imohiyoko/iam/authn/notify"
@@ -122,6 +123,8 @@ type App struct {
 	oauth  *oauth.Service
 	// saml は外部 IdP としての SAML 2.0（ADR 0098）。フィーチャー saml が動いていなければ nil。
 	saml *saml.Service
+	// ldap は LDAP / Active Directory のバインド認証と同期（ADR 0102）。フィーチャー ldap が動いていなければ nil。
+	ldap *dirldap.Service
 	// passkeys は passkey の登録とログイン。Relying Party が決まらない構成（public_url も rp_id も無い）では nil。
 	passkeys *passkey.Service
 	// metadata は認証器のメタデータ（フィーチャー passkey_attestation。ADR 0096）。root だけが持ち、全 realm で共有する。
@@ -466,6 +469,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.saml = &saml.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, OAuth: a.oauth, BaseURL: a.issuer,
 			Dev: cfg.Dev, TTL: cfg.Security.EmailFlow.TTL.D(), Log: d.Logger}
 	}
+	a.ldap = nil
+	if plan.IsActive(feature.LDAP) {
+		// 名前ごとの照合の回数の上限はパスワードと同じ（ディレクトリのアカウントのロックアウトも防ぐ。ADR 0102）。
+		a.ldap = &dirldap.Service{Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, OAuth: a.oauth, Accounts: a.accounts, Sessions: a.sessions,
+			PerAccount: a.accountLimiter(), GroupsChanged: a.authz.Invalidate, Log: d.Logger}
+	}
 	a.passkeys = nil
 	var pa *passkey.Attestation
 	if m := a.root.metadata; m != nil {
@@ -716,6 +725,13 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	} else {
 		close(subDone)
 	}
+	ldapDone := make(chan struct{})
+	if a.plan.IsActive(feature.LDAP) {
+		// ディレクトリの同期（ADR 0102）。connection ごとの間隔は EphemeralStore の印で決め、ここは見回りの間隔。
+		go func() { a.runLDAPSync(ctx, time.Minute); close(ldapDone) }()
+	} else {
+		close(ldapDone)
+	}
 	recheckDone := make(chan struct{})
 	if a.domainRecheck != nil {
 		go func() { a.domainRecheck.Run(ctx); close(recheckDone) }()
@@ -755,6 +771,7 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	<-retDone
 	<-subDone
 	<-recheckDone
+	<-ldapDone
 	// 止める前に残りを送る（届かなければ次の起動で送る）。
 	for _, r := range relays {
 		if _, err := r.Flush(shutdownCtx); err != nil {

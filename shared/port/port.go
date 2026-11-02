@@ -58,6 +58,8 @@ type Tx interface {
 	Suspensions() SuspensionRepo
 	ScheduledEvents() ScheduledEventRepo
 	Connections() ConnectionRepo
+	// DirectoryGroups はディレクトリの同期が管理する Group の対応（フィーチャー ldap。ADR 0102）。
+	DirectoryGroups() DirectoryGroupRepo
 	Sessions() SessionRepo
 	Orgs() OrgRepo
 	Memberships() MembershipRepo

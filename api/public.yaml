@@ -266,13 +266,49 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/login/ldap/{connection}:login:
+    post:
+      operationId: ldapLogin
+      summary: LDAP / Active Directory の名前とパスワードで登録・ログインする（ADR 0102）
+      description: |
+        connection のサービスアカウントで本人の DN を 1 件だけ探し、本人の DN とパスワードでディレクトリに bind し直して確かめる。
+        ディレクトリとは TLS（LDAPS か StartTLS）でだけ話す。空のパスワードはディレクトリに送らずに拒む。失敗は理由を問わず
+        `401 authentication_failed`、ディレクトリにつながらなければ `503 directory_unavailable`。名前ごとの回数の上限は
+        `security.login.rate_limit.per_account`。登録・ログインの扱いは `/v1/login/oauth:complete` と同じ（`409 account_exists`、
+        `400 email_unverified`、Org 専用 SSO の `400 email_domain_not_verified`・`409 quota_exceeded`・`403`）。セッションの `amr` は `pwd`。
+        フィーチャー `ldap` が動いていなければ 404。
+      parameters:
+        - { name: connection, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LDAPCredentials" }
+      responses:
+        "200":
+          description: ログインした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: メールが別のユーザーで登録済み（自動リンクしない）、Org 専用 SSO で Org の Quota が足りない
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/DirectoryUnavailable" }
+
   /v1/login/sso:discover:
     post:
       operationId: discoverSSO
       summary: メールのドメインから Org 専用 SSO の connection を探す（ADR 0077）
       description: |
         アドレスのドメインを証明済みの Org があれば、その Org の connection を返す。`entries` の `type` が `oidc` なら
-        `/v1/login/oauth/{connection}:start`、`saml` なら `/v1/login/saml/{connection}:start` に渡す（`connections` は互換のための slug の一覧）。
+        `/v1/login/oauth/{connection}:start`、`saml` なら `/v1/login/saml/{connection}:start`、`ldap` なら名前とパスワードを `/v1/login/ldap/{connection}:login` に渡す（`connections` は互換のための slug の一覧）。
         無ければ空。ドメインが SSO を使うことは公開の情報とみなす（アドレスの登録の有無は返さない）。
       requestBody:
         required: true
@@ -302,7 +338,7 @@ paths:
                       required: [connection, type]
                       properties:
                         connection: { type: string, description: connection（公開の ID） }
-                        type: { type: string, enum: [oidc, saml] }
+                        type: { type: string, enum: [oidc, saml, ldap] }
         "400": { $ref: "#/components/responses/BadRequest" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
@@ -1123,6 +1159,36 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/identities/ldap/{connection}:link:
+    post:
+      operationId: linkLDAPIdentity
+      summary: LDAP / Active Directory の本人を連携する（ADR 0102）
+      description: |
+        ログイン済みの本人だけが、ディレクトリの名前とパスワードで確かめた本人を連携できる（4.2）。失敗は `401 authentication_failed`、
+        外部 ID が既に紐付いていれば `409 identity_exists`、Org 専用 SSO の connection は、その Org の管理ユーザーだけ（`409 not_managed_by_org`）。
+        ディレクトリにつながらなければ `503 directory_unavailable`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: connection, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LDAPCredentials" }
+      responses:
+        "200":
+          description: 連携した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyIdentity" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/DirectoryUnavailable" }
 
   /v1/me/identities/{id}:unlink:
     post:
@@ -2287,6 +2353,37 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /v1/me/orgs/{id}/connections:ldap:
+    post:
+      operationId: addOrgLDAPConnection
+      summary: Org 専用 SSO の connection（LDAP / Active Directory）を登録する（Org の owner。ADR 0077、0102）
+      description: |
+        Org のディレクトリを登録する。`url` は `ldaps://` か `ldap://`（StartTLS を必ず掛ける。平文では話さない）で、公開のアドレスに
+        限ってつなぐ。サービスアカウントのパスワードは封をして保存し、応答にも監査ログにも出さない。メールは Org が証明したドメインの
+        アドレスに限って確認済みとみなす（`trust_email` は無い）。フィーチャー `ldap` と `org_managed_users` が要る（無ければ 404）。
+        上限・個人 Org・設定の誤りは OIDC の connection と同じ。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LDAPConnectionInput" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgConnection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /v1/me/orgs/{id}/connections/{connection_id}:delete:
     post:
       operationId: deleteOrgConnection
@@ -2968,6 +3065,11 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    DirectoryUnavailable:
+      description: 依存先（ディレクトリなど）に一時的につながらない（`directory_unavailable`）
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     RateLimited:
       description: 回数の上限を超えた（`rate_limited`）
       headers:
@@ -3316,11 +3418,12 @@ components:
     OrgConnection:
       type: object
       required: [id, type, issuer, authorization_endpoint, token_endpoint, client_id, scopes, redirect_uri, created_at]
-      description: OIDC の項目（issuer から redirect_uri まで）は `type` が `oidc` のときだけ値を持つ（`saml` なら空）。
+      description: OIDC の項目（issuer から redirect_uri まで）は `type` が `oidc` のときだけ値を持つ（`saml`・`ldap` なら空）。
       properties:
         id: { type: string, description: "公開の connection ID（con_…）。`/v1/login/oauth/{connection}:start`（SAML なら `/v1/login/saml/{connection}:start`）に渡す" }
-        type: { type: string, enum: [oidc, saml] }
+        type: { type: string, enum: [oidc, saml, ldap] }
         saml: { $ref: "#/components/schemas/SAMLConnectionInfo" }
+        ldap: { $ref: "#/components/schemas/LDAPConnectionInfo" }
         issuer: { type: string }
         authorization_endpoint: { type: string }
         token_endpoint: { type: string }
@@ -3347,6 +3450,61 @@ components:
         sign_requests: { type: boolean, description: AuthnRequest に署名する（ECDSA-SHA256） }
         name_id_format: { type: string, maxLength: 256, description: 求める NameID の形式（transient は使えない） }
         email_attribute: { type: string, maxLength: 256, description: メールの属性の名前 }
+    LDAPCredentials:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, maxLength: 256, description: ディレクトリのログインの名前（login_attribute の値） }
+        password: { type: string, maxLength: 1024, format: password }
+        return_token: { type: boolean }
+    LDAPSync:
+      type: object
+      properties:
+        enabled: { type: boolean, description: 定期的な同期を行う }
+        interval_seconds: { type: integer, format: int64, description: 同期の間隔（900〜604800 秒。0 なら 3600） }
+        provision: { type: boolean, description: まだ紐付いていない本人を、ログインと同じ規則で事前に登録する }
+        on_missing: { type: string, enum: [suspend, none], description: ディレクトリから消えた・無効にされた本人の扱い（既定 suspend） }
+    LDAPConnectionInput:
+      type: object
+      required: [url, bind_dn, bind_password, user_base_dn]
+      properties:
+        url: { type: string, maxLength: 2048, description: "ldaps://host[:port] か ldap://host[:port]（StartTLS を必ず掛ける）" }
+        ca_pem: { type: string, maxLength: 65536, description: サーバーの証明書の信頼の起点（PEM）。無ければ OS の既定 }
+        pins:
+          type: array
+          maxItems: 10
+          items: { type: string, description: 証明書の SubjectPublicKeyInfo の SHA-256（base64） }
+        bind_dn: { type: string, maxLength: 1024 }
+        bind_password: { type: string, maxLength: 1024, format: password }
+        user_base_dn: { type: string, maxLength: 1024 }
+        user_filter: { type: string, maxLength: 1024, description: "既定は (objectClass=inetOrgPerson)。AD は (&(objectCategory=person)(objectClass=user))" }
+        login_attribute: { type: string, maxLength: 64, description: 既定は uid（AD は sAMAccountName） }
+        id_attribute: { type: string, maxLength: 64, description: 変わらない識別子。既定は entryUUID（AD は objectGUID） }
+        email_attribute: { type: string, maxLength: 64, description: 既定は mail }
+        group_base_dn: { type: string, maxLength: 1024, description: この下の Group の所属を同期する（無ければ所属を同期しない） }
+        group_attribute: { type: string, maxLength: 64, description: 本人の項目の所属の属性。既定は memberOf }
+        active_directory: { type: boolean, description: Active Directory の既定を使い、userAccountControl の無効を見る }
+        sync: { $ref: "#/components/schemas/LDAPSync" }
+    LDAPConnectionInfo:
+      type: object
+      required: [url, bind_dn, user_base_dn, user_filter, login_attribute, id_attribute, email_attribute, active_directory, trust_email, ca_configured, pins, sync]
+      properties:
+        url: { type: string }
+        bind_dn: { type: string }
+        user_base_dn: { type: string }
+        user_filter: { type: string }
+        login_attribute: { type: string }
+        id_attribute: { type: string }
+        email_attribute: { type: string }
+        group_base_dn: { type: string }
+        group_attribute: { type: string }
+        active_directory: { type: boolean }
+        trust_email: { type: boolean }
+        ca_configured: { type: boolean }
+        pins:
+          type: array
+          items: { type: string }
+        sync: { $ref: "#/components/schemas/LDAPSync" }
     SAMLConnectionInfo:
       type: object
       required: [idp_entity_id, sso_url, sp_entity_id, acs_url, sign_requests]

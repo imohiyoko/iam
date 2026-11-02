@@ -67,6 +67,14 @@ type AuthnCredential struct {
 	RevokeReason string
 }
 
+type AuthnDirectoryGroup struct {
+	RealmID      string
+	ConnectionID string
+	ExternalKey  string
+	GroupID      string
+	CreatedAt    string
+}
+
 type AuthnKnownDevice struct {
 	ID         string
 	PublicID   string

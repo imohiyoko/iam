@@ -42,6 +42,7 @@ const (
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 	SAML                = "saml"
+	LDAP                = "ldap"
 	// ADR 0105。
 	AccountLockout    = "account_lockout"
 	DeviceRecognition = "device_recognition"
