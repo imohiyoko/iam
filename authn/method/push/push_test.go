@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -259,6 +260,122 @@ func TestEnrollRespondComplete(t *testing.T) {
 	}
 }
 
+// TestBackchannel は CIBA のチャレンジ（ADR 0114）：番号は無く、端末は context で中身を取り、"00" に署名して承認する。
+// ログインのチャレンジを "00" で承認しても番号の違いになる。
+func TestBackchannel(t *testing.T) {
+	m, out, clk := setup(t)
+	s := &fakeStore{}
+	ctx := context.Background()
+	env := func(user string) port.MethodEnv {
+		return port.MethodEnv{RealmID: "r1", UserID: user, Credentials: s, Now: clk.Now()}
+	}
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pk := spki(t, pub)
+	sign := func(kind string, fields ...string) string {
+		msg, _ := Message(kind, fields...)
+		return base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(msg)))
+	}
+	ch, _ := m.EnrollBegin(ctx, env("u1"), port.MethodRequest{})
+	var st enrollState
+	_ = json.Unmarshal(ch.State, &st)
+	raw, _ := json.Marshal(map[string]any{"public_key": pk, "push_token": "tok", "signature": sign("enroll", st.Nonce, pk, TokenHash("tok"))})
+	en, err := m.EnrollComplete(ctx, env("u1"), port.MethodRequest{State: ch.State, Payload: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dev struct {
+		DeviceID string `json:"device_id"`
+	}
+	_ = json.Unmarshal(en.Payload, &dev)
+	req := port.BackchannelRequest{ClientName: "Bank", BindingMessage: "W4SCT", Scopes: []string{"openid"}, ExpiresAt: clk.Now().Add(5 * time.Minute)}
+
+	// 端末が無い本人は NotFound。中身が不正なら Invalid。
+	if _, err := m.BeginBackchannel(ctx, env("u9"), req); !errors.Is(err, errs.NotFound) {
+		t.Fatalf("no device: %v", err)
+	}
+	bad := req
+	bad.BindingMessage = "a\nb"
+	if _, err := m.BeginBackchannel(ctx, env("u1"), bad); !errors.Is(err, errs.Invalid) {
+		t.Fatalf("bad binding message: %v", err)
+	}
+
+	call := func(p map[string]any) (port.MethodCallbackResult, error) {
+		raw, _ := json.Marshal(p)
+		return m.Callback(ctx, env(""), port.MethodRequest{Payload: raw})
+	}
+	ch, err = m.BeginBackchannel(ctx, env("u1"), req)
+	if err != nil || ch.Ref == "" {
+		t.Fatalf("begin: %+v %v", ch, err)
+	}
+	if strings.Contains(string(ch.Payload), "number") {
+		t.Fatalf("backchannel challenge has a number: %s", ch.Payload)
+	}
+	if err := ch.Deliver(ctx); err != nil {
+		t.Fatal(err)
+	}
+	msg := out.sent[len(out.sent)-1]
+	if msg.ChallengeID != ch.Ref {
+		t.Fatalf("ref %q != challenge %q", ch.Ref, msg.ChallengeID)
+	}
+	// 中身は本人の端末の署名でだけ読める。
+	if _, err := call(map[string]any{"action": "context", "device_id": dev.DeviceID, "challenge_id": msg.ChallengeID, "signature": sign("context", "x", dev.DeviceID)}); !errors.Is(err, errs.AuthenticationFailed) {
+		t.Fatalf("context with a bad signature: %v", err)
+	}
+	res, err := call(map[string]any{"action": "context", "device_id": dev.DeviceID, "challenge_id": msg.ChallengeID, "signature": sign("context", msg.ChallengeID, dev.DeviceID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shown struct {
+		Kind           string `json:"kind"`
+		Client         string `json:"client"`
+		BindingMessage string `json:"binding_message"`
+	}
+	_ = json.Unmarshal(res.Payload, &shown)
+	if shown.Kind != "backchannel" || shown.Client != "Bank" || shown.BindingMessage != "W4SCT" {
+		t.Fatalf("context: %s", res.Payload)
+	}
+	if _, err := m.Complete(ctx, env("u1"), port.MethodRequest{State: ch.State}); !errors.Is(err, port.ErrMethodPending) {
+		t.Fatalf("pending: %v", err)
+	}
+	res, err = call(map[string]any{"action": "respond", "device_id": dev.DeviceID, "challenge_id": msg.ChallengeID, "decision": "approve",
+		"number": "00", "signature": sign("respond", msg.ChallengeID, dev.DeviceID, "approve", "00")})
+	if err != nil || res.Ref != ch.Ref {
+		t.Fatalf("respond: %+v %v", res, err)
+	}
+	r, err := m.Complete(ctx, env("u1"), port.MethodRequest{State: ch.State})
+	if err != nil || r.Credential.ID != en.Credential.ID {
+		t.Fatalf("complete: %+v %v", r, err)
+	}
+
+	// ログインのチャレンジは "00" の承認では通らない（番号の違い）。応答の Ref は空。
+	lch, err := m.Begin(ctx, env("u1"), port.MethodRequest{})
+	if err != nil || lch.Ref != "" {
+		t.Fatalf("login begin: %+v %v", lch, err)
+	}
+	_ = lch.Deliver(ctx)
+	lmsg := out.sent[len(out.sent)-1]
+	res, err = call(map[string]any{"action": "respond", "device_id": dev.DeviceID, "challenge_id": lmsg.ChallengeID, "decision": "approve",
+		"number": "00", "signature": sign("respond", lmsg.ChallengeID, dev.DeviceID, "approve", "00")})
+	if err != nil || res.Ref != "" {
+		t.Fatalf("login respond: %+v %v", res, err)
+	}
+	if _, err := m.Complete(ctx, env("u1"), port.MethodRequest{State: lch.State}); !errors.Is(err, errs.AuthenticationFailed) {
+		t.Fatalf("login approved with 00: %v", err)
+	}
+	// 期限は要求の期限で、10 分を超えない。
+	long := req
+	long.ExpiresAt = clk.Now().Add(time.Hour)
+	ch, err = m.BeginBackchannel(ctx, env("u1"), long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ls loginState
+	_ = json.Unmarshal(ch.State, &ls)
+	if !ls.ExpiresAt.Equal(clk.Now().Add(maxBackchannelTTL)) {
+		t.Fatalf("expiry: %v", ls.ExpiresAt)
+	}
+}
+
 func FuzzParsePublicKey(f *testing.F) {
 	ec, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	ed, _, _ := ed25519.GenerateKey(rand.Reader)
@@ -280,6 +397,7 @@ func FuzzParsePublicKey(f *testing.F) {
 func FuzzCallbackPayload(f *testing.F) {
 	f.Add([]byte(`{"action":"respond","device_id":"dev_AAAAAAAAAAAAAAAAAAAAAA","challenge_id":"x","decision":"approve","number":"42","signature":"AA"}`))
 	f.Add([]byte(`{"action":"token","device_id":"dev_AAAAAAAAAAAAAAAAAAAAAA","push_token":"t","timestamp":1,"signature":"AA"}`))
+	f.Add([]byte(`{"action":"context","device_id":"dev_AAAAAAAAAAAAAAAAAAAAAA","challenge_id":"x","signature":"AA"}`))
 	f.Add([]byte(`null`))
 	k := testkit.New(f)
 	a, err := Method{}.Setup(context.Background(), port.MethodSetup{Push: &outbox{}, Clock: k.Clock, Ephemeral: method.Scoped(k.Cache, Name, "r1")})

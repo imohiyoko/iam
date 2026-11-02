@@ -90,6 +90,8 @@ var featureCatalog = map[string]struct {
 	feature.PersonalAccessTokens: {pat.Feature, module + "/features/personalaccesstokens"},
 	feature.OpenID4VP:            {openid4vp.Feature, module + "/features/openid4vp"},
 	feature.WSFed:                {wsfed.Feature, module + "/features/wsfed"},
+	// ADR 0114。
+	feature.CIBA: {provider.CIBAFeature, module + "/features/ciba"},
 	// ADR 0112。
 	feature.PAR:                {provider.PARFeature, module + "/features/par"},
 	feature.ResourceIndicators: {provider.ResourceFeature, module + "/features/resourceindicators"},

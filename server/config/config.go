@@ -153,6 +153,10 @@ type OIDC struct {
 	DevicePollInterval Duration `yaml:"device_poll_interval"`
 	// Impersonation は Token Exchange による運営者のなりすまし（フィーチャー impersonation。ADR 0099）。
 	Impersonation Impersonation `yaml:"impersonation"`
+	// CIBATTL は CIBA の auth_req_id の期限の上限（10 分以下。requested_expiry はこれより短くするときだけ効く。フィーチャー ciba。
+	// ADR 0114）。CIBAPollInterval は連携先のポーリングの最短の間隔（1 秒から 1 分）。
+	CIBATTL          Duration `yaml:"ciba_ttl"`
+	CIBAPollInterval Duration `yaml:"ciba_poll_interval"`
 	// PARRequestURITTL は PAR（RFC 9126）の request_uri の寿命（10 分以下。フィーチャー par。ADR 0112）。
 	PARRequestURITTL Duration `yaml:"par_request_uri_ttl"`
 }
@@ -650,7 +654,8 @@ func Default() Config {
 		OIDC: OIDC{Impersonation: Impersonation{TokenTTL: Duration(10 * time.Minute), MaxAuthAge: Duration(5 * time.Minute), MinFactors: 2},
 			CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
 			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day),
-			DeviceCodeTTL: Duration(10 * time.Minute), DevicePollInterval: Duration(5 * time.Second), PARRequestURITTL: Duration(time.Minute)},
+			DeviceCodeTTL: Duration(10 * time.Minute), DevicePollInterval: Duration(5 * time.Second),
+			CIBATTL: Duration(5 * time.Minute), CIBAPollInterval: Duration(5 * time.Second), PARRequestURITTL: Duration(time.Minute)},
 		ServiceAccounts:      ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
 		PersonalAccessTokens: PersonalAccessTokens{MaxPerUser: 50},
 	}
@@ -851,6 +856,12 @@ func (c Config) Validate() error {
 	}
 	if o.DevicePollInterval < Duration(time.Second) || o.DevicePollInterval > Duration(time.Minute) {
 		problems = append(problems, "oidc.device_poll_interval must be within [1s, 1m]")
+	}
+	if o.CIBATTL < Duration(30*time.Second) || o.CIBATTL > Duration(10*time.Minute) {
+		problems = append(problems, "oidc.ciba_ttl must be within [30s, 10m]")
+	}
+	if o.CIBAPollInterval < Duration(time.Second) || o.CIBAPollInterval > Duration(time.Minute) {
+		problems = append(problems, "oidc.ciba_poll_interval must be within [1s, 1m]")
 	}
 	if o.PARRequestURITTL <= 0 || o.PARRequestURITTL > Duration(10*time.Minute) {
 		problems = append(problems, "oidc.par_request_uri_ttl must be positive and at most 10m")

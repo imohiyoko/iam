@@ -241,6 +241,24 @@ func (e ClientTrustLevel) Valid() bool {
 	}
 }
 
+// Defines values for ClientInputBackchannelTokenDeliveryMode.
+const (
+	Ping ClientInputBackchannelTokenDeliveryMode = "ping"
+	Poll ClientInputBackchannelTokenDeliveryMode = "poll"
+)
+
+// Valid indicates whether the value is a known member of the ClientInputBackchannelTokenDeliveryMode enum.
+func (e ClientInputBackchannelTokenDeliveryMode) Valid() bool {
+	switch e {
+	case Ping:
+		return true
+	case Poll:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ClientInputIdTokenSignedResponseAlg.
 const (
 	ClientInputIdTokenSignedResponseAlgES256   ClientInputIdTokenSignedResponseAlg = "ES256"
@@ -1283,8 +1301,13 @@ type ClaimedNotification struct {
 
 // Client defines model for Client.
 type Client struct {
-	BackchannelLogoutUri *string `json:"backchannel_logout_uri,omitempty"`
-	ClientId             string  `json:"client_id"`
+	// BackchannelClientNotificationEndpoint ping の通知先（ping のときだけ）
+	BackchannelClientNotificationEndpoint *string `json:"backchannel_client_notification_endpoint,omitempty"`
+	BackchannelLogoutUri                  *string `json:"backchannel_logout_uri,omitempty"`
+
+	// BackchannelTokenDeliveryMode CIBA のトークンの受け取り方（フィーチャー `ciba` が動いていて、登録したときだけ返す）
+	BackchannelTokenDeliveryMode *string `json:"backchannel_token_delivery_mode,omitempty"`
+	ClientId                     string  `json:"client_id"`
 
 	// ClientSecret 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す）
 	ClientSecret *string   `json:"client_secret,omitempty"`
@@ -1314,7 +1337,13 @@ type ClientTrustLevel string
 
 // ClientInput defines model for ClientInput.
 type ClientInput struct {
-	BackchannelLogoutUri *string `json:"backchannel_logout_uri,omitempty"`
+	// BackchannelClientNotificationEndpoint ping の通知先（https。`backchannel_token_delivery_mode` が ping のときだけ、必須）
+	BackchannelClientNotificationEndpoint *string `json:"backchannel_client_notification_endpoint,omitempty"`
+	BackchannelLogoutUri                  *string `json:"backchannel_logout_uri,omitempty"`
+
+	// BackchannelTokenDeliveryMode CIBA のトークンの受け取り方（OpenID CIBA Core 4。フィーチャー `ciba`。ADR 0114）。機密の連携先だけ。無ければ CIBA を
+	// 使えない。フィーチャーが動いていなければ付けられない（`invalid_client_metadata`）。CIBA だけの連携先は `redirect_uris` が空でよい
+	BackchannelTokenDeliveryMode *ClientInputBackchannelTokenDeliveryMode `json:"backchannel_token_delivery_mode,omitempty"`
 
 	// DeviceAuthorizationGrant Device Authorization Grant（RFC 8628）を許す。フィーチャー `device_flow` が動いているときだけ true にできる（ADR 0095）
 	DeviceAuthorizationGrant *bool `json:"device_authorization_grant,omitempty"`
@@ -1333,13 +1362,17 @@ type ClientInput struct {
 	Name                   string                  `json:"name"`
 	PostLogoutRedirectUris *[]string               `json:"post_logout_redirect_uris,omitempty"`
 
-	// RedirectUris 1 つ以上。`device_authorization_grant` を許す連携先だけは空でよい
+	// RedirectUris 1 つ以上。`device_authorization_grant` を許すか `backchannel_token_delivery_mode` を登録した連携先だけは空でよい
 	RedirectUris []string `json:"redirect_uris"`
 
 	// RequirePushedAuthorizationRequests 認可要求を PAR（RFC 9126）で送らせる。フィーチャー `par` が動いているときだけ true にできる（ADR 0112）。省けば false
 	RequirePushedAuthorizationRequests *bool                              `json:"require_pushed_authorization_requests,omitempty"`
 	TokenEndpointAuthMethod            ClientInputTokenEndpointAuthMethod `json:"token_endpoint_auth_method"`
 }
+
+// ClientInputBackchannelTokenDeliveryMode CIBA のトークンの受け取り方（OpenID CIBA Core 4。フィーチャー `ciba`。ADR 0114）。機密の連携先だけ。無ければ CIBA を
+// 使えない。フィーチャーが動いていなければ付けられない（`invalid_client_metadata`）。CIBA だけの連携先は `redirect_uris` が空でよい
+type ClientInputBackchannelTokenDeliveryMode string
 
 // ClientInputIdTokenSignedResponseAlg defines model for ClientInput.IdTokenSignedResponseAlg.
 type ClientInputIdTokenSignedResponseAlg string

@@ -4137,7 +4137,7 @@ components:
         redirect_uris:
           type: array
           maxItems: 20
-          description: 1 つ以上。`device_authorization_grant` を許す連携先だけは空でよい
+          description: 1 つ以上。`device_authorization_grant` を許すか `backchannel_token_delivery_mode` を登録した連携先だけは空でよい
           items: { type: string }
         post_logout_redirect_uris:
           type: array
@@ -4162,6 +4162,15 @@ components:
         frontchannel_logout_session_required:
           type: boolean
           description: "`frontchannel_logout_uri` に `iss` と `sid` を付けるか（既定 false）"
+        backchannel_token_delivery_mode:
+          type: string
+          enum: [poll, ping]
+          description: |
+            CIBA のトークンの受け取り方（OpenID CIBA Core 4。フィーチャー `ciba`。ADR 0114）。機密の連携先だけ。無ければ CIBA を
+            使えない。フィーチャーが動いていなければ付けられない（`invalid_client_metadata`）。CIBA だけの連携先は `redirect_uris` が空でよい
+        backchannel_client_notification_endpoint:
+          type: string
+          description: ping の通知先（https。`backchannel_token_delivery_mode` が ping のときだけ、必須）
         require_pushed_authorization_requests:
           type: boolean
           description: |
@@ -4188,6 +4197,8 @@ components:
         device_authorization_grant: { type: boolean, description: フィーチャー `device_flow` が動いているときだけ返す }
         frontchannel_logout_uri: { type: string }
         frontchannel_logout_session_required: { type: boolean, description: "`frontchannel_logout_uri` があるときだけ" }
+        backchannel_token_delivery_mode: { type: string, description: CIBA のトークンの受け取り方（フィーチャー `ciba` が動いていて、登録したときだけ返す） }
+        backchannel_client_notification_endpoint: { type: string, description: ping の通知先（ping のときだけ） }
         require_pushed_authorization_requests: { type: boolean, description: PAR を求める連携先だけ true を返す（求めないなら省く） }
         client_secret: { type: string, description: 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す） }
         created_at: { type: string, format: date-time }

@@ -41,6 +41,8 @@ type AuthnClient struct {
 	DeviceGrant                       int64
 	TokenExchange                     []byte
 	RequirePar                        int64
+	CibaMode                          string
+	CibaNotificationEndpoint          string
 }
 
 type AuthnConnection struct {

@@ -123,3 +123,4 @@
 | [0109](0109-personal-access-tokens.md) | 本人の Personal Access Token は権限の名前のスコープで本人の権限を絞り、ハッシュだけを持つ不透明なトークンにする | 承認 |
 | [0110](0110-wsfed-passive-idp.md) | WS-Federation のパッシブ要求者プロファイルを IdP として持ち、トークンは realm の ES256 の鍵で XML 署名する | 承認 |
 | [0112](0112-par-and-resource-indicators.md) | PAR・AS メタデータ・Protected Resource Metadata を足し、自前の API に向けたトークンは realm に登録したリソースに限って resource で 1 つ選ぶ | 承認 |
+| [0114](0114-ciba.md) | CIBA は状態を EphemeralStore に置き、本人の承認はプッシュの端末と本人の API で受ける | 承認 |

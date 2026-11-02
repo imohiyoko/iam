@@ -229,6 +229,18 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.OAuthResources().Purge(ctx, limit)
 		}},
+	// 連携先の CIBA の登録（モードと ping の通知先）を外す（ADR 0114）。途中の要求は EphemeralStore にあり、期限で消える。
+	feature.CIBA: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.CIBAMode != "" || c.CIBANotificationEndpoint != "", nil })
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
+			if c.CIBAMode == "" && c.CIBANotificationEndpoint == "" {
+				return false, nil
+			}
+			c.CIBAMode, c.CIBANotificationEndpoint, c.UpdatedAt = "", "", now
+			return true, tx.Clients().Update(ctx, c)
+		})
+	}},
 }
 
 // eachRealmRequiringPAR は realm の設定の require_pushed_authorization_requests が真の realm を数える。now が零でなければ、

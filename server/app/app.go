@@ -172,6 +172,9 @@ type App struct {
 	// device は Device Authorization Grant（ADR 0095）。フィーチャー device_flow が動いていなければ nil。deviceTmpl はその画面。
 	device     *provider.Device
 	deviceTmpl *template.Template
+	// ciba は CIBA（ADR 0114）。フィーチャー ciba が動いていなければ nil。cibaHTTP は ping の通知に使う（nil なら既定）。
+	ciba     *provider.Backchannel
+	cibaHTTP *http.Client
 	// impersonationLimit は運営者ごとのなりすましの回数の上限（フィーチャー impersonation。ADR 0099）。
 	impersonationLimit *ratelimit.Limiter
 	// logoutTmpl はログアウトの画面（ADR 0094）。フィーチャー oidc_logout が動いていなければ nil。
@@ -448,7 +451,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
 	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout),
-		PAR: plan.IsActive(feature.PAR)}
+		CIBA: plan.IsActive(feature.CIBA), PAR: plan.IsActive(feature.PAR)}
 	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D()}
 	// ID トークンの署名鍵は realm ごとに用意しておく（JWKS が空のまま公開されないように）。
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, realm.ID) }); err != nil {
@@ -472,6 +475,11 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		if a.deviceTmpl, err = deviceTemplate(cfg.Server.LoginTemplates); err != nil {
 			return err
 		}
+	}
+	a.ciba = nil
+	if plan.IsActive(feature.CIBA) {
+		a.ciba = &provider.Backchannel{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, TTL: cfg.OIDC.CIBATTL.D(),
+			Interval: cfg.OIDC.CIBAPollInterval.D()}
 	}
 	if plan.IsActive(feature.CustomAttributes) {
 		a.attributes = &attribute.Service{Clock: d.Clock, Crypter: a.pii}
@@ -552,6 +560,10 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	a.loginProtection(cfg, d, plan)
 	a.credentials.Lockout = a.lockout
+	if a.ciba != nil {
+		// 本人の端末（プッシュの承認）が CIBA の要求に答えたら、要求に判断を記録する（ADR 0114）。
+		a.credentials.OnBackchannel = a.backchannelAnswered
+	}
 	a.pats = newPATs(cfg, d, plan)
 	a.password = nil
 	if pwMethod != nil {

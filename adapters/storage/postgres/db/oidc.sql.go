@@ -24,8 +24,9 @@ func (q *Queries) CountExchangedGrants(ctx context.Context, exchange string) (in
 const createClient = `-- name: CreateClient :exec
 
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
-    id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at, token_exchange, device_grant, require_par)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+    id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at, token_exchange, device_grant,
+    ciba_mode, ciba_notification_endpoint, require_par)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 `
 
 type CreateClientParams struct {
@@ -47,6 +48,8 @@ type CreateClientParams struct {
 	UpdatedAt                         string
 	TokenExchange                     []byte
 	DeviceGrant                       int64
+	CibaMode                          string
+	CibaNotificationEndpoint          string
 	RequirePar                        int64
 }
 
@@ -71,6 +74,8 @@ func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) erro
 		arg.UpdatedAt,
 		arg.TokenExchange,
 		arg.DeviceGrant,
+		arg.CibaMode,
+		arg.CibaNotificationEndpoint,
 		arg.RequirePar,
 	)
 	return err
@@ -277,7 +282,7 @@ func (q *Queries) EraseUserGrants(ctx context.Context, arg EraseUserGrantsParams
 }
 
 const getClient = `-- name: GetClient :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par FROM authn_clients WHERE realm_id = $1 AND id = $2
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = $1 AND id = $2
 `
 
 type GetClientParams struct {
@@ -308,12 +313,14 @@ func (q *Queries) GetClient(ctx context.Context, arg GetClientParams) (AuthnClie
 		&i.DeviceGrant,
 		&i.TokenExchange,
 		&i.RequirePar,
+		&i.CibaMode,
+		&i.CibaNotificationEndpoint,
 	)
 	return i, err
 }
 
 const getClientByPublicID = `-- name: GetClientByPublicID :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par FROM authn_clients WHERE realm_id = $1 AND public_id = $2
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = $1 AND public_id = $2
 `
 
 type GetClientByPublicIDParams struct {
@@ -344,6 +351,8 @@ func (q *Queries) GetClientByPublicID(ctx context.Context, arg GetClientByPublic
 		&i.DeviceGrant,
 		&i.TokenExchange,
 		&i.RequirePar,
+		&i.CibaMode,
+		&i.CibaNotificationEndpoint,
 	)
 	return i, err
 }
@@ -410,7 +419,7 @@ func (q *Queries) GetOIDCToken(ctx context.Context, arg GetOIDCTokenParams) (Aut
 }
 
 const listClients = `-- name: ListClients :many
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par FROM authn_clients WHERE realm_id = $1 ORDER BY created_at, id
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, ciba_mode, ciba_notification_endpoint FROM authn_clients WHERE realm_id = $1 ORDER BY created_at, id
 `
 
 func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClient, error) {
@@ -442,6 +451,8 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 			&i.DeviceGrant,
 			&i.TokenExchange,
 			&i.RequirePar,
+			&i.CibaMode,
+			&i.CibaNotificationEndpoint,
 		); err != nil {
 			return nil, err
 		}
@@ -623,8 +634,9 @@ func (q *Queries) RevokeGrant(ctx context.Context, arg RevokeGrantParams) (int64
 
 const updateClient = `-- name: UpdateClient :execrows
 UPDATE authn_clients SET name = $1, trust_level = $2, redirect_uris = $3, post_logout_redirect_uris = $4, auth_method = $5, secret_hash = $6, jwks = $7,
-    id_token_alg = $8, backchannel_logout_uri = $9, frontchannel_logout_uri = $10, frontchannel_logout_session_required = $11, updated_at = $12, token_exchange = $13, device_grant = $14, require_par = $15
-WHERE realm_id = $16 AND id = $17
+    id_token_alg = $8, backchannel_logout_uri = $9, frontchannel_logout_uri = $10, frontchannel_logout_session_required = $11, updated_at = $12, token_exchange = $13, device_grant = $14,
+    ciba_mode = $15, ciba_notification_endpoint = $16, require_par = $17
+WHERE realm_id = $18 AND id = $19
 `
 
 type UpdateClientParams struct {
@@ -642,6 +654,8 @@ type UpdateClientParams struct {
 	UpdatedAt                         string
 	TokenExchange                     []byte
 	DeviceGrant                       int64
+	CibaMode                          string
+	CibaNotificationEndpoint          string
 	RequirePar                        int64
 	RealmID                           string
 	ID                                string
@@ -663,6 +677,8 @@ func (q *Queries) UpdateClient(ctx context.Context, arg UpdateClientParams) (int
 		arg.UpdatedAt,
 		arg.TokenExchange,
 		arg.DeviceGrant,
+		arg.CibaMode,
+		arg.CibaNotificationEndpoint,
 		arg.RequirePar,
 		arg.RealmID,
 		arg.ID,

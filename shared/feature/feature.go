@@ -59,6 +59,8 @@ const (
 	OpenID4VP = "openid4vp"
 	// WSFed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。
 	WSFed = "wsfed"
+	// CIBA は OpenID Connect Client-Initiated Backchannel Authentication（ADR 0114）。
+	CIBA = "ciba"
 	// PAR は Pushed Authorization Requests（RFC 9126。ADR 0112）。
 	PAR = "par"
 	// ResourceIndicators は自前の API（リソースサーバー）向けのトークン（RFC 8707。ADR 0112）。

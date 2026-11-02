@@ -54,6 +54,8 @@ type Clients struct {
 	DeviceFlow bool
 	// FrontChannel はフィーチャー oidc_logout が動いているか（Front-Channel Logout の登録を受け付けるか。ADR 0094）。
 	FrontChannel bool
+	// CIBA は CIBA の登録を受け付けるか（フィーチャー ciba。ADR 0114）。
+	CIBA bool
 	// PAR はフィーチャー par が動いているか（require_pushed_authorization_requests を受け付けるか。ADR 0112）。
 	PAR bool
 }
@@ -73,6 +75,10 @@ type ClientInput struct {
 	// FrontchannelLogoutURI と FrontchannelLogoutSessionRequired は Front-Channel Logout（フィーチャー oidc_logout）。
 	FrontchannelLogoutURI             string
 	FrontchannelLogoutSessionRequired bool
+	// CIBAMode は CIBA のトークンの受け取り方（backchannel_token_delivery_mode。空・poll・ping）、CIBANotificationEndpoint は
+	// ping の通知先（フィーチャー ciba。ADR 0114）。
+	CIBAMode                 string
+	CIBANotificationEndpoint string
 	// RequirePAR は認可要求を PAR で送らせる（フィーチャー par。ADR 0112）。
 	RequirePAR bool
 }
@@ -125,7 +131,7 @@ func Origin(s string) (string, bool) {
 	return o, true
 }
 
-func (in ClientInput) normalize(deviceFlow bool) (ClientInput, error) {
+func (in ClientInput) normalize(deviceFlow, ciba bool) (ClientInput, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || utf8.RuneCountInString(in.Name) > MaxClientNameLength {
 		return in, invalidClient("name")
@@ -133,8 +139,11 @@ func (in ClientInput) normalize(deviceFlow bool) (ClientInput, error) {
 	if in.DeviceGrant && !deviceFlow {
 		return in, invalidClient("device_authorization_grant")
 	}
-	// Device Authorization Grant だけを使う連携先（CLI など）は戻り先を持たなくてよい。
-	if (len(in.RedirectURIs) == 0 && !in.DeviceGrant) || len(in.RedirectURIs) > MaxRedirectURIs || len(in.PostLogoutRedirectURIs) > MaxRedirectURIs {
+	if err := in.checkCIBA(ciba); err != nil {
+		return in, err
+	}
+	// Device Authorization Grant・CIBA だけを使う連携先（CLI・コールセンターなど）は戻り先を持たなくてよい。
+	if (len(in.RedirectURIs) == 0 && !in.DeviceGrant && in.CIBAMode == "") || len(in.RedirectURIs) > MaxRedirectURIs || len(in.PostLogoutRedirectURIs) > MaxRedirectURIs {
 		return in, invalidClient("redirect_uris")
 	}
 	for _, u := range append(slices.Clone(in.RedirectURIs), in.PostLogoutRedirectURIs...) {
@@ -190,6 +199,34 @@ func (in ClientInput) normalize(deviceFlow bool) (ClientInput, error) {
 	return in, nil
 }
 
+// checkCIBA は CIBA の登録を確かめる（ADR 0114）。フィーチャーが動いていなければ登録できない。機密の連携先だけで、push モードは
+// 持たない。ping は通知先（連携先の URI の条件。https かループバックの http）が要り、poll では通知先を持たない。
+func (in ClientInput) checkCIBA(enabled bool) error {
+	switch in.CIBAMode {
+	case "":
+		if in.CIBANotificationEndpoint != "" {
+			return invalidClient("backchannel_client_notification_endpoint requires backchannel_token_delivery_mode ping")
+		}
+		return nil
+	case port.CIBAPoll, port.CIBAPing:
+	default:
+		return invalidClient("backchannel_token_delivery_mode")
+	}
+	if !enabled {
+		return invalidClient("backchannel_token_delivery_mode: the ciba feature is not enabled")
+	}
+	if in.AuthMethod == port.ClientAuthNone {
+		return invalidClient("backchannel_token_delivery_mode requires a confidential client")
+	}
+	if in.CIBAMode == port.CIBAPoll && in.CIBANotificationEndpoint != "" {
+		return invalidClient("backchannel_client_notification_endpoint is only for ping")
+	}
+	if in.CIBAMode == port.CIBAPing && !ValidRedirectURI(in.CIBANotificationEndpoint) {
+		return invalidClient("backchannel_client_notification_endpoint")
+	}
+	return nil
+}
+
 // publicOnly は JWK が秘密の項目（RFC 7518 の d・p・q など、対称鍵の k、AKP の priv）を持たないかを返す。
 func publicOnly(k jwk.Key) bool {
 	b, err := json.Marshal(k)
@@ -224,6 +261,9 @@ func (c *Clients) record(ctx context.Context, tx port.Tx, realmID string, actor 
 	if cl.DeviceGrant {
 		details["device_authorization_grant"] = true
 	}
+	if cl.CIBAMode != "" {
+		details["backchannel_token_delivery_mode"] = cl.CIBAMode
+	}
 	if cl.RequirePAR {
 		details["require_pushed_authorization_requests"] = true
 	}
@@ -252,7 +292,7 @@ func (c *Clients) checkPAR(in ClientInput, prev port.Client) error {
 
 // Create は連携先を登録する。client_secret なら秘密を1度だけ返す（保存するのはハッシュだけ）。
 func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
-	in, err := in.normalize(c.DeviceFlow)
+	in, err := in.normalize(c.DeviceFlow, c.CIBA)
 	if err != nil {
 		return port.Client{}, "", err
 	}
@@ -267,7 +307,7 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 		RedirectURIs: in.RedirectURIs, PostLogoutRedirectURIs: in.PostLogoutRedirectURIs, AuthMethod: in.AuthMethod, JWKS: in.JWKS,
 		IDTokenAlg: in.IDTokenAlg, BackchannelLogoutURI: in.BackchannelLogoutURI, DeviceGrant: in.DeviceGrant,
 		FrontchannelLogoutURI: in.FrontchannelLogoutURI, FrontchannelLogoutSessionRequired: in.FrontchannelLogoutSessionRequired,
-		RequirePAR: in.RequirePAR, CreatedAt: now, UpdatedAt: now}
+		CIBAMode: in.CIBAMode, CIBANotificationEndpoint: in.CIBANotificationEndpoint, RequirePAR: in.RequirePAR, CreatedAt: now, UpdatedAt: now}
 	var secret string
 	if cl.AuthMethod == port.ClientAuthSecret {
 		if secret, cl.SecretHash, err = newSecret(); err != nil {
@@ -282,7 +322,7 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 
 // Update は連携先の内容を置き換える。認証方式を client_secret に変えたときは新しい秘密を返す。
 func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
-	in, err := in.normalize(c.DeviceFlow)
+	in, err := in.normalize(c.DeviceFlow, c.CIBA)
 	if err != nil {
 		return port.Client{}, "", err
 	}
@@ -303,6 +343,7 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	cl.Name, cl.RedirectURIs, cl.PostLogoutRedirectURIs, cl.AuthMethod = in.Name, in.RedirectURIs, in.PostLogoutRedirectURIs, in.AuthMethod
 	cl.JWKS, cl.IDTokenAlg, cl.BackchannelLogoutURI, cl.UpdatedAt = in.JWKS, in.IDTokenAlg, in.BackchannelLogoutURI, c.Clock.Now()
 	cl.DeviceGrant, cl.RequirePAR = in.DeviceGrant, in.RequirePAR
+	cl.CIBAMode, cl.CIBANotificationEndpoint = in.CIBAMode, in.CIBANotificationEndpoint
 	cl.FrontchannelLogoutURI, cl.FrontchannelLogoutSessionRequired = in.FrontchannelLogoutURI, in.FrontchannelLogoutSessionRequired
 	if cl.AuthMethod == port.ClientAuthNone {
 		// 公開クライアントには交換を許さない（ADR 0099）。

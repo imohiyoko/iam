@@ -60,7 +60,7 @@ func (p *rp) followLogin(t *testing.T, authorize, email string) string {
 	return p.code(t, p.l.oidcDo(t, "GET", u.Query().Get("return_to"), nil, cookie))
 }
 
-func discoveryOf(t *testing.T, l *loginEnv, path string) map[string]any {
+func metadataAt(t *testing.T, l *loginEnv, path string) map[string]any {
 	t.Helper()
 	w := l.oidcDo(t, "GET", path, nil, "")
 	var out map[string]any
@@ -73,7 +73,7 @@ func discoveryOf(t *testing.T, l *loginEnv, path string) map[string]any {
 func TestPAROff(t *testing.T) {
 	l := featureEnv(t, nil)
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
-	if d := discoveryOf(t, l, "/.well-known/openid-configuration"); d["pushed_authorization_request_endpoint"] != nil ||
+	if d := metadataAt(t, l, "/.well-known/openid-configuration"); d["pushed_authorization_request_endpoint"] != nil ||
 		d["require_pushed_authorization_requests"] != nil {
 		t.Fatalf("discovery shows PAR: %v", d)
 	}
@@ -99,11 +99,11 @@ func TestPAR(t *testing.T) {
 	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
 
 	// Discovery と RFC 8414 のメタデータは同じ内容で、PAR のエンドポイントを載せる。
-	disc := discoveryOf(t, l, "/.well-known/openid-configuration")
+	disc := metadataAt(t, l, "/.well-known/openid-configuration")
 	if disc["pushed_authorization_request_endpoint"] != testIssuer+oidcPAR || disc["require_pushed_authorization_requests"] != nil {
 		t.Fatalf("discovery: %v", disc)
 	}
-	if as := discoveryOf(t, l, wellKnownAS); !reflect.DeepEqual(as, disc) {
+	if as := metadataAt(t, l, wellKnownAS); !reflect.DeepEqual(as, disc) {
 		t.Fatalf("authorization server metadata differs: %v", as)
 	}
 
@@ -150,7 +150,7 @@ func TestPAR(t *testing.T) {
 		"no openid":                 {url.Values{"scope": {"email"}}, "invalid_scope"},
 		"request_uri pushed":        {url.Values{"request_uri": {provider.RequestURIPrefix + "x"}}, "invalid_request"},
 		"request object":            {url.Values{"request": {"eyJ"}}, "request_not_supported"},
-		"other client_id":           {url.Values{"client_id": {other.clientID}}, "invalid_client"},
+		"other client_id":           {url.Values{"client_id": {other.clientID}}, "invalid_request"},
 	} {
 		if status, out := p.push(t, c.extra); status != 400 || out["error"] != c.want {
 			t.Fatalf("%s: %d %v", name, status, out)
@@ -192,7 +192,7 @@ func TestPARRequiredByRealm(t *testing.T) {
 	l := featureEnv(t, func(c *config.Config) { c.Realm.RequirePushedAuthorizationRequests = true }, feature.PAR)
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "none"})
-	if d := discoveryOf(t, l, wellKnownAS); d["require_pushed_authorization_requests"] != true {
+	if d := metadataAt(t, l, wellKnownAS); d["require_pushed_authorization_requests"] != true {
 		t.Fatalf("metadata: %v", d)
 	}
 	if w := l.oidcDo(t, "GET", p.authorizeURL(nil), nil, ""); w.Code != http.StatusBadRequest {
@@ -211,13 +211,13 @@ func TestDisablePARWithData(t *testing.T) {
 
 func TestProtectedResourceMetadata(t *testing.T) {
 	l := featureEnv(t, nil)
-	m := discoveryOf(t, l, wellKnownResource)
+	m := metadataAt(t, l, wellKnownResource)
 	if m["resource"] != testIssuer || !reflect.DeepEqual(m["authorization_servers"], []any{testIssuer}) ||
 		!reflect.DeepEqual(m["bearer_methods_supported"], []any{"header", "body"}) {
 		t.Fatalf("resource metadata: %v", m)
 	}
 	// RFC 8414 のメタデータは PAR が無くても出す。
-	if d := discoveryOf(t, l, wellKnownAS); d["issuer"] != testIssuer || d["token_endpoint"] != testIssuer+oidcToken {
+	if d := metadataAt(t, l, wellKnownAS); d["issuer"] != testIssuer || d["token_endpoint"] != testIssuer+oidcToken {
 		t.Fatalf("authorization server metadata: %v", d)
 	}
 	// どのオリジンからも読める（公開の情報）。

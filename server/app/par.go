@@ -154,35 +154,6 @@ func (s *oidcServer) checkPushed(ctx context.Context, r *http.Request, params ur
 	return err
 }
 
-// clientCredentials は連携先の認証の項目を読む（token エンドポイントと同じ。RFC 6749 2.3、RFC 7523）。方法は 1 つだけ。
-func clientCredentials(r *http.Request) (*op.ClientCredentials, error) {
-	f := r.PostForm
-	cc := &op.ClientCredentials{ClientID: f.Get("client_id"), ClientSecret: f.Get("client_secret"),
-		ClientAssertion: f.Get("client_assertion"), ClientAssertionType: f.Get("client_assertion_type")}
-	assertion, secret := cc.ClientAssertion != "", cc.ClientSecret != ""
-	if assertion && secret {
-		return nil, oidc.ErrInvalidRequest().WithDescription("client authentication must not use more than one method")
-	}
-	if id, sec, ok := r.BasicAuth(); ok {
-		if assertion || secret {
-			return nil, oidc.ErrInvalidRequest().WithDescription("client authentication must not use more than one method")
-		}
-		var err1, err2 error
-		cc.ClientID, err1 = url.QueryUnescape(id)
-		cc.ClientSecret, err2 = url.QueryUnescape(sec)
-		if err1 != nil || err2 != nil || (f.Get("client_id") != "" && f.Get("client_id") != cc.ClientID) {
-			return nil, oidc.ErrInvalidClient().WithDescription("invalid basic auth header")
-		}
-	}
-	if cc.ClientID == "" && cc.ClientAssertion == "" {
-		return nil, oidc.ErrInvalidRequest().WithDescription("client_id or client_assertion must be provided")
-	}
-	if assertion && cc.ClientAssertionType != oidc.ClientAssertionTypeJWTAssertion {
-		return nil, oidc.ErrInvalidRequest().WithDescription("invalid client_assertion_type")
-	}
-	return cc, nil
-}
-
 func cloneValues(v url.Values) url.Values {
 	out := make(url.Values, len(v))
 	for k, vs := range v {
