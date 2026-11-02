@@ -12,7 +12,7 @@
 
 ## 決定
 
-- `server.trusted_proxies` に、X-Forwarded-For を信じる接続元の IP か CIDR を書く。既定は空で、空なら X-Forwarded-For を読まない
+- `server.trusted_proxies` に、X-Forwarded-For を信じる接続元の IP か CIDR を書く。既定は空で、空なら X-Forwarded-For を読まない。IPv4 射影（`::ffff:a.b.c.d/n`）の CIDR は IPv4 の CIDR に直し、/96 より短いものは受け付けない
   （直接さらす構成で、利用者が書いた値を信じないため）
 - 直接の接続元（`RemoteAddr`）が trusted なら、X-Forwarded-For を右から読み、trusted でない最初のアドレスを接続元にする。
   左の方は利用者が自由に書けるので、一番左は使わない。全部が trusted なら一番左、読めない値に当たったらその右のアドレスで止める

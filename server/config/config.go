@@ -155,6 +155,14 @@ func (s Server) TrustedProxyPrefixes() ([]netip.Prefix, error) {
 	out := make([]netip.Prefix, 0, len(s.TrustedProxies))
 	for _, v := range s.TrustedProxies {
 		if p, err := netip.ParsePrefix(v); err == nil {
+			if p.Addr().Is4In6() {
+				// 照合は Unmap した IPv4 で行うので、IPv4 射影の CIDR は IPv4 の CIDR に直す。
+				// /96 より短いと IPv4 射影の外の IPv6 まで含むので受け付けない。
+				if p.Bits() < 96 {
+					return nil, fmt.Errorf("server.trusted_proxies: %q is an IPv4-mapped prefix shorter than /96", v)
+				}
+				p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+			}
 			out = append(out, p.Masked())
 			continue
 		}
