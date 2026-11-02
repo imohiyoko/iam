@@ -103,5 +103,7 @@
 | [0089](0089-enterprise-full-scope.md) | エンタープライズ向けに全部入りを目指し、以前に除外した機能もフィーチャーとして含める | 承認 |
 | [0090](0090-authenticator-plugins.md) | 認証方式を共通のポートを持つプラグインにし、1 方式 1 ディレクトリで持つ | 承認 |
 | [0091](0091-process-roles.md) | 同じバイナリを役割ごとに別のプロセスで動かせるようにする | 承認 |
+| [0094](0094-oidc-rp-initiated-and-front-channel-logout.md) | RP-Initiated Logout はセッションと合う id_token_hint のときだけ確かめずに終え、Front-Channel Logout は完了の画面の iframe で知らせる | 承認 |
 | [0093](0093-acr-aal-step-up.md) | 認証の強さは amr から AAL を求めて acr で出し、足りなければ step-up（RFC 9470）を求める | 承認 |
+| [0097](0097-admin-read-api.md) | 管理 API の一覧・取得・検索は運営者ロールに読み取りの権限を足し、メールはブラインドインデックスの完全一致で引く | 承認 |
 | [0098](0098-saml-sp.md) | 外部 IdP としての SAML 2.0 は goxmldsig で署名を確かめ、プロトコルの確認は自前の薄い層で行う | 承認 |

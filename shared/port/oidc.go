@@ -42,8 +42,13 @@ type Client struct {
 	IDTokenAlg string
 	// BackchannelLogoutURI は Back-Channel Logout の送り先（空なら送らない。5.2）。
 	BackchannelLogoutURI string
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// FrontchannelLogoutURI は Front-Channel Logout の送り先（ログアウトの完了画面の iframe で開く。空なら開かない。
+	// フィーチャー oidc_logout。ADR 0094）。
+	FrontchannelLogoutURI string
+	// FrontchannelLogoutSessionRequired は FrontchannelLogoutURI に iss と sid を付けるか。
+	FrontchannelLogoutSessionRequired bool
+	CreatedAt                         time.Time
+	UpdatedAt                         time.Time
 }
 
 // ClientRepo は clients の Repository。

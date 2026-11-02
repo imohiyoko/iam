@@ -25,7 +25,7 @@ func (s adminServer) ListUserCredentials(ctx context.Context, req adminapi.ListU
 	case d != nil:
 		return adminapi.ListUserCredentials403JSONResponse(d.Body), nil
 	}
-	out := adminapi.UserCredentials{Passkeys: []adminapi.UserPasskey{}, Identities: []adminapi.UserIdentity{}, Totp: []adminapi.UserTOTP{}}
+	var out adminapi.UserCredentials
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		u, err := tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id)
 		if err != nil {
@@ -35,23 +35,8 @@ func (s adminServer) ListUserCredentials(ctx context.Context, req adminapi.ListU
 		if err != nil {
 			return err
 		}
-		slugs, err := connectionSlugs(ctx, tx, s.a.realm.ID)
-		if err != nil {
-			return err
-		}
-		for _, p := range m.Passkeys {
-			out.Passkeys = append(out.Passkeys, adminapi.UserPasskey{Id: p.PublicID, Name: p.Name, CreatedAt: p.CreatedAt, LastUsedAt: p.LastUsedAt})
-		}
-		for _, i := range m.Identities {
-			out.Identities = append(out.Identities, adminapi.UserIdentity{Id: i.PublicID, Connection: slugs[i.ConnectionID], CreatedAt: i.CreatedAt})
-		}
-		for _, t := range m.TOTP {
-			out.Totp = append(out.Totp, adminapi.UserTOTP{Id: t.PublicID, CreatedAt: t.CreatedAt})
-		}
-		if m.Password != nil {
-			out.Password = &adminapi.UserPassword{CreatedAt: m.Password.CreatedAt}
-		}
-		return nil
+		out, err = s.credentialsOut(ctx, tx, m)
+		return err
 	})
 	if errors.Is(err, errs.NotFound) {
 		return adminapi.ListUserCredentials404JSONResponse(adminError("not_found", "")), nil
@@ -60,6 +45,28 @@ func (s adminServer) ListUserCredentials(ctx context.Context, req adminapi.ListU
 		return nil, err
 	}
 	return adminapi.ListUserCredentials200JSONResponse(out), nil
+}
+
+// credentialsOut は有効な認証情報の一覧（個人情報は含めない）。
+func (s adminServer) credentialsOut(ctx context.Context, tx port.Tx, m account.Methods) (adminapi.UserCredentials, error) {
+	out := adminapi.UserCredentials{Passkeys: []adminapi.UserPasskey{}, Identities: []adminapi.UserIdentity{}, Totp: []adminapi.UserTOTP{}}
+	slugs, err := connectionSlugs(ctx, tx, s.a.realm.ID)
+	if err != nil {
+		return out, err
+	}
+	for _, p := range m.Passkeys {
+		out.Passkeys = append(out.Passkeys, adminapi.UserPasskey{Id: p.PublicID, Name: p.Name, CreatedAt: p.CreatedAt, LastUsedAt: p.LastUsedAt})
+	}
+	for _, i := range m.Identities {
+		out.Identities = append(out.Identities, adminapi.UserIdentity{Id: i.PublicID, Connection: slugs[i.ConnectionID], CreatedAt: i.CreatedAt})
+	}
+	for _, t := range m.TOTP {
+		out.Totp = append(out.Totp, adminapi.UserTOTP{Id: t.PublicID, CreatedAt: t.CreatedAt})
+	}
+	if m.Password != nil {
+		out.Password = &adminapi.UserPassword{CreatedAt: m.Password.CreatedAt}
+	}
+	return out, nil
 }
 
 func (s adminServer) RevokeUserCredential(ctx context.Context, req adminapi.RevokeUserCredentialRequestObject) (adminapi.RevokeUserCredentialResponseObject, error) {

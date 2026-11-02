@@ -111,6 +111,29 @@ func verified(es []port.UserEmail) int {
 // AddEmail は所有を確認したメールをユーザーに足す（primary にはしない）。
 // アドレスが使われていれば ErrEmailExists（同じユーザーでも同じ）。
 func (s *Service) AddEmail(ctx context.Context, tx port.Tx, realmID, userID, email string, via port.VerifiedVia, actor audit.Actor, requestID string) (port.UserEmail, error) {
+	return s.addEmail(ctx, tx, realmID, userID, email, via, actor, requestID, nil)
+}
+
+// AdminAddEmail は運営者が所有を確かめたメールを、確認済み（admin）として足す（ADR 0097）。監査ログに対象のユーザーを残す。
+func (s *Service) AdminAddEmail(ctx context.Context, tx port.Tx, u port.User, email string, actor audit.Actor, requestID string) (port.UserEmail, error) {
+	if u.Status != port.UserActive {
+		return port.UserEmail{}, ErrUserNotActive
+	}
+	return s.addEmail(ctx, tx, u.RealmID, u.ID, email, port.VerifiedViaAdmin, actor, requestID, map[string]any{"user_id": u.PublicID})
+}
+
+// ErrUserNotActive は削除・統合したユーザーへの操作。
+var ErrUserNotActive = errs.WithCode(errs.KindFailedPrecondition, "user_not_active", "the user is not active")
+
+// subjectDetails は監査ログの details に、運営者の操作の対象（subject）を足す。
+func subjectDetails(d, subject map[string]any) map[string]any {
+	for k, v := range subject {
+		d[k] = v
+	}
+	return d
+}
+
+func (s *Service) addEmail(ctx context.Context, tx port.Tx, realmID, userID, email string, via port.VerifiedVia, actor audit.Actor, requestID string, subject map[string]any) (port.UserEmail, error) {
 	if !s.Allows(via) {
 		return port.UserEmail{}, ErrViaNotAllowed
 	}
@@ -126,7 +149,8 @@ func (s *Service) AddEmail(ctx context.Context, tx port.Tx, realmID, userID, ema
 	if err != nil {
 		return port.UserEmail{}, err
 	}
-	return e, s.record(ctx, tx, realmID, "email.added", actor, requestID, map[string]any{"email_id": e.PublicID, "verified_via": string(via)})
+	return e, s.record(ctx, tx, realmID, "email.added", actor, requestID,
+		subjectDetails(map[string]any{"email_id": e.PublicID, "verified_via": string(via)}, subject))
 }
 
 // email はユーザーのメールを公開 ID で引く。別のユーザーのものは無いものとして扱う。
@@ -141,6 +165,15 @@ func email(ctx context.Context, tx port.Tx, realmID, userID, publicID string) (p
 // RemoveEmail はユーザーのメールを消す。primary は ErrPrimaryEmail、最後の確認済みメールは ErrLastEmail、
 // 消すとログインの手段が無くなるなら ErrLastMethod。
 func (s *Service) RemoveEmail(ctx context.Context, tx port.Tx, realmID, userID, publicID string, actor audit.Actor, requestID string) error {
+	return s.removeEmail(ctx, tx, realmID, userID, publicID, actor, requestID, nil)
+}
+
+// AdminRemoveEmail は運営者によるメールの削除（ADR 0097）。本人と同じ不変条件を守る。監査ログに対象のユーザーを残す。
+func (s *Service) AdminRemoveEmail(ctx context.Context, tx port.Tx, u port.User, publicID string, actor audit.Actor, requestID string) error {
+	return s.removeEmail(ctx, tx, u.RealmID, u.ID, publicID, actor, requestID, map[string]any{"user_id": u.PublicID})
+}
+
+func (s *Service) removeEmail(ctx context.Context, tx port.Tx, realmID, userID, publicID string, actor audit.Actor, requestID string, subject map[string]any) error {
 	e, err := email(ctx, tx, realmID, userID, publicID)
 	if err != nil {
 		return err
@@ -178,11 +211,20 @@ func (s *Service) RemoveEmail(ctx context.Context, tx port.Tx, realmID, userID, 
 	if err := tx.Emails().Delete(ctx, realmID, e.ID); err != nil {
 		return err
 	}
-	return s.record(ctx, tx, realmID, "email.removed", actor, requestID, map[string]any{"email_id": e.PublicID})
+	return s.record(ctx, tx, realmID, "email.removed", actor, requestID, subjectDetails(map[string]any{"email_id": e.PublicID}, subject))
 }
 
 // SetPrimaryEmail は確認済みのメールを primary にする。
 func (s *Service) SetPrimaryEmail(ctx context.Context, tx port.Tx, realmID, userID, publicID string, actor audit.Actor, requestID string) error {
+	return s.setPrimaryEmail(ctx, tx, realmID, userID, publicID, actor, requestID, nil)
+}
+
+// AdminSetPrimaryEmail は運営者による primary のメールの変更（ADR 0097）。監査ログに対象のユーザーを残す。
+func (s *Service) AdminSetPrimaryEmail(ctx context.Context, tx port.Tx, u port.User, publicID string, actor audit.Actor, requestID string) error {
+	return s.setPrimaryEmail(ctx, tx, u.RealmID, u.ID, publicID, actor, requestID, map[string]any{"user_id": u.PublicID})
+}
+
+func (s *Service) setPrimaryEmail(ctx context.Context, tx port.Tx, realmID, userID, publicID string, actor audit.Actor, requestID string, subject map[string]any) error {
 	e, err := email(ctx, tx, realmID, userID, publicID)
 	if err != nil {
 		return err
@@ -196,7 +238,7 @@ func (s *Service) SetPrimaryEmail(ctx context.Context, tx port.Tx, realmID, user
 	if err := tx.Emails().SetPrimary(ctx, realmID, userID, e.ID); err != nil {
 		return err
 	}
-	return s.record(ctx, tx, realmID, "email.primary_changed", actor, requestID, map[string]any{"email_id": e.PublicID})
+	return s.record(ctx, tx, realmID, "email.primary_changed", actor, requestID, subjectDetails(map[string]any{"email_id": e.PublicID}, subject))
 }
 
 // ReasonUnlinked は本人による外部 ID の連携の解除。

@@ -22,20 +22,22 @@ type AuthnAttributeDef struct {
 }
 
 type AuthnClient struct {
-	ID                     string
-	PublicID               string
-	RealmID                string
-	Name                   string
-	TrustLevel             string
-	RedirectUris           string
-	PostLogoutRedirectUris string
-	AuthMethod             string
-	SecretHash             []byte
-	Jwks                   []byte
-	IDTokenAlg             string
-	BackchannelLogoutUri   string
-	CreatedAt              string
-	UpdatedAt              string
+	ID                                string
+	PublicID                          string
+	RealmID                           string
+	Name                              string
+	TrustLevel                        string
+	RedirectUris                      string
+	PostLogoutRedirectUris            string
+	AuthMethod                        string
+	SecretHash                        []byte
+	Jwks                              []byte
+	IDTokenAlg                        string
+	BackchannelLogoutUri              string
+	CreatedAt                         string
+	UpdatedAt                         string
+	FrontchannelLogoutUri             string
+	FrontchannelLogoutSessionRequired int64
 }
 
 type AuthnConnection struct {

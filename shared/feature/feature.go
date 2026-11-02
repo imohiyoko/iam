@@ -32,6 +32,7 @@ const (
 	AccountMerge        = "account_merge"
 	CustomAttributes    = "custom_attributes"
 	FlowHooks           = "flow_hooks"
+	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 	SAML                = "saml"
 )

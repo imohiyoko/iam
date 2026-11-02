@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{{.T.Title}}</title>
+<link rel="stylesheet" href="{{.Base}}/login/assets/login.css">
+{{if .Redirect}}<script src="{{.Base}}/login/assets/logout.js"></script>{{end}}
+</head>
+<body>
+<main id="logout" data-page="{{.Page}}" data-redirect="{{.Redirect}}">
+  <h1>{{.T.Title}}</h1>
+  {{if eq .Page "confirm"}}
+  <p>{{.T.Confirm}}</p>
+  {{if .Client}}<p class="client">{{.T.RequestedBy}} {{.Client}}</p>{{end}}
+  <form method="post" action="{{.Base}}/oauth2/end_session/confirm">
+    <input type="hidden" name="request" value="{{.Request}}">
+    <input type="hidden" name="ui_locales" value="{{.Lang}}">
+    <button type="submit" name="action" value="logout">{{.T.SignOut}}</button>
+    <button type="submit" name="action" value="cancel" class="link">{{.T.StaySignedIn}}</button>
+  </form>
+  {{else if eq .Page "done"}}
+  <p role="status">{{.T.Done}}</p>
+  {{range .Frames}}<iframe src="{{.}}" hidden title="logout" referrerpolicy="no-referrer"></iframe>
+  {{end}}
+  {{if .Redirect}}<p><a href="{{.Redirect}}">{{.T.Continue}}</a></p>{{end}}
+  {{else if eq .Page "cancelled"}}
+  <p role="status">{{.T.Cancelled}}</p>
+  {{else}}
+  <p role="alert" class="error">{{.Message}}</p>
+  {{end}}
+</main>
+</body>
+</html>
