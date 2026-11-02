@@ -21,6 +21,7 @@ import (
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/password"
+	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authz/manage"
@@ -52,6 +53,7 @@ var featureCatalog = map[string]struct {
 	feature.MultiRealm:         {realm.Feature, module + "/features/multirealm"},
 	feature.PasskeyAttestation: {passkey.AttestationFeature, module + "/features/passkeyattestation"},
 	feature.ACR:                {acr.Feature, module + "/features/acr"},
+	feature.OIDCLogout:         {provider.LogoutFeature, module + "/features/oidclogout"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

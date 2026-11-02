@@ -33,6 +33,7 @@ const (
 	CustomAttributes    = "custom_attributes"
 	FlowHooks           = "flow_hooks"
 	PasskeyAttestation  = "passkey_attestation"
+	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 )
 

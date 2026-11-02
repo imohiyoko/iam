@@ -21,6 +21,7 @@ import (
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/clock"
+	"github.com/imohiyoko/iam/shared/feature"
 )
 
 // E2E（roadmap M5）：本物の HTTPS のサーバーに、ふつうの RP（zitadel/oidc の rp と rs。ES256）と、ML-DSA-65 を自分で
@@ -34,6 +35,12 @@ type e2e struct {
 
 func newE2E(t *testing.T) *e2e {
 	t.Helper()
+	return newE2EWith(t, nil, nil)
+}
+
+// newE2EWith は設定を変え、binary のフィーチャーを含めて組み立てる。
+func newE2EWith(t *testing.T, edit func(*config.Config), binary []feature.Feature) *e2e {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +51,10 @@ func newE2E(t *testing.T) *e2e {
 		c.Server.PublicURL = issuer
 		// passkey の RP ID に IP アドレスは使えない（この試験では passkey を使わない）。
 		c.Passkey.RPID, c.Passkey.Origins = "localhost", []string{"https://localhost"}
-	}, nil, func(d *Deps) {
+		if edit != nil {
+			edit(c)
+		}
+	}, binary, func(d *Deps) {
 		d.Clock.(*clock.Fake).Set(time.Now().UTC().Truncate(time.Second))
 	})
 	srv := httptest.NewUnstartedServer(l.a.PublicHandler())

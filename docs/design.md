@@ -466,6 +466,8 @@ check(principal, action, resource, context) -> allow / deny
 - 運営者ロールは `org_id` が NULL のロール付与で表し、ホスト先が独自のロールを追加できる。停止の種別ごとの解除権限は、これらのロールの permission として定義する
 - Org のロール：`org_role` を Org 範囲の既定ロールに対応させる。`owner`（削除・譲渡・全設定）、`admin`（招待・除名・Group とロール、`customer_request` の停止）、`member`。Group と所属の参照だけは `org:groups.read`（ADR 0085）
 - 個人情報の復号は独立した権限 `pii:read`
+- 参照は読み取りの権限で渡す（ADR 0097）：`users:read`・`sessions:read`・`roles:read`・`groups:read` は admin・security・support、
+  `connections:read` は admin・security、`signing_keys:read` は security。運営者によるメールの操作は `users:emails`（admin）
 - 管理操作には強い認証と直近の認証（`max_auth_age`）を求める。管理者のセッションは短くする
 - 緊急時は Storage と KeyStore に直接触れる CLI を使う（実行は重要イベントとして全運営者に通知）。常設の緊急用アカウントは作らない
 - Org を作れる人：`anyone`（既定）/ `operators_only` / `invite_only`
@@ -499,9 +501,29 @@ GET    /v1/admin/orgs/{id}/quotas
 POST   /v1/admin/orgs/{id}/quota-grants | PUT …/quota-grants/external/{ref} | DELETE …/quota-grants/{grant_id}
 POST   /v1/admin/notifications/{id}:claim
 POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
+GET    /v1/admin/users?email=&connection=&subject=&status=&org_id=&created_from=&created_before=&after=&limit=
+GET    /v1/admin/users/{id}[?include_pii=true] | …/sessions | …/memberships | …/role-bindings | …/groups
+POST   /v1/admin/users/{id}/sessions:revoke-all
+POST   /v1/admin/users/{id}/emails | …/emails/{email_id}:remove | …/emails/{email_id}:make-primary
+GET    /v1/admin/service-accounts/{id}/role-bindings | …/groups
+GET    /v1/admin/orgs?name_prefix=&parent_id=&kind=&status=&after=&limit=
+GET    /v1/admin/connections | GET・PUT /v1/admin/connections/{id} | POST /v1/admin/connections/{id}:delete
+GET    /v1/admin/signing-keys
 ```
 
 管理操作は理由の入力を必須にし、すべて監査ログに出す。
+
+一覧・取得・検索（ADR 0097）：
+
+- 一覧は公開 ID の順のカーソル（`after`・`next_cursor`、1 回 200 件まで）。絞り込みはすべて AND で、無い Org などを指せば空の一覧
+- メールの検索はブラインドインデックスの完全一致だけ（9.5）。Org の名前は平文なので前方一致（バイトで比べる）
+- メールアドレスは詳細で `include_pii=true` と `pii:read` のときだけ復号し、`user.pii_read` を監査ログに残す。ほかの参照は監査ログに残さない
+- `sessions:revoke-all` は全セッションの失効だけで、認証情報は残す（侵害時の初動は `credentials:revoke-all`）
+- 運営者によるメールの操作（確認の経路 `admin`）は outranks の判定をし、本人と同じ不変条件（primary・最後の確認済みメール・
+  最後の認証手段・Membership に結び付けたメール）を守る
+- connection の削除は、有効な外部 ID の紐付けがあれば既定で断る（`revoke_identities` で無効化してから消す）。Org 専用 SSO の
+  connection は参照だけ
+- 署名鍵の一覧は kid・アルゴリズム・状態・時刻だけで、鍵の値は出さない
 
 ## 5. トークンとセッション
 
@@ -525,6 +547,7 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 - OIDC の `sid` はログインの系列の ID（最初のセッションの ID）。ID を入れ替えても変わらず、連携先のトークンは系列の今のセッションが使える間だけ使える（ADR 0066）
 - 失効の契機：ログアウト、本人・管理者による失効、パスワード・認証手段の変更時（他のセッションを一括失効）
 - 失効は Storage に書いてからキャッシュを消す。ログインの系列が終われば Back-Channel Logout で `sid` を通知する（ADR 0066）
+- 連携先からのログアウト（RP-Initiated Logout）と、ブラウザでの通知（Front-Channel Logout）は 5.6
 - 将来：端末に結び付けたセッション（Device Bound Session Credentials など）
 
 ### 5.3 セッション検証とキャッシュ
@@ -553,6 +576,24 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 
 - 当面はホスト先が管理 API で登録したファーストパーティのみ。同意画面なし、動的クライアント登録なし
 - 将来のサードパーティ開放に備え `clients.trust_level` を持つ
+- ログアウトに関わる登録：`post_logout_redirect_uris`（完全一致）、`backchannel_logout_uri`（5.2）、`frontchannel_logout_uri` と
+  `frontchannel_logout_session_required`（5.6。フィーチャー `oidc_logout`）
+
+### 5.6 連携先からのログアウト
+
+フィーチャー `oidc_logout`（既定オフ。ADR 0094）。OpenID Connect RP-Initiated Logout 1.0 と Front-Channel Logout 1.0。
+
+- `end_session_endpoint`（`/oauth2/end_session`、GET と POST）：`id_token_hint`（この realm が発行した ID トークン。期限切れも
+  受け付け、署名・`typ`・`iss`・`aud` を確かめる）、`client_id`、`post_logout_redirect_uri`（登録と完全一致のときだけ。
+  連携先が分からなければ拒む）、`state`、`ui_locales`（画面の言語）、`logout_hint`（使わない）。正しくない要求は戻り先に
+  戻さず、画面で止める
+- `id_token_hint` の `sid` と `sub` がブラウザのセッションと合えば、確かめずにセッションを失効させる。合わない・無いときは
+  ホスト型の確認の画面を出す（要求は EphemeralStore に預け、フォームにはその ID だけを入れる。1回限りで、同じセッションで
+  だけ通る。答えは CrossOriginProtection の内側）。失効は `POST /v1/logout` と同じで、系列が終わり Back-Channel Logout を送る
+- 完了の画面で、終えた系列の認可を持つ連携先の `frontchannel_logout_uri` を iframe で開き（`session_required` なら `iss` と
+  `sid` を付ける）、読み終えたら戻り先に移る。開くものが無ければすぐ 302 で戻す。CSP の `frame-src` は開く連携先の
+  オリジンだけ。`frontchannel_logout_uri` のオリジンは `redirect_uris` のどれかと同じであること
+- 複数 realm（11.1）でも realm ごとの issuer・鍵・連携先・セッションで動く
 
 ## 6. 監査ログとイベント出力
 
@@ -706,6 +747,7 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 | アカウント統合（11.6） | オフ | ― | 統合 API なし |
 | カスタム属性（11.7） | オフ | ― | 属性の読み書きなし |
 | フロー フック（11.8） | オフ | ― | フックを一切呼ばない |
+| OIDC のログアウト（5.6） | オフ | ― | `end_session_endpoint` と Front-Channel Logout なし（Back-Channel Logout は動く） |
 | acr・AAL と step-up（11.15） | オフ | ― | `acr` を出さず、`acr_values` を見ない。AAL で書く条件・ポリシーなし |
 
 ### 11.1 複数 realm
@@ -894,7 +936,8 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 ### 13.2 自前で書く範囲を減らす
 
 - 暗号は Go 標準ライブラリのみ
-- OIDC：zitadel/oidc（v3 で開始し v4 を追う）。自前で補うのは ML-DSA の署名と JWKS、Back-Channel Logout の送信
+- OIDC：zitadel/oidc（v3 で開始し v4 を追う）。自前で補うのは ML-DSA の署名と JWKS、Back-Channel Logout の送信、
+  RP-Initiated Logout の画面と Front-Channel Logout
 - JWT / JWK：lestrrat-go/jwx v4。WebAuthn：go-webauthn
 - SAML は Org 専用 SSO の実装時に最も慎重に選ぶ
 - セキュリティ上重要なコード（トークン、セッション、連携・統合、認可判定、fail-closed 判定）はディレクトリを分けて明示する

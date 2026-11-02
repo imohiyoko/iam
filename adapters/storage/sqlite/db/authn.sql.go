@@ -59,6 +59,22 @@ func (q *Queries) ClearEmailCiphertexts(ctx context.Context, arg ClearEmailCiphe
 	return result.RowsAffected()
 }
 
+const countActiveIdentitiesByConnection = `-- name: CountActiveIdentitiesByConnection :one
+SELECT count(*) FROM authn_user_identities WHERE realm_id = ? AND connection_id = ? AND revoked_at IS NULL
+`
+
+type CountActiveIdentitiesByConnectionParams struct {
+	RealmID      string
+	ConnectionID string
+}
+
+func (q *Queries) CountActiveIdentitiesByConnection(ctx context.Context, arg CountActiveIdentitiesByConnectionParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveIdentitiesByConnection, arg.RealmID, arg.ConnectionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countManagedUsers = `-- name: CountManagedUsers :one
 SELECT count(*) FROM authn_users WHERE managed_org_id IS NOT NULL
 `
@@ -2527,6 +2543,82 @@ func (q *Queries) ScheduleEvent(ctx context.Context, arg ScheduleEventParams) er
 	return err
 }
 
+const searchUsers = `-- name: SearchUsers :many
+SELECT u.id, u.public_id, u.realm_id, u.status, u.valid_from, u.valid_until, u.created_at, u.updated_at, u.deletion_scheduled_at, u.legal_hold, u.managed_org_id, u.managed_at, u.merged_into FROM authn_users u
+WHERE u.realm_id = ?1 AND u.public_id > ?2
+    AND (?3 = '' OR u.id = ?3)
+    AND (?4 = '' OR u.status = ?4)
+    AND (?5 = '' OR u.created_at >= ?5)
+    AND (?6 = '' OR u.created_at < ?6)
+    AND (?7 = '' OR EXISTS (SELECT 1 FROM memberships m
+        WHERE m.realm_id = u.realm_id AND m.user_id = u.id AND m.org_id = ?7 AND m.status = 'active'))
+    AND (?8 = '' OR (?8 = 'yes') = EXISTS (SELECT 1 FROM authn_suspensions s
+        WHERE s.realm_id = u.realm_id AND s.target_type = 'user' AND s.target_id = u.id AND s.starts_at <= ?9
+            AND (s.ends_at IS NULL OR s.ends_at > ?9) AND (s.lifted_at IS NULL OR s.lifted_at > ?9)))
+ORDER BY u.public_id LIMIT ?10
+`
+
+type SearchUsersParams struct {
+	RealmID       string
+	After         string
+	UserID        interface{}
+	Status        interface{}
+	CreatedFrom   interface{}
+	CreatedBefore interface{}
+	OrgID         interface{}
+	Suspended     interface{}
+	Now           string
+	Lim           int64
+}
+
+func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]AuthnUser, error) {
+	rows, err := q.db.QueryContext(ctx, searchUsers,
+		arg.RealmID,
+		arg.After,
+		arg.UserID,
+		arg.Status,
+		arg.CreatedFrom,
+		arg.CreatedBefore,
+		arg.OrgID,
+		arg.Suspended,
+		arg.Now,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnUser
+	for rows.Next() {
+		var i AuthnUser
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.Status,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletionScheduledAt,
+			&i.LegalHold,
+			&i.ManagedOrgID,
+			&i.ManagedAt,
+			&i.MergedInto,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setPasskeyHandles = `-- name: SetPasskeyHandles :exec
 UPDATE authn_passkeys SET user_handle = ? WHERE realm_id = ? AND user_id = ? AND length(user_handle) = 0
 `
@@ -2730,6 +2822,24 @@ type TouchSessionParams struct {
 
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, touchSession, arg.At, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateConnectionConfig = `-- name: UpdateConnectionConfig :execrows
+UPDATE authn_connections SET config = ? WHERE realm_id = ? AND id = ?
+`
+
+type UpdateConnectionConfigParams struct {
+	Config  []byte
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) UpdateConnectionConfig(ctx context.Context, arg UpdateConnectionConfigParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateConnectionConfig, arg.Config, arg.RealmID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

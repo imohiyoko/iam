@@ -10,6 +10,20 @@ SELECT * FROM authn_users WHERE realm_id = ? AND public_id = ?;
 -- name: ListUsers :many
 SELECT * FROM authn_users WHERE realm_id = ? AND id > sqlc.arg(after) ORDER BY id LIMIT sqlc.arg(lim);
 
+-- name: SearchUsers :many
+SELECT u.* FROM authn_users u
+WHERE u.realm_id = sqlc.arg(realm_id) AND u.public_id > sqlc.arg(after)
+    AND (sqlc.arg(user_id) = '' OR u.id = sqlc.arg(user_id))
+    AND (sqlc.arg(status) = '' OR u.status = sqlc.arg(status))
+    AND (sqlc.arg(created_from) = '' OR u.created_at >= sqlc.arg(created_from))
+    AND (sqlc.arg(created_before) = '' OR u.created_at < sqlc.arg(created_before))
+    AND (sqlc.arg(org_id) = '' OR EXISTS (SELECT 1 FROM memberships m
+        WHERE m.realm_id = u.realm_id AND m.user_id = u.id AND m.org_id = sqlc.arg(org_id) AND m.status = 'active'))
+    AND (sqlc.arg(suspended) = '' OR (sqlc.arg(suspended) = 'yes') = EXISTS (SELECT 1 FROM authn_suspensions s
+        WHERE s.realm_id = u.realm_id AND s.target_type = 'user' AND s.target_id = u.id AND s.starts_at <= sqlc.arg(now)
+            AND (s.ends_at IS NULL OR s.ends_at > sqlc.arg(now)) AND (s.lifted_at IS NULL OR s.lifted_at > sqlc.arg(now))))
+ORDER BY u.public_id LIMIT sqlc.arg(lim);
+
 -- name: CreateEmail :exec
 INSERT INTO authn_user_emails (id, public_id, realm_id, user_id, ciphertext, email_index, domain_index, index_key_id, verified_at, verified_via, is_primary, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
@@ -54,6 +68,9 @@ UPDATE authn_user_identities SET revoked_at = ?, revoke_reason = ? WHERE realm_i
 -- name: ListIdentitiesByUser :many
 SELECT * FROM authn_user_identities WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id;
 
+-- name: CountActiveIdentitiesByConnection :one
+SELECT count(*) FROM authn_user_identities WHERE realm_id = ? AND connection_id = ? AND revoked_at IS NULL;
+
 -- name: CreateConnection :exec
 INSERT INTO authn_connections (id, realm_id, slug, type, config, created_at, owner_org_id) VALUES (?, ?, ?, ?, ?, ?, ?);
 
@@ -71,6 +88,9 @@ SELECT * FROM authn_connections WHERE realm_id = ? AND owner_org_id = ? ORDER BY
 
 -- name: CountOwnedConnections :one
 SELECT COUNT(*) FROM authn_connections WHERE realm_id = ? AND owner_org_id <> '';
+
+-- name: UpdateConnectionConfig :execrows
+UPDATE authn_connections SET config = ? WHERE realm_id = ? AND id = ?;
 
 -- name: DeleteConnection :execrows
 DELETE FROM authn_connections WHERE realm_id = ? AND id = ?;
