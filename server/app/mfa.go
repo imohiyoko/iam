@@ -34,7 +34,7 @@ var restrictedAllowed = map[string][]port.SessionRestriction{
 }
 
 func restrictionAllows(r port.SessionRestriction, method, path string) bool {
-	return r == port.RestrictionNone || slices.Contains(restrictedAllowed[method+" "+path], r)
+	return r == port.RestrictionNone || slices.Contains(restrictedAllowed[method+" "+path], r) || methodRestricted(r, method, path)
 }
 
 // loginResult は発行したセッションを応答の形にし、Cookie を差し替える。

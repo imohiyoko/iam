@@ -517,6 +517,7 @@ func (r users) Erase(ctx context.Context, realmID, id string, at time.Time) erro
 		q.EraseUserIdentities(ctx, db.EraseUserIdentitiesParams{RealmID: realmID, UserID: id}),
 		q.EraseUserPasskeys(ctx, db.EraseUserPasskeysParams{RealmID: realmID, UserID: id}),
 		q.EraseUserTOTP(ctx, db.EraseUserTOTPParams{RealmID: realmID, UserID: id}),
+		q.EraseUserCredentials(ctx, db.EraseUserCredentialsParams{RealmID: realmID, UserID: id}),
 		q.EraseUserPasswords(ctx, db.EraseUserPasswordsParams{RealmID: realmID, UserID: id}),
 		q.EraseUserRecoveryCodes(ctx, db.EraseUserRecoveryCodesParams{RealmID: realmID, UserID: id}),
 		q.EraseUserSessions(ctx, db.EraseUserSessionsParams{RealmID: realmID, PrincipalID: id}),

@@ -123,6 +123,12 @@ func (c *Crypter) DomainIndex(ctx context.Context, email string) (Index, error) 
 	return c.index(ctx, "email_domain", e[at+1:])
 }
 
+// Index は用途 purpose の値（正規化済み）のインデックスを、現在のインデックス鍵で返す。purpose は用途ごとに分け、
+// 別の用途の値と一致しないようにする（認証方式の検索キーなど。ADR 0092）。
+func (c *Crypter) Index(ctx context.Context, purpose, normalized string) (Index, error) {
+	return c.index(ctx, purpose, normalized)
+}
+
 // IndexWith は指定したインデックス鍵で計算する（ローテーション中の旧鍵での検索用）。
 func (c *Crypter) IndexWith(ctx context.Context, keyID, purpose, normalized string) (Index, error) {
 	k, err := c.keys.IndexKey(ctx, keyID)

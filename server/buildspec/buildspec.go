@@ -18,6 +18,7 @@ import (
 	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/merge"
+	"github.com/imohiyoko/iam/authn/method/hotp"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/password"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
@@ -48,6 +49,7 @@ var featureCatalog = map[string]struct {
 	feature.FlowHooks:        {hook.Feature, module + "/features/flowhooks"},
 	feature.AccountMerge:     {merge.Feature, module + "/features/accountmerge"},
 	feature.MultiRealm:       {realm.Feature, module + "/features/multirealm"},
+	feature.HOTP:             {hotp.Feature, module + "/features/hotp"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

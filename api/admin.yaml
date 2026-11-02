@@ -160,7 +160,7 @@ paths:
       operationId: revokeUserCredential
       summary: ユーザーの passkey・外部 ID の紐付け・TOTP を無効化する（4.6）
       description: |
-        権限 `credentials:revoke`。`credential_id` は公開 ID（`psk_…`、`idn_…`、`otp_…`）。本人と違い、最後の1つも
+        権限 `credentials:revoke`。`credential_id` は公開 ID（`psk_…`、`idn_…`、`otp_…`、`crd_…`）。本人と違い、最後の1つも
         無効化できる（以後は復旧の手順で戻る）。取り消せない。その認証情報で作ったセッションは、遅くとも
         `validity_max_delay` の後に使えなくなる。
       parameters:
@@ -2394,7 +2394,7 @@ components:
         expires_at: { type: string, format: date-time }
     UserCredentials:
       type: object
-      required: [passkeys, identities, totp]
+      required: [passkeys, identities, totp, credentials]
       properties:
         passkeys:
           type: array
@@ -2405,7 +2405,19 @@ components:
         totp:
           type: array
           items: { $ref: "#/components/schemas/UserTOTP" }
+        credentials:
+          type: array
+          description: 認証方式のプラグインの、無効化していない認証情報（ADR 0092）
+          items: { $ref: "#/components/schemas/UserCredential" }
         password: { $ref: "#/components/schemas/UserPassword" }
+    UserCredential:
+      type: object
+      required: [id, method, created_at]
+      properties:
+        id: { type: string, description: 公開の認証情報の ID（crd_…） }
+        method: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
     UserPasskey:
       type: object
       required: [id, name, created_at]
@@ -2435,11 +2447,12 @@ components:
         created_at: { type: string, format: date-time }
     RevokedCredentials:
       type: object
-      required: [passkeys, identities, totp, password, recovery_codes, sessions]
+      required: [passkeys, identities, totp, credentials, password, recovery_codes, sessions]
       properties:
         passkeys: { type: integer }
         identities: { type: integer }
         totp: { type: integer }
+        credentials: { type: integer, description: 認証方式のプラグインの認証情報の数（ADR 0092） }
         password: { type: boolean }
         recovery_codes: { type: integer, description: 消した未使用のリカバリーコードの数 }
         sessions: { type: integer, description: 失効させたセッションの数 }

@@ -1100,9 +1100,11 @@ type RealmUpdate struct {
 
 // RevokedCredentials defines model for RevokedCredentials.
 type RevokedCredentials struct {
-	Identities int  `json:"identities"`
-	Passkeys   int  `json:"passkeys"`
-	Password   bool `json:"password"`
+	// Credentials 認証方式のプラグインの認証情報の数（ADR 0092）
+	Credentials int  `json:"credentials"`
+	Identities  int  `json:"identities"`
+	Passkeys    int  `json:"passkeys"`
+	Password    bool `json:"password"`
 
 	// RecoveryCodes 消した未使用のリカバリーコードの数
 	RecoveryCodes int `json:"recovery_codes"`
@@ -1337,10 +1339,22 @@ type UserAttributes struct {
 	Attributes map[string]interface{} `json:"attributes"`
 }
 
+// UserCredential defines model for UserCredential.
+type UserCredential struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Id 公開の認証情報の ID（crd_…）
+	Id         string     `json:"id"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	Method     string     `json:"method"`
+}
+
 // UserCredentials defines model for UserCredentials.
 type UserCredentials struct {
-	Identities []UserIdentity `json:"identities"`
-	Passkeys   []UserPasskey  `json:"passkeys"`
+	// Credentials 認証方式のプラグインの、無効化していない認証情報（ADR 0092）
+	Credentials []UserCredential `json:"credentials"`
+	Identities  []UserIdentity   `json:"identities"`
+	Passkeys    []UserPasskey    `json:"passkeys"`
 
 	// Password 設定したパスワード（無ければ省略）
 	Password *UserPassword `json:"password,omitempty"`

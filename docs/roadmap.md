@@ -342,6 +342,19 @@ Group のネスト、Org 階層（M7）。
 - `acr` と AAL、step-up（RFC 9470）、Org のログインポリシーと `acr_values` を強さで書く
 - RP-Initiated Logout、Front-Channel Logout
 
+#### 認証方式のプラグインの土台（ADR 0090、0092）
+
+**ゴール**：認証方式を `authn/method/<name>` と `features/<name>` だけで足せる。
+
+- [x] ポート `Authenticator` と、汎用の認証情報 `authn_credentials`（暗号化したデータ、検索キーのブラインドインデックス、比較と交換の更新）を全部の Storage に持つ
+- [x] 方式の登録と、フィーチャーが動いているときだけ使う仕組み。フローの状態はコアが封をして預かり、1回限りで回数に上限を置く
+- [x] 汎用の HTTP（1要素目・2要素目・登録・無効化）。2要素目は制限つきのセッション（ADR 0050）につなぐ
+- [x] 汎用の認証情報を、本人と運営者の一覧・無効化、消去、統合、フィーチャーの無効化、書き出しと読み込みで扱う
+- [x] HOTP（RFC 4226。フィーチャー `hotp`）：look-ahead と再同期、同時の使用の拒否、RFC のテストベクタ
+- [ ] 外部 Authenticator のアダプタ（HTTP・gRPC）
+- [ ] passkey・TOTP・パスワードを 1 方式ずつ `authn_credentials` へ移す
+- [ ] 方式のペイロードの JSON Schema と OpenAPI の `oneOf`、ホスト型のログイン画面への表示
+
 ### M9 認証方式の拡張
 
 - 外部 IdP：SAML 2.0（Org 専用 SSO と realm の connection）、WS-Federation
