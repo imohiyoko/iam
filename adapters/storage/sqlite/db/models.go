@@ -155,6 +155,28 @@ type AuthnPasswordCredential struct {
 	RevokeReason string
 }
 
+type AuthnPersonalAccessToken struct {
+	ID           string
+	RealmID      string
+	UserID       string
+	Name         string
+	Scopes       string
+	TokenHash    []byte
+	CreatedAt    string
+	ExpiresAt    sql.NullString
+	LastUsedAt   sql.NullString
+	RevokedAt    sql.NullString
+	RevokeReason string
+}
+
+type AuthnPersonalAccessTokenPolicy struct {
+	RealmID            string
+	MaxLifetimeSeconds int64
+	AllowedScopes      string
+	RequireExpiry      int64
+	UpdatedAt          string
+}
+
 type AuthnRealm struct {
 	ID        string
 	Slug      string

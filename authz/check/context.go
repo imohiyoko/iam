@@ -3,6 +3,8 @@ package check
 import (
 	"strings"
 	"time"
+
+	"github.com/imohiyoko/iam/authz/role"
 )
 
 // 認証の文脈（ADR 0084）。authz は authn を import しないので、server がセッションやトークンから組み立てて渡す。
@@ -19,6 +21,15 @@ type AuthContext struct {
 	Risk map[string]int
 	// Attested は文脈を IAM が確かめたか（セッションやトークンから組み立てたなら真、連携先の申告なら偽）。
 	Attested bool
+	// Scoped なら主体の権限を Scopes（権限の名前。`x:*` も可）に絞る（本人の Personal Access Token。ADR 0109）。付与で許す操作でも、
+	// Scopes に含まれなければ許さない。Holds も、Scopes に含まれない権限は持たないとみなす。
+	Scoped bool
+	Scopes []string
+}
+
+// allows は文脈のスコープが操作 action を許すか（スコープで絞っていなければ真）。
+func (c *AuthContext) allows(action string) bool {
+	return c == nil || !c.Scoped || role.Covered(c.Scopes, action)
 }
 
 // 要素の分類（RFC 8176 の knowledge・possession・inherence）。

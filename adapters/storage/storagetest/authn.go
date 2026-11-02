@@ -41,6 +41,8 @@ var authnTests = []struct {
 	{"CredentialDeliveryMethods", testCredentialDeliveryMethods},
 	{"KnownDevices", testKnownDevices},
 	{"KnownDeviceLookupConcurrent", testKnownDeviceLookupConcurrent},
+	{"PersonalAccessTokens", testPersonalAccessTokens},
+	{"PersonalAccessTokenPolicies", testPersonalAccessTokenPolicies},
 	{"Passwords", testPasswords},
 	{"PasswordCreateConcurrent", testPasswordCreateConcurrent},
 	{"RecoveryCodes", testRecoveryCodes},
@@ -656,6 +658,7 @@ func testUserDeletion(t *testing.T, h Harness) {
 	pk, pw, tp, rc := newPasskey(r, u.ID, "cred-u"), newPassword(r, u.ID), newTOTP(r, u.ID), newRecoveryCode(r, u.ID, "l1")
 	cr, ocr := newCredential(r, u.ID, "hotp", []byte("lk")), newCredential(r, other.ID, "hotp", nil)
 	dv, odv := newKnownDevice(r, u.ID, "lk"), newKnownDevice(r, other.ID, "lk")
+	pt, opt := newPAT(r, u.ID, T0), newPAT(r, other.ID, T0)
 	rb := port.RoleBinding{ID: id.New(id.RoleBinding), PublicID: id.NewExternal(id.RoleBinding), RealmID: r, Role: "realm:admin", PrincipalType: port.PrincipalUser, PrincipalID: u.ID, CreatedAt: T0}
 	r2 := id.New(id.Realm)
 	g := port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r, Name: "team", CreatedAt: T0, UpdatedAt: T0}
@@ -670,7 +673,7 @@ func testUserDeletion(t *testing.T, h Harness) {
 			}
 		}
 		for _, err := range []error{tx.Emails().Create(ctx, e), tx.Emails().Create(ctx, oe), tx.Sessions().Create(ctx, ses), tx.Sessions().Create(ctx, os),
-			tx.Passkeys().Create(ctx, pk), tx.Passwords().Create(ctx, pw), tx.TOTP().Create(ctx, tp), tx.Credentials().Create(ctx, cr), tx.Credentials().Create(ctx, ocr), tx.KnownDevices().Create(ctx, dv), tx.KnownDevices().Create(ctx, odv), tx.RecoveryCodes().Replace(ctx, r, u.ID, []port.RecoveryCode{rc}),
+			tx.Passkeys().Create(ctx, pk), tx.Passwords().Create(ctx, pw), tx.TOTP().Create(ctx, tp), tx.Credentials().Create(ctx, cr), tx.Credentials().Create(ctx, ocr), tx.KnownDevices().Create(ctx, dv), tx.KnownDevices().Create(ctx, odv), tx.PersonalAccessTokens().Create(ctx, pt), tx.PersonalAccessTokens().Create(ctx, opt), tx.RecoveryCodes().Replace(ctx, r, u.ID, []port.RecoveryCode{rc}),
 			tx.RoleBindings().Create(ctx, rb), tx.Groups().Create(ctx, g), tx.Groups().Create(ctx, g2),
 			tx.Groups().AddMember(ctx, r, member(g.ID, u.ID)), tx.Groups().AddMember(ctx, r, member(g.ID, other.ID)),
 			tx.Groups().AddMember(ctx, r2, member(g2.ID, u.ID))} {
@@ -715,6 +718,7 @@ func testUserDeletion(t *testing.T, h Harness) {
 			"totp":        func() (int, error) { return count(tx.TOTP().ListByUser(ctx, r, u.ID)) },
 			"credentials": func() (int, error) { return count(tx.Credentials().ListByUser(ctx, r, u.ID, "")) },
 			"devices":     func() (int, error) { return count(tx.KnownDevices().ListByUser(ctx, r, u.ID)) },
+			"pats":        func() (int, error) { return count(tx.PersonalAccessTokens().ListByUser(ctx, r, u.ID)) },
 			"recovery":    func() (int, error) { return count(tx.RecoveryCodes().ListByUser(ctx, r, u.ID)) },
 			"roles":       func() (int, error) { return count(tx.RoleBindings().ListByPrincipal(ctx, r, port.PrincipalUser, u.ID)) },
 			"groups":      func() (int, error) { return count(tx.Groups().ListByMember(ctx, r, port.PrincipalUser, u.ID)) },
@@ -735,6 +739,9 @@ func testUserDeletion(t *testing.T, h Harness) {
 		}
 		if n, err := count(tx.KnownDevices().ListByUser(ctx, r, other.ID)); err != nil || n != 1 {
 			return fmt.Errorf("other device = %d, %v", n, err)
+		}
+		if _, err := tx.PersonalAccessTokens().Get(ctx, r, opt.ID); err != nil {
+			return fmt.Errorf("other personal access token: %v", err)
 		}
 		// 別のユーザーの所属と、別の realm の所属は残る。
 		if n, err := count(tx.Groups().ListByMember(ctx, r, port.PrincipalUser, other.ID)); err != nil || n != 1 {
@@ -1043,6 +1050,7 @@ var authnIsolationCases = []IsolationCase{
 	totpIsolationCase,
 	credentialIsolationCase,
 	knownDeviceIsolationCase,
+	patIsolationCase,
 	passwordIsolationCase,
 	recoveryCodeIsolationCase,
 	suspensionIsolationCase,

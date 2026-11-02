@@ -77,6 +77,9 @@ type Config struct {
 	// ServiceAccounts は汎用サービスアカウント（フィーチャー service_accounts。ADR 0074）。
 	ServiceAccounts ServiceAccounts `yaml:"service_accounts"`
 
+	// PersonalAccessTokens は本人の Personal Access Token（フィーチャー personal_access_tokens。ADR 0109）。
+	PersonalAccessTokens PersonalAccessTokens `yaml:"personal_access_tokens"`
+
 	// Hooks はフロー フック（フィーチャー flow_hooks。design.md 11.8、ADR 0081）。キーはフックの名前。
 	Hooks map[string]Hook `yaml:"hooks"`
 
@@ -122,6 +125,14 @@ type Hook struct {
 type ServiceAccounts struct {
 	// TokenTTL は client credentials で発行するアクセストークンの寿命（1 時間以下）。
 	TokenTTL Duration `yaml:"token_ttl"`
+}
+
+// PersonalAccessTokens は本人の Personal Access Token のホスト先の設定（ADR 0109）。
+type PersonalAccessTokens struct {
+	// MaxPerUser はユーザーごとの有効な（取り消しておらず期限の内の）トークンの上限（1〜1000）。
+	MaxPerUser int `yaml:"max_per_user"`
+	// MaxLifetime はトークンの寿命の上限（0 なら上限なし）。realm のポリシーはこれより長くできない。
+	MaxLifetime Duration `yaml:"max_lifetime"`
 }
 
 // OIDC は OIDC Provider のトークンと鍵の設定。
@@ -635,7 +646,8 @@ func Default() Config {
 			CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
 			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day),
 			DeviceCodeTTL: Duration(10 * time.Minute), DevicePollInterval: Duration(5 * time.Second)},
-		ServiceAccounts: ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
+		ServiceAccounts:      ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
+		PersonalAccessTokens: PersonalAccessTokens{MaxPerUser: 50},
 	}
 }
 
@@ -843,6 +855,9 @@ func (c Config) Validate() error {
 	}
 	if t := c.ServiceAccounts.TokenTTL; t <= 0 || t > Duration(time.Hour) {
 		problems = append(problems, "service_accounts.token_ttl must be positive and at most 1h")
+	}
+	if p := c.PersonalAccessTokens; p.MaxPerUser < 1 || p.MaxPerUser > 1000 || p.MaxLifetime < 0 {
+		problems = append(problems, "personal_access_tokens: max_per_user must be between 1 and 1000 and max_lifetime must not be negative")
 	}
 	if !slices.Contains(KnownOrgCreation, c.Realm.OrgCreation) {
 		problems = append(problems, fmt.Sprintf("realm.org_creation: unknown %q (known: %v)", c.Realm.OrgCreation, KnownOrgCreation))

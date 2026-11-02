@@ -20,6 +20,7 @@ import (
 	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/org"
+	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -205,6 +206,14 @@ func (s *Service) Merge(ctx context.Context, tx port.Tx, into port.User, token s
 	// 統合元の端末は忘れる（ADR 0105。統合先で次に入れば新しい端末になる）。
 	if _, err := tx.KnownDevices().DeleteByUser(ctx, from.RealmID, from.ID); err != nil {
 		return Merged{}, err
+	}
+	// 統合元の Personal Access Token は取り消す（ADR 0109。統合元は使えなくなるので、本人の権限を引き継がせない）。
+	pats, err := tx.PersonalAccessTokens().RevokeByUser(ctx, from.RealmID, from.ID, now, pat.ReasonMerged)
+	if err != nil {
+		return Merged{}, err
+	}
+	if pats > 0 {
+		moved["personal_access_tokens_revoked"] = pats
 	}
 	if err := tx.Users().SetMerged(ctx, from.RealmID, from.ID, into.ID, now); err != nil {
 		return Merged{}, err

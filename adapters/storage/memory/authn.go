@@ -775,6 +775,7 @@ func (r users) Erase(_ context.Context, realmID, id string, at time.Time) error 
 	eraseWhere(r.t, s.totps, func(x port.TOTPCredential) bool { return x.RealmID == realmID && x.UserID == id })
 	eraseWhere(r.t, s.authnCreds, func(x port.Credential) bool { return x.RealmID == realmID && x.UserID == id })
 	eraseWhere(r.t, s.devices, func(x port.KnownDevice) bool { return x.RealmID == realmID && x.UserID == id })
+	eraseWhere(r.t, s.pats, func(x port.PersonalAccessToken) bool { return x.RealmID == realmID && x.UserID == id })
 	eraseWhere(r.t, s.passwords, func(x port.PasswordCredential) bool { return x.RealmID == realmID && x.UserID == id })
 	eraseWhere(r.t, s.recoveryCodes, func(x port.RecoveryCode) bool { return x.RealmID == realmID && x.UserID == id })
 	eraseWhere(r.t, s.sessions, func(x port.Session) bool {

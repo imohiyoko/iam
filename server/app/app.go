@@ -42,6 +42,7 @@ import (
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/password"
+	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/recovery"
 	"github.com/imohiyoko/iam/authn/saml"
@@ -184,6 +185,8 @@ type App struct {
 	// public と admin は待ち受けるハンドラ（複数 realm なら振り分け）。ownPublic と ownAdmin はこの realm のもの。
 	public, admin       http.Handler
 	ownPublic, ownAdmin http.Handler
+	// pats は本人の Personal Access Token（ADR 0109）。フィーチャー personal_access_tokens が動いていなければ nil。
+	pats *pat.Service
 }
 
 // New は起動前の検査を行い、App を組み立てる。binary はこのバイナリに含まれるフィーチャー。
@@ -539,6 +542,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	a.loginProtection(cfg, d, plan)
 	a.credentials.Lockout = a.lockout
+	a.pats = newPATs(cfg, d, plan)
 	a.password = nil
 	if pwMethod != nil {
 		a.password = &password.Service{

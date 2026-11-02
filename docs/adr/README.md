@@ -118,4 +118,5 @@
 | [0105](0105-risk-based-login-protection.md) | ログインの守りは、アカウント単位のロックアウト・端末の記憶・ログインのリスクの点数・ボット対策の 4 つのフィーチャーに分ける | 承認 |
 | [0103](0103-x509-client-certificates.md) | X.509 のクライアント証明書（スマートカードを含む）は認証方式のプラグインにし、証明書はコアが mTLS かプロキシのヘッダーから渡す | 承認 |
 | [0107](0107-kerberos-spnego.md) | Kerberos / SPNEGO は realm ごとの keytab で AP-REQ を確かめる認証方式のプラグインにし、プリンシパルは登録・メール・LDAP の規則でユーザーに結び付ける | 承認 |
+| [0109](0109-personal-access-tokens.md) | 本人の Personal Access Token は権限の名前のスコープで本人の権限を絞り、ハッシュだけを持つ不透明なトークンにする | 承認 |
 | [0106](0106-port-passkey.md) | passkey を認証方式のポートに載せ、無効化した credential ID は汎用の退役した検索キーで再登録を拒み、方式専用の表から authn_credentials へ起動時に移す | 承認 |

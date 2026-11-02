@@ -508,3 +508,47 @@ func TestStepUp(t *testing.T) {
 		}
 	}
 }
+
+// スコープで絞った文脈（本人の Personal Access Token。ADR 0109）は、付与で許す操作のうちスコープの内のものだけを許す。
+// スコープは付与を広げない。Holds もスコープの外の権限は持たないとみなす。
+func TestScopedContext(t *testing.T) {
+	e := newEnv(t, nil)
+	r := e.role("", "project:read", "project:write", "doc:*")
+	e.bind(r.ID, alice, "", "", "")
+	scoped := func(scopes ...string) *check.AuthContext {
+		return &check.AuthContext{AMR: []string{"pat"}, Factors: 1, AuthTime: e.clk.Now(), Attested: true, Scoped: true, Scopes: scopes}
+	}
+	e.check(true, check.Request{Principal: alice, Action: "project:read", Context: scoped("project:read")})
+	e.check(false, check.Request{Principal: alice, Action: "project:write", Context: scoped("project:read")})
+	e.check(true, check.Request{Principal: alice, Action: "doc:write", Context: scoped("doc:*")})
+	e.check(true, check.Request{Principal: alice, Action: "project:write", Context: scoped("project:*")})
+	// 本人が持たない権限はスコープにあっても許さない。
+	e.check(false, check.Request{Principal: alice, Action: "billing:read", Context: scoped("billing:read")})
+	// 空のスコープは何も許さない（Scoped なら fail-closed）。
+	e.check(false, check.Request{Principal: alice, Action: "project:read", Context: scoped()})
+	// 絞っていない文脈は今までどおり。
+	e.check(true, check.Request{Principal: alice, Action: "project:write", Context: &check.AuthContext{AMR: []string{"pwd"}}})
+
+	e.tx(func(ctx context.Context, tx port.Tx) error {
+		for _, c := range []struct {
+			perms []string
+			ac    *check.AuthContext
+			want  bool
+		}{
+			{[]string{"project:read"}, scoped("project:read"), true},
+			{[]string{"project:read", "project:write"}, scoped("project:read"), false},
+			{[]string{"doc:*"}, scoped("doc:read"), false},
+			{[]string{"doc:*"}, scoped("doc:*"), true},
+			{[]string{"project:read", "project:write"}, nil, true},
+		} {
+			got, err := e.c.Holds(ctx, tx, realm, alice, "", c.perms, c.ac)
+			if err != nil {
+				return err
+			}
+			if got != c.want {
+				t.Errorf("Holds(%v, %+v) = %v, want %v", c.perms, c.ac, got, c.want)
+			}
+		}
+		return nil
+	})
+}

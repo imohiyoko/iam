@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/imohiyoko/iam/authn/account"
+	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
@@ -166,6 +167,7 @@ func (s adminServer) RevokeAllUserCredentials(ctx context.Context, req adminapi.
 	}
 	var r account.Revoked
 	var revoked []string
+	pats := -1
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		u, err := tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id)
 		if err != nil {
@@ -176,6 +178,12 @@ func (s adminServer) RevokeAllUserCredentials(ctx context.Context, req adminapi.
 		}
 		if r, err = s.a.accounts.RevokeAllCredentials(ctx, tx, s.a.realm.ID, u, p.Actor, requestID(ctx)); err != nil {
 			return err
+		}
+		// 本人の Personal Access Token も取り消す（ADR 0109。フィーチャーが動いているときだけ。止めれば片付けで消える）。
+		if s.a.pats != nil {
+			if pats, err = s.a.pats.RevokeAll(ctx, tx, s.a.realm.ID, u, pat.ReasonRevokeAll, s.a.patRequest(ctx, p.Actor)); err != nil {
+				return err
+			}
 		}
 		revoked, err = s.revokeUserSessions(ctx, tx, u.ID, p)
 		return err
@@ -190,6 +198,10 @@ func (s adminServer) RevokeAllUserCredentials(ctx context.Context, req adminapi.
 		return nil, err
 	}
 	s.a.sessions.ForgetIDs(ctx, s.a.realm.ID, revoked)
-	return adminapi.RevokeAllUserCredentials200JSONResponse{Passkeys: r.Passkeys, Identities: r.Identities, Totp: r.TOTP, Credentials: r.Credentials,
-		Password: r.Password, RecoveryCodes: r.RecoveryCodes, Sessions: len(revoked)}, nil
+	out := adminapi.RevokeAllUserCredentials200JSONResponse{Passkeys: r.Passkeys, Identities: r.Identities, Totp: r.TOTP, Credentials: r.Credentials,
+		Password: r.Password, RecoveryCodes: r.RecoveryCodes, Sessions: len(revoked)}
+	if pats >= 0 {
+		out.PersonalAccessTokens = &pats
+	}
+	return out, nil
 }

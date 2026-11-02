@@ -204,6 +204,8 @@ var cleaners = map[string]cleaner{
 			return true, tx.Clients().Update(ctx, c)
 		})
 	}},
+	// 本人の Personal Access Token と realm のポリシーを消す（ADR 0109）。
+	feature.PersonalAccessTokens: patCleaner,
 }
 
 // eachClient は全 realm の連携先に fn を呼び、true を返した数を数える。limit が 0 以上なら、その数で止める。

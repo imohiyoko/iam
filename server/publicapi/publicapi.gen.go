@@ -385,6 +385,30 @@ func (e PasskeyPolicyMinCertificationLevel) Valid() bool {
 	}
 }
 
+// Defines values for PersonalAccessTokenRevokeReason.
+const (
+	Merged    PersonalAccessTokenRevokeReason = "merged"
+	Operator  PersonalAccessTokenRevokeReason = "operator"
+	RevokeAll PersonalAccessTokenRevokeReason = "revoke_all"
+	User      PersonalAccessTokenRevokeReason = "user"
+)
+
+// Valid indicates whether the value is a known member of the PersonalAccessTokenRevokeReason enum.
+func (e PersonalAccessTokenRevokeReason) Valid() bool {
+	switch e {
+	case Merged:
+		return true
+	case Operator:
+		return true
+	case RevokeAll:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WarningAction.
 const (
 	WarningActionDeny WarningAction = "deny"
@@ -495,6 +519,18 @@ type CheckResult struct {
 	// `condition.risk.<種類>`・`condition.attested`・`condition.aal`。ADR 0084、0093）。付与の条件だけで拒み、その付与が
 	// 条件を満たせば許されたときに限って返す。連携先はこれを見て step-up を促せる
 	Unmet *[]string `json:"unmet,omitempty"`
+}
+
+// CreatePersonalAccessToken defines model for CreatePersonalAccessToken.
+type CreatePersonalAccessToken struct {
+	// ExpiresAt 期限。省けば、寿命の上限があれば上限の期限、無ければ期限なし（ポリシーの `require_expiry` なら省けない）
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Name 本人が見分けるための名前
+	Name string `json:"name"`
+
+	// Scopes 権限の名前（`<リソース>:<操作>`、`x:*` も可）
+	Scopes []string `json:"scopes"`
 }
 
 // Error defines model for Error.
@@ -1137,6 +1173,37 @@ type PasskeyPolicy struct {
 
 // PasskeyPolicyMinCertificationLevel 求める FIDO の認定レベル（FIDO Metadata Service の status report）
 type PasskeyPolicyMinCertificationLevel string
+
+// PersonalAccessToken Personal Access Token（秘密は含めない。ADR 0109）
+type PersonalAccessToken struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// ExpiresAt 期限（無ければ期限なし）
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Id トークン ID（`pat_…`）
+	Id string `json:"id"`
+
+	// LastUsedAt 最後に使った時刻（1 分の粒度）
+	LastUsedAt   *time.Time                       `json:"last_used_at,omitempty"`
+	Name         string                           `json:"name"`
+	RevokeReason *PersonalAccessTokenRevokeReason `json:"revoke_reason,omitempty"`
+	RevokedAt    *time.Time                       `json:"revoked_at,omitempty"`
+	Scopes       []string                         `json:"scopes"`
+}
+
+// PersonalAccessTokenRevokeReason defines model for PersonalAccessToken.RevokeReason.
+type PersonalAccessTokenRevokeReason string
+
+// PersonalAccessTokenPolicyView defines model for PersonalAccessTokenPolicyView.
+type PersonalAccessTokenPolicyView struct {
+	// AllowedScopes 作れるスコープ（空なら形だけを確かめる）
+	AllowedScopes []string `json:"allowed_scopes"`
+
+	// MaxLifetimeSeconds 今効く寿命の上限（realm とホスト先の短い方。0 なら上限なし）
+	MaxLifetimeSeconds int64 `json:"max_lifetime_seconds"`
+	RequireExpiry      bool  `json:"require_expiry"`
+}
 
 // QuotaShortage Quota の不足（`quota_exceeded`。11.14）。`from` から `until`（無ければ無期限）の間、上限 `limit` に `count` 人がいる
 type QuotaShortage struct {
@@ -1828,6 +1895,9 @@ type RemoveMyPasswordJSONRequestBody RemoveMyPasswordJSONBody
 // SetMyPasswordJSONRequestBody defines body for SetMyPassword for application/json ContentType.
 type SetMyPasswordJSONRequestBody SetMyPasswordJSONBody
 
+// CreateMyPersonalAccessTokenJSONRequestBody defines body for CreateMyPersonalAccessToken for application/json ContentType.
+type CreateMyPersonalAccessTokenJSONRequestBody = CreatePersonalAccessToken
+
 // ConfirmRegisterTOTPJSONRequestBody defines body for ConfirmRegisterTOTP for application/json ContentType.
 type ConfirmRegisterTOTPJSONRequestBody ConfirmRegisterTOTPJSONBody
 
@@ -2154,6 +2224,18 @@ type ServerInterface interface {
 	// SetMyPassword パスワードを設定・変更する（フィーチャー password）
 	// (POST /v1/me/password:set)
 	SetMyPassword(w http.ResponseWriter, r *http.Request)
+	// GetMyPersonalAccessTokenPolicy realm の Personal Access Token のポリシー（作る前に上限と許すスコープを知るため）
+	// (GET /v1/me/personal-access-token-policy)
+	GetMyPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request)
+	// ListMyPersonalAccessTokens 本人の Personal Access Token の一覧（フィーチャー personal_access_tokens。ADR 0109）
+	// (GET /v1/me/personal-access-tokens)
+	ListMyPersonalAccessTokens(w http.ResponseWriter, r *http.Request)
+	// CreateMyPersonalAccessToken 本人の Personal Access Token を作る（トークンは1回だけ返す。ADR 0109）
+	// (POST /v1/me/personal-access-tokens)
+	CreateMyPersonalAccessToken(w http.ResponseWriter, r *http.Request)
+	// RevokeMyPersonalAccessToken 本人の Personal Access Token を取り消す
+	// (POST /v1/me/personal-access-tokens/{id}:revoke)
+	RevokeMyPersonalAccessToken(w http.ResponseWriter, r *http.Request, id string)
 	// RegenerateMyRecoveryCodes リカバリーコードを作り直す
 	// (POST /v1/me/recovery-codes:regenerate)
 	RegenerateMyRecoveryCodes(w http.ResponseWriter, r *http.Request)
@@ -4852,6 +4934,74 @@ func (siw *ServerInterfaceWrapper) SetMyPassword(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// GetMyPersonalAccessTokenPolicy operation middleware
+func (siw *ServerInterfaceWrapper) GetMyPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMyPersonalAccessTokenPolicy(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyPersonalAccessTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListMyPersonalAccessTokens(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyPersonalAccessTokens(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMyPersonalAccessToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateMyPersonalAccessToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMyPersonalAccessToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeMyPersonalAccessToken operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMyPersonalAccessToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeMyPersonalAccessToken(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RegenerateMyRecoveryCodes operation middleware
 func (siw *ServerInterfaceWrapper) RegenerateMyRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 
@@ -5332,6 +5482,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}/members", wrapper.AddMyOrgGroupMember)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/orgs/{id}/groups/{group_id}/members:remove", wrapper.RemoveMyOrgGroupMember)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me:check", wrapper.CheckMyAuthz)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/personal-access-tokens", wrapper.ListMyPersonalAccessTokens)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/personal-access-tokens", wrapper.CreateMyPersonalAccessToken)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/personal-access-tokens/{id}:revoke", wrapper.RevokeMyPersonalAccessToken)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/personal-access-token-policy", wrapper.GetMyPersonalAccessTokenPolicy)
 
 	return m
 }
@@ -12678,6 +12832,234 @@ func (response SetMyPassword429JSONResponse) VisitSetMyPasswordResponse(w http.R
 	return err
 }
 
+type GetMyPersonalAccessTokenPolicyRequestObject struct {
+}
+
+type GetMyPersonalAccessTokenPolicyResponseObject interface {
+	VisitGetMyPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error
+}
+
+type GetMyPersonalAccessTokenPolicy200JSONResponse PersonalAccessTokenPolicyView
+
+func (response GetMyPersonalAccessTokenPolicy200JSONResponse) VisitGetMyPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyPersonalAccessTokenPolicy401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetMyPersonalAccessTokenPolicy401JSONResponse) VisitGetMyPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyPersonalAccessTokenPolicy404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetMyPersonalAccessTokenPolicy404JSONResponse) VisitGetMyPersonalAccessTokenPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyPersonalAccessTokensRequestObject struct {
+}
+
+type ListMyPersonalAccessTokensResponseObject interface {
+	VisitListMyPersonalAccessTokensResponse(w http.ResponseWriter) error
+}
+
+type ListMyPersonalAccessTokens200JSONResponse struct {
+	PersonalAccessTokens []PersonalAccessToken `json:"personal_access_tokens"`
+}
+
+func (response ListMyPersonalAccessTokens200JSONResponse) VisitListMyPersonalAccessTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyPersonalAccessTokens401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyPersonalAccessTokens401JSONResponse) VisitListMyPersonalAccessTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyPersonalAccessTokens404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyPersonalAccessTokens404JSONResponse) VisitListMyPersonalAccessTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyPersonalAccessTokenRequestObject struct {
+	Body *CreateMyPersonalAccessTokenJSONRequestBody
+}
+
+type CreateMyPersonalAccessTokenResponseObject interface {
+	VisitCreateMyPersonalAccessTokenResponse(w http.ResponseWriter) error
+}
+
+type CreateMyPersonalAccessToken201JSONResponse struct {
+	// PersonalAccessToken Personal Access Token（秘密は含めない。ADR 0109）
+	PersonalAccessToken PersonalAccessToken `json:"personal_access_token"`
+
+	// Token トークン（`iampat_…`）。この応答でだけ返す
+	Token string `json:"token"`
+}
+
+func (response CreateMyPersonalAccessToken201JSONResponse) VisitCreateMyPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyPersonalAccessToken400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateMyPersonalAccessToken400JSONResponse) VisitCreateMyPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyPersonalAccessToken401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateMyPersonalAccessToken401JSONResponse) VisitCreateMyPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyPersonalAccessToken404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateMyPersonalAccessToken404JSONResponse) VisitCreateMyPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyPersonalAccessToken409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateMyPersonalAccessToken409JSONResponse) VisitCreateMyPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyPersonalAccessTokenRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RevokeMyPersonalAccessTokenResponseObject interface {
+	VisitRevokeMyPersonalAccessTokenResponse(w http.ResponseWriter) error
+}
+
+type RevokeMyPersonalAccessToken204Response struct {
+}
+
+func (response RevokeMyPersonalAccessToken204Response) VisitRevokeMyPersonalAccessTokenResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeMyPersonalAccessToken401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeMyPersonalAccessToken401JSONResponse) VisitRevokeMyPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyPersonalAccessToken404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeMyPersonalAccessToken404JSONResponse) VisitRevokeMyPersonalAccessTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RegenerateMyRecoveryCodesRequestObject struct {
 }
 
@@ -13692,6 +14074,18 @@ type StrictServerInterface interface {
 	// SetMyPassword パスワードを設定・変更する（フィーチャー password）
 	// (POST /v1/me/password:set)
 	SetMyPassword(ctx context.Context, request SetMyPasswordRequestObject) (SetMyPasswordResponseObject, error)
+	// GetMyPersonalAccessTokenPolicy realm の Personal Access Token のポリシー（作る前に上限と許すスコープを知るため）
+	// (GET /v1/me/personal-access-token-policy)
+	GetMyPersonalAccessTokenPolicy(ctx context.Context, request GetMyPersonalAccessTokenPolicyRequestObject) (GetMyPersonalAccessTokenPolicyResponseObject, error)
+	// ListMyPersonalAccessTokens 本人の Personal Access Token の一覧（フィーチャー personal_access_tokens。ADR 0109）
+	// (GET /v1/me/personal-access-tokens)
+	ListMyPersonalAccessTokens(ctx context.Context, request ListMyPersonalAccessTokensRequestObject) (ListMyPersonalAccessTokensResponseObject, error)
+	// CreateMyPersonalAccessToken 本人の Personal Access Token を作る（トークンは1回だけ返す。ADR 0109）
+	// (POST /v1/me/personal-access-tokens)
+	CreateMyPersonalAccessToken(ctx context.Context, request CreateMyPersonalAccessTokenRequestObject) (CreateMyPersonalAccessTokenResponseObject, error)
+	// RevokeMyPersonalAccessToken 本人の Personal Access Token を取り消す
+	// (POST /v1/me/personal-access-tokens/{id}:revoke)
+	RevokeMyPersonalAccessToken(ctx context.Context, request RevokeMyPersonalAccessTokenRequestObject) (RevokeMyPersonalAccessTokenResponseObject, error)
 	// RegenerateMyRecoveryCodes リカバリーコードを作り直す
 	// (POST /v1/me/recovery-codes:regenerate)
 	RegenerateMyRecoveryCodes(ctx context.Context, request RegenerateMyRecoveryCodesRequestObject) (RegenerateMyRecoveryCodesResponseObject, error)
@@ -16765,6 +17159,111 @@ func (sh *strictHandler) SetMyPassword(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetMyPasswordResponseObject); ok {
 		if err := validResponse.VisitSetMyPasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMyPersonalAccessTokenPolicy operation middleware
+func (sh *strictHandler) GetMyPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request) {
+	var request GetMyPersonalAccessTokenPolicyRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMyPersonalAccessTokenPolicy(ctx, request.(GetMyPersonalAccessTokenPolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMyPersonalAccessTokenPolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMyPersonalAccessTokenPolicyResponseObject); ok {
+		if err := validResponse.VisitGetMyPersonalAccessTokenPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyPersonalAccessTokens operation middleware
+func (sh *strictHandler) ListMyPersonalAccessTokens(w http.ResponseWriter, r *http.Request) {
+	var request ListMyPersonalAccessTokensRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyPersonalAccessTokens(ctx, request.(ListMyPersonalAccessTokensRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyPersonalAccessTokens")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyPersonalAccessTokensResponseObject); ok {
+		if err := validResponse.VisitListMyPersonalAccessTokensResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateMyPersonalAccessToken operation middleware
+func (sh *strictHandler) CreateMyPersonalAccessToken(w http.ResponseWriter, r *http.Request) {
+	var request CreateMyPersonalAccessTokenRequestObject
+
+	var body CreateMyPersonalAccessTokenJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMyPersonalAccessToken(ctx, request.(CreateMyPersonalAccessTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMyPersonalAccessToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMyPersonalAccessTokenResponseObject); ok {
+		if err := validResponse.VisitCreateMyPersonalAccessTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeMyPersonalAccessToken operation middleware
+func (sh *strictHandler) RevokeMyPersonalAccessToken(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevokeMyPersonalAccessTokenRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeMyPersonalAccessToken(ctx, request.(RevokeMyPersonalAccessTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeMyPersonalAccessToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeMyPersonalAccessTokenResponseObject); ok {
+		if err := validResponse.VisitRevokeMyPersonalAccessTokenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
