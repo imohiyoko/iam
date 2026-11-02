@@ -15,7 +15,8 @@ import (
 
 // 連携先（OIDC のクライアント）と署名鍵の管理 API（design.md 5.5、9.3、ADR 0026）。
 
-func clientOut(c port.Client, secret string) (adminapi.Client, error) {
+// clientOut は連携先を返す形にする。deviceFlow はフィーチャー device_flow が動いているか（オフなら許可の有無を返さない）。
+func clientOut(c port.Client, secret string, deviceFlow bool) (adminapi.Client, error) {
 	out := adminapi.Client{ClientId: c.PublicID, Name: c.Name, TrustLevel: adminapi.ClientTrustLevel(c.TrustLevel),
 		RedirectUris: c.RedirectURIs, PostLogoutRedirectUris: c.PostLogoutRedirectURIs, TokenEndpointAuthMethod: c.AuthMethod,
 		IdTokenSignedResponseAlg: c.IDTokenAlg, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
@@ -42,6 +43,9 @@ func clientOut(c port.Client, secret string) (adminapi.Client, error) {
 	if secret != "" {
 		out.ClientSecret = &secret
 	}
+	if deviceFlow {
+		out.DeviceAuthorizationGrant = &c.DeviceGrant
+	}
 	return out, nil
 }
 
@@ -55,6 +59,9 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.BackchannelLogoutUri != nil {
 		in.BackchannelLogoutURI = *b.BackchannelLogoutUri
+	}
+	if b.DeviceAuthorizationGrant != nil {
+		in.DeviceGrant = *b.DeviceAuthorizationGrant
 	}
 	if b.FrontchannelLogoutUri != nil {
 		in.FrontchannelLogoutURI = *b.FrontchannelLogoutUri
@@ -93,7 +100,7 @@ func (s adminServer) ListClients(ctx context.Context, _ adminapi.ListClientsRequ
 			return err
 		}
 		for _, c := range cs {
-			v, err := clientOut(c, "")
+			v, err := clientOut(c, "", s.a.device != nil)
 			if err != nil {
 				return err
 			}
@@ -128,7 +135,7 @@ func (s adminServer) CreateClient(ctx context.Context, req adminapi.CreateClient
 		if err != nil {
 			return err
 		}
-		out, err = clientOut(c, secret)
+		out, err = clientOut(c, secret, s.a.device != nil)
 		return err
 	})
 	switch {
@@ -153,7 +160,7 @@ func (s adminServer) GetClient(ctx context.Context, req adminapi.GetClientReques
 		if err != nil {
 			return err
 		}
-		out, err = clientOut(c, "")
+		out, err = clientOut(c, "", s.a.device != nil)
 		return err
 	})
 	switch {
@@ -189,7 +196,7 @@ func (s adminServer) UpdateClient(ctx context.Context, req adminapi.UpdateClient
 		if err != nil {
 			return err
 		}
-		out, err = clientOut(c, secret)
+		out, err = clientOut(c, secret, s.a.device != nil)
 		return err
 	})
 	switch {

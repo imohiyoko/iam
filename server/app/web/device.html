@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="{{.Lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>{{.T.Title}}</title>
+<link rel="stylesheet" href="{{.Base}}/login/assets/login.css">
+</head>
+<body>
+<main id="app" data-page="device" data-step="{{.Step}}">
+  <h1>{{.T.Title}}</h1>
+  {{if eq .Error "invalid"}}<p id="message" class="error" role="alert">{{.T.Invalid}}</p>{{end}}
+  {{if eq .Error "rate_limited"}}<p id="message" class="error" role="alert">{{.T.RateLimited}}</p>{{end}}
+  {{if eq .Error "org_unavailable"}}<p id="message" class="error" role="alert">{{.T.OrgUnavailable}}</p>{{end}}
+
+  {{if eq .Step "enter"}}
+  <form method="get" action="{{.Action}}">
+    <p>{{.T.Enter}}</p>
+    <label for="user_code">{{.T.Code}}</label>
+    <input id="user_code" name="user_code" value="{{.UserCode}}" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" required>
+    <button type="submit">{{.T.Continue}}</button>
+  </form>
+  {{end}}
+
+  {{if eq .Step "confirm"}}
+  <p><strong class="client">{{.Client}}</strong> {{.T.Requests}}</p>
+  <p>{{.T.Confirm}}</p>
+  <p class="user-code"><code>{{.UserCode}}</code></p>
+  <p>{{.T.Scopes}}</p>
+  <ul class="scopes">{{range .Scopes}}<li>{{.}}</li>{{end}}</ul>
+  <p class="warning">{{.T.Warning}}</p>
+  <form method="post" action="{{.Action}}">
+    <input type="hidden" name="user_code" value="{{.UserCode}}">
+    <button type="submit" name="action" value="approve">{{.T.Approve}}</button>
+    <button type="submit" name="action" value="deny" class="secondary">{{.T.Deny}}</button>
+  </form>
+  {{end}}
+
+  {{if eq .Step "approved"}}<p role="status">{{.T.Approved}}</p>{{end}}
+  {{if eq .Step "denied"}}<p role="status">{{.T.Denied}}</p>{{end}}
+</main>
+</body>
+</html>

@@ -142,6 +142,9 @@ type App struct {
 	issuer string
 	flow   *provider.Flow
 	tokens *provider.Tokens
+	// device は Device Authorization Grant（ADR 0095）。フィーチャー device_flow が動いていなければ nil。deviceTmpl はその画面。
+	device     *provider.Device
+	deviceTmpl *template.Template
 	// impersonationLimit は運営者ごとのなりすましの回数の上限（フィーチャー impersonation。ADR 0099）。
 	impersonationLimit *ratelimit.Limiter
 	// logoutTmpl はログアウトの画面（ADR 0094）。フィーチャー oidc_logout が動いていなければ nil。
@@ -359,7 +362,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.authz.Members, a.authz.Hierarchy = authzMembers{}, a.orgs.Hierarchy
 	}
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
-	a.clients = &provider.Clients{Clock: d.Clock, FrontChannel: plan.IsActive(feature.OIDCLogout)}
+	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout)}
 	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D()}
 	// ID トークンの署名鍵は realm ごとに用意しておく（JWKS が空のまま公開されないように）。
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, realm.ID) }); err != nil {
@@ -369,6 +372,15 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	a.serviceAccounts = &serviceaccount.Service{Clock: d.Clock, Replay: d.Ephemeral, Audience: a.issuer,
 		TokenTTL: cfg.ServiceAccounts.TokenTTL.D(), Authenticator: serviceaccount.Authenticator{Enabled: plan.IsActive(feature.ServiceAccounts), DeliveryOnly: deliveryOnly}}
 	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D()}
+	a.device, a.deviceTmpl = nil, nil
+	if plan.IsActive(feature.DeviceFlow) {
+		a.device = &provider.Device{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, TTL: cfg.OIDC.DeviceCodeTTL.D(),
+			Interval: cfg.OIDC.DevicePollInterval.D()}
+		var err error
+		if a.deviceTmpl, err = deviceTemplate(cfg.Server.LoginTemplates); err != nil {
+			return err
+		}
+	}
 	if plan.IsActive(feature.CustomAttributes) {
 		a.attributes = &attribute.Service{Clock: d.Clock, Crypter: a.pii}
 	}

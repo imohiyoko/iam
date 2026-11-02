@@ -580,6 +580,7 @@ GET    /v1/admin/signing-keys
 ### 5.5 連携先
 
 - 当面はホスト先が管理 API で登録したファーストパーティのみ。同意画面なし、動的クライアント登録なし
+- 入力の限られた端末向けに、Device Authorization Grant を連携先ごとに許せる（フィーチャー `device_flow`。11.16）
 - 将来のサードパーティ開放に備え `clients.trust_level` を持つ
 - ログアウトに関わる登録：`post_logout_redirect_uris`（完全一致）、`backchannel_logout_uri`（5.2）、`frontchannel_logout_uri` と
   `frontchannel_logout_session_required`（5.6。フィーチャー `oidc_logout`）
@@ -789,6 +790,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 | Token Exchange の委任（5.7） | オフ | ― | token-exchange の grant を受けない。交換のトークンは使えない |
 | なりすまし（5.7） | オフ | Token Exchange | `requested_subject` を受けない。なりすましのトークンは使えない |
 | acr・AAL と step-up（11.15） | オフ | ― | `acr` を出さず、`acr_values` を見ない。AAL で書く条件・ポリシーなし |
+| Device Authorization Grant（11.16） | オフ | ― | device_authorization エンドポイントと承認の画面なし。Discovery に出さない |
 | Org の監査ログ（6.6） | オフ | Org | Org の管理者は監査ログを読めない（運営者の照会は常にある） |
 | イベントの Webhook の購読（6.7） | オフ | ― | 購読の API なし・配送しない（EventSink はそのまま） |
 | SAML 2.0 の外部 IdP（11.3、ADR 0098） | オフ | ― | SAML の connection を使わない（Org 専用には Org 管理ユーザーも要る） |
@@ -962,6 +964,21 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - 条件の言語の `aal_at_least`（理由 `condition.aal`）と、Org のログインポリシーの `min_aal`（理由 `policy.min_aal`）
 - 判定の API は `unmet` と一緒に `step_up`（`acr_values`・`max_age`）を返す。公開 API の本人の重要な操作の 401 には
   `WWW-Authenticate: Bearer error="insufficient_user_authentication"` を足す（本文は変えない）
+
+### 11.16 Device Authorization Grant
+
+入力の限られた端末（テレビ・CLI など）が、OAuth 2.0 Device Authorization Grant（RFC 8628）でログインを任せる。
+
+実装（ADR 0095）：
+
+- フィーチャー `device_flow`。管理 API の連携先で `device_authorization_grant` を許したものだけが使える（戻り先は無くてよい）
+- `POST /oauth2/device_authorization` が device_code（256 bit）と user_code（子音 8 桁、`XXXX-XXXX`）を返す。期限は
+  `oidc.device_code_ttl`（既定 10 分）、間隔は `oidc.device_poll_interval`（既定 5 秒）
+- 本人は `/oauth2/device`（ホスト型の画面）でログインし、user_code を入れ、連携先の名前とスコープを見て許可か拒否を選ぶ。
+  照合は本人と接続元ごとに数える
+- 端末は token エンドポイントを `urn:ietf:params:oauth:grant-type:device_code` でポーリングする（`authorization_pending`・
+  `slow_down`・`access_denied`・`expired_token`）。承認の後は認可コードフローと同じトークン（ログインの系列に結び付く。5.2）
+- 途中の状態は EphemeralStore に置く（認可コードと同じ。複数インスタンスでは共有できるものが要る）
 
 ## 12. テスト
 

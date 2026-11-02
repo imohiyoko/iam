@@ -353,16 +353,7 @@ func TestOIDCRPInitiatedLogoutMultiRealm(t *testing.T) {
 // E2E：ふつうの RP（zitadel/oidc の rp）が Discovery の end_session_endpoint に id_token_hint を送り、登録した戻り先に state 付きで
 // 戻される（RP のサーバーから送るので、ブラウザのセッションは無い）。
 func TestOIDCE2ERPInitiatedLogout(t *testing.T) {
-	e := newE2EWith(t, func(c *config.Config) {
-		names := []string{}
-		for _, f := range feature.Registered() {
-			if f.DefaultEnabled {
-				names = append(names, f.Name)
-			}
-		}
-		names = append(names, feature.OIDCLogout)
-		c.Features = &names
-	}, feature.Registered())
+	e := newE2E(t, feature.OIDCLogout)
 	ctx := context.Background()
 	_, owner := e.l.operator(t, "root@example.com", role.RealmOwner)
 	web := e.l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "post_logout_redirect_uris": []string{"https://rp.example.com/bye"}})

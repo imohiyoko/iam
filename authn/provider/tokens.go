@@ -133,10 +133,14 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 	if err != nil {
 		return Issued{}, err
 	}
+	details := map[string]any{"client_id": cl.PublicID, "scopes": c.Scopes}
+	if c.GrantType != "" {
+		details["grant_type"] = c.GrantType
+	}
 	_, err = eventlog.Record(ctx, tx, t.Clock, audit.Event{
 		Type: "oidc.authorized", Result: audit.ResultSuccess, RealmID: c.RealmID, OrgID: orgPublicID,
 		Actor: audit.Actor{Type: "user", ID: u.PublicID}, SessionID: c.SID, RequestID: requestID,
-		Details: map[string]any{"client_id": cl.PublicID, "scopes": c.Scopes},
+		Details: details,
 	})
 	return out, err
 }

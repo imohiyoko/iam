@@ -3643,14 +3643,17 @@ components:
         name: { type: string, minLength: 1, maxLength: 100 }
         redirect_uris:
           type: array
-          minItems: 1
           maxItems: 20
+          description: 1 つ以上。`device_authorization_grant` を許す連携先だけは空でよい
           items: { type: string }
         post_logout_redirect_uris:
           type: array
           maxItems: 20
           items: { type: string }
         token_endpoint_auth_method: { type: string, enum: [client_secret, private_key_jwt, none] }
+        device_authorization_grant:
+          type: boolean
+          description: Device Authorization Grant（RFC 8628）を許す。フィーチャー `device_flow` が動いているときだけ true にできる（ADR 0095）
         jwks:
           type: object
           additionalProperties: true
@@ -3685,6 +3688,7 @@ components:
           additionalProperties: true
         id_token_signed_response_alg: { type: string }
         backchannel_logout_uri: { type: string }
+        device_authorization_grant: { type: boolean, description: フィーチャー `device_flow` が動いているときだけ返す }
         frontchannel_logout_uri: { type: string }
         frontchannel_logout_session_required: { type: boolean, description: "`frontchannel_logout_uri` があるときだけ" }
         client_secret: { type: string, description: 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す） }

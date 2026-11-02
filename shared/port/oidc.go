@@ -42,6 +42,8 @@ type Client struct {
 	IDTokenAlg string
 	// BackchannelLogoutURI は Back-Channel Logout の送り先（空なら送らない。5.2）。
 	BackchannelLogoutURI string
+	// DeviceGrant は Device Authorization Grant（RFC 8628）を許す（フィーチャー device_flow。ADR 0095）。
+	DeviceGrant bool
 	// FrontchannelLogoutURI は Front-Channel Logout の送り先（ログアウトの完了画面の iframe で開く。空なら開かない。
 	// フィーチャー oidc_logout。ADR 0094）。
 	FrontchannelLogoutURI string

@@ -398,7 +398,19 @@ Group のネスト、Org 階層（M7）。
 - ディレクトリ：LDAP / AD のバインド認証と同期、Kerberos / SPNEGO
 - 方式：WebAuthn の attestation と AAGUID の許可リスト、HOTP、SMS・音声、プッシュ、X.509・スマートカード、Verifiable Credentials（OpenID4VP）
 - リスクに応じた追加認証、新しい端末の検知、ボット対策、アカウント単位のロックアウト
-- Device Authorization Grant、本人の Personal Access Token
+- Device Authorization Grant（下記）、本人の Personal Access Token
+
+#### Device Authorization Grant（ADR 0095）
+
+**ゴール**：入力の限られた端末（テレビ・CLI など）の連携先が、RFC 8628 で本人にログインを任せられる。
+
+- [x] フィーチャー `device_flow`（既定オフ）。オフなら Discovery・エンドポイント・管理 API に何も出さない
+- [x] 連携先ごとに許し、許した連携先だけが device_authorization と device_code の grant を使える（公開クライアントも可）
+- [x] device_code は 256 bit、user_code は子音 8 桁。状態は EphemeralStore に封をして置き、user_code と承認は1回だけ使える
+- [x] 本人はホスト型の画面でログインし、連携先の名前・コード・スコープを見て許可か拒否を選ぶ（CSRF を拒む。照合の回数に上限）
+- [x] `authorization_pending`・`slow_down`（間隔を延ばす）・`access_denied`・`expired_token`。承認の後は認可コードフローと同じトークン
+- [x] 監査ログ（承認・拒否・発行）、フィーチャーの無効化で連携先の許可を外す、標準の RP（zitadel/oidc の rp）での E2E
+- 端末の名前や場所を確認の画面に出す、承認の通知
 
 #### 外部 IdP としての SAML 2.0（ADR 0098）
 

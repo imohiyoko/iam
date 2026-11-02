@@ -32,6 +32,8 @@ import (
 //	POST /oauth2/introspect                 イントロスペクション（RFC 7662。機密の連携先だけ）
 //	POST /oauth2/revoke                     失効（RFC 7009）
 //	GET  /oauth2/userinfo                   UserInfo（POST も可）
+//	POST /oauth2/device_authorization       Device Authorization Grant の開始（RFC 8628。フィーチャー device_flow）
+//	GET  /oauth2/device                     user_code の入力と承認の画面（POST で承認・拒否）
 //	GET  /oauth2/end_session                RP-Initiated Logout（POST も可。フィーチャー oidc_logout。endsession.go）
 
 const (
@@ -42,6 +44,8 @@ const (
 	oidcKeys       = "/oauth2/keys"
 	oidcIntrospect = "/oauth2/introspect"
 	oidcRevoke     = "/oauth2/revoke"
+	oidcDeviceAuth = "/oauth2/device_authorization"
+	oidcDevice     = "/oauth2/device"
 )
 
 // isOIDC は OIDC Provider のパスかを返す。
@@ -55,13 +59,17 @@ func newOIDCHandler(a *App) http.Handler {
 		return nil
 	}
 	srv := &oidcServer{a: a}
-	ops := op.RegisterServer(srv, op.Endpoints{
+	endpoints := op.Endpoints{
 		Authorization: op.NewEndpoint(oidcAuthorize),
 		Token:         op.NewEndpoint(oidcToken),
 		JwksURI:       op.NewEndpoint(oidcKeys),
 		Introspection: op.NewEndpoint(oidcIntrospect),
 		Revocation:    op.NewEndpoint(oidcRevoke),
-	}, op.WithServerCORSOptions(nil))
+	}
+	if a.device != nil {
+		endpoints.DeviceAuthorization = op.NewEndpoint(oidcDeviceAuth)
+	}
+	ops := op.RegisterServer(srv, endpoints, op.WithServerCORSOptions(nil))
 	mux := http.NewServeMux()
 	mux.Handle(oidc.DiscoveryEndpoint, ops)
 	mux.Handle(oidcKeys, ops)
@@ -72,6 +80,11 @@ func newOIDCHandler(a *App) http.Handler {
 	mux.Handle(oidcAuthorize, a.withSession(ops))
 	mux.Handle(oidcResume, a.withSession(http.HandlerFunc(srv.resume)))
 	mux.HandleFunc(oidcUserinfo, srv.userinfo)
+	if a.device != nil {
+		mux.Handle(oidcDeviceAuth, ops)
+		// 承認の画面はブラウザのセッションを見る。書き込み（POST）は別オリジンから受けない（CSRF。Cookie も SameSite=Lax）。
+		mux.Handle(oidcDevice, a.withSession(http.NewCrossOriginProtection().Handler(http.HandlerFunc(srv.deviceVerify))))
+	}
 	if a.logoutTmpl != nil {
 		// ログアウトの要求はトップレベルの遷移（別のオリジンの連携先から）。確認の答えは自分の画面のフォームからだけ受ける。
 		mux.Handle(oidcEndSession, a.withSession(http.HandlerFunc(srv.endSession)))
@@ -257,6 +270,11 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		d.FrontChannelLogoutSupported, d.FrontChannelLogoutSessionSupported = true, true
 		d.UILocalesSupported = []language.Tag{language.English, language.Japanese}
 	}
+	// Device Authorization Grant（フィーチャー device_flow。オフなら出さない）。
+	if s.a.device != nil {
+		d.DeviceAuthorizationEndpoint = s.endpoint(oidcDeviceAuth)
+		d.GrantTypesSupported = append(slices.Clone(d.GrantTypesSupported), oidc.GrantTypeDeviceCode)
+	}
 	return op.NewResponse(d), nil
 }
 
@@ -275,10 +293,18 @@ func (s *oidcServer) Keys(ctx context.Context, _ *op.Request[struct{}]) (*op.Res
 	return resp, nil
 }
 
-// opClient は連携先を op.Client にする。exchange は Token Exchange を許した連携先か（フィーチャーが動いているときだけ真）。
+// opClient は連携先を op.Client にする。device は Device Authorization Grant を許すか（フィーチャーが動いていて、
+// 連携先で許したとき）。exchange は Token Exchange を許した連携先か（フィーチャーが動いているときだけ真）。
 type opClient struct {
 	c        port.Client
+	device   bool
 	exchange bool
+}
+
+func (s *oidcServer) opClient(c port.Client) opClient {
+	_, exchange := provider.ParseExchangePolicy(c.TokenExchange)
+	return opClient{c: c, device: s.a.device != nil && c.DeviceGrant,
+		exchange: exchange && s.a.tokens.TokenExchange && c.AuthMethod != port.ClientAuthNone}
 }
 
 func (c opClient) GetID() string                    { return c.c.PublicID }
@@ -307,10 +333,14 @@ func (opClient) ResponseTypes() []oidc.ResponseType {
 	return []oidc.ResponseType{oidc.ResponseTypeCode}
 }
 func (c opClient) GrantTypes() []oidc.GrantType {
+	gt := grantTypes
 	if c.exchange {
-		return exchangeGrantTypes()
+		gt = exchangeGrantTypes()
 	}
-	return grantTypes
+	if c.device {
+		gt = append(slices.Clone(gt), oidc.GrantTypeDeviceCode)
+	}
+	return gt
 }
 func (opClient) LoginURL(string) string { return "" }
 func (opClient) AccessTokenType() op.AccessTokenType {
@@ -354,7 +384,7 @@ func (s *oidcServer) VerifyAuthRequest(ctx context.Context, r *op.Request[oidc.A
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
-	return &op.ClientRequest[oidc.AuthRequest]{Request: r, Client: opClient{c: cl}}, nil
+	return &op.ClientRequest[oidc.AuthRequest]{Request: r, Client: s.opClient(cl)}, nil
 }
 
 // Authorize は検証済みの認可要求（戻り先・スコープ・response_type は op が確かめた）を受け、ログイン済みなら認可コードを、
@@ -520,7 +550,7 @@ func (s *oidcServer) resume(w http.ResponseWriter, r *http.Request) {
 		s.a.unavailable(w, r, err)
 		return
 	}
-	if op.ValidateAuthReqRedirectURI(opClient{c: cl}, req.RedirectURI, oidc.ResponseTypeCode) != nil {
+	if op.ValidateAuthReqRedirectURI(s.opClient(cl), req.RedirectURI, oidc.ResponseTypeCode) != nil {
 		http.Error(w, "The application's redirect URI is no longer registered.", http.StatusBadRequest)
 		return
 	}
@@ -535,19 +565,18 @@ func (s *oidcServer) resume(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, red.URL, http.StatusFound)
 }
 
-// VerifyClient は token エンドポイントと revoke エンドポイントでの連携先の認証（client_secret_basic / post、
+// VerifyClient は token・revoke・device_authorization エンドポイントでの連携先の認証（client_secret_basic / post、
 // private_key_jwt、none）。
 func (s *oidcServer) VerifyClient(ctx context.Context, r *op.Request[op.ClientCredentials]) (op.Client, error) {
 	aud := []string{s.endpoint(oidcToken), s.a.issuer}
-	if r.URL != nil && r.URL.Path == oidcRevoke {
-		aud = []string{s.endpoint(oidcRevoke), s.a.issuer}
+	if r.URL != nil && (r.URL.Path == oidcRevoke || r.URL.Path == oidcDeviceAuth) {
+		aud = []string{s.endpoint(r.URL.Path), s.a.issuer}
 	}
 	cl, err := s.authenticate(ctx, r.Data, aud, false)
 	if err != nil {
 		return nil, err
 	}
-	_, exchange := provider.ParseExchangePolicy(cl.TokenExchange)
-	return opClient{c: cl, exchange: exchange && s.a.tokens.TokenExchange && cl.AuthMethod != port.ClientAuthNone}, nil
+	return s.opClient(cl), nil
 }
 
 // authenticate は連携先を認証する。confidential なら client_secret か private_key_jwt を求める。

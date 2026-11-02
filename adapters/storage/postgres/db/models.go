@@ -38,6 +38,7 @@ type AuthnClient struct {
 	UpdatedAt                         string
 	FrontchannelLogoutUri             string
 	FrontchannelLogoutSessionRequired int64
+	DeviceGrant                       int64
 	TokenExchange                     []byte
 }
 

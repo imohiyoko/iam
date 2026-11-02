@@ -64,6 +64,7 @@ var featureCatalog = map[string]struct {
 	feature.SAML:               {saml.Feature, module + "/features/saml"},
 	feature.OrgAuditLog:        {eventlog.OrgAuditLogFeature, module + "/features/orgauditlog"},
 	feature.EventSubscriptions: {eventsub.Feature, module + "/features/eventsubscriptions"},
+	feature.DeviceFlow:         {provider.DeviceFeature, module + "/features/deviceflow"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

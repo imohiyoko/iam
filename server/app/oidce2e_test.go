@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,9 +34,21 @@ type e2e struct {
 	http   *http.Client
 }
 
-func newE2E(t *testing.T) *e2e {
+// newE2E は features（既定でオンのものに加えて有効にするフィーチャー）を有効にして起動する。
+func newE2E(t *testing.T, features ...string) *e2e {
 	t.Helper()
-	return newE2EWith(t, nil, nil)
+	if len(features) == 0 {
+		return newE2EWith(t, nil, nil)
+	}
+	return newE2EWith(t, func(c *config.Config) {
+		names := slices.Clone(features)
+		for _, f := range feature.Registered() {
+			if f.DefaultEnabled {
+				names = append(names, f.Name)
+			}
+		}
+		c.Features = &names
+	}, feature.Registered())
 }
 
 // newE2EWith は設定を変え、binary のフィーチャーを含めて組み立てる。
