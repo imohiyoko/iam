@@ -58,6 +58,8 @@ type Clients struct {
 	DPoP, MTLS bool
 	// CIBA は CIBA の登録を受け付けるか（フィーチャー ciba。ADR 0114）。
 	CIBA bool
+	// PAR はフィーチャー par が動いているか（require_pushed_authorization_requests を受け付けるか。ADR 0112）。
+	PAR bool
 }
 
 // ClientInput は登録・変更の内容。
@@ -84,6 +86,8 @@ type ClientInput struct {
 	// ping の通知先（フィーチャー ciba。ADR 0114）。
 	CIBAMode                 string
 	CIBANotificationEndpoint string
+	// RequirePAR は認可要求を PAR で送らせる（フィーチャー par。ADR 0112）。
+	RequirePAR bool
 }
 
 // ValidRedirectURI は連携先の URI に使えるか（絶対 URL、https か loopback の http、フラグメントと userinfo なし）を返す。
@@ -283,6 +287,9 @@ func (c *Clients) record(ctx context.Context, tx port.Tx, realmID string, actor 
 	if cl.CIBAMode != "" {
 		details["backchannel_token_delivery_mode"] = cl.CIBAMode
 	}
+	if cl.RequirePAR {
+		details["require_pushed_authorization_requests"] = true
+	}
 	_, err := eventlog.Record(ctx, tx, c.Clock, audit.Event{Type: typ, Result: audit.ResultSuccess, RealmID: realmID, Actor: actor,
 		RequestID: requestID, Details: details})
 	return err
@@ -315,6 +322,15 @@ func (c *Clients) checkSenderConstraint(in ClientInput, prev port.Client) error 
 		return invalidClient("token_endpoint_auth_method: the mtls_client_auth feature is not enabled")
 	}
 	return nil
+
+}
+
+// checkPAR は、フィーチャー par が動いていないときに PAR の必須を新たに置くのを拒む。今の値のままなら受け付ける。
+func (c *Clients) checkPAR(in ClientInput, prev port.Client) error {
+	if c.PAR || !in.RequirePAR || prev.RequirePAR {
+		return nil
+	}
+	return invalidClient("require_pushed_authorization_requests: the par feature is not enabled")
 }
 
 // Create は連携先を登録する。client_secret なら秘密を1度だけ返す（保存するのはハッシュだけ）。
@@ -329,6 +345,9 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 	if err := c.checkSenderConstraint(in, port.Client{}); err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkPAR(in, port.Client{}); err != nil {
+		return port.Client{}, "", err
+	}
 	now := c.Clock.Now()
 	cl := port.Client{ID: id.New(id.Client), PublicID: id.NewExternal(id.Client), RealmID: realmID, Name: in.Name, TrustLevel: port.TrustFirstParty,
 		RedirectURIs: in.RedirectURIs, PostLogoutRedirectURIs: in.PostLogoutRedirectURIs, AuthMethod: in.AuthMethod, JWKS: in.JWKS,
@@ -336,7 +355,7 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 		FrontchannelLogoutURI: in.FrontchannelLogoutURI, FrontchannelLogoutSessionRequired: in.FrontchannelLogoutSessionRequired,
 		DPoPBoundAccessTokens: in.DPoPBoundAccessTokens, TLSBoundAccessTokens: in.TLSBoundAccessTokens, TLSAuthField: in.TLSAuthField,
 		TLSAuthValue: in.TLSAuthValue, CIBAMode: in.CIBAMode, CIBANotificationEndpoint: in.CIBANotificationEndpoint,
-		CreatedAt: now, UpdatedAt: now}
+		RequirePAR: in.RequirePAR, CreatedAt: now, UpdatedAt: now}
 	var secret string
 	if cl.AuthMethod == port.ClientAuthSecret {
 		if secret, cl.SecretHash, err = newSecret(); err != nil {
@@ -361,6 +380,9 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	if err := c.checkSenderConstraint(in, cl); err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkPAR(in, cl); err != nil {
+		return port.Client{}, "", err
+	}
 	var secret string
 	if in.AuthMethod != port.ClientAuthSecret {
 		cl.SecretHash = nil
@@ -371,7 +393,7 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	}
 	cl.Name, cl.RedirectURIs, cl.PostLogoutRedirectURIs, cl.AuthMethod = in.Name, in.RedirectURIs, in.PostLogoutRedirectURIs, in.AuthMethod
 	cl.JWKS, cl.IDTokenAlg, cl.BackchannelLogoutURI, cl.UpdatedAt = in.JWKS, in.IDTokenAlg, in.BackchannelLogoutURI, c.Clock.Now()
-	cl.DeviceGrant = in.DeviceGrant
+	cl.DeviceGrant, cl.RequirePAR = in.DeviceGrant, in.RequirePAR
 	cl.CIBAMode, cl.CIBANotificationEndpoint = in.CIBAMode, in.CIBANotificationEndpoint
 	cl.FrontchannelLogoutURI, cl.FrontchannelLogoutSessionRequired = in.FrontchannelLogoutURI, in.FrontchannelLogoutSessionRequired
 	cl.DPoPBoundAccessTokens, cl.TLSBoundAccessTokens = in.DPoPBoundAccessTokens, in.TLSBoundAccessTokens

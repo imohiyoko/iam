@@ -417,8 +417,18 @@ func nilEmpty(b []byte) []byte {
 func toSAToken(r db.AuthnServiceAccountToken) (port.ServiceAccountToken, error) {
 	var p times
 	t := port.ServiceAccountToken{ID: r.ID, RealmID: r.RealmID, ServiceAccountID: r.ServiceAccountID, CredentialID: r.CredentialID,
-		Hash: r.TokenHash, CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.at(r.ExpiresAt), JKT: r.Jkt}
-	return t, p.err
+		Hash: r.TokenHash, CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.at(r.ExpiresAt), Audience: r.Audience,
+		JKT: r.Jkt}
+	if p.err != nil {
+		return port.ServiceAccountToken{}, p.err
+	}
+	if err := json.Unmarshal([]byte(r.Scopes), &t.Scopes); err != nil {
+		return port.ServiceAccountToken{}, err
+	}
+	if len(t.Scopes) == 0 {
+		t.Scopes = nil
+	}
+	return t, nil
 }
 
 func (r accounts) Create(ctx context.Context, a port.ServiceAccount) error {
@@ -469,7 +479,7 @@ func (r accounts) RevokeCredential(ctx context.Context, realmID, id string, at t
 func (r accounts) CreateToken(ctx context.Context, t port.ServiceAccountToken) error {
 	return mapErr(r.q.CreateServiceAccountToken(ctx, db.CreateServiceAccountTokenParams{ID: t.ID, RealmID: t.RealmID,
 		ServiceAccountID: t.ServiceAccountID, CredentialID: t.CredentialID, TokenHash: nonNil(t.Hash), CreatedAt: formatTime(t.CreatedAt),
-		ExpiresAt: formatTime(t.ExpiresAt), Jkt: t.JKT}))
+		ExpiresAt: formatTime(t.ExpiresAt), Audience: t.Audience, Scopes: jsonList(t.Scopes), Jkt: t.JKT}))
 }
 
 func (r accounts) GetToken(ctx context.Context, realmID, id string) (port.ServiceAccountToken, error) {

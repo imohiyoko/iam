@@ -588,6 +588,27 @@ realm ごとの規則で iam のユーザーに結び付く。
   memory・SQLite・PostgreSQL の契約テスト、要求の値の検査と端末の要求のファジング
 - push モード、`login_hint_token`・署名した要求（JAR）、`user_code`、ping の通知の再送、ホスト型の承認の画面、FAPI-CIBA
 
+#### SAML 2.0 の IdP（ADR 0115）
+
+**ゴール**：SAML の SP（ECDSA の署名を読めるもの）が、ADFS・Okta などの代わりに iam でサインインでき、SP からのログアウトで iam のセッションも終わる。
+
+- [x] フィーチャー `saml_idp`（既定オフ）。実装は `authn/samlidp`。オフならエンドポイントは 404、管理 API は `404 saml_idp_disabled`
+- [x] 管理 API（`/v1/admin/saml/service-providers`、`clients:manage`）で realm ごとに SP を登録できる：Entity ID、ACS（HTTP-POST、番号・既定）、
+  SLO、SP の署名の証明書と署名の必須、暗号化の証明書、NameID の形式と出どころ、属性の対応、Assertion・Response の署名、IdP-initiated の許可、有効期間
+- [x] AuthnRequest を HTTP-Redirect と HTTP-POST で受ける。知らない SP・登録と完全一致でない ACS・確かめられない署名（鍵違い・書き換え・SHA-1・
+  必須なのに無い）・Destination の違い・古い要求・同じ ID の再利用を、SP に戻さずに 400 で拒むテストがある
+- [x] XML Signature Wrapping（同じ ID の外側の書き換え、外側の署名が中を指す、外側に署名が無い）を拒むテストがある。コメント・DOCTYPE も拒む
+- [x] ForceAuthn・IsPassive（NoPassive）・RequestedAuthnContext（acr に対応させ、満たさなければ step-up、届かなければ NoAuthnContext）を守るテストがある
+- [x] Assertion（bearer。Audience・Recipient・InResponseTo・SessionIndex・AuthnContextClassRef）を realm の ES256 の鍵で XML 署名し、iam の SAML の SP の
+  検証（ADR 0098）に通るテストがある。Response の署名、AES-128-GCM と RSA-OAEP の暗号化、transient の NameID、IdP-initiated（SP ごとの opt-in）
+- [x] Single Logout：署名した LogoutRequest の本人のセッションを失効させ、署名した LogoutResponse（HTTP-Redirect・HTTP-POST）を返す。署名の無いもの・
+  別の本人のものではセッションを終えないテストがある
+- [x] `/saml/idp/metadata`（署名付き）。鍵ごとの証明書を置いて同じものを返す
+- [x] 監査ログ（`saml_idp.assertion_issued`・`saml_idp.logged_out`・SP の作成・変更・削除）、無効化で SP と証明書を消す、memory・SQLite・PostgreSQL の
+  契約テスト、AuthnRequest・HTTP-Redirect のクエリ・LogoutRequest のファジング
+- RSA-SHA256 の署名（RS256 のフィーチャーの後）、ほかの SP への SLO の伝播と IdP から始める SLO、HTTP-Artifact、SP のメタデータからの登録、
+  `pre_token` フックでの属性、Scoping（IdP のプロキシ）
+
 ### M10 エンタープライズの運用
 
 - [x] 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作（ADR 0097）
@@ -623,6 +644,23 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] なりすましは権限 `users:impersonate`・outranks・step-up・レートリミットを満たしたときだけ。短い寿命、監査ログ、本人への通知
 - [x] Discovery の `grant_types_supported` に載せ、フィーチャーの無効化で許可と交換の認可を片付ける
 
+#### PAR・メタデータ・自前の API に向けたトークン（ADR 0112）
+
+**ゴール**：認可要求をバックチャネルで送らせられ、OAuth のクライアントが AS とリソースを見つけられる。ホスト先は自分の API に
+`aud` とスコープを付けたトークンを、人と機械の両方に出せる。
+
+- [x] フィーチャー `par`（既定オフ）。`POST /oauth2/par` が token エンドポイントと同じ連携先の認証と authorize と同じ確かめの後に
+  `request_uri` を返し、authorize は預けたパラメーターだけを 1 回だけ使う。別の連携先・期限切れ・使用済みを拒むテストがある
+- [x] 連携先と realm（設定ファイルを含む）の単位で PAR を必須にでき、PAR を通らない認可要求を戻り先に転送せずに拒む。Discovery に載せる
+- [x] `/.well-known/oauth-authorization-server`（RFC 8414）と `/.well-known/oauth-protected-resource`（RFC 9728）。パスのある issuer の
+  差し込み、UserInfo の `401` の `resource_metadata`
+- [x] フィーチャー `resource_indicators`（既定オフ）。管理 API でリソース（URI・スコープ・許す連携先とサービスアカウント）を登録する
+- [x] 認可コードフローの `resource`（1 つ）で `aud` がリソースの URI になり、token エンドポイント・リフレッシュでは同じ resource だけを受ける。
+  許していない連携先・知らないリソース・2 つ以上は `invalid_target`
+- [x] サービスアカウントの `POST /v1/admin/token` の `resource` と `scope`。そのトークンは管理 API では使えず、イントロスペクションで `aud` とスコープを返す
+- [x] リソースの削除・許可の取り消し・無効化が発行済みのトークンにも次の検証から効く。memory・SQLite・PostgreSQL の契約テスト
+- Device Authorization Grant の `resource`、1 つの認可で複数のリソース、主体ごとのスコープの絞り込み、`/oauth2/token` での client credentials
+
 #### 送信者制約トークン（ADR 0113）
 
 **ゴール**：漏れたトークンを、連携先の鍵（DPoP）か証明書（mTLS）が無ければ使えないようにできる。
@@ -635,9 +673,11 @@ realm ごとの規則で iam のユーザーに結び付く。
   専用の待ち受けかプロキシのヘッダーで受け、`tls_client_certificate_bound_access_tokens` の連携先のトークンを `x5t#S256` に結び付ける
 - [x] イントロスペクションの `cnf`。UserInfo と管理 API（サービスアカウントのトークン）は結び付けたトークンに同じ鍵の証明・同じ証明書を求め、
   Bearer での提示・別の鍵・`ath` の無い証明・再送を拒むテストがある
-- [x] Token Exchange は結び付けた subject_token・actor_token に同じ鍵・証明書を求める。Device Authorization Grant も結び付ける
+- [x] Token Exchange は結び付けた subject_token・actor_token に同じ鍵・証明書を求める。Device Authorization Grant・CIBA も結び付ける
+- [x] PAR の要求の DPoP の証明か本文の `dpop_jkt` で認可コードを鍵に結び付ける。自前の API に向けたトークン（認可コードフロー・
+  リフレッシュ・サービスアカウントの `resource`）も結び付け、イントロスペクションが `aud` と `cnf` を返すテストがある
 - [x] 無効化で連携先の設定と結び付けたトークンを消す。memory・SQLite・PostgreSQL の契約テスト、証明の解析のファジング（`FuzzParse`）
-- 連携先の証明書の失効（OCSP・CRL）の確かめ、realm ごとの CA、JWT のアクセストークンの `cnf` クレーム、PAR・CIBA の要求での DPoP
+- 連携先の証明書の失効（OCSP・CRL）の確かめ、realm ごとの CA、JWT のアクセストークンの `cnf` クレーム
 
 ### M12 認可の拡張
 

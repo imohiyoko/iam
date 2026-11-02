@@ -80,6 +80,9 @@ func (s adminServer) realmView(r port.Realm) (adminapi.Realm, error) {
 		d := slices.Clone(rs.DisabledMethods)
 		v.Settings.DisabledMethods = &d
 	}
+	if rs.RequirePushedAuthorizationRequests {
+		v.Settings.RequirePushedAuthorizationRequests = &rs.RequirePushedAuthorizationRequests
+	}
 	return v, nil
 }
 
@@ -90,6 +93,14 @@ func (s adminServer) checkPasskeyPolicy(prev, next realmSettings) error {
 		return nil
 	}
 	return errs.WithCode(errs.KindInvalid, "invalid_realm_settings", "invalid realm settings: passkey_policy requires the passkey_attestation feature")
+}
+
+// checkPAR は、フィーチャー par が止まっているときに PAR の必須を新しく置く設定を拒む（そのまま残す・外す更新は受ける）。
+func (s adminServer) checkPAR(prev, next realmSettings) error {
+	if s.a.plan.IsActive(feature.PAR) || !next.RequirePushedAuthorizationRequests || prev.RequirePushedAuthorizationRequests {
+		return nil
+	}
+	return errs.WithCode(errs.KindInvalid, "invalid_realm_settings", "invalid realm settings: require_pushed_authorization_requests requires the par feature")
 }
 
 // applySettings は API の設定を rs に重ねる（渡した項目だけ）。
@@ -123,6 +134,9 @@ func applySettings(rs realmSettings, in *adminapi.RealmSettings) realmSettings {
 	}
 	if in.PasskeyPolicy != nil {
 		rs.PasskeyPolicy = passkeyPolicyIn(in.PasskeyPolicy)
+	}
+	if in.RequirePushedAuthorizationRequests != nil {
+		rs.RequirePushedAuthorizationRequests = *in.RequirePushedAuthorizationRequests
 	}
 	if in.DisabledMethods != nil {
 		rs.DisabledMethods = slices.Clone(*in.DisabledMethods)
@@ -246,6 +260,9 @@ func (s adminServer) createRealm(ctx context.Context, p adminPrincipal, body *ad
 	if err := s.checkPasskeyPolicy(defaultRealmSettings(s.a.cfg.Realm), rs); err != nil {
 		return err
 	}
+	if err := s.checkPAR(defaultRealmSettings(s.a.cfg.Realm), rs); err != nil {
+		return err
+	}
 	raw, err := json.Marshal(rs)
 	if err != nil {
 		return err
@@ -358,6 +375,9 @@ func (s adminServer) updateRealm(ctx context.Context, p adminPrincipal, realmID 
 			return err
 		}
 		if err := s.checkPasskeyPolicy(prev, rs); err != nil {
+			return err
+		}
+		if err := s.checkPAR(prev, rs); err != nil {
 			return err
 		}
 		if r.Settings, err = json.Marshal(rs); err != nil {

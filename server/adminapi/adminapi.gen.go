@@ -1336,11 +1336,14 @@ type Client struct {
 	Name                              string                  `json:"name"`
 	PostLogoutRedirectUris            []string                `json:"post_logout_redirect_uris"`
 	RedirectUris                      []string                `json:"redirect_uris"`
-	TlsClientAuthSanDns               *string                 `json:"tls_client_auth_san_dns,omitempty"`
-	TlsClientAuthSanEmail             *string                 `json:"tls_client_auth_san_email,omitempty"`
-	TlsClientAuthSanIp                *string                 `json:"tls_client_auth_san_ip,omitempty"`
-	TlsClientAuthSanUri               *string                 `json:"tls_client_auth_san_uri,omitempty"`
-	TlsClientAuthSubjectDn            *string                 `json:"tls_client_auth_subject_dn,omitempty"`
+
+	// RequirePushedAuthorizationRequests PAR を求める連携先だけ true を返す（求めないなら省く）
+	RequirePushedAuthorizationRequests *bool   `json:"require_pushed_authorization_requests,omitempty"`
+	TlsClientAuthSanDns                *string `json:"tls_client_auth_san_dns,omitempty"`
+	TlsClientAuthSanEmail              *string `json:"tls_client_auth_san_email,omitempty"`
+	TlsClientAuthSanIp                 *string `json:"tls_client_auth_san_ip,omitempty"`
+	TlsClientAuthSanUri                *string `json:"tls_client_auth_san_uri,omitempty"`
+	TlsClientAuthSubjectDn             *string `json:"tls_client_auth_subject_dn,omitempty"`
 
 	// TlsClientCertificateBoundAccessTokens フィーチャー `mtls_client_auth` が動いているときだけ返す
 	TlsClientCertificateBoundAccessTokens *bool            `json:"tls_client_certificate_bound_access_tokens,omitempty"`
@@ -1383,11 +1386,14 @@ type ClientInput struct {
 	PostLogoutRedirectUris *[]string               `json:"post_logout_redirect_uris,omitempty"`
 
 	// RedirectUris 1 つ以上。`device_authorization_grant` を許すか `backchannel_token_delivery_mode` を登録した連携先だけは空でよい
-	RedirectUris          []string `json:"redirect_uris"`
-	TlsClientAuthSanDns   *string  `json:"tls_client_auth_san_dns,omitempty"`
-	TlsClientAuthSanEmail *string  `json:"tls_client_auth_san_email,omitempty"`
-	TlsClientAuthSanIp    *string  `json:"tls_client_auth_san_ip,omitempty"`
-	TlsClientAuthSanUri   *string  `json:"tls_client_auth_san_uri,omitempty"`
+	RedirectUris []string `json:"redirect_uris"`
+
+	// RequirePushedAuthorizationRequests 認可要求を PAR（RFC 9126）で送らせる。フィーチャー `par` が動いているときだけ true にできる（ADR 0112）。省けば false
+	RequirePushedAuthorizationRequests *bool   `json:"require_pushed_authorization_requests,omitempty"`
+	TlsClientAuthSanDns                *string `json:"tls_client_auth_san_dns,omitempty"`
+	TlsClientAuthSanEmail              *string `json:"tls_client_auth_san_email,omitempty"`
+	TlsClientAuthSanIp                 *string `json:"tls_client_auth_san_ip,omitempty"`
+	TlsClientAuthSanUri                *string `json:"tls_client_auth_san_uri,omitempty"`
 
 	// TlsClientAuthSubjectDn 証明書の主体の DN（RFC 4514 の文字列。完全一致）
 	TlsClientAuthSubjectDn *string `json:"tls_client_auth_subject_dn,omitempty"`
@@ -1771,6 +1777,37 @@ type MembershipRole string
 // MembershipStatus defines model for Membership.Status.
 type MembershipStatus string
 
+// OAuthResource defines model for OAuthResource.
+type OAuthResource struct {
+	Clients         []string  `json:"clients"`
+	CreatedAt       time.Time `json:"created_at"`
+	Id              string    `json:"id"`
+	Name            string    `json:"name"`
+	Scopes          []string  `json:"scopes"`
+	ServiceAccounts []string  `json:"service_accounts"`
+	UpdatedAt       time.Time `json:"updated_at"`
+	Uri             string    `json:"uri"`
+}
+
+// OAuthResourceInput defines model for OAuthResourceInput.
+type OAuthResourceInput struct {
+	// Clients 認可コードフローで `resource` に指定してよい連携先の client_id
+	Clients *[]string `json:"clients,omitempty"`
+	Name    string    `json:"name"`
+	Scopes  []string  `json:"scopes"`
+
+	// ServiceAccounts client credentials で `resource` に指定してよいサービスアカウントの ID
+	ServiceAccounts *[]string `json:"service_accounts,omitempty"`
+
+	// Uri `resource` の値（aud になる）
+	Uri string `json:"uri"`
+}
+
+// OAuthResources defines model for OAuthResources.
+type OAuthResources struct {
+	Resources []OAuthResource `json:"resources"`
+}
+
 // Org defines model for Org.
 type Org struct {
 	CreatedAt time.Time `json:"created_at"`
@@ -2050,9 +2087,10 @@ type Realm struct {
 			Invited   bool `json:"invited"`
 			Suspended bool `json:"suspended"`
 		} `json:"quota_count"`
-		Timezone                 string   `json:"timezone"`
-		UserDeletionGraceSeconds int64    `json:"user_deletion_grace_seconds"`
-		VerifiedVia              []string `json:"verified_via"`
+		RequirePushedAuthorizationRequests *bool    `json:"require_pushed_authorization_requests,omitempty"`
+		Timezone                           string   `json:"timezone"`
+		UserDeletionGraceSeconds           int64    `json:"user_deletion_grace_seconds"`
+		VerifiedVia                        []string `json:"verified_via"`
 	} `json:"settings"`
 	Slug      string    `json:"slug"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -2088,9 +2126,12 @@ type RealmSettings struct {
 		Invited   *bool `json:"invited,omitempty"`
 		Suspended *bool `json:"suspended,omitempty"`
 	} `json:"quota_count,omitempty"`
-	Timezone                 *string                     `json:"timezone,omitempty"`
-	UserDeletionGraceSeconds *int64                      `json:"user_deletion_grace_seconds,omitempty"`
-	VerifiedVia              *[]RealmSettingsVerifiedVia `json:"verified_via,omitempty"`
+
+	// RequirePushedAuthorizationRequests この realm のすべての連携先に PAR（RFC 9126）を求める（フィーチャー `par`。ADR 0112）
+	RequirePushedAuthorizationRequests *bool                       `json:"require_pushed_authorization_requests,omitempty"`
+	Timezone                           *string                     `json:"timezone,omitempty"`
+	UserDeletionGraceSeconds           *int64                      `json:"user_deletion_grace_seconds,omitempty"`
+	VerifiedVia                        *[]RealmSettingsVerifiedVia `json:"verified_via,omitempty"`
 }
 
 // RealmSettingsEmailStorage defines model for RealmSettings.EmailStorage.
@@ -2232,6 +2273,106 @@ type RoleInput struct {
 // Roles defines model for Roles.
 type Roles struct {
 	Roles []Role `json:"roles"`
+}
+
+// SAMLAttribute defines model for SAMLAttribute.
+type SAMLAttribute struct {
+	FriendlyName *string `json:"friendly_name,omitempty"`
+
+	// Name 属性の名前（`name_format` が uri なら絶対 URI）
+	Name string `json:"name"`
+
+	// NameFormat `urn:oasis:names:tc:SAML:2.0:attrname-format:uri`（既定）・`basic`・`unspecified` の URN
+	NameFormat *string `json:"name_format,omitempty"`
+
+	// Source `user_id`・`email`（確認済みのものだけ出す）・`org_id`・`amr`・`attribute:<キー>`（フィーチャー `custom_attributes`）
+	Source string `json:"source"`
+}
+
+// SAMLEndpoint defines model for SAMLEndpoint.
+type SAMLEndpoint struct {
+	// Binding バインディングの URN。ACS は `urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST` だけ（省略時も同じ）。
+	// SLO は HTTP-Redirect か HTTP-POST（必須）
+	Binding *string `json:"binding,omitempty"`
+
+	// Default 既定の ACS（AuthnRequest が ACS を指さないときと IdP-initiated）。無ければ最初のもの
+	Default *bool `json:"default,omitempty"`
+
+	// Index ACS の番号（AssertionConsumerServiceIndex。SLO では使わない）
+	Index *int `json:"index,omitempty"`
+
+	// Url https の絶対 URL（フラグメント・利用者情報なし）
+	Url string `json:"url"`
+}
+
+// SAMLServiceProvider defines model for SAMLServiceProvider.
+type SAMLServiceProvider struct {
+	Acs               []SAMLEndpoint  `json:"acs"`
+	AllowIdpInitiated bool            `json:"allow_idp_initiated"`
+	AssertionLifetime int             `json:"assertion_lifetime"`
+	Attributes        []SAMLAttribute `json:"attributes"`
+	CreatedAt         time.Time       `json:"created_at"`
+
+	// EncryptionCertificate base64 の DER（無ければ無い）
+	EncryptionCertificate *string `json:"encryption_certificate,omitempty"`
+	EntityId              string  `json:"entity_id"`
+	Id                    string  `json:"id"`
+	Name                  string  `json:"name"`
+	NameIdFormat          string  `json:"name_id_format"`
+	NameIdSource          *string `json:"name_id_source,omitempty"`
+	RequireSignedRequests bool    `json:"require_signed_requests"`
+	SignAssertion         bool    `json:"sign_assertion"`
+	SignResponse          bool    `json:"sign_response"`
+
+	// SigningCertificates base64 の DER
+	SigningCertificates []string       `json:"signing_certificates"`
+	Slo                 []SAMLEndpoint `json:"slo"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+}
+
+// SAMLServiceProviderInput defines model for SAMLServiceProviderInput.
+type SAMLServiceProviderInput struct {
+	Acs []SAMLEndpoint `json:"acs"`
+
+	// AllowIdpInitiated IdP-initiated の SSO を許す（既定 false）
+	AllowIdpInitiated *bool `json:"allow_idp_initiated,omitempty"`
+
+	// AssertionLifetime Assertion の有効期間（秒。既定 300）
+	AssertionLifetime *int             `json:"assertion_lifetime,omitempty"`
+	Attributes        *[]SAMLAttribute `json:"attributes,omitempty"`
+
+	// EncryptionCertificate Assertion を暗号化する SP の証明書（PEM か base64 の DER。RSA 2048 bit 以上）。あれば必ず暗号化する（AES-128-GCM と RSA-OAEP）
+	EncryptionCertificate *string `json:"encryption_certificate,omitempty"`
+
+	// EntityId SP の Entity ID（絶対 URI）
+	EntityId string `json:"entity_id"`
+	Name     string `json:"name"`
+
+	// NameIdFormat NameID の形式の URN（persistent（既定）・emailAddress・unspecified・transient）
+	NameIdFormat *string `json:"name_id_format,omitempty"`
+
+	// NameIdSource NameID の値の出どころ（`user_id`・`email`・`attribute:<キー>`）。既定は emailAddress なら `email`、ほかは `user_id`。transient では使わない
+	NameIdSource *string `json:"name_id_source,omitempty"`
+
+	// RequireSignedRequests 署名の無い AuthnRequest を受けない（既定 false。署名があればいつも確かめる）
+	RequireSignedRequests *bool `json:"require_signed_requests,omitempty"`
+
+	// SignAssertion Assertion に署名する（既定 true）
+	SignAssertion *bool `json:"sign_assertion,omitempty"`
+
+	// SignResponse Response に署名する（既定 false。どちらかは true）
+	SignResponse *bool `json:"sign_response,omitempty"`
+
+	// SigningCertificates AuthnRequest・LogoutRequest の署名を確かめる SP の証明書（PEM か base64 の DER。RSA 2048 bit 以上か ECDSA。期限切れは受けない）
+	SigningCertificates *[]string `json:"signing_certificates,omitempty"`
+
+	// Slo SingleLogoutService（LogoutResponse を返す先）。登録するには `signing_certificates` が要る（LogoutRequest はいつも署名を求める）
+	Slo *[]SAMLEndpoint `json:"slo,omitempty"`
+}
+
+// SAMLServiceProviders defines model for SAMLServiceProviders.
+type SAMLServiceProviders struct {
+	ServiceProviders []SAMLServiceProvider `json:"service_providers"`
 }
 
 // ServiceAccount defines model for ServiceAccount.
@@ -2647,7 +2788,10 @@ type IssueServiceAccountTokenFormdataBody struct {
 	ClientSecret        *string `form:"client_secret,omitempty" json:"client_secret,omitempty"`
 	GrantType           string  `form:"grant_type" json:"grant_type"`
 
-	// Scope 使わない（権限はロールの付与で決まる）
+	// Resource 自前の API の URI（RFC 8707。1 つだけ。フィーチャー `resource_indicators`）
+	Resource *[]string `form:"resource,omitempty" json:"resource,omitempty"`
+
+	// Scope `resource` を付けたときだけ使う（空白区切り）。管理 API 向けのトークンでは使わない（権限はロールの付与で決まる）
 	Scope *string `form:"scope,omitempty" json:"scope,omitempty"`
 }
 
@@ -2782,6 +2926,12 @@ type UpdateMembershipJSONRequestBody = Validity
 // SuspendMembershipJSONRequestBody defines body for SuspendMembership for application/json ContentType.
 type SuspendMembershipJSONRequestBody = SuspendRequest
 
+// CreateOAuthResourceJSONRequestBody defines body for CreateOAuthResource for application/json ContentType.
+type CreateOAuthResourceJSONRequestBody = OAuthResourceInput
+
+// UpdateOAuthResourceJSONRequestBody defines body for UpdateOAuthResource for application/json ContentType.
+type UpdateOAuthResourceJSONRequestBody = OAuthResourceInput
+
 // CreateOrgJSONRequestBody defines body for CreateOrg for application/json ContentType.
 type CreateOrgJSONRequestBody CreateOrgJSONBody
 
@@ -2832,6 +2982,12 @@ type CreateRoleJSONRequestBody = RoleInput
 
 // UpdateRoleJSONRequestBody defines body for UpdateRole for application/json ContentType.
 type UpdateRoleJSONRequestBody = RoleInput
+
+// CreateSAMLServiceProviderJSONRequestBody defines body for CreateSAMLServiceProvider for application/json ContentType.
+type CreateSAMLServiceProviderJSONRequestBody = SAMLServiceProviderInput
+
+// UpdateSAMLServiceProviderJSONRequestBody defines body for UpdateSAMLServiceProvider for application/json ContentType.
+type UpdateSAMLServiceProviderJSONRequestBody = SAMLServiceProviderInput
 
 // CreateServiceAccountJSONRequestBody defines body for CreateServiceAccount for application/json ContentType.
 type CreateServiceAccountJSONRequestBody = ServiceAccountInput
@@ -3030,6 +3186,21 @@ type ServerInterface interface {
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(w http.ResponseWriter, r *http.Request, id string)
+	// ListOAuthResources 自前の API（リソースサーバー）の一覧（RFC 8707。ADR 0112）
+	// (GET /v1/admin/oauth/resources)
+	ListOAuthResources(w http.ResponseWriter, r *http.Request)
+	// CreateOAuthResource 自前の API（リソースサーバー）を登録する（RFC 8707。ADR 0112）
+	// (POST /v1/admin/oauth/resources)
+	CreateOAuthResource(w http.ResponseWriter, r *http.Request)
+	// GetOAuthResource 自前の API（リソースサーバー）を返す
+	// (GET /v1/admin/oauth/resources/{id})
+	GetOAuthResource(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateOAuthResource 自前の API（リソースサーバー）の登録を置き換える
+	// (PUT /v1/admin/oauth/resources/{id})
+	UpdateOAuthResource(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteOAuthResource 自前の API（リソースサーバー）を消す
+	// (POST /v1/admin/oauth/resources/{id}:delete)
+	DeleteOAuthResource(w http.ResponseWriter, r *http.Request, id string)
 	// ListOrgs Org の一覧・検索（ADR 0097）
 	// (GET /v1/admin/orgs)
 	ListOrgs(w http.ResponseWriter, r *http.Request, params ListOrgsParams)
@@ -3141,6 +3312,21 @@ type ServerInterface interface {
 	// DeleteRole 独自のロールと、その付与を消す
 	// (POST /v1/admin/roles/{role_id}:delete)
 	DeleteRole(w http.ResponseWriter, r *http.Request, roleId string)
+	// ListSAMLServiceProviders SAML の SP の一覧（iam が IdP。ADR 0115）
+	// (GET /v1/admin/saml/service-providers)
+	ListSAMLServiceProviders(w http.ResponseWriter, r *http.Request)
+	// CreateSAMLServiceProvider SAML の SP を登録する（ADR 0115）
+	// (POST /v1/admin/saml/service-providers)
+	CreateSAMLServiceProvider(w http.ResponseWriter, r *http.Request)
+	// GetSAMLServiceProvider SAML の SP を返す
+	// (GET /v1/admin/saml/service-providers/{id})
+	GetSAMLServiceProvider(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateSAMLServiceProvider SAML の SP の登録を置き換える
+	// (PUT /v1/admin/saml/service-providers/{id})
+	UpdateSAMLServiceProvider(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteSAMLServiceProvider SAML の SP を消す
+	// (POST /v1/admin/saml/service-providers/{id}:delete)
+	DeleteSAMLServiceProvider(w http.ResponseWriter, r *http.Request, id string)
 	// ListServiceAccounts サービスアカウントの一覧（削除したものも含む。ADR 0074）
 	// (GET /v1/admin/service-accounts)
 	ListServiceAccounts(w http.ResponseWriter, r *http.Request, params ListServiceAccountsParams)
@@ -4490,6 +4676,112 @@ func (siw *ServerInterfaceWrapper) ClaimNotification(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListOAuthResources operation middleware
+func (siw *ServerInterfaceWrapper) ListOAuthResources(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOAuthResources(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOAuthResource operation middleware
+func (siw *ServerInterfaceWrapper) CreateOAuthResource(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOAuthResource(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOAuthResource operation middleware
+func (siw *ServerInterfaceWrapper) GetOAuthResource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOAuthResource(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateOAuthResource operation middleware
+func (siw *ServerInterfaceWrapper) UpdateOAuthResource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateOAuthResource(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteOAuthResource operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOAuthResource(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteOAuthResource(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListOrgs operation middleware
 func (siw *ServerInterfaceWrapper) ListOrgs(w http.ResponseWriter, r *http.Request) {
 
@@ -5460,6 +5752,112 @@ func (siw *ServerInterfaceWrapper) DeleteRole(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteRole(w, r, roleId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSAMLServiceProviders operation middleware
+func (siw *ServerInterfaceWrapper) ListSAMLServiceProviders(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSAMLServiceProviders(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSAMLServiceProvider operation middleware
+func (siw *ServerInterfaceWrapper) CreateSAMLServiceProvider(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSAMLServiceProvider(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSAMLServiceProvider operation middleware
+func (siw *ServerInterfaceWrapper) GetSAMLServiceProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSAMLServiceProvider(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateSAMLServiceProvider operation middleware
+func (siw *ServerInterfaceWrapper) UpdateSAMLServiceProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateSAMLServiceProvider(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSAMLServiceProvider operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSAMLServiceProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSAMLServiceProvider(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7230,6 +7628,16 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}", wrapper.GetWSFedRelyingParty)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}", wrapper.UpdateWSFedRelyingParty)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/wsfed/relying-parties/{id}:delete", wrapper.DeleteWSFedRelyingParty)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/saml/service-providers", wrapper.ListSAMLServiceProviders)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/saml/service-providers", wrapper.CreateSAMLServiceProvider)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/saml/service-providers/{id}", wrapper.GetSAMLServiceProvider)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/saml/service-providers/{id}", wrapper.UpdateSAMLServiceProvider)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/saml/service-providers/{id}:delete", wrapper.DeleteSAMLServiceProvider)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/oauth/resources", wrapper.ListOAuthResources)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/oauth/resources", wrapper.CreateOAuthResource)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}", wrapper.GetOAuthResource)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}", wrapper.UpdateOAuthResource)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}:delete", wrapper.DeleteOAuthResource)
 
 	return m
 }
@@ -10661,6 +11069,376 @@ func (response ClaimNotification404JSONResponse) VisitClaimNotificationResponse(
 	return err
 }
 
+type ListOAuthResourcesRequestObject struct {
+}
+
+type ListOAuthResourcesResponseObject interface {
+	VisitListOAuthResourcesResponse(w http.ResponseWriter) error
+}
+
+type ListOAuthResources200JSONResponse OAuthResources
+
+func (response ListOAuthResources200JSONResponse) VisitListOAuthResourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOAuthResources401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListOAuthResources401JSONResponse) VisitListOAuthResourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOAuthResources403JSONResponse Error
+
+func (response ListOAuthResources403JSONResponse) VisitListOAuthResourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOAuthResources404JSONResponse Error
+
+func (response ListOAuthResources404JSONResponse) VisitListOAuthResourcesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResourceRequestObject struct {
+	Body *CreateOAuthResourceJSONRequestBody
+}
+
+type CreateOAuthResourceResponseObject interface {
+	VisitCreateOAuthResourceResponse(w http.ResponseWriter) error
+}
+
+type CreateOAuthResource201JSONResponse OAuthResource
+
+func (response CreateOAuthResource201JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateOAuthResource400JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource401JSONResponse Error
+
+func (response CreateOAuthResource401JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource403JSONResponse Error
+
+func (response CreateOAuthResource403JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource404JSONResponse Error
+
+func (response CreateOAuthResource404JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOAuthResource409JSONResponse Error
+
+func (response CreateOAuthResource409JSONResponse) VisitCreateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOAuthResourceRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetOAuthResourceResponseObject interface {
+	VisitGetOAuthResourceResponse(w http.ResponseWriter) error
+}
+
+type GetOAuthResource200JSONResponse OAuthResource
+
+func (response GetOAuthResource200JSONResponse) VisitGetOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOAuthResource401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetOAuthResource401JSONResponse) VisitGetOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOAuthResource403JSONResponse Error
+
+func (response GetOAuthResource403JSONResponse) VisitGetOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOAuthResource404JSONResponse Error
+
+func (response GetOAuthResource404JSONResponse) VisitGetOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResourceRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateOAuthResourceJSONRequestBody
+}
+
+type UpdateOAuthResourceResponseObject interface {
+	VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error
+}
+
+type UpdateOAuthResource200JSONResponse OAuthResource
+
+func (response UpdateOAuthResource200JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateOAuthResource400JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource401JSONResponse Error
+
+func (response UpdateOAuthResource401JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource403JSONResponse Error
+
+func (response UpdateOAuthResource403JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource404JSONResponse Error
+
+func (response UpdateOAuthResource404JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOAuthResource409JSONResponse Error
+
+func (response UpdateOAuthResource409JSONResponse) VisitUpdateOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOAuthResourceRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteOAuthResourceResponseObject interface {
+	VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error
+}
+
+type DeleteOAuthResource204Response struct {
+}
+
+func (response DeleteOAuthResource204Response) VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteOAuthResource401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteOAuthResource401JSONResponse) VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOAuthResource403JSONResponse Error
+
+func (response DeleteOAuthResource403JSONResponse) VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOAuthResource404JSONResponse Error
+
+func (response DeleteOAuthResource404JSONResponse) VisitDeleteOAuthResourceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListOrgsRequestObject struct {
 	Params ListOrgsParams
 }
@@ -13574,6 +14352,376 @@ func (response DeleteRole404JSONResponse) VisitDeleteRoleResponse(w http.Respons
 	return err
 }
 
+type ListSAMLServiceProvidersRequestObject struct {
+}
+
+type ListSAMLServiceProvidersResponseObject interface {
+	VisitListSAMLServiceProvidersResponse(w http.ResponseWriter) error
+}
+
+type ListSAMLServiceProviders200JSONResponse SAMLServiceProviders
+
+func (response ListSAMLServiceProviders200JSONResponse) VisitListSAMLServiceProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSAMLServiceProviders401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListSAMLServiceProviders401JSONResponse) VisitListSAMLServiceProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSAMLServiceProviders403JSONResponse Error
+
+func (response ListSAMLServiceProviders403JSONResponse) VisitListSAMLServiceProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSAMLServiceProviders404JSONResponse Error
+
+func (response ListSAMLServiceProviders404JSONResponse) VisitListSAMLServiceProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLServiceProviderRequestObject struct {
+	Body *CreateSAMLServiceProviderJSONRequestBody
+}
+
+type CreateSAMLServiceProviderResponseObject interface {
+	VisitCreateSAMLServiceProviderResponse(w http.ResponseWriter) error
+}
+
+type CreateSAMLServiceProvider201JSONResponse SAMLServiceProvider
+
+func (response CreateSAMLServiceProvider201JSONResponse) VisitCreateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLServiceProvider400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateSAMLServiceProvider400JSONResponse) VisitCreateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLServiceProvider401JSONResponse Error
+
+func (response CreateSAMLServiceProvider401JSONResponse) VisitCreateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLServiceProvider403JSONResponse Error
+
+func (response CreateSAMLServiceProvider403JSONResponse) VisitCreateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLServiceProvider404JSONResponse Error
+
+func (response CreateSAMLServiceProvider404JSONResponse) VisitCreateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLServiceProvider409JSONResponse Error
+
+func (response CreateSAMLServiceProvider409JSONResponse) VisitCreateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSAMLServiceProviderRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetSAMLServiceProviderResponseObject interface {
+	VisitGetSAMLServiceProviderResponse(w http.ResponseWriter) error
+}
+
+type GetSAMLServiceProvider200JSONResponse SAMLServiceProvider
+
+func (response GetSAMLServiceProvider200JSONResponse) VisitGetSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSAMLServiceProvider401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetSAMLServiceProvider401JSONResponse) VisitGetSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSAMLServiceProvider403JSONResponse Error
+
+func (response GetSAMLServiceProvider403JSONResponse) VisitGetSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSAMLServiceProvider404JSONResponse Error
+
+func (response GetSAMLServiceProvider404JSONResponse) VisitGetSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSAMLServiceProviderRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateSAMLServiceProviderJSONRequestBody
+}
+
+type UpdateSAMLServiceProviderResponseObject interface {
+	VisitUpdateSAMLServiceProviderResponse(w http.ResponseWriter) error
+}
+
+type UpdateSAMLServiceProvider200JSONResponse SAMLServiceProvider
+
+func (response UpdateSAMLServiceProvider200JSONResponse) VisitUpdateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSAMLServiceProvider400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateSAMLServiceProvider400JSONResponse) VisitUpdateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSAMLServiceProvider401JSONResponse Error
+
+func (response UpdateSAMLServiceProvider401JSONResponse) VisitUpdateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSAMLServiceProvider403JSONResponse Error
+
+func (response UpdateSAMLServiceProvider403JSONResponse) VisitUpdateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSAMLServiceProvider404JSONResponse Error
+
+func (response UpdateSAMLServiceProvider404JSONResponse) VisitUpdateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSAMLServiceProvider409JSONResponse Error
+
+func (response UpdateSAMLServiceProvider409JSONResponse) VisitUpdateSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSAMLServiceProviderRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteSAMLServiceProviderResponseObject interface {
+	VisitDeleteSAMLServiceProviderResponse(w http.ResponseWriter) error
+}
+
+type DeleteSAMLServiceProvider204Response struct {
+}
+
+func (response DeleteSAMLServiceProvider204Response) VisitDeleteSAMLServiceProviderResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteSAMLServiceProvider401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteSAMLServiceProvider401JSONResponse) VisitDeleteSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSAMLServiceProvider403JSONResponse Error
+
+func (response DeleteSAMLServiceProvider403JSONResponse) VisitDeleteSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSAMLServiceProvider404JSONResponse Error
+
+func (response DeleteSAMLServiceProvider404JSONResponse) VisitDeleteSAMLServiceProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListServiceAccountsRequestObject struct {
 	Params ListServiceAccountsParams
 }
@@ -14738,9 +15886,12 @@ type IssueServiceAccountToken200ResponseHeaders struct {
 
 type IssueServiceAccountToken200JSONResponse struct {
 	Body struct {
-		AccessToken string                                               `json:"access_token"`
-		ExpiresIn   int                                                  `json:"expires_in"`
-		TokenType   IssueServiceAccountToken200JSONResponseBodyTokenType `json:"token_type"`
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+
+		// Scope `resource` を付けたときの、許したスコープ（空白区切り）
+		Scope     *string                                              `json:"scope,omitempty"`
+		TokenType IssueServiceAccountToken200JSONResponseBodyTokenType `json:"token_type"`
 	}
 	Headers IssueServiceAccountToken200ResponseHeaders
 }
@@ -17474,6 +18625,21 @@ type StrictServerInterface interface {
 	// ClaimNotification 通知の秘密と宛先を1回だけ取り出す
 	// (POST /v1/admin/notifications/{id}:claim)
 	ClaimNotification(ctx context.Context, request ClaimNotificationRequestObject) (ClaimNotificationResponseObject, error)
+	// ListOAuthResources 自前の API（リソースサーバー）の一覧（RFC 8707。ADR 0112）
+	// (GET /v1/admin/oauth/resources)
+	ListOAuthResources(ctx context.Context, request ListOAuthResourcesRequestObject) (ListOAuthResourcesResponseObject, error)
+	// CreateOAuthResource 自前の API（リソースサーバー）を登録する（RFC 8707。ADR 0112）
+	// (POST /v1/admin/oauth/resources)
+	CreateOAuthResource(ctx context.Context, request CreateOAuthResourceRequestObject) (CreateOAuthResourceResponseObject, error)
+	// GetOAuthResource 自前の API（リソースサーバー）を返す
+	// (GET /v1/admin/oauth/resources/{id})
+	GetOAuthResource(ctx context.Context, request GetOAuthResourceRequestObject) (GetOAuthResourceResponseObject, error)
+	// UpdateOAuthResource 自前の API（リソースサーバー）の登録を置き換える
+	// (PUT /v1/admin/oauth/resources/{id})
+	UpdateOAuthResource(ctx context.Context, request UpdateOAuthResourceRequestObject) (UpdateOAuthResourceResponseObject, error)
+	// DeleteOAuthResource 自前の API（リソースサーバー）を消す
+	// (POST /v1/admin/oauth/resources/{id}:delete)
+	DeleteOAuthResource(ctx context.Context, request DeleteOAuthResourceRequestObject) (DeleteOAuthResourceResponseObject, error)
 	// ListOrgs Org の一覧・検索（ADR 0097）
 	// (GET /v1/admin/orgs)
 	ListOrgs(ctx context.Context, request ListOrgsRequestObject) (ListOrgsResponseObject, error)
@@ -17585,6 +18751,21 @@ type StrictServerInterface interface {
 	// DeleteRole 独自のロールと、その付与を消す
 	// (POST /v1/admin/roles/{role_id}:delete)
 	DeleteRole(ctx context.Context, request DeleteRoleRequestObject) (DeleteRoleResponseObject, error)
+	// ListSAMLServiceProviders SAML の SP の一覧（iam が IdP。ADR 0115）
+	// (GET /v1/admin/saml/service-providers)
+	ListSAMLServiceProviders(ctx context.Context, request ListSAMLServiceProvidersRequestObject) (ListSAMLServiceProvidersResponseObject, error)
+	// CreateSAMLServiceProvider SAML の SP を登録する（ADR 0115）
+	// (POST /v1/admin/saml/service-providers)
+	CreateSAMLServiceProvider(ctx context.Context, request CreateSAMLServiceProviderRequestObject) (CreateSAMLServiceProviderResponseObject, error)
+	// GetSAMLServiceProvider SAML の SP を返す
+	// (GET /v1/admin/saml/service-providers/{id})
+	GetSAMLServiceProvider(ctx context.Context, request GetSAMLServiceProviderRequestObject) (GetSAMLServiceProviderResponseObject, error)
+	// UpdateSAMLServiceProvider SAML の SP の登録を置き換える
+	// (PUT /v1/admin/saml/service-providers/{id})
+	UpdateSAMLServiceProvider(ctx context.Context, request UpdateSAMLServiceProviderRequestObject) (UpdateSAMLServiceProviderResponseObject, error)
+	// DeleteSAMLServiceProvider SAML の SP を消す
+	// (POST /v1/admin/saml/service-providers/{id}:delete)
+	DeleteSAMLServiceProvider(ctx context.Context, request DeleteSAMLServiceProviderRequestObject) (DeleteSAMLServiceProviderResponseObject, error)
 	// ListServiceAccounts サービスアカウントの一覧（削除したものも含む。ADR 0074）
 	// (GET /v1/admin/service-accounts)
 	ListServiceAccounts(ctx context.Context, request ListServiceAccountsRequestObject) (ListServiceAccountsResponseObject, error)
@@ -19109,6 +20290,146 @@ func (sh *strictHandler) ClaimNotification(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// ListOAuthResources operation middleware
+func (sh *strictHandler) ListOAuthResources(w http.ResponseWriter, r *http.Request) {
+	var request ListOAuthResourcesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOAuthResources(ctx, request.(ListOAuthResourcesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOAuthResources")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOAuthResourcesResponseObject); ok {
+		if err := validResponse.VisitListOAuthResourcesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateOAuthResource operation middleware
+func (sh *strictHandler) CreateOAuthResource(w http.ResponseWriter, r *http.Request) {
+	var request CreateOAuthResourceRequestObject
+
+	var body CreateOAuthResourceJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateOAuthResource(ctx, request.(CreateOAuthResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateOAuthResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateOAuthResourceResponseObject); ok {
+		if err := validResponse.VisitCreateOAuthResourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOAuthResource operation middleware
+func (sh *strictHandler) GetOAuthResource(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetOAuthResourceRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOAuthResource(ctx, request.(GetOAuthResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOAuthResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOAuthResourceResponseObject); ok {
+		if err := validResponse.VisitGetOAuthResourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateOAuthResource operation middleware
+func (sh *strictHandler) UpdateOAuthResource(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateOAuthResourceRequestObject
+
+	request.Id = id
+
+	var body UpdateOAuthResourceJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateOAuthResource(ctx, request.(UpdateOAuthResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateOAuthResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateOAuthResourceResponseObject); ok {
+		if err := validResponse.VisitUpdateOAuthResourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteOAuthResource operation middleware
+func (sh *strictHandler) DeleteOAuthResource(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteOAuthResourceRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteOAuthResource(ctx, request.(DeleteOAuthResourceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteOAuthResource")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteOAuthResourceResponseObject); ok {
+		if err := validResponse.VisitDeleteOAuthResourceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListOrgs operation middleware
 func (sh *strictHandler) ListOrgs(w http.ResponseWriter, r *http.Request, params ListOrgsParams) {
 	var request ListOrgsRequestObject
@@ -20171,6 +21492,146 @@ func (sh *strictHandler) DeleteRole(w http.ResponseWriter, r *http.Request, role
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteRoleResponseObject); ok {
 		if err := validResponse.VisitDeleteRoleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSAMLServiceProviders operation middleware
+func (sh *strictHandler) ListSAMLServiceProviders(w http.ResponseWriter, r *http.Request) {
+	var request ListSAMLServiceProvidersRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSAMLServiceProviders(ctx, request.(ListSAMLServiceProvidersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSAMLServiceProviders")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSAMLServiceProvidersResponseObject); ok {
+		if err := validResponse.VisitListSAMLServiceProvidersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSAMLServiceProvider operation middleware
+func (sh *strictHandler) CreateSAMLServiceProvider(w http.ResponseWriter, r *http.Request) {
+	var request CreateSAMLServiceProviderRequestObject
+
+	var body CreateSAMLServiceProviderJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSAMLServiceProvider(ctx, request.(CreateSAMLServiceProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSAMLServiceProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSAMLServiceProviderResponseObject); ok {
+		if err := validResponse.VisitCreateSAMLServiceProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSAMLServiceProvider operation middleware
+func (sh *strictHandler) GetSAMLServiceProvider(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetSAMLServiceProviderRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSAMLServiceProvider(ctx, request.(GetSAMLServiceProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSAMLServiceProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSAMLServiceProviderResponseObject); ok {
+		if err := validResponse.VisitGetSAMLServiceProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateSAMLServiceProvider operation middleware
+func (sh *strictHandler) UpdateSAMLServiceProvider(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateSAMLServiceProviderRequestObject
+
+	request.Id = id
+
+	var body UpdateSAMLServiceProviderJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateSAMLServiceProvider(ctx, request.(UpdateSAMLServiceProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateSAMLServiceProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateSAMLServiceProviderResponseObject); ok {
+		if err := validResponse.VisitUpdateSAMLServiceProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteSAMLServiceProvider operation middleware
+func (sh *strictHandler) DeleteSAMLServiceProvider(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteSAMLServiceProviderRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSAMLServiceProvider(ctx, request.(DeleteSAMLServiceProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSAMLServiceProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteSAMLServiceProviderResponseObject); ok {
+		if err := validResponse.VisitDeleteSAMLServiceProviderResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

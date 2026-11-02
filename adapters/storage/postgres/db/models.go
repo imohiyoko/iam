@@ -40,6 +40,7 @@ type AuthnClient struct {
 	FrontchannelLogoutSessionRequired int64
 	DeviceGrant                       int64
 	TokenExchange                     []byte
+	RequirePar                        int64
 	DpopBoundAccessTokens             int64
 	TlsBoundAccessTokens              int64
 	TlsAuthField                      string
@@ -93,6 +94,18 @@ type AuthnKnownDevice struct {
 	Data       []byte
 	CreatedAt  string
 	LastSeenAt string
+}
+
+type AuthnOauthResource struct {
+	ID              string
+	RealmID         string
+	Uri             string
+	Name            string
+	Scopes          string
+	Clients         string
+	ServiceAccounts string
+	CreatedAt       string
+	UpdatedAt       string
 }
 
 type AuthnOidcGrant struct {
@@ -184,6 +197,23 @@ type AuthnRetiredCredentialLookup struct {
 	RetiredAt   string
 }
 
+type AuthnSamlIdpCertificate struct {
+	RealmID   string
+	KeyID     string
+	Der       []byte
+	CreatedAt string
+}
+
+type AuthnSamlServiceProvider struct {
+	ID        string
+	RealmID   string
+	EntityID  string
+	Name      string
+	Config    []byte
+	CreatedAt string
+	UpdatedAt string
+}
+
 type AuthnServiceAccount struct {
 	ID         string
 	RealmID    string
@@ -217,6 +247,8 @@ type AuthnServiceAccountToken struct {
 	TokenHash        []byte
 	CreatedAt        string
 	ExpiresAt        string
+	Audience         string
+	Scopes           string
 	Jkt              string
 }
 

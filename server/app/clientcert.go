@@ -35,7 +35,7 @@ var mtlsPath = regexp.MustCompile(`^(?:/realms/[a-z0-9][a-z0-9-]{0,62})?/v1/(?:l
 
 // mtlsOAuthPath は、フィーチャー mtls_client_auth が動いているときに mTLS の専用の待ち受けで通す OAuth のエンドポイント
 // （RFC 8705 の連携先の認証と、証明書に結び付けたトークンの提示。ADR 0113）。
-var mtlsOAuthPath = regexp.MustCompile(`^(?:/realms/[a-z0-9][a-z0-9-]{0,62})?/oauth2/(?:token|introspect|revoke|userinfo|device_authorization|bc-authorize)$`)
+var mtlsOAuthPath = regexp.MustCompile(`^(?:/realms/[a-z0-9][a-z0-9-]{0,62})?/oauth2/(?:token|introspect|revoke|userinfo|device_authorization|bc-authorize|par)$`)
 
 // withClientCertHeader は、信じたプロキシからの要求のヘッダーの証明書を ctx に載せる。ヘッダーは読んだら消す。
 // TLS で受けた要求（mTLS の専用の待ち受け）のヘッダーは読まない。

@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -345,7 +346,7 @@ func selfSigned(t *testing.T) (*x509.Certificate, map[string]any) {
 
 func TestMTLSClientAuthAndBoundTokens(t *testing.T) {
 	pki := newTestPKI(t)
-	l := mtlsEnv(t, pki, feature.MTLSClientAuth)
+	l := mtlsEnv(t, pki, feature.MTLSClientAuth, feature.PAR)
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "tls_client_auth", "tls_client_auth_subject_dn": "CN=pat",
 		"tls_client_certificate_bound_access_tokens": true})
@@ -357,7 +358,8 @@ func TestMTLSClientAuthAndBoundTokens(t *testing.T) {
 	methods, _ := disc["token_endpoint_auth_methods_supported"].([]any)
 	aliases, _ := disc["mtls_endpoint_aliases"].(map[string]any)
 	if !slices.Contains(methods, any("tls_client_auth")) || disc["tls_client_certificate_bound_access_tokens"] != true ||
-		aliases["token_endpoint"] != "https://mtls.example.test"+oidcToken {
+		aliases["token_endpoint"] != "https://mtls.example.test"+oidcToken ||
+		aliases["pushed_authorization_request_endpoint"] != "https://mtls.example.test"+oidcPAR {
 		t.Fatalf("discovery: %v", disc)
 	}
 
@@ -503,5 +505,164 @@ func TestDPoPCIBA(t *testing.T) {
 	// 結び付けたアクセストークンは Bearer では UserInfo を通らない。
 	if w, _ := l.form(t, h, "GET", oidcUserinfo, nil, nil, "Authorization", "Bearer "+tok["access_token"].(string)); w.Code != 401 {
 		t.Fatalf("bearer use: %d", w.Code)
+	}
+}
+
+// basic は連携先の client_secret_basic のヘッダー。
+func (p *rp) basic() string {
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(url.QueryEscape(p.clientID)+":"+url.QueryEscape(p.secret)))
+}
+
+// pushForm は PAR に送る認可要求（authorizeURL と同じパラメーター。PKCE は新しく作る）に extra を重ねる。
+func (p *rp) pushForm(extra url.Values) url.Values {
+	u, _ := url.Parse(p.authorizeURL(nil))
+	q := u.Query()
+	q.Del("client_id")
+	for k, v := range extra {
+		q[k] = v
+	}
+	return q
+}
+
+// PAR（ADR 0112）で預けた認可要求も DPoP の鍵に結び付く（RFC 9449 10.1）。PAR の要求の DPoP の証明の鍵か本文の dpop_jkt を
+// 預け、認可コードの交換で同じ鍵の証明を求める。
+func TestDPoPPAR(t *testing.T) {
+	l := senderEnv(t, nil, feature.DPoP, feature.PAR)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	k, other := dpoptest.NewKey(t), dpoptest.NewKey(t)
+	h := l.a.PublicHandler()
+	par := testIssuer + oidcPAR
+	push := func(extra url.Values, hdr ...string) (int, map[string]any) {
+		w, out := l.form(t, h, "POST", oidcPAR, p.pushForm(extra), nil, append([]string{"Authorization", p.basic()}, hdr...)...)
+		return w.Code, out
+	}
+	authorize := func(uri string) string {
+		return oidcAuthorize + "?" + url.Values{"client_id": {p.clientID}, "request_uri": {uri}}.Encode()
+	}
+	exchange := func(code string, key *dpoptest.Key) (int, map[string]any) {
+		var hdr []string
+		if key != nil {
+			hdr = []string{"DPoP", l.proof(t, key, "POST", testIssuer+oidcToken, "", "")}
+		}
+		f := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {p.redirect}, "code_verifier": {p.verifier}}
+		w, out := l.form(t, h, "POST", oidcToken, f, nil, append([]string{"Authorization", p.basic()}, hdr...)...)
+		return w.Code, out
+	}
+
+	// 証明の誤り・本文の dpop_jkt と証明の鍵の違いは invalid_dpop_proof。壊れた dpop_jkt は invalid_request。
+	if st, out := push(nil, "DPoP", l.proof(t, k, "POST", testIssuer+oidcToken, "", "")); st != 400 || out["error"] != "invalid_dpop_proof" {
+		t.Fatalf("wrong htu: %d %v", st, out)
+	}
+	if st, out := push(url.Values{"dpop_jkt": {other.JKT()}}, "DPoP", l.proof(t, k, "POST", par, "", "")); st != 400 || out["error"] != "invalid_dpop_proof" {
+		t.Fatalf("dpop_jkt mismatch: %d %v", st, out)
+	}
+	if st, out := push(url.Values{"dpop_jkt": {"abc"}}); st != 400 || out["error"] != "invalid_request" {
+		t.Fatalf("malformed dpop_jkt: %d %v", st, out)
+	}
+
+	// PAR の証明の鍵に結び付く：別の鍵・証明なしの交換は通らない。
+	for name, key := range map[string]*dpoptest.Key{"other key": other, "no proof": nil} {
+		st, out := push(nil, "DPoP", l.proof(t, k, "POST", par, "", ""))
+		if st != 201 {
+			t.Fatalf("push: %d %v", st, out)
+		}
+		code := p.followLogin(t, authorize(out["request_uri"].(string)), "alice@example.com")
+		if st, out := exchange(code, key); st != 400 || out["error"] != "invalid_grant" {
+			t.Fatalf("%s: %d %v", name, st, out)
+		}
+	}
+	st, out := push(nil, "DPoP", l.proof(t, k, "POST", par, "", ""))
+	if st != 201 {
+		t.Fatalf("push: %d %v", st, out)
+	}
+	code := p.followLogin(t, authorize(out["request_uri"].(string)), "alice@example.com")
+	st, tok := exchange(code, k)
+	if st != 200 || tok["token_type"] != "DPoP" {
+		t.Fatalf("token: %d %v", st, tok)
+	}
+	if in := p.introspect(t, tok["access_token"].(string)); in["cnf"].(map[string]any)["jkt"] != k.JKT() {
+		t.Fatalf("introspect: %v", in)
+	}
+
+	// 本文の dpop_jkt だけでも（証明なし）預けた鍵に結び付く。
+	st, out = push(url.Values{"dpop_jkt": {k.JKT()}})
+	if st != 201 {
+		t.Fatalf("push dpop_jkt: %d %v", st, out)
+	}
+	code = p.followLogin(t, authorize(out["request_uri"].(string)), "alice@example.com")
+	if st, out := exchange(code, other); st != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("dpop_jkt other key: %d %v", st, out)
+	}
+	st, out = push(url.Values{"dpop_jkt": {k.JKT()}})
+	if st != 201 {
+		t.Fatalf("push dpop_jkt: %d %v", st, out)
+	}
+	code = p.followLogin(t, authorize(out["request_uri"].(string)), "alice@example.com")
+	if st, tok := exchange(code, k); st != 200 || tok["token_type"] != "DPoP" {
+		t.Fatalf("dpop_jkt token: %d %v", st, tok)
+	}
+}
+
+// 自前の API に向けたトークン（RFC 8707、ADR 0112）も DPoP の鍵に結び付く：認可コードフロー・リフレッシュ（公開クライアント）・
+// サービスアカウントの resource のトークン。イントロスペクションは aud と cnf.jkt を返す。
+func TestDPoPResourceIndicators(t *testing.T) {
+	l := senderEnv(t, nil, feature.DPoP, feature.ServiceAccounts, feature.ResourceIndicators)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	pub := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "none"})
+	rs := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	sa, secret := l.serviceAccountSecret(t, owner, "worker")
+	if code, out := l.admin(t, "/v1/admin/oauth/resources", owner, map[string]any{"uri": ordersAPI, "name": "Orders",
+		"scopes": []string{"orders:read"}, "clients": []string{pub.clientID}, "service_accounts": []string{sa}}); code != 201 {
+		t.Fatalf("resource: %d %v", code, out)
+	}
+	k, other := dpoptest.NewKey(t), dpoptest.NewKey(t)
+	h := l.a.PublicHandler()
+	tokenURL := testIssuer + oidcToken
+
+	code, _ := pub.login(t, "alice@example.com", url.Values{"resource": {ordersAPI}, "scope": {"openid orders:read"}})
+	form := pub.codeForm(code)
+	form.Set("resource", ordersAPI)
+	w, tok := l.form(t, h, "POST", oidcToken, form, nil, "DPoP", l.proof(t, k, "POST", tokenURL, "", ""))
+	if w.Code != 200 || tok["token_type"] != "DPoP" {
+		t.Fatalf("token: %d %v", w.Code, tok)
+	}
+	in := rs.introspect(t, tok["access_token"].(string))
+	if in["active"] != true || !slices.Equal(in["aud"].([]any), []any{ordersAPI}) || in["cnf"].(map[string]any)["jkt"] != k.JKT() {
+		t.Fatalf("introspect: %v", in)
+	}
+	// リフレッシュ：同じ resource でも、別の鍵・証明なしは invalid_grant（リフレッシュトークンは使われずに残る）。
+	refresh := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tok["refresh_token"].(string)}, "client_id": {pub.clientID}, "resource": {ordersAPI}}
+	if w, out := l.form(t, h, "POST", oidcToken, refresh, nil); w.Code != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("refresh without proof: %d %v", w.Code, out)
+	}
+	if w, out := l.form(t, h, "POST", oidcToken, refresh, nil, "DPoP", l.proof(t, other, "POST", tokenURL, "", "")); w.Code != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("refresh other key: %d %v", w.Code, out)
+	}
+	w, out := l.form(t, h, "POST", oidcToken, refresh, nil, "DPoP", l.proof(t, k, "POST", tokenURL, "", ""))
+	if w.Code != 200 || out["token_type"] != "DPoP" {
+		t.Fatalf("refresh: %d %v", w.Code, out)
+	}
+	if in := rs.introspect(t, out["access_token"].(string)); !slices.Equal(in["aud"].([]any), []any{ordersAPI}) || in["cnf"].(map[string]any)["jkt"] != k.JKT() {
+		t.Fatalf("introspect refreshed: %v", in)
+	}
+
+	// サービスアカウントの resource のトークン。
+	sform := url.Values{"grant_type": {"client_credentials"}, "client_id": {sa}, "client_secret": {secret}, "resource": {ordersAPI}}
+	w, st := l.form(t, l.a.AdminHandler(), "POST", adminTokenPath, sform, nil, "DPoP", l.proof(t, k, "POST", testAdminURL+adminTokenPath, "", ""))
+	if w.Code != 200 || st["token_type"] != "DPoP" || st["scope"] != "orders:read" {
+		t.Fatalf("service account token: %d %v", w.Code, st)
+	}
+	in = rs.introspect(t, st["access_token"].(string))
+	if in["active"] != true || !slices.Equal(in["aud"].([]any), []any{ordersAPI}) || in["cnf"].(map[string]any)["jkt"] != k.JKT() {
+		t.Fatalf("introspect service account token: %v", in)
+	}
+	// Bearer のリソースのトークンには cnf が無い。
+	w, st = l.form(t, l.a.AdminHandler(), "POST", adminTokenPath, sform, nil)
+	if w.Code != 200 || st["token_type"] != "Bearer" {
+		t.Fatalf("bearer service account token: %d %v", w.Code, st)
+	}
+	if in := rs.introspect(t, st["access_token"].(string)); in["active"] != true || in["cnf"] != nil {
+		t.Fatalf("introspect bearer: %v", in)
 	}
 }

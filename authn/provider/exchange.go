@@ -292,8 +292,9 @@ func (t *Tokens) subject(ctx context.Context, tx port.Tx, realmID, token, typ st
 		if err != nil {
 			return subjectToken{}, err
 		}
+		// 自前の API に向けた認可（ADR 0112）の aud はリソースの URI のまま（連携先の client_id にしない）。
 		aud := g.Audiences
-		if g.Exchange == "" {
+		if g.Exchange == "" && !ResourceBound(g) {
 			c, err := tx.Clients().Get(ctx, realmID, g.ClientID)
 			if errors.Is(err, errs.NotFound) {
 				return subjectToken{}, ErrInvalidGrant
@@ -666,6 +667,18 @@ func (t *Tokens) grantAliveUntil(ctx context.Context, tx port.Tx, g port.Grant, 
 	}
 	switch g.Exchange {
 	case "":
+		if ResourceBound(g) {
+			cl, err := tx.Clients().Get(ctx, g.RealmID, g.ClientID)
+			if errors.Is(err, errs.NotFound) {
+				return time.Time{}, ErrInvalidToken
+			}
+			if err != nil {
+				return time.Time{}, err
+			}
+			if err := t.resourceAlive(ctx, tx, g, cl); err != nil {
+				return time.Time{}, err
+			}
+		}
 		return t.aliveUntil(ctx, tx, g.RealmID, g.SID, g.UserID, g.OrgID, now)
 	case port.ExchangeDelegation:
 		if !t.TokenExchange {

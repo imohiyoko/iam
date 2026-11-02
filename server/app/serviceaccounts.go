@@ -417,7 +417,11 @@ func (s adminServer) IssueServiceAccountToken(ctx context.Context, req adminapi.
 		return adminapi.IssueServiceAccountToken400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", ""))}, nil
 	}
 	tr := serviceaccount.TokenRequest{GrantType: req.Body.GrantType, ClientID: deref(req.Body.ClientId), ClientSecret: deref(req.Body.ClientSecret),
-		AssertionType: deref(req.Body.ClientAssertionType), Assertion: deref(req.Body.ClientAssertion)}
+		AssertionType: deref(req.Body.ClientAssertionType), Assertion: deref(req.Body.ClientAssertion), Scope: deref(req.Body.Scope)}
+	if req.Body.Resource != nil {
+		// 自前の API に向けたトークン（RFC 8707、ADR 0112）。
+		tr.Resources = *req.Body.Resource
+	}
 	if h := deref(req.Params.Authorization); h != "" {
 		id, secret, ok := basicAuth(h)
 		if !ok || tr.ClientSecret != "" || (tr.ClientID != "" && tr.ClientID != id) {
@@ -453,6 +457,10 @@ func (s adminServer) IssueServiceAccountToken(ctx context.Context, req adminapi.
 	out.Body.AccessToken, out.Body.TokenType, out.Body.ExpiresIn = is.Token, "Bearer", int(is.ExpiresIn.Seconds())
 	if jkt != "" {
 		out.Body.TokenType = dpop.TokenType
+	}
+	if is.Audience != "" {
+		scope := strings.Join(is.Scopes, " ")
+		out.Body.Scope = &scope
 	}
 	return out, nil
 }

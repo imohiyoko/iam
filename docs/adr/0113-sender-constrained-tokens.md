@@ -2,9 +2,10 @@
 
 - 状態: 承認
 - 日付: 2026-11-02
-- 関連: [design.md](../design.md) 5.1、5.5、5.9、11.12、[0005](0005-crypto-no-rsa-pqc.md)、[0066](0066-oidc-authorization-code-flow.md)、
+- 関連: [design.md](../design.md) 5.1、5.5、5.11、11.12、[0005](0005-crypto-no-rsa-pqc.md)、[0066](0066-oidc-authorization-code-flow.md)、
   [0073](0073-build-and-feature-toggle.md)、[0074](0074-service-accounts.md)、[0083](0083-multi-realm.md)、[0089](0089-enterprise-full-scope.md)、
-  [0095](0095-device-authorization-grant.md)、[0099](0099-token-exchange.md)、[0103](0103-x509-client-certificates.md)
+  [0095](0095-device-authorization-grant.md)、[0099](0099-token-exchange.md)、[0103](0103-x509-client-certificates.md)、
+  [0112](0112-par-and-resource-indicators.md)、[0114](0114-ciba.md)
 
 ## 背景
 
@@ -37,7 +38,11 @@ mTLS（RFC 8705）」。S）。決めることは次のとおり。
   （鍵を持たない盗んだ人にトークンを焼かせない）。機密の連携先のリフレッシュトークンは連携先の認証が守るので結び付けない
 - 認可コードの交換・リフレッシュ・Device Authorization Grant・CIBA・Token Exchange のどれでも同じ。Token Exchange は結び付けた
   `subject_token`・`actor_token` に同じ鍵・証明書を求める（盗んだトークンを交換で Bearer にさせない）
-- 認可要求の `dpop_jkt`（RFC 9449 10）を受け、認可コードの交換で同じ鍵の証明を求める
+- 認可要求の `dpop_jkt`（RFC 9449 10）を受け、認可コードの交換で同じ鍵の証明を求める。PAR（ADR 0112）では、PAR の要求の DPoP の
+  証明（`htu` は PAR のエンドポイント）を確かめてその鍵を `dpop_jkt` として預ける（RFC 9449 10.1）。本文の `dpop_jkt` もあれば同じ鍵で
+  なければ `invalid_dpop_proof`。証明が無ければ本文の `dpop_jkt` を預ける
+- 自前の API に向けたトークン（RFC 8707、ADR 0112）も同じ：認可コードフロー・リフレッシュのアクセストークンと、サービスアカウントの
+  `resource` のトークン（`POST /v1/admin/token` の DPoP の証明）を結び付け、イントロスペクションは `aud` と `cnf` を返す
 - 監査ログ `oidc.authorized` に `dpop_jkt`・`x5t#S256` を残す
 
 ### DPoP（RFC 9449）
@@ -59,7 +64,7 @@ mTLS（RFC 8705）」。S）。決めることは次のとおり。
 ### OAuth の mTLS（RFC 8705）
 
 - 証明書は ADR 0103 のコアの経路でだけ受ける（mTLS の専用の待ち受けか、`proxies` に書いたプロキシのヘッダー）。秘密鍵の所持は TLS の
-  CertificateVerify で確かめてある。フィーチャーが動いていれば、専用の待ち受けは token・introspect・revoke・userinfo・device_authorization・bc-authorize（CIBA）も通す
+  CertificateVerify で確かめてある。フィーチャーが動いていれば、専用の待ち受けは token・introspect・revoke・userinfo・device_authorization・bc-authorize（CIBA）・par（PAR）も通す
   （オフなら今までどおり方式のパスだけ）
 - `tls_client_auth`（2.1）：`oidc.mtls.trust_anchors`（と `intermediates`）までの連鎖、`clientAuth` の用途、期限（Clock）を確かめ、
   登録した 1 つの項目（`tls_client_auth_subject_dn`・`_san_dns`・`_san_uri`・`_san_ip`・`_san_email`）と照合する。DN は RFC 4514 の文字列の完全一致
@@ -76,7 +81,7 @@ mTLS（RFC 8705）」。S）。決めることは次のとおり。
 
 - UserInfo：結び付けたトークンは、DPoP なら `Authorization: DPoP` と、同じ鍵・`ath`・`htm`・`htu` の証明（再送は拒む）、証明書なら
   同じクライアント証明書の要求でだけ通す。結び付けの無いトークンを `DPoP` の方式で示すのも拒む（RFC 9449 7.1）。401 の `WWW-Authenticate` は
-  DPoP が動いていれば `DPoP error=…, algs=…`
+  DPoP が動いていれば `DPoP error=…, algs=…`（どちらの方式にも RFC 9728 の `resource_metadata` を付ける）
 - 管理 API：Bearer で受けるもののうち結び付けられるのは、サービスアカウントのアクセストークン（ADR 0074）。`POST /v1/admin/token` の
   `DPoP` ヘッダーの証明で鍵に結び付け（`token_type: DPoP`）、管理 API はそのトークンに `Authorization: DPoP` と同じ鍵の証明を求める。
   `htu` は `oidc.dpop.admin_url`（管理 API の外から見たオリジン）とパス（realm の接頭辞を含む）。設定が無ければ管理 API では DPoP を受けない

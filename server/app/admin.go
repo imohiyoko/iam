@@ -50,7 +50,7 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 		}
 		// DPoP の方式で使えるのは、DPoP に結び付けたサービスアカウントのアクセストークンだけ（ADR 0113）。
 		if scheme == dpop.Scheme && !serviceaccount.IsAccessToken(key) {
-			a.challenge(w, "invalid_token")
+			a.challenge(w, "invalid_token", "")
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -102,7 +102,7 @@ func (a *App) withAdminAuth(next http.Handler) http.Handler {
 			// DPoP に結び付けたトークンは、同じ鍵の証明でだけ通す。結び付けの無いトークンを DPoP の方式で示すのも拒む。
 			err = a.checkResourceBinding(r.Context(), r, scheme, key, provider.Binding{JKT: sa.JKT}, a.adminURLs(r.URL.Path))
 			if eb, ok := errors.AsType[*errBinding](err); ok {
-				a.challenge(w, eb.Code)
+				a.challenge(w, eb.Code, "")
 				next.ServeHTTP(w, r)
 				return
 			}

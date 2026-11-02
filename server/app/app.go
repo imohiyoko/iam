@@ -47,6 +47,7 @@ import (
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/recovery"
 	"github.com/imohiyoko/iam/authn/saml"
+	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
@@ -131,6 +132,13 @@ type App struct {
 	// wsfed は WS-Federation のパッシブ要求者プロファイル（iam が IdP。ADR 0110）。フィーチャー wsfed が動いていないか、
 	// issuer（server.public_url）が無ければ nil。
 	wsfed *wsfed.Service
+	// samlIdP は SAML 2.0 の IdP（iam が IdP。ADR 0115）。フィーチャー saml_idp が動いていないか、issuer（server.public_url）が無ければ nil。
+	samlIdP *samlidp.Service
+	// par は Pushed Authorization Requests（RFC 9126。ADR 0112）が動いているか（フィーチャー par）。
+	par bool
+	// resources は自前の API（リソースサーバー）の登録（RFC 8707。ADR 0112）。フィーチャー resource_indicators が
+	// 動いていなければ nil。
+	resources *provider.Resources
 	// ldap は LDAP / Active Directory のバインド認証と同期（ADR 0102）。フィーチャー ldap が動いていなければ nil。
 	ldap *dirldap.Service
 	// metadata は認証器のメタデータ（フィーチャー passkey_attestation。ADR 0096）。root だけが持ち、全 realm で共有する。
@@ -451,7 +459,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
 	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout),
-		CIBA: plan.IsActive(feature.CIBA), DPoP: plan.IsActive(feature.DPoP), MTLS: plan.IsActive(feature.MTLSClientAuth)}
+		CIBA: plan.IsActive(feature.CIBA), PAR: plan.IsActive(feature.PAR), DPoP: plan.IsActive(feature.DPoP), MTLS: plan.IsActive(feature.MTLSClientAuth)}
 	if err := a.setupSenderConstraint(); err != nil {
 		return err
 	}
@@ -463,7 +471,13 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	a.issuer = ep.issuer
 	a.serviceAccounts = &serviceaccount.Service{Clock: d.Clock, Replay: d.Ephemeral, Audience: a.issuer,
 		TokenTTL: cfg.ServiceAccounts.TokenTTL.D(), Authenticator: serviceaccount.Authenticator{Enabled: plan.IsActive(feature.ServiceAccounts), DeliveryOnly: deliveryOnly}}
-	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D()}
+	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D(), PushedTTL: cfg.OIDC.PARRequestURITTL.D()}
+	// PAR と自前の API 向けのトークン（ADR 0112）。
+	a.par, a.resources = plan.IsActive(feature.PAR), nil
+	if plan.IsActive(feature.ResourceIndicators) {
+		a.resources = &provider.Resources{Clock: d.Clock}
+		a.serviceAccounts.Resource = provider.ResourceForServiceAccount
+	}
 	a.device, a.deviceTmpl = nil, nil
 	if plan.IsActive(feature.DeviceFlow) {
 		a.device = &provider.Device{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, TTL: cfg.OIDC.DeviceCodeTTL.D(),
@@ -488,7 +502,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Attributes: a.attributes, Issuer: a.issuer,
 		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D(),
-		ACR: plan.IsActive(feature.ACR)}
+		ACR: plan.IsActive(feature.ACR), ResourceIndicators: a.resources != nil}
 	if a.issuer != "" {
 		a.sessions.Lineages = a.tokens
 	}
@@ -499,6 +513,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		// RP に渡すトークンは realm の issuer と ES256 の鍵で署名する（ADR 0110）。
 		a.wsfed = &wsfed.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Tokens: a.tokens,
 			Issuer: a.issuer, Attributes: a.attributes != nil, Log: d.Logger}
+	}
+	a.samlIdP = nil
+	if plan.IsActive(feature.SAMLIdP) && a.issuer != "" {
+		// SP に渡す Response は realm の issuer と ES256 の鍵で署名する（ADR 0115）。
+		a.samlIdP = &samlidp.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Tokens: a.tokens,
+			Issuer: a.issuer, Attributes: a.attributes != nil, HardwareAAL: a.hardwareAAL(), Log: d.Logger}
 	}
 	if plan.IsActive(feature.Impersonation) {
 		a.impersonationLimit = a.limiter(cfg.Security.Login.RateLimit.PerAccount)

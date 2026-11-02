@@ -79,6 +79,8 @@ var authnTests = []struct {
 	{"Grants", testGrants},
 	{"SessionLineage", testSessionLineage},
 	{"WSFed", testWSFed},
+	{"SAMLIdP", testSAMLIdP},
+	{"OAuthResources", testOAuthResources},
 }
 
 func notFound(what string, err error) error {
@@ -851,8 +853,13 @@ func testServiceAccountsM7(t *testing.T, h Harness) {
 		}
 		later := tok
 		later.ID, later.ExpiresAt = id.New(id.SAToken), T0.Add(time.Hour)
+		// 自前の API 向けのトークンは aud とスコープを持つ（RFC 8707、ADR 0112）。
+		later.Audience, later.Scopes = "https://api.example.com/orders", []string{"orders:read", "orders:write"}
 		if err := repo.CreateToken(ctx, later); err != nil {
 			return err
+		}
+		if got, err := repo.GetToken(ctx, r, later.ID); err != nil || !reflect.DeepEqual(got, later) {
+			return fmt.Errorf("serviceAccounts.GetToken with audience = %+v, %v", got, err)
 		}
 		if got, err := repo.GetToken(ctx, r, tok.ID); err != nil || !reflect.DeepEqual(got, tok) {
 			return fmt.Errorf("serviceAccounts.GetToken = %+v, %v", got, err)

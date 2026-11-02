@@ -80,6 +80,8 @@ type Client struct {
 	CIBAMode string
 	// CIBANotificationEndpoint は ping の通知先（backchannel_client_notification_endpoint。ping のときだけ）。
 	CIBANotificationEndpoint string
+	// RequirePAR は認可要求を PAR（RFC 9126）で送らせる（require_pushed_authorization_requests。フィーチャー par。ADR 0112）。
+	RequirePAR bool
 }
 
 // CIBA のトークンの受け取り方（ADR 0114）。push は持たない。

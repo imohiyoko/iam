@@ -281,12 +281,17 @@ func (a *App) checkResourceBinding(ctx context.Context, r *http.Request, scheme,
 }
 
 // challenge は資源の 401 の WWW-Authenticate。DPoP が動いていれば DPoP の方式と受ける alg も示す（RFC 9449 7.1）。
-func (a *App) challenge(w http.ResponseWriter, code string) {
+// metadata は資源のメタデータの URL（RFC 9728 5.1。UserInfo だけ。空なら付けない）。
+func (a *App) challenge(w http.ResponseWriter, code, metadata string) {
+	extra := ""
+	if metadata != "" {
+		extra = fmt.Sprintf(`, resource_metadata=%q`, metadata)
+	}
 	if a.dpop != nil {
-		w.Header().Add("WWW-Authenticate", fmt.Sprintf(`DPoP error=%q, algs=%q`, code, strings.Join(dpop.Algs, " ")))
+		w.Header().Add("WWW-Authenticate", fmt.Sprintf(`DPoP error=%q, algs=%q`, code, strings.Join(dpop.Algs, " "))+extra)
 	}
 	if code == "invalid_token" {
-		w.Header().Add("WWW-Authenticate", `Bearer error="invalid_token"`)
+		w.Header().Add("WWW-Authenticate", `Bearer error="invalid_token"`+extra)
 	}
 }
 
@@ -313,6 +318,9 @@ func (s *oidcServer) senderConstraintDiscovery(d *discovery) {
 	}
 	if s.a.ciba != nil {
 		d.MTLSEndpointAliases["backchannel_authentication_endpoint"] = s.mtlsAlias(oidcBackchannel)
+	}
+	if s.a.par {
+		d.MTLSEndpointAliases["pushed_authorization_request_endpoint"] = s.mtlsAlias(oidcPAR)
 	}
 }
 

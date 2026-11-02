@@ -46,6 +46,7 @@ func (a *App) clientOut(c port.Client, secret string) (adminapi.Client, error) {
 }
 
 // clientOutBase は deviceFlow（device_flow）と ciba（ADR 0114）が止まっていれば、その登録を返さない。
+// require_pushed_authorization_requests は PAR を求める連携先だけ返す（求めないなら省く）。
 func clientOutBase(c port.Client, secret string, deviceFlow, ciba bool) (adminapi.Client, error) {
 	out := adminapi.Client{ClientId: c.PublicID, Name: c.Name, TrustLevel: adminapi.ClientTrustLevel(c.TrustLevel),
 		RedirectUris: c.RedirectURIs, PostLogoutRedirectUris: c.PostLogoutRedirectURIs, TokenEndpointAuthMethod: c.AuthMethod,
@@ -82,6 +83,9 @@ func clientOutBase(c port.Client, secret string, deviceFlow, ciba bool) (adminap
 			out.BackchannelClientNotificationEndpoint = &c.CIBANotificationEndpoint
 		}
 	}
+	if c.RequirePAR {
+		out.RequirePushedAuthorizationRequests = &c.RequirePAR
+	}
 	return out, nil
 }
 
@@ -110,6 +114,9 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.FrontchannelLogoutSessionRequired != nil {
 		in.FrontchannelLogoutSessionRequired = *b.FrontchannelLogoutSessionRequired
+	}
+	if b.RequirePushedAuthorizationRequests != nil {
+		in.RequirePAR = *b.RequirePushedAuthorizationRequests
 	}
 	if b.DpopBoundAccessTokens != nil {
 		in.DPoPBoundAccessTokens = *b.DpopBoundAccessTokens
