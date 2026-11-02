@@ -49,6 +49,42 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
 
   /v1/admin/users:
+    get:
+      operationId: listUsers
+      summary: ユーザーの一覧・検索（ADR 0097）
+      description: |
+        権限 `users:read`。公開 ID の順に、`limit` 件ずつ返す。続きは `next_cursor` を `after` に渡す。絞り込みはすべて AND。
+        `email` はブラインドインデックスで引く完全一致（正規化は小文字化だけ。部分一致はしない。9.5、ADR 0014）。
+        `connection`（slug）と `subject` は外部 ID の完全一致で、両方を渡す（片方だけは `400 invalid_request`）。
+        `status` の `active` は停止中でないもの、`suspended` は今停止中のもの（どちらも削除・統合されていない）。
+        `org_id` は active な Membership のある Org。一覧にメールアドレスは含めない。無い Org・connection・アドレスを
+        指したときは空の一覧。
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+        - { name: after, in: query, schema: { type: string } }
+        - { name: email, in: query, schema: { type: string, maxLength: 254 } }
+        - { name: connection, in: query, schema: { type: string } }
+        - { name: subject, in: query, schema: { type: string, maxLength: 2048 } }
+        - { name: status, in: query, schema: { type: string, enum: [active, suspended, deleted, merged] } }
+        - { name: org_id, in: query, schema: { type: string } }
+        - { name: created_from, in: query, description: この時刻以後に作成, schema: { type: string, format: date-time } }
+        - { name: created_before, in: query, description: この時刻より前に作成, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: 公開 ID の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminUserSummary" }
+                  next_cursor: { type: string, description: 続きがあるときだけ }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
     post:
       operationId: createUser
       summary: ユーザーを登録する（確認の経路 `admin`。4.1）
@@ -206,6 +242,26 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
 
   /v1/admin/users/{id}:
+    get:
+      operationId: getUser
+      summary: ユーザーの詳細（ADR 0097）
+      description: |
+        権限 `users:read`。状態・停止・有効期間・legal hold・削除の予定・メール・認証手段の概要・Membership を返す。
+        メールアドレスは `include_pii=true` のときだけ復号して返し、権限 `pii:read` も要る（無ければ `403 permission_denied`）。
+        復号したときは `user.pii_read` を監査ログに残す。最小化モード（`index_only`）ではアドレスを持たないので返さない。
+        Membership はフィーチャー org が動いているときだけ返す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: include_pii, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: ユーザー
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
     patch:
       operationId: updateUser
       summary: ユーザーの有効期間を変更する（4.8）
@@ -546,6 +602,26 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
 
   /v1/admin/connections:
+    get:
+      operationId: listConnections
+      summary: IdP 接続の一覧（ADR 0097）
+      description: |
+        権限 `connections:read`。slug の順。Org 専用 SSO の connection（`owner_org_id` がある）も含む。
+        クライアントシークレットは返さない。`active_identities` はその connection の有効な外部 ID の数。
+      responses:
+        "200":
+          description: slug の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connections]
+                properties:
+                  connections:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminConnection" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
     post:
       operationId: createConnection
       summary: IdP 接続（OAuth / OIDC）を登録する
@@ -584,6 +660,38 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
 
   /v1/admin/orgs:
+    get:
+      operationId: listOrgs
+      summary: Org の一覧・検索（ADR 0097）
+      description: |
+        権限 `orgs:read`。公開 ID の順に、`limit` 件ずつ返す。続きは `next_cursor` を `after` に渡す。絞り込みはすべて AND。
+        `name_prefix` は名前の前方一致（名前は平文で持つので、正規化せずにバイトで比べる。大文字と小文字は区別する）。
+        `parent_id` は親の Org。`status` の `active` は削除も停止もされていないもの、`suspended` は今停止中のもの（削除済みを
+        除く）、`deleted` は削除済み。無い親を指したときは空の一覧。フィーチャー org が動いていなければ `404 org_disabled`。
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+        - { name: after, in: query, schema: { type: string } }
+        - { name: name_prefix, in: query, schema: { type: string, minLength: 1, maxLength: 400 } }
+        - { name: parent_id, in: query, schema: { type: string } }
+        - { name: kind, in: query, schema: { type: string, enum: [personal, shared] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, suspended, deleted] } }
+      responses:
+        "200":
+          description: 公開 ID の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orgs]
+                properties:
+                  orgs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Org" }
+                  next_cursor: { type: string, description: 続きがあるときだけ }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
     post:
       operationId: createOrg
       summary: 共有 Org を作り、ユーザーを owner にする（運営者。realm の `org_creation` に関わらず作れる。4.11）
@@ -1942,6 +2050,358 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/users/{id}/memberships:
+    get:
+      operationId: listUserMemberships
+      summary: ユーザーの Membership の一覧（終了したものも含む。ADR 0097）
+      description: 権限 `users:read`。作成時刻の順。フィーチャー org が動いていなければ `404 org_disabled`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 作成時刻の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [memberships]
+                properties:
+                  memberships:
+                    type: array
+                    items: { $ref: "#/components/schemas/Membership" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/sessions:
+    get:
+      operationId: listUserSessions
+      summary: ユーザーの有効なセッションの一覧（ADR 0097）
+      description: |
+        権限 `sessions:read`。失効・期限切れ・無操作の期限を過ぎたものは含めない（本人の一覧と同じ）。新しい順。
+        IP と User-Agent は含めない（個人情報。監査ログで調べる）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 新しい順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminSession" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/sessions:revoke-all:
+    post:
+      operationId: revokeAllUserSessions
+      summary: ユーザーの全セッションを失効させる（ADR 0097）
+      description: |
+        権限 `sessions:revoke`。全セッションを失効させ、連携先にも Back-Channel Logout で伝える。認証情報（passkey・外部 ID・
+        TOTP・パスワード・リカバリーコード）は残す。認証情報も無効化するなら `credentials:revoke-all`（侵害時の初動）を使う。
+        端末の紛失や、停止・権限の変更をすぐに効かせたいときに使う。失効は取り消せない。セッションが無くても 200
+        （`sessions` は 0）。`session.revoked` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 失効させた
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions: { type: integer, description: 失効させたセッションの数 }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/role-bindings:
+    get:
+      operationId: listUserRoleBindings
+      summary: ユーザーに効くロールの付与の逆引き（ADR 0097）
+      description: |
+        権限 `roles:read`。ユーザーへの直接の付与と、所属する Group（`nested_groups` が有効なら含む Group も）への付与を、
+        realm と Org の範囲をまとめて返す（作成時刻の順）。Group の付与は `via_group_id` にその Group を入れる。
+        Org の範囲の付与は `org_id` に Org を入れる。Membership の `role`（org_role）から効く Org のロールは含めない。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, description: 公開のユーザー ID } }
+      responses:
+        "200":
+          description: 作成時刻の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bindings]
+                properties:
+                  bindings:
+                    type: array
+                    items: { $ref: "#/components/schemas/EffectiveRoleBinding" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/groups:
+    get:
+      operationId: listUserGroups
+      summary: ユーザーが所属する Group の逆引き（ADR 0097）
+      description: |
+        権限 `groups:read`。realm と Org の範囲の Group を名前の順に返す。`nested_groups` が有効なら、所属する Group を含む
+        Group も返す（`direct` が false）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, description: 公開のユーザー ID } }
+      responses:
+        "200":
+          description: 名前の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [groups]
+                properties:
+                  groups:
+                    type: array
+                    items: { $ref: "#/components/schemas/PrincipalGroup" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/service-accounts/{id}/role-bindings:
+    get:
+      operationId: listServiceAccountRoleBindings
+      summary: サービスアカウントに効くロールの付与の逆引き（ADR 0097）
+      description: |
+        権限 `roles:read`。サービスアカウントへの直接の付与と、所属する Group（`nested_groups` が有効なら含む Group も）への付与を、
+        realm と Org の範囲をまとめて返す（作成時刻の順）。Group の付与は `via_group_id` にその Group を入れる。
+        Org の範囲の付与は `org_id` に Org を入れる。Membership の `role`（org_role）から効く Org のロールは含めない。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, description: サービスアカウントの ID } }
+      responses:
+        "200":
+          description: 作成時刻の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bindings]
+                properties:
+                  bindings:
+                    type: array
+                    items: { $ref: "#/components/schemas/EffectiveRoleBinding" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/service-accounts/{id}/groups:
+    get:
+      operationId: listServiceAccountGroups
+      summary: サービスアカウントが所属する Group の逆引き（ADR 0097）
+      description: |
+        権限 `groups:read`。realm と Org の範囲の Group を名前の順に返す。`nested_groups` が有効なら、所属する Group を含む
+        Group も返す（`direct` が false）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, description: サービスアカウントの ID } }
+      responses:
+        "200":
+          description: 名前の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [groups]
+                properties:
+                  groups:
+                    type: array
+                    items: { $ref: "#/components/schemas/PrincipalGroup" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/emails:
+    post:
+      operationId: addUserEmail
+      summary: 運営者がユーザーにメールを足す（確認の経路 `admin`。ADR 0097）
+      description: |
+        権限 `users:emails`。運営者が所有を確かめたアドレスを、確認済み（`admin`）として足す。primary にはしない。
+        呼び出し側が対象のロールの権限をすべて持っていなければ `403 permission_denied`（なりすましと同じ判定。ADR 0052）。
+        realm の `verified_via` に `admin` が無ければ `400 verification_method_disabled`。アドレスが使われていれば
+        `409 email_exists`（同じユーザーでも。自動リンクしない）。active でないユーザーは `409 user_not_active`。
+        応答にアドレスは含めない。`email.added` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, maxLength: 254 }
+      responses:
+        "201":
+          description: 足した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserEmail" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/emails/{email_id}:remove:
+    post:
+      operationId: removeUserEmail
+      summary: 運営者がユーザーのメールを消す（ADR 0097）
+      description: |
+        権限 `users:emails` と、対象を上回ること（`addUserEmail` と同じ）。本人と同じ不変条件を守る：primary は
+        `409 primary_email`（先に別のメールを primary にする）、最後の確認済みメールは `409 last_email`、消すとログインの
+        手段が無くなるなら `409 last_method`、Membership に結び付けたメールは `409 email_bound_to_membership`。
+        `email.removed` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: email_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 消した }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/users/{id}/emails/{email_id}:make-primary:
+    post:
+      operationId: makeUserEmailPrimary
+      summary: 運営者がユーザーの primary のメールを変える（ADR 0097）
+      description: |
+        権限 `users:emails` と、対象を上回ること。確認済みのメールだけ（未確認は `409 email_unverified`）。既に primary なら
+        何もせず 204。`email.primary_changed` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: email_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 変えた }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/connections/{id}:
+    get:
+      operationId: getConnection
+      summary: IdP 接続を返す（ADR 0097）
+      description: 権限 `connections:read`。クライアントシークレットは返さない。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: connection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminConnection" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateConnection
+      summary: IdP 接続のクライアント ID・シークレット・戻り先を置き換える（ADR 0097）
+      description: |
+        権限 `connections:manage`。slug・種類・プロバイダのエンドポイントは変えない。`client_secret` を省けば今の値のまま
+        （新しい値は封をして保存し、応答にも監査ログにも出さない）。値の誤りは `400 invalid_connection`。Org 専用 SSO の
+        connection は Org の owner が扱うので `409 org_connection`。変えても既存の外部 ID の紐付けとセッションはそのまま。
+        `connection.updated` を監査ログに残す（変えた項目の名前だけ）。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, redirect_uris]
+              properties:
+                client_id: { type: string, minLength: 1, maxLength: 2048 }
+                client_secret: { type: string, minLength: 1, maxLength: 2048 }
+                redirect_uris:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { type: string, maxLength: 2048 }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminConnection" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/connections/{id}:delete:
+    post:
+      operationId: deleteConnection
+      summary: IdP 接続を消す（ADR 0097）
+      description: |
+        権限 `connections:manage`。有効な外部 ID の紐付けが残っていれば、既定では消さずに `409 connection_in_use`
+        （`message` にその数）。`revoke_identities: true` なら紐付けを無効化（理由 `connection_deleted`）してから消す。その外部 ID で
+        作ったセッションは、遅くとも `validity_max_delay` の後に使えなくなる。その外部 ID しかログインの手段が無いユーザーは
+        復旧の手順で戻る。Org 専用 SSO の connection は `409 org_connection`。`connection.deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                revoke_identities: { type: boolean, default: false }
+      responses:
+        "200":
+          description: 消した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [identities_revoked]
+                properties:
+                  identities_revoked: { type: integer, description: 無効化した外部 ID の紐付けの数 }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/signing-keys:
+    get:
+      operationId: listSigningKeys
+      summary: ID トークンの署名鍵の一覧（ADR 0097）
+      description: |
+        権限 `signing_keys:read`。作成時刻の順。秘密鍵も公開鍵も返さない（公開鍵は JWKS で配る）。`state` は `active`（署名に
+        使っている）、`retired`（署名をやめ、`published_until` まで JWKS に残す）、`expired`（JWKS から外れ、次の参照で消える）。
+      responses:
+        "200":
+          description: 作成時刻の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items: { $ref: "#/components/schemas/AdminSigningKey" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
   /v1/admin/realms:
     get:
       operationId: listRealms
@@ -2477,6 +2937,126 @@ components:
         valid_until: { type: string, format: date-time }
         deletion_scheduled_at: { type: string, format: date-time, description: 削除の予定（猶予期間の終わり） }
         legal_hold: { type: boolean }
+    AdminUserSummary:
+      type: object
+      required: [id, status, suspended, created_at]
+      properties:
+        id: { type: string, description: 公開のユーザー ID }
+        status: { type: string, enum: [active, deleted, merged] }
+        suspended: { type: boolean, description: 今停止中か }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        deletion_scheduled_at: { type: string, format: date-time, description: 削除の予定（猶予期間の終わり） }
+        legal_hold: { type: boolean }
+        managed_by_org_id: { type: string, description: 管理する Org の公開 ID（Org 管理ユーザーのときだけ） }
+        created_at: { type: string, format: date-time }
+    AdminUserDetail:
+      type: object
+      required: [id, status, suspended, created_at, emails, credentials, suspensions]
+      properties:
+        id: { type: string, description: 公開のユーザー ID }
+        status: { type: string, enum: [active, deleted, merged] }
+        suspended: { type: boolean, description: 今停止中か }
+        valid_from: { type: string, format: date-time }
+        valid_until: { type: string, format: date-time }
+        deletion_scheduled_at: { type: string, format: date-time, description: 削除の予定（猶予期間の終わり） }
+        legal_hold: { type: boolean }
+        managed_by_org_id: { type: string, description: 管理する Org の公開 ID（Org 管理ユーザーのときだけ） }
+        merged_into: { type: string, description: 統合先のユーザーの公開 ID（merged のときだけ） }
+        created_at: { type: string, format: date-time }
+        emails:
+          type: array
+          items: { $ref: "#/components/schemas/AdminUserEmail" }
+        credentials: { $ref: "#/components/schemas/UserCredentials" }
+        recovery_codes_remaining: { type: integer, description: 未使用のリカバリーコードの数 }
+        suspensions:
+          type: array
+          description: 停止の一覧（解除・終了したものも含む。開始の時刻の順）
+          items: { $ref: "#/components/schemas/Suspension" }
+        memberships:
+          type: array
+          description: Membership（終了したものも含む。フィーチャー org が動いているときだけ）
+          items: { $ref: "#/components/schemas/Membership" }
+    AdminUserEmail:
+      type: object
+      required: [id, primary, verified, created_at]
+      properties:
+        id: { type: string, description: メールの公開 ID }
+        email: { type: string, description: アドレス（`include_pii=true` と `pii:read` のときだけ） }
+        primary: { type: boolean }
+        verified: { type: boolean }
+        verified_via: { type: string, enum: [code, oauth_provider, sso, invitation, admin] }
+        created_at: { type: string, format: date-time }
+    AdminSession:
+      type: object
+      required: [id, authenticated_at, created_at, last_seen_at, expires_at, auth_methods]
+      properties:
+        id: { type: string, description: 公開のセッション ID（ses_…） }
+        authenticated_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        auth_methods:
+          type: array
+          items: { type: string }
+        restriction: { type: string, description: 使える操作の制限（second_factor / enroll / recovery / deletion_pending）。無ければ制限なし }
+        active_org_id: { type: string, description: active な Org の公開 ID（フィーチャー org が動いているときだけ） }
+    EffectiveRoleBinding:
+      type: object
+      required: [id, role, principal_type, principal_id, created_at]
+      properties:
+        id: { type: string }
+        role: { type: string, description: 組み込みのロールの名前か、独自のロールの ID }
+        principal_type: { type: string, description: user / group / service_account }
+        principal_id: { type: string, description: 付与の主体の公開 ID（Group の付与では Group） }
+        org_id: { type: string, description: Org の範囲の付与の Org（公開 ID）。無ければ realm の範囲 }
+        via_group_id: { type: string, description: この Group の所属を通して効く（Group の付与のときだけ） }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        condition:
+          type: object
+          additionalProperties: true
+          description: 付与の条件（ADR 0084）。無ければ条件なし
+        created_at: { type: string, format: date-time }
+    PrincipalGroup:
+      type: object
+      required: [id, name, direct, created_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        org_id: { type: string, description: Org の範囲の Group の Org（公開 ID）。無ければ realm の範囲 }
+        direct: { type: boolean, description: 直接の所属か（false はネストで含む Group） }
+        created_at: { type: string, format: date-time }
+    AdminConnection:
+      type: object
+      required: [id, slug, type, client_id, scopes, redirect_uris, active_identities, created_at]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        type: { type: string }
+        owner_org_id: { type: string, description: Org 専用 SSO の connection の Org（公開 ID） }
+        issuer: { type: string }
+        authorization_endpoint: { type: string }
+        token_endpoint: { type: string }
+        client_id: { type: string }
+        scopes:
+          type: array
+          items: { type: string }
+        redirect_uris:
+          type: array
+          items: { type: string }
+        active_identities: { type: integer, description: 有効な外部 ID の紐付けの数 }
+        created_at: { type: string, format: date-time }
+    AdminSigningKey:
+      type: object
+      required: [kid, alg, state, created_at]
+      properties:
+        kid: { type: string }
+        alg: { type: string }
+        state: { type: string, enum: [active, retired, expired] }
+        created_at: { type: string, format: date-time }
+        retired_at: { type: string, format: date-time }
+        published_until: { type: string, format: date-time, description: JWKS に残す期限（退役した鍵だけ） }
     SuspendRequest:
       type: object
       required: [category, reason]

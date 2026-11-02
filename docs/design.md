@@ -464,6 +464,8 @@ check(principal, action, resource, context) -> allow / deny
 - 運営者ロールは `org_id` が NULL のロール付与で表し、ホスト先が独自のロールを追加できる。停止の種別ごとの解除権限は、これらのロールの permission として定義する
 - Org のロール：`org_role` を Org 範囲の既定ロールに対応させる。`owner`（削除・譲渡・全設定）、`admin`（招待・除名・Group とロール、`customer_request` の停止）、`member`。Group と所属の参照だけは `org:groups.read`（ADR 0085）
 - 個人情報の復号は独立した権限 `pii:read`
+- 参照は読み取りの権限で渡す（ADR 0097）：`users:read`・`sessions:read`・`roles:read`・`groups:read` は admin・security・support、
+  `connections:read` は admin・security、`signing_keys:read` は security。運営者によるメールの操作は `users:emails`（admin）
 - 管理操作には強い認証と直近の認証（`max_auth_age`）を求める。管理者のセッションは短くする
 - 緊急時は Storage と KeyStore に直接触れる CLI を使う（実行は重要イベントとして全運営者に通知）。常設の緊急用アカウントは作らない
 - Org を作れる人：`anyone`（既定）/ `operators_only` / `invite_only`
@@ -497,9 +499,29 @@ GET    /v1/admin/orgs/{id}/quotas
 POST   /v1/admin/orgs/{id}/quota-grants | PUT …/quota-grants/external/{ref} | DELETE …/quota-grants/{grant_id}
 POST   /v1/admin/notifications/{id}:claim
 POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
+GET    /v1/admin/users?email=&connection=&subject=&status=&org_id=&created_from=&created_before=&after=&limit=
+GET    /v1/admin/users/{id}[?include_pii=true] | …/sessions | …/memberships | …/role-bindings | …/groups
+POST   /v1/admin/users/{id}/sessions:revoke-all
+POST   /v1/admin/users/{id}/emails | …/emails/{email_id}:remove | …/emails/{email_id}:make-primary
+GET    /v1/admin/service-accounts/{id}/role-bindings | …/groups
+GET    /v1/admin/orgs?name_prefix=&parent_id=&kind=&status=&after=&limit=
+GET    /v1/admin/connections | GET・PUT /v1/admin/connections/{id} | POST /v1/admin/connections/{id}:delete
+GET    /v1/admin/signing-keys
 ```
 
 管理操作は理由の入力を必須にし、すべて監査ログに出す。
+
+一覧・取得・検索（ADR 0097）：
+
+- 一覧は公開 ID の順のカーソル（`after`・`next_cursor`、1 回 200 件まで）。絞り込みはすべて AND で、無い Org などを指せば空の一覧
+- メールの検索はブラインドインデックスの完全一致だけ（9.5）。Org の名前は平文なので前方一致（バイトで比べる）
+- メールアドレスは詳細で `include_pii=true` と `pii:read` のときだけ復号し、`user.pii_read` を監査ログに残す。ほかの参照は監査ログに残さない
+- `sessions:revoke-all` は全セッションの失効だけで、認証情報は残す（侵害時の初動は `credentials:revoke-all`）
+- 運営者によるメールの操作（確認の経路 `admin`）は outranks の判定をし、本人と同じ不変条件（primary・最後の確認済みメール・
+  最後の認証手段・Membership に結び付けたメール）を守る
+- connection の削除は、有効な外部 ID の紐付けがあれば既定で断る（`revoke_identities` で無効化してから消す）。Org 専用 SSO の
+  connection は参照だけ
+- 署名鍵の一覧は kid・アルゴリズム・状態・時刻だけで、鍵の値は出さない
 
 ## 5. トークンとセッション
 
