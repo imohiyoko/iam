@@ -73,6 +73,8 @@ type Service struct {
 	// Passkeys は認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。nil ならフィーチャーが動いておらず、
 	// ログインポリシーの passkey を判定しない。
 	Passkeys *passkey.Attestation
+	// ACR はフィーチャー acr が active か（ログインポリシーの min_aal。ADR 0093）。
+	ACR bool
 	// Quotas は Quota（フィーチャー quota）が active か。QuotaCount は数えるもの（11.14）。
 	Quotas     bool
 	QuotaCount QuotaCount

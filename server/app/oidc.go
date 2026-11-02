@@ -14,7 +14,9 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/op"
 
 	"github.com/imohiyoko/iam/authn/provider"
+	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -182,11 +184,25 @@ func (s *oidcServer) claims() []string {
 	if s.a.attributes != nil {
 		out = append(out, "attributes")
 	}
+	if s.a.acrActive() {
+		out = append(out, "acr")
+	}
 	return out
 }
 
+// acrValues は Discovery の acr_values_supported。フィーチャー acr が動いていなければ載せない。
+func (s *oidcServer) acrValues() []string {
+	if !s.a.acrActive() {
+		return nil
+	}
+	return acr.Supported()
+}
+
+// acrActive はフィーチャー acr（ADR 0093）が動いているか。
+func (a *App) acrActive() bool { return a.plan.IsActive(feature.ACR) }
+
 func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Response, error) {
-	return op.NewResponse(&oidc.DiscoveryConfiguration{
+	disc := &oidc.DiscoveryConfiguration{
 		Issuer:                            s.a.issuer,
 		AuthorizationEndpoint:             s.endpoint(oidcAuthorize),
 		TokenEndpoint:                     s.endpoint(oidcToken),
@@ -211,7 +227,9 @@ func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Resp
 		RevocationEndpointAuthSigningAlgValuesSupported:    assertionAlgs,
 		BackChannelLogoutSupported:                         true,
 		BackChannelLogoutSessionSupported:                  true,
-	}), nil
+	}
+	disc.ACRValuesSupported = s.acrValues()
+	return op.NewResponse(disc), nil
 }
 
 func (s *oidcServer) Keys(ctx context.Context, _ *op.Request[struct{}]) (*op.Response, error) {
@@ -329,12 +347,24 @@ func (s *oidcServer) Authorize(ctx context.Context, r *op.ClientRequest[oidc.Aut
 		// op は prompt=login を max_age=0 にする。ログイン画面から戻るまでの時間を許すため、時刻で比べる。
 		req.MaxAge, req.LoginAfter = nil, &now
 	}
+	if s.a.acrActive() {
+		values, err := requestedACR(d.ACRValues, r.Form.Get("claims"))
+		if err != nil {
+			return nil, err
+		}
+		req.ACR = acr.Requested(values)
+	}
 	au, ok := authFrom(ctx)
-	if ok && req.Fresh(au.AuthenticatedAt, now) {
+	if ok && req.Fresh(au.AuthenticatedAt, now) && acrMet(req, au.AuthMethods) {
 		return s.complete(ctx, req, au)
 	}
 	if slices.Contains(d.Prompt, oidc.PromptNone) {
 		return nil, oidc.ErrLoginRequired()
+	}
+	if len(req.ACR) > 0 && req.LoginAfter == nil {
+		// acr を求めるなら、ここから後のログインを求める（step-up。今のセッションで足りるなら上で済んでいる）。戻ったときに
+		// 満たさなければ、ログインし直しても届かないので unmet_authentication_requirements にする（ADR 0093）。
+		req.LoginAfter = &now
 	}
 	rid, err := s.a.flow.Hold(ctx, req)
 	if err != nil {
@@ -354,8 +384,15 @@ func (s *oidcServer) complete(ctx context.Context, req provider.AuthRequest, au 
 	if len(au.OrgUnavailable) > 0 {
 		return s.errorRedirect(ctx, req, oidc.ErrAccessDenied())
 	}
-	code, err := s.a.flow.IssueCode(ctx, provider.Code{AuthRequest: req, UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID,
-		AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods})
+	c := provider.Code{AuthRequest: req, UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID, AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods}
+	if s.a.acrActive() {
+		v, ok := acr.Select(req.ACR, au.AuthMethods)
+		if !ok {
+			return s.errorRedirect(ctx, req, errUnmetAuthentication())
+		}
+		c.SelectedACR = v
+	}
+	code, err := s.a.flow.IssueCode(ctx, c)
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
@@ -365,6 +402,45 @@ func (s *oidcServer) complete(ctx context.Context, req provider.AuthRequest, au 
 		return nil, s.fail(ctx, err)
 	}
 	return op.NewRedirect(u), nil
+}
+
+// requestedACR は要求された acr の値（ADR 0093）。claims パラメーター（OpenID Connect Core 5.5）の id_token.acr に
+// value・values があればそれを、無ければ acr_values を使う。essential かどうかは区別しない（どちらも満たせなければ
+// unmet_authentication_requirements にする）。claims のほかの項目は見ない。claims が JSON でなければ invalid_request。
+func requestedACR(acrValues []string, claims string) ([]string, error) {
+	if claims == "" {
+		return acrValues, nil
+	}
+	var c struct {
+		IDToken map[string]*struct {
+			Value  *string  `json:"value"`
+			Values []string `json:"values"`
+		} `json:"id_token"`
+	}
+	if err := json.Unmarshal([]byte(claims), &c); err != nil {
+		return nil, oidc.ErrInvalidRequest().WithDescription("claims must be a JSON object")
+	}
+	r := c.IDToken["acr"]
+	if r == nil || (r.Value == nil && len(r.Values) == 0) {
+		return acrValues, nil
+	}
+	var out []string
+	if r.Value != nil {
+		out = append(out, *r.Value)
+	}
+	return append(out, r.Values...), nil
+}
+
+// acrMet は amr の認証が要求の acr を満たすか（要求が無ければ真）。
+func acrMet(req provider.AuthRequest, amr []string) bool {
+	_, ok := acr.Select(req.ACR, amr)
+	return ok
+}
+
+// errUnmetAuthentication はログインし直しても要求の acr に届かないときのエラー
+// （OpenID Connect Core Error Code unmet_authentication_requirements）。
+func errUnmetAuthentication() *oidc.Error {
+	return &oidc.Error{ErrorType: "unmet_authentication_requirements", Description: "the requested authentication context class could not be met"}
 }
 
 func (s *oidcServer) errorRedirect(ctx context.Context, req provider.AuthRequest, e *oidc.Error) (*op.Redirect, error) {

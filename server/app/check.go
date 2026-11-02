@@ -112,6 +112,9 @@ func (s adminServer) CheckAuthz(ctx context.Context, req adminapi.CheckAuthzRequ
 	out := adminapi.CheckAuthz200JSONResponse{Allowed: dec.Allow}
 	if len(dec.Unmet) > 0 {
 		out.Unmet = &dec.Unmet
+		if v, m, ok := stepUpValues(dec.StepUp); ok && s.a.acrActive() {
+			out.StepUp = &adminapi.StepUp{AcrValues: v, MaxAge: m}
+		}
 	}
 	return out, nil
 }
@@ -165,6 +168,9 @@ func (s publicServer) CheckMyAuthz(ctx context.Context, req publicapi.CheckMyAut
 	out := publicapi.CheckMyAuthz200JSONResponse{Allowed: d.Allow}
 	if len(d.Unmet) > 0 {
 		out.Unmet = &d.Unmet
+		if v, m, ok := stepUpValues(d.StepUp); ok && s.a.acrActive() {
+			out.StepUp = &publicapi.StepUp{AcrValues: v, MaxAge: m}
+		}
 	}
 	return out, nil
 }

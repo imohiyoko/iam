@@ -240,6 +240,11 @@ func (a *App) createBinding(ctx context.Context, tx port.Tx, c authzCall, in pub
 	if err != nil {
 		return publicapi.RoleBinding{}, err
 	}
+	if cond != nil {
+		if err := a.aalAllowed(check.Requirements{"": *cond}, nil); err != nil {
+			return publicapi.RoleBinding{}, err
+		}
+	}
 	b, err := a.manage.Bind(ctx, tx, c.sc, c.ac, in.Role, t, res, cond)
 	if err != nil {
 		return publicapi.RoleBinding{}, conflictAs(err, errBindingExists)

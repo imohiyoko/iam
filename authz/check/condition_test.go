@@ -52,6 +52,8 @@ func TestConditionValidate(t *testing.T) {
 		`{"all":[{"factors_at_least":2},{"auth_within":300},{"risk_below":{"type":"account","score":30}}]}`,
 		`{"any":[{"risk_at_most":{"type":"ip","level":"medium"}},{"attested":true}]}`,
 		`{"all":[{"any":[{"all":[{"amr_has":["otp"]}]}]}]}`,
+		`{"aal_at_least":1}`,
+		`{"aal_at_least":3}`,
 	}
 	for _, s := range ok {
 		if err := parse(t, s).Validate(known); err != nil {
@@ -72,6 +74,8 @@ func TestConditionValidate(t *testing.T) {
 		`{"risk_below":{"type":"account","score":101}}`,
 		`{"risk_below":{"type":"device","score":30}}`,
 		`{"risk_at_most":{"type":"ip","level":"severe"}}`,
+		`{"aal_at_least":4}`,
+		`{"aal_at_least":-1}`,
 		`{"all":[{"all":[{"all":[{"all":[{"attested":true}]}]}]}]}`,
 		`{"all":[` + strings16(`{"attested":true}`) + `,{"attested":true}]}`,
 	}
@@ -128,8 +132,13 @@ func TestConditionEval(t *testing.T) {
 		{`{"all":[{"all":[]}]}`, ac, false, nil},
 		{`{"all":[{}]}`, ac, false, nil},
 		{`{"all":[{"amr_has":["hwk"]},{"any":[]}]}`, ac, false, nil},
+		// AAL は amr から求める（ADR 0093）。passkey と本人確認は AAL2。
+		{`{"aal_at_least":2}`, ac, true, nil},
+		{`{"aal_at_least":3}`, ac, false, []string{check.UnmetAAL}},
+		{`{"aal_at_least":1}`, &check.AuthContext{AMR: []string{"link"}}, false, []string{check.UnmetAAL}},
 		// 文脈が無ければ何も満たさない。
 		{`{"auth_within":86400}`, nil, false, []string{check.UnmetAuthAge}},
+		{`{"aal_at_least":1}`, nil, false, []string{check.UnmetAAL}},
 		{`{"risk_below":{"type":"ip","score":100}}`, nil, false, []string{"condition.risk.ip"}},
 	} {
 		ok, unmet := parse(t, c.cond).Eval(c.ac, now, bands)
@@ -161,5 +170,17 @@ func TestConditionRiskTypes(t *testing.T) {
 	c := parse(t, `{"all":[{"risk_below":{"type":"account","score":30}},{"any":[{"risk_at_most":{"type":"ip","level":"low"}},{"risk_below":{"type":"account","score":10}}]}]}`)
 	if got := c.RiskTypes(); !slices.Equal(got, []string{"account", "ip"}) {
 		t.Fatalf("RiskTypes = %v", got)
+	}
+}
+
+func TestConditionUsesAAL(t *testing.T) {
+	for s, want := range map[string]bool{
+		`{"aal_at_least":2}`: true,
+		`{"any":[{"amr_has":["hwk"]},{"all":[{"aal_at_least":2}]}]}`: true,
+		`{"all":[{"amr_has":["hwk"]},{"auth_within":60}]}`:           false,
+	} {
+		if got := parse(t, s).UsesAAL(); got != want {
+			t.Errorf("%s: UsesAAL = %v, want %v", s, got, want)
+		}
 	}
 }
