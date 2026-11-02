@@ -1,6 +1,6 @@
 module github.com/imohiyoko/iam/adapters/storage/postgres
 
-go 1.27.0
+go 1.27.3
 
 require (
 	github.com/imohiyoko/iam v0.0.0
