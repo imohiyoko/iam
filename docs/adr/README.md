@@ -106,4 +106,5 @@
 | [0092](0092-authenticator-port-implementation.md) | 認証方式のポートは汎用の認証情報のストアと封をしたフローで動かし、HOTP を最初の方式にする | 承認 |
 | [0094](0094-oidc-rp-initiated-and-front-channel-logout.md) | RP-Initiated Logout はセッションと合う id_token_hint のときだけ確かめずに終え、Front-Channel Logout は完了の画面の iframe で知らせる | 承認 |
 | [0093](0093-acr-aal-step-up.md) | 認証の強さは amr から AAL を求めて acr で出し、足りなければ step-up（RFC 9470）を求める | 承認 |
+| [0096](0096-passkey-attestation.md) | passkey の attestation を MDS と設定の信頼の起点で確かめ、認証器のポリシーを realm と Org の段で判定する | 承認 |
 | [0097](0097-admin-read-api.md) | 管理 API の一覧・取得・検索は運営者ロールに読み取りの権限を足し、メールはブラインドインデックスの完全一致で引く | 承認 |

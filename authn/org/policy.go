@@ -13,9 +13,12 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/passkey"
+	"github.com/imohiyoko/iam/authn/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/shared/acr"
+	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/port"
@@ -36,9 +39,15 @@ const (
 	PolicyIPAllowlist           = "ip_allowlist"
 	// PolicyRequireSSO はその Org の connection（Org 専用 SSO。ADR 0077）での認証。フィーチャー org_managed_users も要る。
 	PolicyRequireSSO = "require_sso"
+	// PolicyPasskeyAuthenticator は、認証に使った passkey の認証器が Org の段の認証器のポリシーを満たすこと（ADR 0096）。
+	// フィーチャー passkey_attestation も要る。
+	PolicyPasskeyAuthenticator = "passkey_authenticator"
 	// PolicyMinAAL は amr から求めた AAL の下限（ADR 0093）。フィーチャー acr も要る。
 	PolicyMinAAL = "min_aal"
 )
+
+// EventPasskeyPolicyDenied は、Org の段の認証器のポリシーでその Org に入れなかったことの監査ログの種類（ADR 0096）。
+const EventPasskeyPolicyDenied = "org.passkey_policy_denied"
 
 // 上限。
 const (
@@ -56,12 +65,15 @@ type LoginPolicy struct {
 	IPAllowlist []string `json:"ip_allowlist,omitempty"`
 	// RequireSSO はその Org の connection で認証したセッションだけを入れる（ADR 0077）。
 	RequireSSO bool `json:"require_sso,omitempty"`
+	// Passkey は Org の段の認証器のポリシー（ADR 0096）。認証に使った passkey が realm の段に加えてこれも満たすこと。
+	// passkey を使っていない認証には効かない（passkey を求めるなら RequirePasskey と組み合わせる）。
+	Passkey *attestation.Policy `json:"passkey,omitempty"`
 	// MinAAL は amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（ADR 0093）。0 は判定しない。
 	MinAAL int `json:"min_aal,omitempty"`
 }
 
 func (p *LoginPolicy) empty() bool {
-	return p == nil || (!p.RequirePasskey && !p.RequireSSO && len(p.MembershipEmailDomains) == 0 && len(p.IPAllowlist) == 0 && p.MinAAL == 0)
+	return p == nil || (!p.RequirePasskey && !p.RequireSSO && len(p.MembershipEmailDomains) == 0 && len(p.IPAllowlist) == 0 && p.Passkey.Empty() && p.MinAAL == 0)
 }
 
 // checkPolicy は設定しようとするポリシー p を確かめ、正規化したものを返す。フィーチャーが止まっていても、
@@ -83,6 +95,11 @@ func (s *Service) checkPolicy(p, prev *LoginPolicy) (*LoginPolicy, error) {
 	if out.RequireSSO && !s.ManagedUsers && (prev == nil || !prev.RequireSSO) {
 		return nil, settingInvalid("login_policy.require_sso: the org_managed_users feature is not enabled")
 	}
+	if out.Passkey != nil && s.Passkeys == nil {
+		if keep, err := normalizePolicy(prev); err != nil || keep == nil || !reflect.DeepEqual(out.Passkey, keep.Passkey) {
+			return nil, settingInvalid("login_policy.passkey: the passkey_attestation feature is not enabled")
+		}
+	}
 	if out.MinAAL != 0 && !s.ACR && (prev == nil || prev.MinAAL != out.MinAAL) {
 		return nil, settingInvalid("login_policy.min_aal: the acr feature is not enabled")
 	}
@@ -99,6 +116,10 @@ func normalizePolicy(p *LoginPolicy) (*LoginPolicy, error) {
 	}
 	if len(p.MembershipEmailDomains) > MaxPolicyDomains || len(p.IPAllowlist) > MaxPolicyCIDRs {
 		return nil, settingInvalid("login_policy: too many entries")
+	}
+	var err error
+	if out.Passkey, err = attestation.Normalize(p.Passkey); err != nil {
+		return nil, settingInvalid("login_policy.passkey: %s", err.Error())
 	}
 	for _, d := range p.MembershipEmailDomains {
 		d = strings.ToLower(strings.TrimSpace(d))
@@ -164,6 +185,15 @@ func (s *Service) policyDenied(ctx context.Context, tx port.Tx, o port.Org, m po
 			codes = append(codes, "policy."+PolicyRequireSSO)
 		}
 	}
+	if !p.Passkey.Empty() && s.Passkeys != nil { // フィーチャーがオフなら判定しない（無効化の片付けで外す）
+		ok, err := s.passkeyAllowed(ctx, tx, o, m, p.Passkey, in)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			codes = append(codes, "policy."+PolicyPasskeyAuthenticator)
+		}
+	}
 	if p.MinAAL > 0 && s.ACR && acr.AAL(in.AuthMethods) < p.MinAAL { // フィーチャーがオフなら判定しない（無効化の片付けで外す）
 		codes = append(codes, "policy."+PolicyMinAAL)
 	}
@@ -202,6 +232,98 @@ func (s *Service) emailInDomains(ctx context.Context, tx port.Tx, m port.Members
 		}
 	}
 	return false, nil
+}
+
+// passkeyAllowed は、認証に使った passkey（in.Credentials のうち passkey のもの）の認証器が、realm の段に加えて Org の段の
+// ポリシー p も満たすかを返す（ADR 0096）。passkey を使っていなければ true。満たさなければ AAGUID と判定を監査ログに残す
+// （ログインのトランザクションに書くので、ログインそのものが失敗すれば残らない。失敗は passkey の側で残す）。
+func (s *Service) passkeyAllowed(ctx context.Context, tx port.Tx, o port.Org, m port.Membership, p *attestation.Policy, in session.OrgPick) (bool, error) {
+	var ps []port.Passkey
+	for _, c := range in.Credentials {
+		if !strings.HasPrefix(c, string(id.Passkey)+"_") {
+			continue
+		}
+		if ps == nil {
+			var err error
+			if ps, err = tx.Passkeys().ListByUser(ctx, o.RealmID, m.UserID); err != nil {
+				return false, err
+			}
+		}
+		for _, k := range ps {
+			if k.ID != c {
+				continue
+			}
+			d := s.Passkeys.Evaluate(s.Clock.Now(), k, attestation.Tiered{Tier: "org", Policy: p})
+			if d.Allowed {
+				continue
+			}
+			u, err := tx.Users().Get(ctx, o.RealmID, m.UserID)
+			if err != nil {
+				return false, err
+			}
+			details := d.Audit()
+			details["passkey_id"] = k.PublicID
+			_, err = eventlog.Record(ctx, tx, s.Clock, audit.Event{
+				Type: EventPasskeyPolicyDenied, Result: audit.ResultFailure, RealmID: o.RealmID, OrgID: o.PublicID,
+				Actor: audit.Actor{Type: "user", ID: u.PublicID}, RequestID: in.RequestID, Details: details,
+			})
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// RecordPasskeyDenied は、Org の切り替えが Org の段の認証器のポリシーで拒否されたときに、その判定を監査ログに残す
+// （切り替えの拒否はトランザクションごと戻るため、別のトランザクションで判定し直して記録する。ADR 0096）。
+func (s *Service) RecordPasskeyDenied(ctx context.Context, st port.Storage, realmID, sessionID, orgID, requestID string) error {
+	if s.Passkeys == nil {
+		return nil
+	}
+	return st.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		sess, err := tx.Sessions().Get(ctx, realmID, sessionID)
+		if err != nil {
+			return err
+		}
+		o, err := tx.Orgs().Get(ctx, realmID, orgID)
+		if err != nil {
+			return err
+		}
+		m, err := tx.Memberships().GetByUserOrg(ctx, realmID, sess.PrincipalID, orgID)
+		if err != nil {
+			return err
+		}
+		set, err := SettingsOf(o)
+		if err != nil || set.LoginPolicy == nil || set.LoginPolicy.Passkey.Empty() {
+			return err
+		}
+		_, err = s.passkeyAllowed(ctx, tx, o, m, set.LoginPolicy.Passkey, session.OrgPick{Credentials: sess.AuthCredentialIDs, RequestID: requestID})
+		return err
+	})
+}
+
+// HasPasskeyPolicy は Org のログインポリシーに passkey があるかを返す（passkey_attestation の無効化で数える。11.12）。
+func HasPasskeyPolicy(o port.Org) (bool, error) {
+	st, err := SettingsOf(o)
+	return st.LoginPolicy != nil && !st.LoginPolicy.Passkey.Empty(), err
+}
+
+// ClearPasskeyPolicy は Org のログインポリシーから passkey を外す（passkey_attestation の無効化の片付け。11.12）。外したら true。
+func ClearPasskeyPolicy(ctx context.Context, tx port.Tx, o port.Org, now time.Time) (bool, error) {
+	st, err := SettingsOf(o)
+	if err != nil || st.LoginPolicy == nil || st.LoginPolicy.Passkey.Empty() {
+		return false, err
+	}
+	st.LoginPolicy.Passkey = nil
+	if st.LoginPolicy.empty() {
+		st.LoginPolicy = nil
+	}
+	var raw []byte
+	if !st.empty() {
+		if raw, err = json.Marshal(st); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Orgs().SetSettings(ctx, o.RealmID, o.ID, raw, now)
 }
 
 // usedOrgConnection は、認証に使った認証情報（内部 ID）に o の connection の外部 ID があるかを返す。

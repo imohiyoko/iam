@@ -218,6 +218,13 @@ type BreachChecker interface {
 	Breached(ctx context.Context, sha1Hex string) (bool, error)
 }
 
+// FIDOMetadataSource は FIDO Metadata Service（MDS3）の BLOB（署名付きの JWT）を取ってくる（フィーチャー passkey_attestation、
+// ADR 0096）。署名はコアが設定したルートで確かめるので、アダプタは取り方だけを持つ（ファイル、HTTP など）。
+// コアはバックグラウンドで定期的に呼び、ログインと登録の経路では呼ばない（ADR 0010）。
+type FIDOMetadataSource interface {
+	Fetch(ctx context.Context) ([]byte, error)
+}
+
 // ---------------------------------------------------------------------------
 // KeyStore
 

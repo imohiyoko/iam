@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for HealthStatus.
@@ -294,6 +295,36 @@ func (e OrgSettingsViewEffectiveWarnings) Valid() bool {
 	case OrgSettingsViewEffectiveWarningsIgnore:
 		return true
 	case OrgSettingsViewEffectiveWarningsWarn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PasskeyPolicyMinCertificationLevel.
+const (
+	L1     PasskeyPolicyMinCertificationLevel = "L1"
+	L1plus PasskeyPolicyMinCertificationLevel = "L1plus"
+	L2     PasskeyPolicyMinCertificationLevel = "L2"
+	L2plus PasskeyPolicyMinCertificationLevel = "L2plus"
+	L3     PasskeyPolicyMinCertificationLevel = "L3"
+	L3plus PasskeyPolicyMinCertificationLevel = "L3plus"
+)
+
+// Valid indicates whether the value is a known member of the PasskeyPolicyMinCertificationLevel enum.
+func (e PasskeyPolicyMinCertificationLevel) Valid() bool {
+	switch e {
+	case L1:
+		return true
+	case L1plus:
+		return true
+	case L2:
+		return true
+	case L2plus:
+		return true
+	case L3:
+		return true
+	case L3plus:
 		return true
 	default:
 		return false
@@ -759,6 +790,9 @@ type OrgLoginPolicy struct {
 	// MinAal amr から求めた AAL（SP 800-63B）がこの値以上のセッションだけを入れる（理由は policy.min_aal）。フィーチャー acr も要る（ADR 0093）
 	MinAal *int `json:"min_aal,omitempty"`
 
+	// Passkey Org の段の認証器のポリシー（ADR 0096）。認証に使った passkey が realm の段に加えてこれも満たすこと（理由は policy.passkey_authenticator）。passkey を使わない認証には効かない。フィーチャー passkey_attestation も要る
+	Passkey *PasskeyPolicy `json:"passkey,omitempty"`
+
 	// RequirePasskey passkey で本人確認したセッションだけを入れる
 	RequirePasskey *bool `json:"require_passkey,omitempty"`
 
@@ -854,6 +888,24 @@ type PasskeyCeremony struct {
 	// Options `{"publicKey": …}`。WebAuthn の options の JSON の形
 	Options map[string]interface{} `json:"options"`
 }
+
+// PasskeyPolicy 認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。登録とログインのたびに判定し、外れれば passkey_not_allowed（どの条件に外れたかは監査ログにだけ残す）。空の項目は判定しない。require_attestation が無ければ AAGUID は認証器の自己申告
+type PasskeyPolicy struct {
+	// AllowedAaguids 許可する認証器の AAGUID。空でなければ、このどれかであること
+	AllowedAaguids *[]openapi_types.UUID `json:"allowed_aaguids,omitempty"`
+
+	// DeniedAaguids 拒否する認証器の AAGUID
+	DeniedAaguids *[]openapi_types.UUID `json:"denied_aaguids,omitempty"`
+
+	// MinCertificationLevel 求める FIDO の認定レベル（FIDO Metadata Service の status report）
+	MinCertificationLevel *PasskeyPolicyMinCertificationLevel `json:"min_certification_level,omitempty"`
+
+	// RequireAttestation 登録のときに信頼の起点（MDS か設定）に連なる attestation を確かめた passkey だけを通す。既存の passkey は確かめていない
+	RequireAttestation *bool `json:"require_attestation,omitempty"`
+}
+
+// PasskeyPolicyMinCertificationLevel 求める FIDO の認定レベル（FIDO Metadata Service の status report）
+type PasskeyPolicyMinCertificationLevel string
 
 // QuotaShortage Quota の不足（`quota_exceeded`。11.14）。`from` から `until`（無ければ無期限）の間、上限 `limit` に `count` 人がいる
 type QuotaShortage struct {

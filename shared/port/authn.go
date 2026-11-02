@@ -197,7 +197,11 @@ type Passkey struct {
 	PreferredOrgID string
 	// UserHandle は登録時のユーザーハンドル（WebAuthn の user.id）。空なら持ち主の公開 ID。統合（11.6）で移した passkey は
 	// 元のユーザーの公開 ID を持つ。
-	UserHandle   []byte
+	UserHandle []byte
+	// AttestationFormat は登録のときの attestation の形式（none、packed など。ADR 0096）。空はこの列を足す前に登録したもの。
+	AttestationFormat string
+	// Attested は登録のときに attestation の証明書の連なりを信頼の起点（MDS か設定）まで確かめたか。既存の行は false。
+	Attested     bool
 	CreatedAt    time.Time
 	LastUsedAt   *time.Time
 	RevokedAt    *time.Time

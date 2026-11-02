@@ -67,6 +67,20 @@ realm:
   ended_retention: 7d   # 失効・期限切れのセッション、配送済みの outbox、発火済みの予約イベントを残す期間（0 で消さない）
   email_storage: encrypted  # encrypted（暗号文 + インデックス）/ index_only（インデックスのみ。操作起点でない通知の宛先は外部が user_id から解決する）
 
+# passkey の attestation（フィーチャー passkey_attestation。ADR 0096）。フィーチャーがオフなら無視する。
+# passkey:
+#   attestation:
+#     conveyance: direct            # none（既定）/ indirect / direct / enterprise
+#     metadata_root_file: ""        # MDS の BLOB の署名のルート（PEM）。空なら FIDO Alliance の本番のルート
+#     metadata_refresh: 24h         # BLOB を読み直す間隔
+#     trusted_authenticators:       # MDS に無い認証器の信頼の起点
+#       - aaguid: 00000000-0000-0000-0000-000000000000
+#         name: Corp Key
+#         root_files: [/etc/iam/corp-key-root.pem]
+# fido_mds:                         # MDS3 の BLOB の取得。driver: file（options.path）/ http（options.url、options.timeout）
+#   driver: http
+# realm.passkey_policy に realm の段の認証器のポリシーを置ける（allowed_aaguids・denied_aaguids・min_certification_level・require_attestation）
+
 security:
   session:
     absolute_lifetime: { default: 30d, min: 1h, max: 90d }

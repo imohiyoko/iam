@@ -26,7 +26,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | メールのコード・マジックリンク | P | ✅ | |
 | パスワード | S（SP 800-63B）P | ✅ | 漏洩の確認（HIBP）も |
 | passkey（WebAuthn L3） | S（W3C、FIDO2） | ✅ | Related Origin Requests も |
-| WebAuthn の attestation、AAGUID の許可リスト、FIDO MDS | S C | ❌ | 企業が認めた鍵だけを通す |
+| WebAuthn の attestation、AAGUID の許可リスト、FIDO MDS | S C | ✅ | 企業が認めた鍵だけを通す。フィーチャー `passkey_attestation`（ADR 0096） |
 | TOTP | S（RFC 6238） | ✅ | |
 | HOTP・ハードウェアトークン | S（RFC 4226）P | ✅ | フィーチャー `hotp`（ADR 0092）。2要素目 |
 | SMS・音声の OTP | P | ❌ | SP 800-63B では制限付き。Notifier 経由 |

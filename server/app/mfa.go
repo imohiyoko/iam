@@ -146,6 +146,10 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.VerifySecondFactor429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
 	}
+	if na, ok := errors.AsType[*passkey.NotAllowedError](err); ok {
+		// 認証器のポリシーによる拒否（ADR 0096）。トランザクションは戻ったので、監査ログはここで残す。
+		s.a.passkeys.RecordDenied(ctx, s.a.realm.ID, s.passkeyClient(ctx), na)
+	}
 	if d, ok := errors.AsType[errs.Denial](err); ok {
 		return publicapi.VerifySecondFactor403JSONResponse{DeniedJSONResponse: denied(d)}, nil
 	}
