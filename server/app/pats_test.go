@@ -321,13 +321,3 @@ func TestPersonalAccessTokenMerge(t *testing.T) {
 		t.Fatalf("merge audit: %+v", ev)
 	}
 }
-
-func anyStrings(v any) []string {
-	xs, _ := v.([]any)
-	out := make([]string, 0, len(xs))
-	for _, x := range xs {
-		s, _ := x.(string)
-		out = append(out, s)
-	}
-	return out
-}

@@ -55,6 +55,9 @@ var Methods = map[string]Method{
 	"user": {Class: Inherence}, "fpt": {Class: Inherence}, "face": {Class: Inherence}, "iris": {Class: Inherence},
 	"retina": {Class: Inherence}, "vbm": {Class: Inherence},
 	"fed": {Class: Federated},
+	// wia は Kerberos / SPNEGO（ADR 0107）。KDC での本人確認の手段（パスワード・スマートカード）を iam は知らないので、外部 ID と同じ
+	// 分類の分からない 1 要素に数える。
+	"wia": {Class: Federated},
 }
 
 // Restricted は amr に制限付きの認証器（SMS・音声の OTP。SP 800-63B）があるかを返す（ADR 0104）。

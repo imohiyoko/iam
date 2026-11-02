@@ -51,6 +51,8 @@ const (
 	DeviceRecognition = "device_recognition"
 	LoginRisk         = "login_risk"
 	BotProtection     = "bot_protection"
+	// ADR 0107。
+	Kerberos = "kerberos"
 	// PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 	PersonalAccessTokens = "personal_access_tokens"
 )

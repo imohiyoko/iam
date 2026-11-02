@@ -224,3 +224,50 @@ func (s *Service) Link(ctx context.Context, realmID, slug, userID string, in Cre
 	}
 	return port.Identity{}, out
 }
+
+// UserBy は realm 共通の connection（slug）で、属性 attribute が value の項目をサービスアカウントでちょうど 1 件探し、その外部 ID を
+// 紐付けたユーザーの内部 ID を返す（Kerberos のプリンシパルの結び付け。ADR 0107）。本人の bind はしない（本人の確認は呼び出し側が
+// 済ませている）。Org 専用の connection は使わない（Org の owner が書いたディレクトリで realm の本人を決めさせない）。
+// 見つからない・複数・AD で無効・紐付けが無ければ errs.NotFound、ディレクトリに届かなければ ErrUnavailable。
+func (s *Service) UserBy(ctx context.Context, realmID, slug, attribute, value string) (string, error) {
+	c, cfg, err := s.connection(ctx, realmID, slug)
+	if err != nil {
+		return "", err
+	}
+	if c.OwnerOrgID != "" {
+		return "", errs.New(errs.KindNotFound, "connection %s is not a realm connection", slug)
+	}
+	if !attrRE.MatchString(attribute) || !ValidUsername(value) {
+		return "", errs.New(errs.KindNotFound, "user")
+	}
+	sess, err := s.open(ctx, cfg, false)
+	if err != nil {
+		return "", err
+	}
+	defer sess.close()
+	filter := "(&" + cfg.UserFilter + "(" + attribute + "=" + ldap.EscapeFilter(value) + "))"
+	res, err := sess.conn.Search(ldap.NewSearchRequest(cfg.UserBaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 2, int(opTimeout/time.Second), false,
+		filter, attributes(cfg), nil))
+	switch {
+	case ldap.IsErrorWithCode(err, ldap.LDAPResultSizeLimitExceeded):
+		return "", errs.New(errs.KindNotFound, "more than one entry matches")
+	case err != nil:
+		return "", fmt.Errorf("%w: search: %v", ErrUnavailable, err)
+	case len(res.Entries) != 1:
+		return "", errs.New(errs.KindNotFound, "%d entries match", len(res.Entries))
+	}
+	e, err := entryOf(cfg, res.Entries[0])
+	if err != nil {
+		return "", errs.Wrap(errs.KindNotFound, err, "directory entry")
+	}
+	if e.Disabled {
+		return "", errs.New(errs.KindNotFound, "account disabled in the directory")
+	}
+	var userID string
+	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		i, err := tx.Identities().GetBySubject(ctx, realmID, c.ID, e.Subject)
+		userID = i.UserID
+		return err
+	})
+	return userID, err
+}

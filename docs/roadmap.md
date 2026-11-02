@@ -454,7 +454,8 @@ Group のネスト、Org 階層（M7）。
 - [x] 同期：`memberOf` から Group を作りメンバーをそろえる。同期が作った Group だけを扱い、既存の同名の Group は取り込まない
 - [x] 同じプロセスの偽物のディレクトリでのテスト、絞り込みの組み立てと属性の解釈のファジング、監査ログ
 - [x] フィーチャー `ldap`（既定オフ）。無効化で connection を消し、外部 ID を無効化し、同期の Group の対応を消す
-- [ ] ホスト型のログイン画面、ネストしたグループと AD のプライマリーグループ、Org の owner からの今すぐの同期とサービスアカウントの切り替え、Kerberos / SPNEGO
+- [ ] ホスト型のログイン画面、ネストしたグループと AD のプライマリーグループ、Org の owner からの今すぐの同期とサービスアカウントの切り替え
+- [x] Kerberos / SPNEGO（下記。ADR 0107）
 
 #### X.509 のクライアント証明書・スマートカード（ADR 0103）
 
@@ -499,6 +500,23 @@ Group のネスト、Org 階層（M7）。
 - [x] memory・SQLite・PostgreSQL の契約テスト、GeoIP の CSV の解析のファジング、HTTP の通しのテスト
 - ホスト型のログイン画面の CAPTCHA のウィジェット、MaxMind の mmdb の GeoIP のアダプタ、ロックの本人への通知
 
+#### Kerberos / SPNEGO（ADR 0107）
+
+**ゴール**：AD に参加した端末の利用者が、パスワードを打たずに HTTP の Negotiate（RFC 4559）でログインでき、プリンシパルが
+realm ごとの規則で iam のユーザーに結び付く。
+
+- [x] フィーチャー `kerberos`（既定オフ）。方式は `authn/method/kerberos`。設定（`methods.kerberos.realms.<slug>`）の無い realm では動かない。
+  keytab・サービスのプリンシパル・受け付ける realm・結び付けの誤りは起動を止める
+- [x] `Authorization: Negotiate` は汎用のログインの完了と登録のパスでだけ読み、どのパスでもヘッダーを消す（Cookie のセッションを妨げない）。
+  トークンが無ければ 401 と `WWW-Authenticate: Negotiate` を返し、回数にも失敗の監査ログにも数えないテストがある
+- [x] SPNEGO と GSS-API のトークンから AP-REQ だけを取り出し（NTLM・KRB-ERROR・Kerberos が先頭でない `MechTypes` を拒む）、AES だけ
+  （RC4 は設定で明示）、宛先のサービス、期限、認証子の本人、時刻のずれ、受け付ける realm、要素が 1 つの名前、インスタンスをまたぐ再送を
+  確かめ、拒むテストがある
+- [x] 結び付けは本人の登録（`enrollment`）・確認済みのメール（`email`）・LDAP の connection の外部 ID（`ldap`）。引き直して付け替えに追従し、
+  ディレクトリの障害は 503。同じプロセスの KDC の代わり（keytab から本物と同じチケットを作る）と偽物のディレクトリでの通しのテストがある
+- [x] amr は `wia`（外部 ID と同じ分類の分からない 1 要素。AAL1）。1要素目だけ
+- [x] トークンの解析と確かめ、ヘッダーの解析にファジングのテストがある
+- [ ] ホスト型のログイン画面（開いたときに Negotiate を試す）、keytab の再読み込み、PAC のグループ、相互認証、カスタム属性での結び付け
 #### 本人の Personal Access Token（ADR 0109）
 
 **ゴール**：人が CLI やスクリプトから自分として API を呼べ、トークンごとに使える権限を本人の権限の内側に絞れる。漏れたトークンは見つけやすく、DB が漏れても秘密は戻せない。
