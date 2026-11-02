@@ -24,6 +24,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/hook"
+	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -114,6 +115,8 @@ type Manager struct {
 	Lineages LineageHook
 	// Hooks はフロー フック（11.8）。nil ならフィーチャー flow_hooks が動いておらず、呼ばない。
 	Hooks *hook.Runner
+	// Methods は動いている認証方式のプラグイン（ADR 0092）。2要素目に使える方式の認証情報を、2要素目として数える。
+	Methods *method.Set
 }
 
 // LineageHook はログインの系列（sid）が終わったことを受け取る（authn/provider）。失効と同じトランザクションで呼ぶ。
@@ -487,7 +490,7 @@ func (m *Manager) secondFactor(ctx context.Context, tx port.Tx, in Issue) (port.
 	if slices.Contains(in.AuthMethods, AMRMFA) || (slices.Contains(in.AuthMethods, "hwk") && slices.Contains(in.AuthMethods, "user")) {
 		return port.RestrictionNone, nil, nil
 	}
-	methods, err := SecondFactors(ctx, tx, in.RealmID, in.UserID)
+	methods, err := SecondFactors(ctx, tx, in.RealmID, in.UserID, m.Methods)
 	if err != nil {
 		return "", nil, err
 	}
@@ -500,8 +503,9 @@ func (m *Manager) secondFactor(ctx context.Context, tx port.Tx, in Issue) (port.
 	return port.RestrictionNone, nil, nil
 }
 
-// SecondFactors はユーザーが登録している（無効化していない）2要素目の種類を返す。
-func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string) ([]string, error) {
+// SecondFactors はユーザーが登録している（無効化していない）2要素目の種類を返す。汎用の認証情報（ADR 0092）は、方式が
+// methods で動いていて2要素目に使えるものだけを、方式の名前で数える。
+func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string, methods *method.Set) ([]string, error) {
 	var out []string
 	ps, err := tx.Passkeys().ListByUser(ctx, realmID, userID)
 	if err != nil {
@@ -516,6 +520,15 @@ func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string) ([]s
 	}
 	if slices.ContainsFunc(ts, func(c port.TOTPCredential) bool { return c.RevokedAt == nil }) {
 		out = append(out, SecondFactorTOTP)
+	}
+	cs, err := tx.Credentials().ListByUser(ctx, realmID, userID, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range cs {
+		if c.RevokedAt == nil && methods.Supports(c.Method, port.UsageSecondFactor) && !slices.Contains(out, c.Method) {
+			out = append(out, c.Method)
+		}
 	}
 	return out, nil
 }
@@ -888,7 +901,7 @@ func (m *Manager) checkSession(ctx context.Context, tx port.Tx, s port.Session, 
 	if at != nil {
 		next = earliest(next, *at)
 	}
-	// 認証に使った外部 ID・passkey・TOTP が無効化されていれば、そのセッションも使えない（4.6）。
+	// 認証に使った外部 ID・passkey・TOTP・汎用の認証情報が無効化されていれば、そのセッションも使えない（4.6）。
 	if err := checkCredentials(ctx, tx, s); err != nil {
 		return time.Time{}, port.User{}, err
 	}
@@ -899,6 +912,7 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 	var identities []port.Identity
 	var passkeys []port.Passkey
 	var totps []port.TOTPCredential
+	var creds []port.Credential
 	for _, c := range s.AuthCredentialIDs {
 		var revoked, found bool
 		switch {
@@ -936,6 +950,18 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 			for _, t := range totps {
 				if t.ID == c {
 					found, revoked = true, t.RevokedAt != nil
+				}
+			}
+		case strings.HasPrefix(c, string(id.Credential)+"_"):
+			if creds == nil {
+				var err error
+				if creds, err = tx.Credentials().ListByUser(ctx, s.RealmID, s.PrincipalID, ""); err != nil {
+					return err
+				}
+			}
+			for _, x := range creds {
+				if x.ID == c {
+					found, revoked = true, x.RevokedAt != nil
 				}
 			}
 		default:

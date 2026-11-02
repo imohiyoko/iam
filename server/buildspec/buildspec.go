@@ -18,6 +18,7 @@ import (
 	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/merge"
+	"github.com/imohiyoko/iam/authn/method/hotp"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/password"
@@ -54,6 +55,7 @@ var featureCatalog = map[string]struct {
 	feature.PasskeyAttestation: {passkey.AttestationFeature, module + "/features/passkeyattestation"},
 	feature.ACR:                {acr.Feature, module + "/features/acr"},
 	feature.OIDCLogout:         {provider.LogoutFeature, module + "/features/oidclogout"},
+	feature.HOTP:               {hotp.Feature, module + "/features/hotp"},
 	feature.DeviceFlow:         {provider.DeviceFeature, module + "/features/deviceflow"},
 }
 
