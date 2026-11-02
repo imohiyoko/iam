@@ -239,6 +239,18 @@ UPDATE authn_password_credentials SET hash = ? WHERE realm_id = ? AND id = ? AND
 -- name: RevokePassword :exec
 UPDATE authn_password_credentials SET revoked_at = ?, revoke_reason = ? WHERE realm_id = ? AND id = ? AND revoked_at IS NULL;
 
+-- name: ListAllTOTP :many
+SELECT * FROM authn_totp_credentials ORDER BY id LIMIT sqlc.arg(lim);
+
+-- name: DeleteTOTP :exec
+DELETE FROM authn_totp_credentials WHERE realm_id = ? AND id = ?;
+
+-- name: ListAllPasswords :many
+SELECT * FROM authn_password_credentials ORDER BY id LIMIT sqlc.arg(lim);
+
+-- name: DeletePassword :exec
+DELETE FROM authn_password_credentials WHERE realm_id = ? AND id = ?;
+
 -- name: SetUserValidity :execrows
 UPDATE authn_users SET valid_from = ?, valid_until = ?, updated_at = ? WHERE realm_id = ? AND id = ?;
 

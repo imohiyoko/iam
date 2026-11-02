@@ -32,7 +32,7 @@ roadmap の M9 の「リスクに応じた追加認証、新しい端末の検�
 
 | フィーチャー | 依存 | オンのとき |
 |---|---|---|
-| `account_lockout` | ― | パスワードと 2 要素目のコードの失敗を数え、待ち時間とロックをかける |
+| `account_lockout` | ― | パスワードなどログイン ID で本人を決める 1 要素目と、2 要素目の失敗を数え、待ち時間とロックをかける |
 | `device_recognition` | ― | 端末の Cookie で端末を覚え、新しい端末を知らせ、本人が一覧・削除できる。警告 `new_device` を評価する |
 | `login_risk` | `device_recognition` | ログインのときにリスクの種類 `device`・`ip` の点数をセッションに入れる |
 | `bot_protection` | ― | ログインの入口でボットの確認（CAPTCHA・Turnstile など）を求める |
@@ -42,8 +42,12 @@ roadmap の M9 の「リスクに応じた追加認証、新しい端末の検�
 
 ### アカウント単位のロックアウト（`account_lockout`）
 
-- 数えるのは推測で当てられる照合の**失敗**だけ：パスワードのログイン（メールアドレスのブラインドインデックスごと）と、2 要素目の
-  コード（TOTP と、汎用の認証方式の 2 要素目。ユーザーごと）。接続元を問わずに数える（接続元を変えても続きから数える）
+- 数えるのは推測で当てられる照合の**失敗**だけ：ログイン ID（メールアドレス）で本人を決める 1 要素目（パスワードなど。メール
+  アドレスのブラインドインデックスごと）と、2 要素目（TOTP と、汎用の認証方式の 2 要素目。ユーザーごと）。接続元を問わずに
+  数える（接続元を変えても続きから数える）
+- 数えるのは認証方式のコアのサービス（`authn/credential`。ADR 0101）：方式専用のパス（`/v1/login/password`・
+  `/v1/login/second-factor:verify`）も汎用のパス（`/v1/login/methods/{method}:complete`・2 要素目）も同じところを通る。
+  ログイン ID の確認（`LoginUser`）でロックを確かめ、方式の照合（トランザクションの外の `Complete`）の結果で数える
 - メールのコード・リンク、passkey、外部 IdP は数えない。メールのフローは回数の上限とフローごとの試行の上限を持ち、passkey は推測で
   当てられない。ロックされたアカウントでも本人はメールや passkey で入れる（第三者に本人を締め出させない）
 - 段階
@@ -56,7 +60,7 @@ roadmap の M9 の「リスクに応じた追加認証、新しい端末の検�
   ロックされる。応答の形・状態コード・`Retry-After` は有無で変わらない。応答時間は `min_response_time` で揃える（4.9）
 - 状態は EphemeralStore に置く（レートリミットと同じ。複数インスタンスでは共有できるストアが要る）。Storage には書かない
   （失敗のたびに DB に書かない。消えても守りが一時的に緩むだけで、レートリミットは残る）
-- 監査ログ：ロックしたとき `account.locked`（`scope`（`password` / `second_factor`）・`until`・`level`。アカウントがあるときだけ。
+- 監査ログ：ロックしたとき `account.locked`（`scope`（`login_id` / `second_factor`）・`until`・`level`。アカウントがあるときだけ。
   無いアドレスのロックは記録しない）、運営者が解いたとき `account.unlocked`
 - 管理 API：`GET /v1/admin/users/{user_id}/lockout`（状態）と `POST /v1/admin/users/{user_id}:unlock`（ユーザーのすべての
   メールアドレスと 2 要素目のロック・待ち時間・失敗の回数・ロックの回数を消す）。権限は運営者による認証情報の無効化と同じ `credentials:revoke`（owner・admin・security）

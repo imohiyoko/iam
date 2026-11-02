@@ -7,12 +7,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imohiyoko/iam/adapters/botcheck/dev"
-	ephemeral "github.com/imohiyoko/iam/adapters/ephemeral/memory"
 	"github.com/imohiyoko/iam/authn/botcheck"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/port"
 )
+
+// tokenVerifier は値が一致すれば通す。
+type tokenVerifier string
+
+func (v tokenVerifier) Verify(_ context.Context, token, _ string) error {
+	if token != string(v) {
+		return port.ErrBotRejected
+	}
+	return nil
+}
 
 type broken struct{}
 
@@ -20,11 +28,11 @@ func (broken) Verify(context.Context, string, string) error { return errors.New(
 
 func guard(mode botcheck.Mode, v port.BotVerifier) (*botcheck.Guard, *clock.Fake) {
 	clk := clock.NewFake(time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
-	return &botcheck.Guard{Verifier: v, Cache: ephemeral.New(clk), Clock: clk, Mode: mode, AfterFailures: 3, Window: 10 * time.Minute}, clk
+	return &botcheck.Guard{Verifier: v, Cache: newStore(clk), Clock: clk, Mode: mode, AfterFailures: 3, Window: 10 * time.Minute}, clk
 }
 
 func TestAlways(t *testing.T) {
-	g, _ := guard(botcheck.ModeAlways, dev.Verifier{Token: "ok"})
+	g, _ := guard(botcheck.ModeAlways, tokenVerifier("ok"))
 	ctx := context.Background()
 	for _, tok := range []string{"", "ng", strings.Repeat("x", 5000)} {
 		if err := g.Check(ctx, "r", "203.0.113.1", tok); !errors.Is(err, botcheck.ErrRequired) {
@@ -42,7 +50,7 @@ func TestAlways(t *testing.T) {
 }
 
 func TestSuspicious(t *testing.T) {
-	g, clk := guard(botcheck.ModeSuspicious, dev.Verifier{Token: "ok"})
+	g, clk := guard(botcheck.ModeSuspicious, tokenVerifier("ok"))
 	ctx := context.Background()
 	for range 3 {
 		if err := g.Check(ctx, "r", "2001:db8::1", ""); err != nil {

@@ -377,7 +377,12 @@ Group のネスト、Org 階層（M7）。
 - [x] 汎用の認証情報を、本人と運営者の一覧・無効化、消去、統合、フィーチャーの無効化、書き出しと読み込みで扱う
 - [x] HOTP（RFC 4226。フィーチャー `hotp`）：look-ahead と再同期、同時の使用の拒否、RFC のテストベクタ
 - [ ] 外部 Authenticator のアダプタ（HTTP・gRPC）
-- [ ] passkey・TOTP・パスワードを 1 方式ずつ `authn_credentials` へ移す
+- [ ] 方式専用の古い表（`authn_totp_credentials`・`authn_password_credentials`）と、その Repository を消す（ADR 0101 の次のリリース）
+- [x] TOTP とパスワードを `authn/method/totp`・`authn/method/password` に移し、`authn_credentials` に置く（ADR 0101）。
+  完了の条件：方式専用の表の行（無効化したものも）が起動で移り、台帳に記録され、移す前のバイナリが起動を拒む。汎用のパスと方式専用の
+  パスが同じ処理で動き、amr・AAL・acr と既存のテストが変わらない。パスワードのハッシュを直列のトランザクションの外で計算する。
+  メモリ・SQLite・PostgreSQL で移行に使う Storage の操作の契約テストが通る
+- [ ] passkey を `authn_credentials` へ移す
 - [ ] 方式のペイロードの JSON Schema と OpenAPI の `oneOf`、ホスト型のログイン画面への表示
 
 #### acr・AAL と step-up（ADR 0093）
@@ -440,8 +445,8 @@ Group のネスト、Org 階層（M7）。
 **ゴール**：接続元を変えた総当たりをアカウント単位で止め、知らない端末や場所からのログインを本人に知らせてポリシーで step-up を
 求められ、ボットには人の確認を求められる。どれも既定オフで、アカウントの有無を漏らさない。
 
-- [x] フィーチャー `account_lockout`：パスワードはメールアドレスのブラインドインデックス、2要素目のコードはユーザーごとに、接続元を
-  問わず失敗を数え、待ち時間を倍々にかけ、しきい値でロックする（続けてロックされるたびに長く）。無いアドレスも同じ応答（`429`）
+- [x] フィーチャー `account_lockout`：ログイン ID で本人を決める1要素目（パスワードなど）はメールアドレスのブラインドインデックス、
+  2要素目はユーザーごとに、接続元を問わず失敗を数え（方式専用のパスと汎用のパスで同じ）、待ち時間を倍々にかけ、しきい値でロックする（続けてロックされるたびに長く）。無いアドレスも同じ応答（`429`）
 - [x] ロックを監査ログ `account.locked` に残し、運営者が `GET /v1/admin/users/{id}/lockout` で見て `POST …:unlock` で解ける（`account.unlocked`）
 - [x] フィーチャー `device_recognition`：`__Host-` の HttpOnly の Cookie（256 bit の乱数）で端末を覚え、記録は暗号化してブラインドインデックスで引く
 - [x] 前に端末を持っていたユーザーの新しい端末からのログインを、ID だけの通知 `new_device_login` と警告 `new_device` で知らせる

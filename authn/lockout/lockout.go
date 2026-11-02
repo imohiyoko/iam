@@ -24,9 +24,10 @@ var Feature = feature.Feature{Name: feature.AccountLockout, DataVersion: 1}
 
 // 数える照合の種類（監査ログの scope）。
 const (
-	// ScopePassword はパスワードのログイン。対象はメールアドレスのブラインドインデックス（無いアドレスも同じに数える）。
-	ScopePassword = "password"
-	// ScopeSecondFactor は 2 要素目のコード（TOTP と汎用の認証方式）。対象はユーザーの内部 ID。
+	// ScopeLoginID はログイン ID（メールアドレス）で本人を決める1要素目（パスワードなど）。対象はメールアドレスの
+	// ブラインドインデックス（無いアドレスも同じに数える）。
+	ScopeLoginID = "login_id"
+	// ScopeSecondFactor は 2 要素目（TOTP と汎用の認証方式）。対象はユーザーの内部 ID。
 	ScopeSecondFactor = "second_factor"
 )
 

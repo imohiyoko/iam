@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	ephemeral "github.com/imohiyoko/iam/adapters/ephemeral/memory"
 	"github.com/imohiyoko/iam/authn/lockout"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/ratelimit"
@@ -14,7 +13,7 @@ import (
 
 func guard() (*lockout.Guard, *clock.Fake) {
 	clk := clock.NewFake(time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
-	return &lockout.Guard{Cache: ephemeral.New(clk), Clock: clk, Config: lockout.Config{Threshold: 5, Window: 15 * time.Minute,
+	return &lockout.Guard{Cache: newStore(clk), Clock: clk, Config: lockout.Config{Threshold: 5, Window: 15 * time.Minute,
 		LockDuration: 10 * time.Minute, MaxLockDuration: 30 * time.Minute, DelayAfter: 2, BaseDelay: time.Second, MaxDelay: 4 * time.Second}}, clk
 }
 
@@ -32,10 +31,10 @@ func TestDelaysThenLock(t *testing.T) {
 	ctx := context.Background()
 	fail := func() *lockout.Lock {
 		t.Helper()
-		if err := g.Check(ctx, "r", lockout.ScopePassword, "alice"); err != nil {
+		if err := g.Check(ctx, "r", lockout.ScopeLoginID, "alice"); err != nil {
 			t.Fatalf("check before failure: %v", err)
 		}
-		l, err := g.Failed(ctx, "r", lockout.ScopePassword, "alice")
+		l, err := g.Failed(ctx, "r", lockout.ScopeLoginID, "alice")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,11 +46,11 @@ func TestDelaysThenLock(t *testing.T) {
 		if l := fail(); l != nil {
 			t.Fatalf("locked early at %d", i)
 		}
-		if got := retry(t, g.Check(ctx, "r", lockout.ScopePassword, "alice")); got != want {
+		if got := retry(t, g.Check(ctx, "r", lockout.ScopeLoginID, "alice")); got != want {
 			t.Fatalf("delay %d = %s, want %s", i, got, want)
 		}
 		// ほかの対象・ほかの realm・ほかの種類には効かない。
-		for _, err := range []error{g.Check(ctx, "r", lockout.ScopePassword, "bob"), g.Check(ctx, "r2", lockout.ScopePassword, "alice"),
+		for _, err := range []error{g.Check(ctx, "r", lockout.ScopeLoginID, "bob"), g.Check(ctx, "r2", lockout.ScopeLoginID, "alice"),
 			g.Check(ctx, "r", lockout.ScopeSecondFactor, "alice")} {
 			if err != nil {
 				t.Fatalf("leaked to another subject: %v", err)
@@ -64,10 +63,10 @@ func TestDelaysThenLock(t *testing.T) {
 	if l == nil || l.Level != 1 || !l.Until.Equal(clk.Now().Add(10*time.Minute)) {
 		t.Fatalf("lock = %+v", l)
 	}
-	if got := retry(t, g.Check(ctx, "r", lockout.ScopePassword, "alice")); got != 10*time.Minute {
+	if got := retry(t, g.Check(ctx, "r", lockout.ScopeLoginID, "alice")); got != 10*time.Minute {
 		t.Fatalf("lock retry = %s", got)
 	}
-	st, err := g.Status(ctx, "r", lockout.ScopePassword, "alice")
+	st, err := g.Status(ctx, "r", lockout.ScopeLoginID, "alice")
 	if err != nil || st.LockedUntil == nil || st.Level != 1 || st.Failures != 0 || !st.Locked() {
 		t.Fatalf("status = %+v, %v", st, err)
 	}
@@ -127,13 +126,13 @@ func TestWindowExpires(t *testing.T) {
 	ctx := context.Background()
 	for range 4 {
 		clk.Advance(5 * time.Second)
-		if _, err := g.Failed(ctx, "r", lockout.ScopePassword, "a"); err != nil {
+		if _, err := g.Failed(ctx, "r", lockout.ScopeLoginID, "a"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// 窓が過ぎれば数え直すので、次の失敗ではロックしない。
 	clk.Advance(16 * time.Minute)
-	if l, err := g.Failed(ctx, "r", lockout.ScopePassword, "a"); err != nil || l != nil {
+	if l, err := g.Failed(ctx, "r", lockout.ScopeLoginID, "a"); err != nil || l != nil {
 		t.Fatalf("after window = %+v, %v", l, err)
 	}
 }
@@ -141,16 +140,16 @@ func TestWindowExpires(t *testing.T) {
 func TestNilGuard(t *testing.T) {
 	var g *lockout.Guard
 	ctx := context.Background()
-	if err := g.Check(ctx, "r", lockout.ScopePassword, "a"); err != nil {
+	if err := g.Check(ctx, "r", lockout.ScopeLoginID, "a"); err != nil {
 		t.Fatal(err)
 	}
-	if l, err := g.Failed(ctx, "r", lockout.ScopePassword, "a"); l != nil || err != nil {
+	if l, err := g.Failed(ctx, "r", lockout.ScopeLoginID, "a"); l != nil || err != nil {
 		t.Fatal(l, err)
 	}
-	if err := g.Succeeded(ctx, "r", lockout.ScopePassword, "a"); err != nil {
+	if err := g.Succeeded(ctx, "r", lockout.ScopeLoginID, "a"); err != nil {
 		t.Fatal(err)
 	}
-	if st, err := g.Unlock(ctx, "r", lockout.ScopePassword, "a"); err != nil || st.Locked() {
+	if st, err := g.Unlock(ctx, "r", lockout.ScopeLoginID, "a"); err != nil || st.Locked() {
 		t.Fatal(st, err)
 	}
 }

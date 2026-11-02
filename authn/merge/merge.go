@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/imohiyoko/iam/authn/account"
@@ -20,7 +21,6 @@ import (
 	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/session"
-	"github.com/imohiyoko/iam/authn/totp"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -235,8 +235,9 @@ func (s *Service) move(ctx context.Context, tx port.Tx, from, into port.User, pe
 		name string
 		fn   func(context.Context, port.Tx, port.User, port.User) (int, error)
 	}{
-		{"emails", s.moveEmails}, {"identities", s.moveIdentities}, {"passkeys", movePasskeys}, {"totp", s.moveTOTP}, {"credentials", s.moveCredentials},
-		{"passwords", s.movePassword}, {"role_bindings", bindings}, {"groups", s.moveGroups}, {"attributes", s.moveAttributes},
+		// TOTP とパスワードは1人に1つなので、汎用の認証情報を移す前に、統合先にあるものと重なる統合元のものを無効化する。
+		{"emails", s.moveEmails}, {"identities", s.moveIdentities}, {"passkeys", movePasskeys}, {"totp", s.moveSingle(method.TOTP)},
+		{"passwords", s.moveSingle(method.Password)}, {"credentials", s.moveCredentials}, {"role_bindings", bindings}, {"groups", s.moveGroups}, {"attributes", s.moveAttributes},
 	}
 	for _, st := range steps {
 		if n[st.name], err = st.fn(ctx, tx, from, into); err != nil {
@@ -328,7 +329,10 @@ func (s *Service) moveCredentials(ctx context.Context, tx port.Tx, from, into po
 		if err := tx.Credentials().UpdateData(ctx, c.RealmID, c.ID, c.Data, ct, c.DataVersion); err != nil {
 			return 0, err
 		}
-		n++
+		// TOTP とパスワードは moveSingle が数える。
+		if c.Method != method.TOTP && c.Method != method.Password {
+			n++
+		}
 	}
 	if _, err := tx.Credentials().MoveUser(ctx, from.RealmID, from.ID, into.ID); err != nil {
 		return 0, err
@@ -336,63 +340,33 @@ func (s *Service) moveCredentials(ctx context.Context, tx port.Tx, from, into po
 	return n, nil
 }
 
-// moveTOTP は統合先に TOTP が無ければ統合元の有効な TOTP を移し、統合元のものは無効化する。
-func (s *Service) moveTOTP(ctx context.Context, tx port.Tx, from, into port.User) (int, error) {
-	mine, err := tx.TOTP().ListByUser(ctx, into.RealmID, into.ID)
-	if err != nil {
-		return 0, err
-	}
-	has := false
-	for _, c := range mine {
-		has = has || c.RevokedAt == nil
-	}
-	theirs, err := tx.TOTP().ListByUser(ctx, from.RealmID, from.ID)
-	if err != nil {
-		return 0, err
-	}
-	now, n := s.Clock.Now(), 0
-	for _, c := range theirs {
-		if c.RevokedAt != nil {
-			continue
-		}
-		if !has {
-			ct, err := s.recrypt(ctx, tx, from.ID, into.ID, c.SecretCiphertext, totp.SecretAAD)
-			if err != nil {
-				return 0, err
-			}
-			if err := tx.TOTP().Create(ctx, port.TOTPCredential{ID: id.New(id.TOTP), PublicID: id.NewExternal(id.TOTP), RealmID: c.RealmID,
-				UserID: into.ID, SecretCiphertext: ct, LastUsedStep: c.LastUsedStep, CreatedAt: c.CreatedAt}); err != nil {
-				return 0, err
-			}
-			has, n = true, n+1
-		}
-		if err := tx.TOTP().Revoke(ctx, c.RealmID, c.ID, now, ReasonMerged); err != nil {
+// moveSingle は1人に1つの方式（TOTP・パスワード。ADR 0101）の手順を返す。統合先に有効なものがあれば、統合元の有効なものは
+// 無効化して残す（moveCredentials で移しても使えない）。無ければ統合元のものを moveCredentials が移す。移す数を返す。
+func (s *Service) moveSingle(name string) func(context.Context, port.Tx, port.User, port.User) (int, error) {
+	return func(ctx context.Context, tx port.Tx, from, into port.User) (int, error) {
+		mine, err := tx.Credentials().ListByUser(ctx, into.RealmID, into.ID, name)
+		if err != nil {
 			return 0, err
 		}
-	}
-	return n, nil
-}
-
-// movePassword は統合先にパスワードが無ければ統合元のものを移し、統合元のものは無効化する。
-func (s *Service) movePassword(ctx context.Context, tx port.Tx, from, into port.User) (int, error) {
-	theirs, err := tx.Passwords().GetActive(ctx, from.RealmID, from.ID)
-	if errors.Is(err, errs.NotFound) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	n := 0
-	if _, err := tx.Passwords().GetActive(ctx, into.RealmID, into.ID); errors.Is(err, errs.NotFound) {
-		if err := tx.Passwords().Create(ctx, port.PasswordCredential{ID: id.New(id.Password), RealmID: theirs.RealmID, UserID: into.ID,
-			Hash: theirs.Hash, CreatedAt: theirs.CreatedAt}); err != nil {
+		has := slices.ContainsFunc(mine, func(c port.Credential) bool { return c.RevokedAt == nil })
+		theirs, err := tx.Credentials().ListByUser(ctx, from.RealmID, from.ID, name)
+		if err != nil {
 			return 0, err
 		}
-		n = 1
-	} else if err != nil {
-		return 0, err
+		now, n := s.Clock.Now(), 0
+		for _, c := range theirs {
+			switch {
+			case c.RevokedAt != nil:
+			case has:
+				if err := tx.Credentials().Revoke(ctx, c.RealmID, c.ID, now, ReasonMerged); err != nil {
+					return 0, err
+				}
+			default:
+				has, n = true, n+1
+			}
+		}
+		return n, nil
 	}
-	return n, tx.Passwords().Revoke(ctx, theirs.RealmID, theirs.ID, s.Clock.Now(), ReasonMerged)
 }
 
 // moveBindings はロールの付与を統合先に付け直す（同じ付与が既にあれば、統合元の付与を消すだけ）。個人 Org personal での

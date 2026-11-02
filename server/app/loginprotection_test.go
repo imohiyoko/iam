@@ -102,7 +102,7 @@ func TestAccountLockoutPassword(t *testing.T) {
 		t.Fatalf("locked, right password: %d %v %q", code, res, retry)
 	}
 	locked := l.auditOf(t, "account.locked")
-	if len(locked) != 1 || locked[0].Details["user_id"] != patID || locked[0].Details["scope"] != "password" {
+	if len(locked) != 1 || locked[0].Details["user_id"] != patID || locked[0].Details["scope"] != "login_id" {
 		t.Fatalf("account.locked = %+v", locked)
 	}
 	if strings.Contains(l.e.out.String(), "nobody@example.com") {
@@ -110,7 +110,7 @@ func TestAccountLockoutPassword(t *testing.T) {
 	}
 
 	code, st := l.adminDo(t, "GET", owner, "/v1/admin/users/"+patID+"/lockout", nil)
-	pw, _ := st["password"].(map[string]any)
+	pw, _ := st["login_id"].(map[string]any)
 	if code != 200 || st["locked"] != true || pw["locked_until"] == nil || pw["level"] != float64(1) {
 		t.Fatalf("lockout: %d %v", code, st)
 	}
@@ -330,12 +330,12 @@ func TestLoginRiskStepUp(t *testing.T) {
 	jar := ""
 	l.device = &jar
 	l.hdr = []string{"X-Forwarded-For", "198.51.100.10"}
-	_, cookie := l.login(t, "pat@example.com")
+	l.login(t, "pat@example.com")
 	if got := l.loginRisk(t); got["device"] != float64(60) || got["ip"] != float64(0) {
 		t.Fatalf("first login: %v", got)
 	}
 	// 2 回目は知っている端末だが、確かめていない（メールのログインは AAL1）。
-	_, cookie = l.login(t, "pat@example.com")
+	_, cookie := l.login(t, "pat@example.com")
 	if got := l.loginRisk(t); got["device"] != float64(30) || got["ip"] != float64(0) {
 		t.Fatalf("known unconfirmed device: %v", got)
 	}
@@ -427,4 +427,34 @@ func TestBotProtection(t *testing.T) {
 			t.Fatalf("after the window: %d %v", code, res)
 		}
 	})
+}
+
+// 汎用の方式のパス（/v1/login/methods/password）も、方式専用のパスと同じロックアウトを数える（ADR 0101、0105）。
+func TestAccountLockoutGenericMethodPath(t *testing.T) {
+	l := newProtectEnv(t, []string{feature.AccountLockout}, func(c *config.Config) { c.Security.Lockout.DelayAfter = 0 }, nil)
+	l.strongUser(t, "pat@example.com")
+	generic := func(pw string) (int, map[string]any) {
+		t.Helper()
+		status, ch, _ := l.post(t, "", "/v1/login/methods/password:begin", nil)
+		if status != 200 {
+			t.Fatalf("begin: %d %v", status, ch)
+		}
+		status, res, _ := l.post(t, "", "/v1/login/methods/password:complete", map[string]any{"flow_id": ch["flow_id"],
+			"payload": map[string]any{"email": "pat@example.com", "password": pw}})
+		return status, res
+	}
+	for i := range 2 {
+		if code, res := generic("wrong"); code != 401 {
+			t.Fatalf("generic %d: %d %v", i, code, res)
+		}
+		if code, res, _ := l.pwFrom(t, "198.51.100.1", "pat@example.com", "wrong"); code != 401 {
+			t.Fatalf("dedicated %d: %d %v", i, code, res)
+		}
+	}
+	if code, res := generic(acrPassword); code != 429 || res["error"] != "rate_limited" {
+		t.Fatalf("generic after the lock: %d %v", code, res)
+	}
+	if code, res, _ := l.pwFrom(t, "198.51.100.1", "pat@example.com", acrPassword); code != 429 {
+		t.Fatalf("dedicated after the lock: %d %v", code, res)
+	}
 }

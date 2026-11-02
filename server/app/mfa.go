@@ -6,9 +6,10 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/imohiyoko/iam/authn/credential"
+	totpm "github.com/imohiyoko/iam/authn/method/totp"
 	"github.com/imohiyoko/iam/authn/passkey"
 	"github.com/imohiyoko/iam/authn/session"
-	"github.com/imohiyoko/iam/authn/totp"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
@@ -111,27 +112,33 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 		return fail, nil
 	}
 	c := s.a.clientOf(ctx)
-	f := session.SecondFactor{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}
-	usePasskey := deref(req.Body.TotpCode) == "" && req.Body.Credential != nil && s.a.passkeys != nil
-	// TOTP のコードはアカウント単位のロックアウトで数える（ADR 0105。passkey は推測で当てられないので数えない）。
-	useCode := deref(req.Body.TotpCode) != ""
-	if useCode {
-		if err := s.a.secondFactorLocked(ctx, au.PrincipalID); err != nil {
-			if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
-				return publicapi.VerifySecondFactor429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
-			}
+	if code := deref(req.Body.TotpCode); code != "" {
+		// TOTP は汎用の方式（ADR 0101）を、フロー無しの1回の要求で呼ぶ。
+		p, err := json.Marshal(map[string]string{"code": code})
+		if err != nil {
 			return nil, err
 		}
+		is, err := s.a.credentials.SecondFactorOnce(ctx, s.a.realm.ID, au.PrincipalID, au.SessionID, totpm.Name, p,
+			credential.Client{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID})
+		if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
+			return publicapi.VerifySecondFactor429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
+		}
+		if d, ok := errors.AsType[errs.Denial](err); ok {
+			return publicapi.VerifySecondFactor403JSONResponse{DeniedJSONResponse: denied(d)}, nil
+		}
+		switch {
+		case errors.Is(err, errs.AuthenticationFailed), errors.Is(err, session.ErrNotRestricted), errors.Is(err, credential.ErrUnknownMethod):
+			return fail, nil
+		case err != nil:
+			return nil, err
+		}
+		return publicapi.VerifySecondFactor200JSONResponse(s.loginResult(ctx, is, au.PublicID, false, req.Body.ReturnToken)), nil
 	}
+	f := session.SecondFactor{IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID}
+	usePasskey := req.Body.Credential != nil && s.a.passkeys != nil
 	var is session.Issued
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		switch {
-		case deref(req.Body.TotpCode) != "":
-			t, err := s.a.totp.Verify(ctx, tx, s.a.realm.ID, au.PrincipalID, *req.Body.TotpCode)
-			if err != nil {
-				return err
-			}
-			f.AMR, f.CredentialID = []string{totp.AMR}, t.ID
 		case usePasskey:
 			resp, err := json.Marshal(*req.Body.Credential)
 			if err != nil {
@@ -143,7 +150,7 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 			}
 			f.AMR, f.CredentialID = []string{passkey.AMRKey}, p.ID
 		default:
-			return totp.ErrAuthFailed
+			return credential.ErrAuthFailed
 		}
 		var err error
 		is, err = s.a.sessions.CompleteSecondFactor(ctx, tx, s.a.realm.ID, au.SessionID, f)
@@ -152,11 +159,6 @@ func (s publicServer) VerifySecondFactor(ctx context.Context, req publicapi.Veri
 	if usePasskey {
 		// 失敗でもフローは使い終わったので Cookie を消す。
 		s.setPasskeyCookie(ctx, "", -1)
-	}
-	if useCode && (err == nil || errors.Is(err, errs.AuthenticationFailed)) {
-		if err := s.a.secondFactorResult(ctx, au, err != nil); err != nil {
-			return nil, err
-		}
 	}
 	if ex, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		return publicapi.VerifySecondFactor429JSONResponse{RateLimitedJSONResponse: rateLimited(ex)}, nil
@@ -186,14 +188,22 @@ func (s publicServer) StartRegisterTOTP(ctx context.Context, _ publicapi.StartRe
 	if s.stale(ctx, au) {
 		return publicapi.StartRegisterTOTP401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
-	e, err := s.a.totp.BeginEnroll(ctx, s.a.realm.ID, au.PrincipalID)
+	// 汎用の方式の登録（ADR 0101）。フロー ID は汎用の `/v1/me/credentials/totp:enroll-complete` でも使える。
+	ch, err := s.a.credentials.EnrollBegin(ctx, s.a.realm.ID, au.PrincipalID, totpm.Name, nil, credential.EnrollOptions{RecentAuth: true})
 	if code, ok := stateCode(err); ok {
 		return publicapi.StartRegisterTOTP409JSONResponse{ConflictJSONResponse: publicapi.ConflictJSONResponse{Error: code}}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return publicapi.StartRegisterTOTP200JSONResponse{FlowId: e.FlowID, Secret: e.Secret, Uri: e.URI, ExpiresAt: e.ExpiresAt}, nil
+	var out struct {
+		Secret string `json:"secret"`
+		URI    string `json:"uri"`
+	}
+	if err := json.Unmarshal(ch.Payload, &out); err != nil {
+		return nil, err
+	}
+	return publicapi.StartRegisterTOTP200JSONResponse{FlowId: ch.FlowID, Secret: out.Secret, Uri: out.URI, ExpiresAt: ch.ExpiresAt}, nil
 }
 
 func (s publicServer) ConfirmRegisterTOTP(ctx context.Context, req publicapi.ConfirmRegisterTOTPRequestObject) (publicapi.ConfirmRegisterTOTPResponseObject, error) {
@@ -206,22 +216,27 @@ func (s publicServer) ConfirmRegisterTOTP(ctx context.Context, req publicapi.Con
 		return publicapi.ConfirmRegisterTOTP401JSONResponse{UnauthenticatedJSONResponse: reauthRequired()}, nil
 	}
 	c := s.a.clientOf(ctx)
-	var t port.TOTPCredential
+	p, err := json.Marshal(map[string]string{"code": req.Body.Code})
+	if err != nil {
+		return nil, err
+	}
+	var t port.Credential
 	var is session.Issued
 	var codes *[]string
 	upgrade := au.Restriction == port.RestrictionEnroll
-	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		var err error
-		t, err = s.a.totp.ConfirmEnroll(ctx, tx, s.a.realm.ID, au.PrincipalID, req.Body.FlowId, req.Body.Code, au.Actor(), c.RequestID)
+	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		en, err := s.a.credentials.EnrollComplete(ctx, tx, credential.EnrollInput{RealmID: s.a.realm.ID, UserID: au.PrincipalID,
+			Method: totpm.Name, FlowID: req.Body.FlowId, Payload: p, Actor: au.Actor(), RequestID: c.RequestID})
 		if err != nil {
 			return err
 		}
+		t = en.Credential
 		if codes, err = s.initialCodes(ctx, tx, au); err != nil || !upgrade {
 			return err
 		}
 		// 登録だけのセッションは、登録に使ったコードを2要素目として通常のセッションに替える。
 		is, err = s.a.sessions.CompleteSecondFactor(ctx, tx, s.a.realm.ID, au.SessionID, session.SecondFactor{
-			AMR: []string{totp.AMR}, CredentialID: t.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
+			AMR: []string{totpm.AMR}, CredentialID: t.ID, IP: c.IP, UserAgent: c.UserAgent, RequestID: c.RequestID,
 		})
 		return err
 	})
@@ -265,6 +280,6 @@ func (s publicServer) RevokeMyTOTP(ctx context.Context, req publicapi.RevokeMyTO
 	return publicapi.RevokeMyTOTP204Response{}, nil
 }
 
-func myTOTP(t port.TOTPCredential) publicapi.MyTOTP {
+func myTOTP(t port.Credential) publicapi.MyTOTP {
 	return publicapi.MyTOTP{Id: t.PublicID, CreatedAt: t.CreatedAt}
 }

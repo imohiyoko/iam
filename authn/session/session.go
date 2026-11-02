@@ -559,16 +559,13 @@ func SecondFactors(ctx context.Context, tx port.Tx, realmID, userID string, meth
 	if slices.ContainsFunc(ps, func(p port.Passkey) bool { return p.RevokedAt == nil }) {
 		out = append(out, SecondFactorPasskey)
 	}
-	ts, err := tx.TOTP().ListByUser(ctx, realmID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if slices.ContainsFunc(ts, func(c port.TOTPCredential) bool { return c.RevokedAt == nil }) {
-		out = append(out, SecondFactorTOTP)
-	}
 	cs, err := tx.Credentials().ListByUser(ctx, realmID, userID, "")
 	if err != nil {
 		return nil, err
+	}
+	// TOTP（コアの方式。ADR 0101）は方式の組に関わらず、passkey の次に置く（従来の順）。
+	if slices.ContainsFunc(cs, func(c port.Credential) bool { return c.RevokedAt == nil && c.Method == method.TOTP }) {
+		out = append(out, SecondFactorTOTP)
 	}
 	for _, c := range cs {
 		if c.RevokedAt == nil && methods.Supports(c.Method, port.UsageSecondFactor) && !slices.Contains(out, c.Method) {
@@ -956,7 +953,6 @@ func (m *Manager) checkSession(ctx context.Context, tx port.Tx, s port.Session, 
 func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 	var identities []port.Identity
 	var passkeys []port.Passkey
-	var totps []port.TOTPCredential
 	var creds []port.Credential
 	for _, c := range s.AuthCredentialIDs {
 		var revoked, found bool
@@ -985,19 +981,8 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 					found, revoked = true, p.RevokedAt != nil
 				}
 			}
-		case strings.HasPrefix(c, string(id.TOTP)+"_"):
-			if totps == nil {
-				var err error
-				if totps, err = tx.TOTP().ListByUser(ctx, s.RealmID, s.PrincipalID); err != nil {
-					return err
-				}
-			}
-			for _, t := range totps {
-				if t.ID == c {
-					found, revoked = true, t.RevokedAt != nil
-				}
-			}
-		case strings.HasPrefix(c, string(id.Credential)+"_"):
+		// 方式専用の表から移した TOTP（ADR 0101）は otp_ の ID のまま汎用の認証情報にある。
+		case strings.HasPrefix(c, string(id.TOTP)+"_"), strings.HasPrefix(c, string(id.Credential)+"_"):
 			if creds == nil {
 				var err error
 				if creds, err = tx.Credentials().ListByUser(ctx, s.RealmID, s.PrincipalID, ""); err != nil {

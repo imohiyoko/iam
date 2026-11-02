@@ -179,8 +179,8 @@ paths:
       operationId: getUserLockout
       summary: ユーザーのアカウント単位のロックアウトの状態（フィーチャー account_lockout。ADR 0105）
       description: |
-        権限 `credentials:revoke`。フィーチャーが動いていなければ 404。パスワードはユーザーのすべてのメールアドレスのうち
-        いちばん厳しい状態を返す。
+        権限 `credentials:revoke`。フィーチャーが動いていなければ 404。`login_id`（パスワードなどログイン ID で本人を決める
+        1要素目）はユーザーのすべてのメールアドレスのうちいちばん厳しい状態を返す。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -3267,10 +3267,10 @@ components:
         expires_at: { type: string, format: date-time }
     UserLockout:
       type: object
-      required: [locked, password, second_factor]
+      required: [locked, login_id, second_factor]
       properties:
         locked: { type: boolean, description: どちらかがロックか待ち時間の間か }
-        password: { $ref: "#/components/schemas/LockoutState" }
+        login_id: { $ref: "#/components/schemas/LockoutState" }
         second_factor: { $ref: "#/components/schemas/LockoutState" }
     LockoutState:
       type: object

@@ -652,6 +652,20 @@ func (q *Queries) DeleteFiredScheduledEvents(ctx context.Context, arg DeleteFire
 	return result.RowsAffected()
 }
 
+const deletePassword = `-- name: DeletePassword :exec
+DELETE FROM authn_password_credentials WHERE realm_id = ? AND id = ?
+`
+
+type DeletePasswordParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) DeletePassword(ctx context.Context, arg DeletePasswordParams) error {
+	_, err := q.db.ExecContext(ctx, deletePassword, arg.RealmID, arg.ID)
+	return err
+}
+
 const deleteRecoveryCodes = `-- name: DeleteRecoveryCodes :exec
 DELETE FROM authn_recovery_codes WHERE realm_id = ? AND user_id = ?
 `
@@ -682,6 +696,20 @@ func (q *Queries) DeleteServiceAccount(ctx context.Context, arg DeleteServiceAcc
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const deleteTOTP = `-- name: DeleteTOTP :exec
+DELETE FROM authn_totp_credentials WHERE realm_id = ? AND id = ?
+`
+
+type DeleteTOTPParams struct {
+	RealmID string
+	ID      string
+}
+
+func (q *Queries) DeleteTOTP(ctx context.Context, arg DeleteTOTPParams) error {
+	_, err := q.db.ExecContext(ctx, deleteTOTP, arg.RealmID, arg.ID)
+	return err
 }
 
 const dueScheduledEvents = `-- name: DueScheduledEvents :many
@@ -1585,6 +1613,78 @@ func (q *Queries) LiftSuspension(ctx context.Context, arg LiftSuspensionParams) 
 		arg.ID,
 	)
 	return err
+}
+
+const listAllPasswords = `-- name: ListAllPasswords :many
+SELECT id, realm_id, user_id, hash, created_at, revoked_at, revoke_reason FROM authn_password_credentials ORDER BY id LIMIT ?1
+`
+
+func (q *Queries) ListAllPasswords(ctx context.Context, lim int64) ([]AuthnPasswordCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listAllPasswords, lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnPasswordCredential
+	for rows.Next() {
+		var i AuthnPasswordCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.RealmID,
+			&i.UserID,
+			&i.Hash,
+			&i.CreatedAt,
+			&i.RevokedAt,
+			&i.RevokeReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllTOTP = `-- name: ListAllTOTP :many
+SELECT id, public_id, realm_id, user_id, secret_ciphertext, last_used_step, created_at, revoked_at, revoke_reason FROM authn_totp_credentials ORDER BY id LIMIT ?1
+`
+
+func (q *Queries) ListAllTOTP(ctx context.Context, lim int64) ([]AuthnTotpCredential, error) {
+	rows, err := q.db.QueryContext(ctx, listAllTOTP, lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnTotpCredential
+	for rows.Next() {
+		var i AuthnTotpCredential
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.RealmID,
+			&i.UserID,
+			&i.SecretCiphertext,
+			&i.LastUsedStep,
+			&i.CreatedAt,
+			&i.RevokedAt,
+			&i.RevokeReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listConnections = `-- name: ListConnections :many

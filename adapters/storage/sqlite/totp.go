@@ -54,3 +54,12 @@ func (r totps) Revoke(ctx context.Context, realmID, id string, at time.Time, rea
 	}
 	return mapErr(r.q.RevokeTOTP(ctx, db.RevokeTOTPParams{RevokedAt: nullTime(&at), RevokeReason: reason, RealmID: realmID, ID: id}))
 }
+
+func (r totps) ListAll(ctx context.Context, limit int) ([]port.TOTPCredential, error) {
+	rs, err := r.q.ListAllTOTP(ctx, int64(limit))
+	return rows(rs, err, toTOTP)
+}
+
+func (r totps) Delete(ctx context.Context, realmID, id string) error {
+	return mapErr(r.q.DeleteTOTP(ctx, db.DeleteTOTPParams{RealmID: realmID, ID: id}))
+}

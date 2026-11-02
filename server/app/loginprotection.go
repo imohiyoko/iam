@@ -45,6 +45,7 @@ func (o deviceObserver) Observe(ctx context.Context, tx port.Tx, in session.Devi
 	}
 	// トランザクションが取り消されても、Cookie の値は次のログインでそのまま使う（同じ端末として記録される）。
 	// 認証の Cookie ではないので SameSite=None にし、外部 IdP からのクロスサイトの POST（SAML の ACS など）でも送らせる。
+	// #nosec G124 -- Secure・HttpOnly は付ける。SameSite=None は上の理由（認証には使わず、値だけでは何もできない）。
 	setCookie(ctx, &http.Cookie{Name: a.cookie(deviceCookie), Value: res.Token, Path: "/", Secure: true, HttpOnly: true,
 		SameSite: http.SameSiteNoneMode, MaxAge: int(a.cfg.Security.Devices.CookieTTL.D() / time.Second)})
 	return session.DeviceResult{New: res.New, Risk: res.Risk}, nil
@@ -111,35 +112,9 @@ var deviceCleaner = cleaner{
 }
 
 // ---------------------------------------------------------------------------
-// アカウント単位のロックアウト（2要素目のコード。パスワードは authn/password が数える）
+// アカウント単位のロックアウト（数えるのは authn/credential。ここは運営者の API）
 
-// secondFactorLocked は 2 要素目のコードがロックか待ち時間の間なら *ratelimit.ExceededError を返す。
-func (a *App) secondFactorLocked(ctx context.Context, userID string) error {
-	return a.lockout.Check(ctx, a.realm.ID, lockout.ScopeSecondFactor, userID)
-}
-
-// secondFactorResult は 2 要素目のコードの照合の結果を数える。失敗でロックしたなら監査ログに残す。
-func (a *App) secondFactorResult(ctx context.Context, au auth, failed bool) error {
-	if a.lockout == nil {
-		return nil
-	}
-	if !failed {
-		return a.lockout.Succeeded(ctx, a.realm.ID, lockout.ScopeSecondFactor, au.PrincipalID)
-	}
-	l, err := a.lockout.Failed(ctx, a.realm.ID, lockout.ScopeSecondFactor, au.PrincipalID)
-	if err != nil || l == nil {
-		return err
-	}
-	c := a.clientOf(ctx)
-	if err := a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		return lockout.RecordLocked(ctx, tx, a.deps.Clock, a.realm.ID, au.PublicID, lockout.ScopeSecondFactor, l, c.IP, c.UserAgent, c.RequestID)
-	}); err != nil {
-		a.deps.Logger.WarnContext(ctx, "could not record account lock", "error", err)
-	}
-	return nil
-}
-
-// lockoutSubjects はユーザーのロックアウトの対象（パスワードはすべてのメールアドレス、2要素目はユーザー）。
+// lockoutSubjects はユーザーのログイン ID のロックアウトの対象（すべてのメールアドレス。2要素目はユーザー）。
 func (a *App) lockoutSubjects(ctx context.Context, tx port.Tx, u port.User) ([]string, error) {
 	es, err := tx.Emails().ListByUser(ctx, a.realm.ID, u.ID)
 	if err != nil {
@@ -196,7 +171,7 @@ func (s adminServer) userLockout(ctx context.Context, publicID string, unlock bo
 	}
 	var pw []lockout.Status
 	for _, sub := range subjects {
-		st, err := op(ctx, s.a.realm.ID, lockout.ScopePassword, sub)
+		st, err := op(ctx, s.a.realm.ID, lockout.ScopeLoginID, sub)
 		if err != nil {
 			return out, nil, err
 		}
@@ -206,8 +181,8 @@ func (s adminServer) userLockout(ctx context.Context, publicID string, unlock bo
 	if err != nil {
 		return out, nil, err
 	}
-	out.Password, out.SecondFactor = lockoutStateOut(pw), lockoutStateOut([]lockout.Status{sf})
-	out.Locked = out.Password.LockedUntil != nil || out.Password.WaitUntil != nil || out.SecondFactor.LockedUntil != nil || out.SecondFactor.WaitUntil != nil
+	out.LoginId, out.SecondFactor = lockoutStateOut(pw), lockoutStateOut([]lockout.Status{sf})
+	out.Locked = out.LoginId.LockedUntil != nil || out.LoginId.WaitUntil != nil || out.SecondFactor.LockedUntil != nil || out.SecondFactor.WaitUntil != nil
 	if unlock {
 		c := s.a.clientOf(ctx)
 		err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {

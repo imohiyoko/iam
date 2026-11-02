@@ -111,6 +111,10 @@ func (f *fakeStore) Update(_ context.Context, c port.MethodCredential, data []by
 	return port.MethodCredential{}, errs.New(errs.KindNotFound, "credential")
 }
 
+func (f *fakeStore) Revoke(context.Context, port.MethodCredential, string) error {
+	return errs.New(errs.KindConflict, "not supported")
+}
+
 func env(s *fakeStore) port.MethodEnv {
 	return port.MethodEnv{RealmID: "rlm_1", UserID: "usr_1", Credentials: s, Now: time.Now(), Issuer: "Example", Account: "a@example.com"}
 }
@@ -225,6 +229,10 @@ func (s *staleStore) Create(ctx context.Context, u, l string, d []byte) (port.Me
 
 func (s *staleStore) Update(ctx context.Context, c port.MethodCredential, d []byte) (port.MethodCredential, error) {
 	return s.fakeStore.Update(ctx, c, d)
+}
+
+func (s *staleStore) Revoke(ctx context.Context, c port.MethodCredential, r string) error {
+	return s.fakeStore.Revoke(ctx, c, r)
 }
 
 func TestEnrollBeginRejects(t *testing.T) {

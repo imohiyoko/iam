@@ -2085,7 +2085,7 @@ type UserIdentity struct {
 type UserLockout struct {
 	// Locked どちらかがロックか待ち時間の間か
 	Locked       bool         `json:"locked"`
-	Password     LockoutState `json:"password"`
+	LoginId      LockoutState `json:"login_id"`
 	SecondFactor LockoutState `json:"second_factor"`
 }
 
