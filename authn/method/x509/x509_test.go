@@ -103,7 +103,7 @@ func chainOf(cs ...*x509.Certificate) [][]byte {
 	return out
 }
 
-// run は方式をコアと同じ順（Begin・Preflight・Complete）で呼ぶ。
+// call は方式をコアと同じ形で呼ぶ（ログインと登録の始めはトランザクションの外、登録の完了はトランザクションの中。ADR 0101）。
 type call struct {
 	m      *Method
 	f      *fixture
@@ -113,9 +113,11 @@ type call struct {
 
 func (c call) env(tx port.Tx, chain [][]byte) port.MethodEnv {
 	e := port.MethodEnv{RealmID: c.f.realm, UserID: c.userID, Usage: c.usage, Now: t0, ClientCertificates: chain}
-	if tx != nil {
-		e.Credentials = &method.Store{Tx: tx, Crypter: pii.New(keys{}), RealmID: c.f.realm, Info: c.m.Info(), Now: t0}
+	st := &method.Store{Tx: tx, Crypter: pii.New(keys{}), RealmID: c.f.realm, Info: c.m.Info(), Now: t0}
+	if tx == nil {
+		st.Storage = c.f.st
 	}
+	e.Credentials = st
 	return e
 }
 
@@ -126,36 +128,24 @@ func (c call) login(t *testing.T, begin, complete [][]byte) (port.MethodResult, 
 	if err != nil {
 		return port.MethodResult{}, err
 	}
-	pre, err := c.m.Preflight(ctx, c.env(nil, complete), port.MethodRequest{State: ch.State})
-	if err != nil {
-		return port.MethodResult{}, err
-	}
-	var r port.MethodResult
-	err = c.f.st.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		r, err = c.m.Complete(ctx, c.env(tx, complete), port.MethodRequest{State: ch.State, Preflight: pre})
-		return err
-	})
-	return r, err
+	return c.m.Complete(ctx, c.env(nil, complete), port.MethodRequest{State: ch.State})
 }
 
 func (c call) enroll(t *testing.T, chain [][]byte) (port.MethodEnrollment, error) {
 	t.Helper()
+	return c.enrollWith(t, chain, chain)
+}
+
+func (c call) enrollWith(t *testing.T, begin, complete [][]byte) (port.MethodEnrollment, error) {
+	t.Helper()
 	ctx := context.Background()
-	var ch port.MethodChallenge
-	err := c.f.st.Tx(ctx, func(ctx context.Context, tx port.Tx) (err error) {
-		ch, err = c.m.EnrollBegin(ctx, c.env(tx, chain), port.MethodRequest{})
-		return err
-	})
-	if err != nil {
-		return port.MethodEnrollment{}, err
-	}
-	pre, err := c.m.Preflight(ctx, c.env(nil, chain), port.MethodRequest{State: ch.State})
+	ch, err := c.m.EnrollBegin(ctx, c.env(nil, begin), port.MethodRequest{})
 	if err != nil {
 		return port.MethodEnrollment{}, err
 	}
 	var en port.MethodEnrollment
 	err = c.f.st.Tx(ctx, func(ctx context.Context, tx port.Tx) (err error) {
-		en, err = c.m.EnrollComplete(ctx, c.env(tx, chain), port.MethodRequest{State: ch.State, Preflight: pre})
+		en, err = c.m.EnrollComplete(ctx, c.env(tx, complete), port.MethodRequest{State: ch.State})
 		return err
 	})
 	return en, err
@@ -187,6 +177,10 @@ func TestEnrollAndLoginByFingerprint(t *testing.T) {
 	}
 	if _, err := (call{m: m, f: f, userID: f.users[0], usage: port.UsageSecondFactor}).login(t, chain, chain); err != nil {
 		t.Fatalf("second factor = %v", err)
+	}
+	// 登録を始めた証明書と違う証明書では完了できない。
+	if _, err := (call{m: m, f: f, userID: f.users[1]}).enrollWith(t, chainOf(f.leaf(t, leafOpts{}), f.inter.cert), chain); !failed(err) {
+		t.Fatalf("certificate switched during the enrollment = %v", err)
 	}
 	// 同じ証明書は別の人が登録できない。
 	if _, err := (call{m: m, f: f, userID: f.users[1]}).enroll(t, chain); !errors.Is(err, ErrExists) {
@@ -267,7 +261,7 @@ func TestChainValidation(t *testing.T) {
 		"oversized certificate": {bytes.Repeat([]byte{0x30}, maxCertBytes+1)},
 	}
 	for name, chain := range cases {
-		if _, err := m.Preflight(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chain}, port.MethodRequest{}); !failed(err) {
+		if _, err := m.check(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chain}); !failed(err) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -275,7 +269,7 @@ func TestChainValidation(t *testing.T) {
 	m = f.method(t, func(rc *RealmConfig) {
 		rc.Revocation.Mode, rc.Intermediates = RevocationNone, []string{pemOf(f.inter.cert)}
 	})
-	if _, err := m.Preflight(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chainOf(f.leaf(t, leafOpts{}))}, port.MethodRequest{}); err != nil {
+	if _, err := m.check(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chainOf(f.leaf(t, leafOpts{}))}); err != nil {
 		t.Fatalf("configured intermediate = %v", err)
 	}
 	// 独自の拡張鍵用途（スマートカードのログイン）を受ける設定。
@@ -283,16 +277,16 @@ func TestChainValidation(t *testing.T) {
 		rc.Revocation.Mode, rc.ExtKeyUsages = RevocationNone, []string{"smartcard_logon"}
 	})
 	sc := f.leaf(t, leafOpts{ekuOIDs: []asn1.ObjectIdentifier{oidSmartcardLogon}})
-	if _, err := m.Preflight(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chainOf(sc, f.inter.cert)}, port.MethodRequest{}); err != nil {
+	if _, err := m.check(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chainOf(sc, f.inter.cert)}); err != nil {
 		t.Fatalf("smartcard logon = %v", err)
 	}
-	if _, err := m.Preflight(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chainOf(f.leaf(t, leafOpts{}), f.inter.cert)}, port.MethodRequest{}); !failed(err) {
+	if _, err := m.check(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chainOf(f.leaf(t, leafOpts{}), f.inter.cert)}); !failed(err) {
 		t.Fatalf("client auth when only smartcard logon is accepted = %v", err)
 	}
 }
 
 func preflight(m *Method, chain [][]byte) error {
-	_, err := m.Preflight(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chain}, port.MethodRequest{})
+	_, err := m.check(context.Background(), port.MethodEnv{Now: t0, ClientCertificates: chain})
 	return err
 }
 

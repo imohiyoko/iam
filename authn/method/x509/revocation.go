@@ -18,7 +18,7 @@ import (
 )
 
 // 失効の確認（OCSP（RFC 6960）と CRL（RFC 5280））。ネットワークを使うので、コアは Storage のトランザクションの外
-// （Preflight）で呼ぶ。結果は応答の nextUpdate か cache_max の早い方まで持つ。
+// （Complete・EnrollBegin。ADR 0101）で呼ぶ。結果は応答の nextUpdate か cache_max の早い方まで持つ。
 
 // errRevoked は失効している。fail_open でも拒む。
 var errRevoked = errors.New("certificate revoked")

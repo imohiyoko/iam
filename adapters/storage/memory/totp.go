@@ -3,6 +3,8 @@ package memory
 import (
 	"bytes"
 	"context"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/errs"
@@ -71,5 +73,21 @@ func (r totps) Revoke(_ context.Context, realmID, id string, at time.Time, reaso
 	c = cloneTOTP(c)
 	c.RevokedAt, c.RevokeReason = &at, reason
 	setKey(r.t, r.t.s.totps, id, c)
+	return nil
+}
+
+func (r totps) ListAll(_ context.Context, limit int) ([]port.TOTPCredential, error) {
+	var out []port.TOTPCredential
+	for _, x := range r.t.s.totps {
+		out = append(out, cloneTOTP(x))
+	}
+	slices.SortFunc(out, func(a, b port.TOTPCredential) int { return strings.Compare(a.ID, b.ID) })
+	return out[:min(limit, len(out))], nil
+}
+
+func (r totps) Delete(_ context.Context, realmID, id string) error {
+	if c, ok := r.t.s.totps[id]; ok && c.RealmID == realmID {
+		deleteKey(r.t, r.t.s.totps, id)
+	}
 	return nil
 }

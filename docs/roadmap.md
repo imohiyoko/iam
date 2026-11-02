@@ -377,7 +377,12 @@ Group のネスト、Org 階層（M7）。
 - [x] 汎用の認証情報を、本人と運営者の一覧・無効化、消去、統合、フィーチャーの無効化、書き出しと読み込みで扱う
 - [x] HOTP（RFC 4226。フィーチャー `hotp`）：look-ahead と再同期、同時の使用の拒否、RFC のテストベクタ
 - [ ] 外部 Authenticator のアダプタ（HTTP・gRPC）
-- [ ] passkey・TOTP・パスワードを 1 方式ずつ `authn_credentials` へ移す
+- [ ] 方式専用の古い表（`authn_totp_credentials`・`authn_password_credentials`）と、その Repository を消す（ADR 0101 の次のリリース）
+- [x] TOTP とパスワードを `authn/method/totp`・`authn/method/password` に移し、`authn_credentials` に置く（ADR 0101）。
+  完了の条件：方式専用の表の行（無効化したものも）が起動で移り、台帳に記録され、移す前のバイナリが起動を拒む。汎用のパスと方式専用の
+  パスが同じ処理で動き、amr・AAL・acr と既存のテストが変わらない。パスワードのハッシュを直列のトランザクションの外で計算する。
+  メモリ・SQLite・PostgreSQL で移行に使う Storage の操作の契約テストが通る
+- [ ] passkey を `authn_credentials` へ移す
 - [ ] 方式のペイロードの JSON Schema と OpenAPI の `oneOf`、ホスト型のログイン画面への表示
 
 #### acr・AAL と step-up（ADR 0093）
@@ -430,7 +435,7 @@ Group のネスト、Org 階層（M7）。
 - [x] フィーチャー `x509`（既定オフ）。方式は `authn/method/x509`。設定（`methods.x509.realms.<slug>`）の無い realm では動かない
 - [x] 証明書は mTLS の専用の待ち受け（方式のパスだけを通す）か、`proxies` に書いたプロキシからの要求のヘッダーでだけ受ける。それ以外のヘッダーは読まずに消すテストがある
 - [x] realm のトラストアンカーへの連鎖・期限・鍵用途・拡張鍵用途（clientAuth を明示）・鍵の強さを確かめ、拒むテストがある
-- [x] OCSP と CRL（署名・対象・鮮度）、キャッシュ、既定で fail-closed（`fail_open` でも失効は拒む）。中間 CA の失効も確かめる。確かめは Storage のトランザクションの外（`Preflighter`）
+- [x] OCSP と CRL（署名・対象・鮮度）、キャッシュ、既定で fail-closed（`fail_open` でも失効は拒む）。中間 CA の失効も確かめる。確かめは Storage のトランザクションの外（ログインの完了と登録の始め。ADR 0101）
 - [x] 指紋・SAN の UPN・SAN のメール・主体の DN で、本人が登録した認証情報（検索キーのブラインドインデックス。インデックス鍵の切り替えに追従）を引く。本人による登録と無効化
 - [x] ハードウェアの CA の証明書だけが `sc`（PIN の保証で `pin`・`mfa`）を出し AAL3 に届く。それ以外は `pop` で AAL2 まで。同じ認証情報を 2 要素に数えない
 - [x] SAN の UPN とプロキシのヘッダーの解析にファジングのテストがある

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/id"
@@ -60,14 +61,15 @@ func (s *Service) AdminRevokeCredential(ctx context.Context, tx port.Tx, realmID
 		return s.record(ctx, tx, realmID, "identity.unlinked", actor, requestID,
 			map[string]any{"user_id": u.PublicID, "identity_id": i.PublicID, "connection_id": i.ConnectionID, "reason": ReasonRevokedByAdmin})
 	case string(id.TOTP):
-		c, err := tx.TOTP().GetByPublicID(ctx, realmID, publicID)
-		if err == nil && (c.UserID != u.ID || c.RevokedAt != nil) {
+		// 方式専用の表から移した TOTP（ADR 0101）は otp_ の公開 ID のまま。
+		c, err := credential(ctx, tx, realmID, u.ID, publicID)
+		if err == nil && c.Method != method.TOTP {
 			err = errs.New(errs.KindNotFound, "totp")
 		}
 		if err != nil {
 			return err
 		}
-		if err := tx.TOTP().Revoke(ctx, realmID, c.ID, now, ReasonRevokedByAdmin); err != nil {
+		if err := tx.Credentials().Revoke(ctx, realmID, c.ID, now, ReasonRevokedByAdmin); err != nil {
 			return err
 		}
 		return s.record(ctx, tx, realmID, "totp.revoked", actor, requestID, map[string]any{"user_id": u.PublicID, "totp_id": c.PublicID, "reason": ReasonRevokedByAdmin})
@@ -80,11 +82,14 @@ func (s *Service) AdminRevokeCredential(ctx context.Context, tx port.Tx, realmID
 // AdminRevokePassword はユーザーのパスワードを無効化する（再設定は復旧の手順で行う）。無ければ errs.NotFound。
 // 呼び出し側はユーザーの全セッションを失効させる。
 func (s *Service) AdminRevokePassword(ctx context.Context, tx port.Tx, realmID string, u port.User, actor audit.Actor, requestID string) error {
-	c, err := tx.Passwords().GetActive(ctx, realmID, u.ID)
+	m, err := s.ListMethods(ctx, tx, realmID, u.ID)
 	if err != nil {
 		return err
 	}
-	if err := tx.Passwords().Revoke(ctx, realmID, c.ID, s.Clock.Now(), ReasonRevokedByAdmin); err != nil {
+	if m.Password == nil {
+		return errs.New(errs.KindNotFound, "password")
+	}
+	if err := tx.Credentials().Revoke(ctx, realmID, m.Password.ID, s.Clock.Now(), ReasonRevokedByAdmin); err != nil {
 		return err
 	}
 	return s.record(ctx, tx, realmID, "password.removed", actor, requestID, map[string]any{"user_id": u.PublicID, "reason": ReasonRevokedByAdmin})
@@ -112,7 +117,7 @@ func (s *Service) RevokeAllCredentials(ctx context.Context, tx port.Tx, realmID 
 		out.Identities++
 	}
 	for _, c := range m.TOTP {
-		if err := tx.TOTP().Revoke(ctx, realmID, c.ID, now, ReasonCompromised); err != nil {
+		if err := tx.Credentials().Revoke(ctx, realmID, c.ID, now, ReasonCompromised); err != nil {
 			return Revoked{}, err
 		}
 		out.TOTP++
@@ -124,7 +129,7 @@ func (s *Service) RevokeAllCredentials(ctx context.Context, tx port.Tx, realmID 
 		out.Credentials++
 	}
 	if m.Password != nil {
-		if err := tx.Passwords().Revoke(ctx, realmID, m.Password.ID, now, ReasonCompromised); err != nil && !errors.Is(err, errs.NotFound) {
+		if err := tx.Credentials().Revoke(ctx, realmID, m.Password.ID, now, ReasonCompromised); err != nil && !errors.Is(err, errs.NotFound) {
 			return Revoked{}, err
 		}
 		out.Password = true

@@ -32,6 +32,8 @@ import (
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method"
+	pwm "github.com/imohiyoko/iam/authn/method/password"
+	totpm "github.com/imohiyoko/iam/authn/method/totp"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/org"
@@ -43,7 +45,6 @@ import (
 	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
-	"github.com/imohiyoko/iam/authn/totp"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/manage"
@@ -120,8 +121,6 @@ type App struct {
 	// metadata は認証器のメタデータ（フィーチャー passkey_attestation。ADR 0096）。root だけが持ち、全 realm で共有する。
 	// フィーチャーが動いていなければ nil。
 	metadata *attestation.Metadata
-	// totp は TOTP の登録と照合（2要素目）。
-	totp *totp.Service
 	// methods は動いている認証方式のプラグイン、credentials はそれを呼ぶコアのサービス（ADR 0092）。
 	methods     *method.Set
 	credentials *credential.Service
@@ -222,6 +221,12 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	}
 	for _, w := range plan.Warnings {
 		d.Logger.Warn("feature", "message", w)
+	}
+	// TOTP とパスワードを方式専用の表から authn_credentials へ移す（ADR 0101）。移した行は古い表から消え、台帳に記録する。
+	if m, err := credential.MigrateLegacy(ctx, d.Storage, crypter, d.Clock, prepareBatch); err != nil {
+		return nil, fmt.Errorf("app: migrate totp and password credentials: %w", err)
+	} else if m != (credential.Migrated{}) {
+		d.Logger.Info("migrated credentials to authn_credentials", "totp", m.TOTP, "passwords", m.Passwords)
 	}
 
 	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary, clientSealer: clientSealer, pii: crypter}
@@ -365,7 +370,20 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	for _, v := range rs.VerifiedVia {
 		via = append(via, port.VerifiedVia(v))
 	}
-	methods, err := method.ActiveIn(plan.IsActive, realm.Slug, cfg.MethodSettings(), d.Methods...)
+	// TOTP はコアの方式で、フィーチャーを問わずに動く。パスワードは、フィーチャーが動いていれば設定を入れたものに置き換える（ADR 0101）。
+	ar := cfg.Security.Password.Argon2
+	builtin := []port.Authenticator{totpm.Method{}}
+	var pwMethod *pwm.Method
+	if plan.IsActive(feature.Password) {
+		minLength := pwm.MinLength
+		if cfg.Security.SecondFactor.Required {
+			minLength = pwm.MinLengthWithSecondFactor
+		}
+		pwMethod = &pwm.Method{Params: pwm.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
+			MinLength: minLength, Breach: d.BreachCheck, Log: d.Logger}
+		builtin = append(builtin, pwMethod)
+	}
+	methods, err := method.ActiveIn(plan.IsActive, realm.Slug, cfg.MethodSettings(), append(builtin, d.Methods...)...)
 	if err != nil {
 		return err
 	}
@@ -436,10 +454,9 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	a.perIP = a.limiter(cfg.Security.Login.RateLimit.PerIP)
 	a.links = &loginlink.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Sessions: a.sessions, Log: d.Logger}
-	ar := cfg.Security.Password.Argon2
 	a.recovery = &recovery.Service{
 		Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Notify: a.notify,
-		Params:     password.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
+		Params:     pwm.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
 		PerAccount: a.accountLimiter(), Log: d.Logger,
 	}
 
@@ -480,25 +497,16 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	if issuer == "" || a.root != a {
 		issuer = ep.rpName
 	}
-	a.totp = &totp.Service{
-		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Issuer: issuer,
-		TTL: cfg.Security.SecondFactor.TTL.D(), MaxAttempts: cfg.Security.SecondFactor.MaxAttempts,
-		PerUser: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
-	}
 	a.credentials = &credential.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Methods: methods,
 		Issuer: issuer, TTL: cfg.Security.SecondFactor.TTL.D(), MaxAttempts: cfg.Security.SecondFactor.MaxAttempts,
-		PerUser: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
+		PerUser: a.limiter(cfg.Security.Login.RateLimit.PerAccount), PerLogin: a.accountLimiter(), Log: d.Logger,
 	}
-	if plan.IsActive(feature.Password) {
-		minLength := password.MinLength
-		if cfg.Security.SecondFactor.Required {
-			minLength = password.MinLengthWithSecondFactor
-		}
+	a.password = nil
+	if pwMethod != nil {
 		a.password = &password.Service{
-			Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Breach: d.BreachCheck,
-			Params:    password.Params{Memory: ar.MemoryKiB, Time: ar.Iterations, Threads: ar.Parallelism},
-			MinLength: minLength, PerAccount: a.accountLimiter(), Log: d.Logger,
+			Storage: d.Storage, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Credentials: a.credentials,
+			Method: pwMethod, PerAccount: a.accountLimiter(),
 		}
 	}
 	if plan.IsActive(feature.AccountMerge) {
@@ -553,7 +561,8 @@ func (a *App) accountLimiter() *ratelimit.Limiter {
 // active で記録する。片付けるデータも準備するデータも無いため、enable の手順（11.12）を省ける。
 // 既存の DB では何もしない（`iam features enable` で明示的に進める）。
 func activateOnFreshInstall(ctx context.Context, tx port.Tx, clk clock.Clock, ledger []port.FeatureRecord, binary []feature.Feature, enabled []string) ([]port.FeatureRecord, error) {
-	if len(ledger) > 0 {
+	// コアのデータの移行の記録（ADR 0101）はフィーチャーの記録に数えない。
+	if slices.ContainsFunc(ledger, func(r port.FeatureRecord) bool { return !feature.IsMigration(r.Feature) }) {
 		return ledger, nil
 	}
 	realms, err := tx.Realms().List(ctx)

@@ -3,7 +3,8 @@
 // 証明書はコアが mTLS の専用の待ち受けか、設定で信じたプロキシのヘッダーから取り出して MethodEnv.ClientCertificates で渡す
 // （秘密鍵の所持は TLS のハンドシェイクで確かめてある）。方式は realm ごとのトラストアンカーへの連鎖・期限・鍵用途と拡張鍵用途・
 // 失効（OCSP・CRL）を確かめ、設定の規則（証明書の指紋・SAN の UPN・SAN のメール・主体の DN）の値で、本人が登録した認証情報
-// （authn_credentials。検索キーはブラインドインデックス）を引く。失効の確認はネットワークを使うので Preflight で行う。
+// （authn_credentials。検索キーはブラインドインデックス）を引く。失効の確認はネットワークを使うので、コアが Storage の
+// トランザクションの外で呼ぶ Complete と EnrollBegin で行う（ADR 0101）。登録の完了は、始めに確かめた結果（封をした状態）を使う。
 //
 // セキュリティ上重要なコード（13.2）。失敗は理由を外に返さず（4.9）、分からないときは拒む（fail-closed）。
 package x509
@@ -53,7 +54,6 @@ type Method struct {
 
 var (
 	_ port.Authenticator  = (*Method)(nil)
-	_ port.Preflighter    = (*Method)(nil)
 	_ method.Configurable = (*Method)(nil)
 )
 
@@ -149,7 +149,7 @@ func sameFingerprint(a, b string) bool {
 	return a != "" && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-// Begin はログインを始める。証明書が無ければ拒む。確かめは Complete（Preflight）で行う。
+// Begin はログインを始める。証明書が無ければ拒む。確かめは Complete で行う。
 func (m *Method) Begin(_ context.Context, env port.MethodEnv, _ port.MethodRequest) (port.MethodChallenge, error) {
 	if err := m.configured(); err != nil {
 		return port.MethodChallenge{}, err
@@ -162,30 +162,24 @@ func (m *Method) Begin(_ context.Context, env port.MethodEnv, _ port.MethodReque
 	return port.MethodChallenge{State: st}, err
 }
 
-// Preflight は連鎖・用途・失効を確かめ、マッピングの値を求める（Storage のトランザクションの外。ネットワークを使う）。
-func (m *Method) Preflight(ctx context.Context, env port.MethodEnv, _ port.MethodRequest) ([]byte, error) {
-	if err := m.configured(); err != nil {
-		return nil, err
-	}
+// check は連鎖・用途・失効を確かめ、マッピングの値を求める。ネットワークを使うので、コアが Storage のトランザクションの外で呼ぶ
+// Complete・EnrollBegin からだけ呼ぶ。
+func (m *Method) check(ctx context.Context, env port.MethodEnv) (verified, error) {
 	certs, err := parseChain(env.ClientCertificates)
 	if err != nil {
-		return nil, err
+		return verified{}, err
 	}
 	chain, err := m.p.verify(certs, env.Now)
 	if err != nil {
-		return nil, err
+		return verified{}, err
 	}
 	if err := m.rev.checkChain(ctx, chain, env.Now); err != nil {
 		if errors.Is(err, errRevoked) || errors.Is(err, errUnknown) {
-			return nil, rejected(fmt.Sprintf("%v (certificate %s)", err, Fingerprint(certs[0].Raw)))
+			return verified{}, rejected(fmt.Sprintf("%v (certificate %s)", err, Fingerprint(certs[0].Raw)))
 		}
-		return nil, err
+		return verified{}, err
 	}
-	v, err := m.summarize(chain)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(v)
+	return m.summarize(chain)
 }
 
 func (m *Method) summarize(chain []*x509.Certificate) (verified, error) {
@@ -199,24 +193,16 @@ func (m *Method) summarize(chain []*x509.Certificate) (verified, error) {
 		Subject: leaf.Subject.String(), Issuer: leaf.Issuer.String(), Serial: leaf.SerialNumber.Text(16), NotAfter: leaf.NotAfter}, nil
 }
 
-// checked は Preflight の結果を読み、今の要求の証明書と、フローを始めた証明書（state）に一致することを確かめる。
-func checked(env port.MethodEnv, in port.MethodRequest) (verified, error) {
-	var v verified
-	if len(in.Preflight) == 0 || json.Unmarshal(in.Preflight, &v) != nil {
-		return v, errors.New("x509: missing preflight")
-	}
+// sameCertificate は、今の要求の証明書がフローを始めた証明書（指紋 want）と同じかを確かめる。
+func sameCertificate(env port.MethodEnv, want string) error {
 	fp, err := leafFingerprint(env)
 	if err != nil {
-		return v, err
+		return err
 	}
-	var st flowState
-	if err := json.Unmarshal(in.State, &st); err != nil {
-		return v, fmt.Errorf("x509: flow state: %w", err)
+	if !sameFingerprint(want, fp) {
+		return rejected("certificate changed during the flow")
 	}
-	if !sameFingerprint(v.Fingerprint, fp) || !sameFingerprint(st.Fingerprint, fp) {
-		return v, rejected("certificate changed during the flow")
-	}
-	return v, nil
+	return nil
 }
 
 // amr は確かめた証明書の amr。ハードウェアの CA の証明書は sc（PIN が要ると保証されていれば pin も。1要素目なら mfa）、
@@ -233,12 +219,19 @@ func amr(v verified, u port.MethodUsage) []string {
 	return []string{"pop"}
 }
 
-// Complete は確かめた証明書のマッピングの値で、登録した認証情報を引く。2要素目なら本人のものに限る。
+// Complete は証明書を確かめ（失効を含む）、マッピングの値で登録した認証情報を引く。2要素目なら本人のものに限る。
 func (m *Method) Complete(ctx context.Context, env port.MethodEnv, in port.MethodRequest) (port.MethodResult, error) {
 	if err := m.configured(); err != nil {
 		return port.MethodResult{}, err
 	}
-	v, err := checked(env, in)
+	var st flowState
+	if err := json.Unmarshal(in.State, &st); err != nil {
+		return port.MethodResult{}, fmt.Errorf("x509: flow state: %w", err)
+	}
+	if err := sameCertificate(env, st.Fingerprint); err != nil {
+		return port.MethodResult{}, err
+	}
+	v, err := m.check(ctx, env)
 	if err != nil {
 		return port.MethodResult{}, err
 	}
@@ -262,25 +255,21 @@ func (m *Method) Complete(ctx context.Context, env port.MethodEnv, in port.Metho
 	return port.MethodResult{Credential: c, AMR: amr(v, env.Usage)}, nil
 }
 
-// EnrollBegin は登録を始める。証明書の連鎖と用途を確かめ（失効は完了で確かめる）、何を登録するかを本人に返す。
+// EnrollBegin は登録を始める。証明書を失効まで確かめ（コアはトランザクションの外で呼ぶ）、何を登録するかを本人に返す。
+// 確かめた結果は状態（コアが封をして預かる）に置き、完了で使う。
 func (m *Method) EnrollBegin(ctx context.Context, env port.MethodEnv, _ port.MethodRequest) (port.MethodChallenge, error) {
 	if err := m.configured(); err != nil {
 		return port.MethodChallenge{}, err
 	}
-	certs, err := parseChain(env.ClientCertificates)
-	if errors.Is(err, errs.AuthenticationFailed) && len(env.ClientCertificates) == 0 {
+	if len(env.ClientCertificates) == 0 {
 		return port.MethodChallenge{}, errNoCertificate
 	}
-	if err != nil {
+	v, err := m.check(ctx, env)
+	if errors.Is(err, errs.AuthenticationFailed) {
 		return port.MethodChallenge{}, errs.WithCode(errs.KindInvalid, "certificate_invalid", err.Error())
 	}
-	chain, err := m.p.verify(certs, env.Now)
 	if err != nil {
-		return port.MethodChallenge{}, errs.WithCode(errs.KindInvalid, "certificate_invalid", err.Error())
-	}
-	v, err := m.summarize(chain)
-	if err != nil {
-		return port.MethodChallenge{}, errs.WithCode(errs.KindInvalid, "certificate_invalid", err.Error())
+		return port.MethodChallenge{}, err
 	}
 	if err := m.checkLimit(ctx, env); err != nil {
 		return port.MethodChallenge{}, err
@@ -289,7 +278,7 @@ func (m *Method) EnrollBegin(ctx context.Context, env port.MethodEnv, _ port.Met
 	if err != nil {
 		return port.MethodChallenge{}, err
 	}
-	st, err := json.Marshal(flowState{Fingerprint: v.Fingerprint})
+	st, err := json.Marshal(v)
 	return port.MethodChallenge{Payload: out, State: st}, err
 }
 
@@ -298,15 +287,21 @@ func (m *Method) summary(v verified) summary {
 		Serial: v.Serial, NotAfter: v.NotAfter, Hardware: v.Hardware}
 }
 
-// EnrollComplete は、フローを始めたのと同じ証明書で、失効まで確かめた（Preflight）ものを登録する。マッピングの値が既に
-// 誰かに登録されていれば ErrExists。
+// EnrollComplete は、始めに確かめたのと同じ証明書を登録する（コアのトランザクションの中。ネットワークは使わない）。マッピングの
+// 値が既に誰かに登録されていれば ErrExists。
 func (m *Method) EnrollComplete(ctx context.Context, env port.MethodEnv, in port.MethodRequest) (port.MethodEnrollment, error) {
 	if err := m.configured(); err != nil {
 		return port.MethodEnrollment{}, err
 	}
-	v, err := checked(env, in)
-	if err != nil {
+	var v verified
+	if err := json.Unmarshal(in.State, &v); err != nil || v.Fingerprint == "" || v.Lookup == "" {
+		return port.MethodEnrollment{}, fmt.Errorf("x509: enrollment state: %v", err)
+	}
+	if err := sameCertificate(env, v.Fingerprint); err != nil {
 		return port.MethodEnrollment{}, err
+	}
+	if !env.Now.Before(v.NotAfter) {
+		return port.MethodEnrollment{}, rejected("certificate expired during the enrollment")
 	}
 	if err := m.checkLimit(ctx, env); err != nil {
 		return port.MethodEnrollment{}, err

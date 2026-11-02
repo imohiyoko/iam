@@ -36,6 +36,7 @@ type MethodInfo struct {
 	// Name は方式の名前（API のパスの {method}、authn_credentials.method）。小文字の英数字と `_`。台帳に残るので変えない。
 	Name string
 	// Feature は方式を動かすフィーチャーの名前。フィーチャーが動いていなければ方式も使えない。
+	// 空はコアの方式（TOTP。ADR 0101）で、コアが組み込みとして渡し、フィーチャーを問わずに動く。method.Register では空にできない。
 	Feature string
 	Kind    FactorKind
 	// AMR は確かめたときにセッションに足す amr（RFC 8176）。
@@ -73,7 +74,8 @@ type MethodCredential struct {
 }
 
 // CredentialStore は、コアが方式に渡す認証情報のストア。realm と方式に閉じ、データの暗号化と復号はコアが行う。
-// 呼び出し側のトランザクションの中でだけ使える。
+// 呼び出し側のトランザクションに結び付くか（登録の完了）、操作ごとに短いトランザクションで動く（ログインと登録の始め。方式の重い計算
+// （パスワードのハッシュ）を、直列にしたトランザクションの外で行うため。ADR 0101）。どちらでも、書き込みは比較と交換で競合を拒む。
 type CredentialStore interface {
 	// List はユーザー（内部 ID）の、この方式の有効な認証情報を作成時刻の順に返す。
 	List(ctx context.Context, userID string) ([]MethodCredential, error)
@@ -84,6 +86,17 @@ type CredentialStore interface {
 	// Update はデータを置き換える。c を読んだ後に別の書き込みがあったか、無効化されていれば errs.Conflict（原子的に判定する）。
 	// 返す MethodCredential は新しいデータを持つ。
 	Update(ctx context.Context, c MethodCredential, data []byte) (MethodCredential, error)
+	// Revoke は認証情報を無効化する（置き換え。パスワードの変更など。ADR 0101）。c を読んだ後に別の書き込みか無効化があれば
+	// errs.Conflict。
+	Revoke(ctx context.Context, c MethodCredential, reason string) error
+}
+
+// MethodUsers は、ログイン ID で本人を決める方式（パスワード）に、コアが渡す本人の引き当て（ADR 0101）。
+type MethodUsers interface {
+	// LoginUser はログイン ID（メールアドレス）の本人の内部 ID を返す。確認済みのメールの、ログインできる状態のユーザーだけで、
+	// それ以外は errs.NotFound（理由を区別しない）。ログイン ID ごとの回数の上限を超えれば *ratelimit.ExceededError。
+	// 引き当てたメールに、発行するセッションを結び付ける（メールを外すと使えなくなる）。
+	LoginUser(ctx context.Context, identifier string) (string, error)
 }
 
 // MethodEnv はコアが方式に渡す、呼び出しの環境。
@@ -91,7 +104,7 @@ type MethodEnv struct {
 	RealmID string
 	// UserID は本人の内部 ID。1要素目の Begin・Complete では空（方式が FindByLookup で決める）。
 	UserID string
-	// Usage は呼び出しの用途（登録では空）。
+	// Usage は呼び出しの用途。登録では空で、復旧専用のセッションでの登録だけ UsageRecovery（今の秘密を求めない再設定。ADR 0101）。
 	Usage MethodUsage
 	// Credentials は認証情報のストア。
 	Credentials CredentialStore
@@ -99,6 +112,10 @@ type MethodEnv struct {
 	Now time.Time
 	// Issuer と Account は登録のときに認証器に表示する名前（発行者と、本人のメールアドレスか公開 ID）。
 	Issuer, Account string
+	// Users は1要素目で本人を引き当てる（ログイン ID で本人を決める方式だけが使う）。1要素目以外では nil。
+	Users MethodUsers
+	// RecentAuth は、登録で、本人の認証が直近（max_auth_age の内）か。汎用のパスは直近の認証を求めるので常に true。
+	RecentAuth bool
 	// ClientCertificates は要求で受け取ったクライアント証明書の連鎖（DER。先頭が本人の証明書。ADR 0103）。mTLS の専用の
 	// 待ち受け（秘密鍵の所持は TLS のハンドシェイクで確かめてある）か、設定で信じたプロキシのヘッダーから、コアが取り出す。
 	// 無ければ nil。連鎖・用途・失効は方式が確かめる。
@@ -111,15 +128,6 @@ type MethodRequest struct {
 	Payload json.RawMessage
 	// State は Begin（EnrollBegin）が返した状態。Complete（EnrollComplete）でだけ渡す。
 	State []byte
-	// Preflight は Preflighter.Preflight の結果。方式が Preflighter のとき、Complete・EnrollComplete にだけ渡す。
-	Preflight []byte
-}
-
-// Preflighter は、Storage のトランザクションの外で行う確かめ（ネットワークを使う証明書の失効の確認など）を持つ方式が実装する
-// （任意。ADR 0103）。コアは Complete・EnrollComplete の前に、トランザクションを開かずに呼び、結果を MethodRequest.Preflight で渡す。
-// env.Credentials は nil。照合の失敗は Complete と同じく errs.AuthenticationFailed に一致するエラーで返す。
-type Preflighter interface {
-	Preflight(ctx context.Context, env MethodEnv, in MethodRequest) ([]byte, error)
 }
 
 // MethodChallenge は Begin・EnrollBegin の結果。
@@ -136,6 +144,8 @@ type MethodResult struct {
 	Credential MethodCredential
 	// AMR は足す amr。空なら MethodInfo.AMR。
 	AMR []string
+	// KnowledgeBreached は、知識の要素（パスワード）が漏洩済みか。確かめなかったか、確かめられなければ nil（警告の評価。ADR 0051）。
+	KnowledgeBreached *bool
 }
 
 // MethodEnrollment は登録（EnrollComplete）の結果。
@@ -172,7 +182,7 @@ type Credential struct {
 	UserID   string
 	Method   string
 	Lookup   []byte
-	// LookupKeyID は Lookup を作ったインデックス鍵の ID（Lookup が無ければ空）。鍵を切り替えた後も前の鍵で引くのに使う。
+	// LookupKeyID は Lookup を作ったインデックス鍵の ID（Lookup が無ければ空）。鍵を切り替えた後も前の鍵で引くのに使う（ADR 0103）。
 	LookupKeyID  string
 	Data         []byte
 	DataVersion  int

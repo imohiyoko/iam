@@ -21,7 +21,7 @@ import (
 	cbasn1 "golang.org/x/crypto/cryptobyte/asn1"
 )
 
-// verified は確かめた証明書の要約（Preflight の結果。コアが Complete・EnrollComplete に渡す）。
+// verified は確かめた証明書の要約（登録では、EnrollBegin の状態としてコアが封をして預かり、EnrollComplete に渡す）。
 type verified struct {
 	Fingerprint string    `json:"fingerprint"`
 	Lookup      string    `json:"lookup"`

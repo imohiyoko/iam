@@ -6570,6 +6570,21 @@ func (response BeginEnrollCredential409JSONResponse) VisitBeginEnrollCredentialR
 	return err
 }
 
+type BeginEnrollCredential429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response BeginEnrollCredential429JSONResponse) VisitBeginEnrollCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CompleteEnrollCredentialRequestObject struct {
 	Method string `json:"method"`
 	Body   *CompleteEnrollCredentialJSONRequestBody
