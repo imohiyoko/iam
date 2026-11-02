@@ -1,0 +1,181 @@
+# 全部入りの範囲
+
+iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-scope.md)）。フェーズの割り当ては [roadmap.md](roadmap.md) の M8〜M12。
+状態は 2026-11-02 の main（`3a20f7d`）で、API の定義と ADR から確かめた。「要確認」はコードの中まで確かめていない。
+
+## 範囲の決め方
+
+次のどれかに当てはまるものを「全部」に含める。
+
+- **S（標準）**：IETF・OpenID Foundation・OASIS・W3C・FIDO Alliance・NIST などの、認証・認可・プロビジョニングの仕様
+- **P（製品）**：Keycloak・Auth0・Okta・Zitadel・Entra ID のうち、2 つ以上が標準で持つ機能
+- **C（調達）**：SOC 2・ISO 27001・企業のセキュリティ質問票で、IAM によく求められる項目
+
+含めないもの：
+
+- 廃止・非推奨の仕様（implicit grant、ROPC、OAuth 1.0、SAML 1.1）
+- 1 製品だけの独自機能
+- IAM の外の領域（PAM、IGA の申請ワークフロー、MDM）
+
+状態：✅ ある、△ 一部、❌ 無い、⛔ 以前の ADR で除外していた（0089 で含める）。
+
+## 1. 認証方式
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| メールのコード・マジックリンク | P | ✅ | |
+| パスワード | S（SP 800-63B）P | ✅ | 漏洩の確認（HIBP）も |
+| passkey（WebAuthn L3） | S（W3C、FIDO2） | ✅ | Related Origin Requests も |
+| WebAuthn の attestation、AAGUID の許可リスト、FIDO MDS | S C | ❌ | 企業が認めた鍵だけを通す |
+| TOTP | S（RFC 6238） | ✅ | |
+| HOTP・ハードウェアトークン | S（RFC 4226）P | ❌ | |
+| SMS・音声の OTP | P | ❌ | SP 800-63B では制限付き。Notifier 経由 |
+| プッシュ通知の承認（番号の照合付き） | P | ❌ | |
+| X.509 クライアント証明書・スマートカード（PIV、CAC） | S P C | ❌ | |
+| Kerberos／SPNEGO | S P | ❌ | |
+| LDAP のバインド認証 | P | ❌ | |
+| 外部 IdP（OAuth／OIDC） | S P | ✅ | |
+| 外部 IdP（SAML 2.0） | S P C | ❌ | |
+| 運営者が発行するログインリンク | P | ✅ | |
+| Verifiable Credentials（OpenID4VP、mdoc） | S | ❌ | |
+| 外部の認証方式（プラグイン・Webhook） | P | ❌ | ADR 0090 |
+
+## 2. 多要素・保証レベル・リスク
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| 2 要素目の強制と登録の要求 | P C | ✅ | passkey と TOTP に固定 |
+| step-up（RFC 9470） | S P | △ | Org の切り替えと `max_age` だけ |
+| `acr`・`acr_values`・AAL | S（OIDC、SP 800-63B） | ❌ | `amr` はある |
+| リスクに応じた追加認証 | P | △ | リスクは認可に効く（ADR 0084） |
+| 新しい端末・異常な場所の検知 | P | △ | `new_device` は ignore |
+| ブルートフォース対策・ロックアウト | P C | △ | レートリミットはある。アカウント単位のロックは要確認 |
+| ボット対策（CAPTCHA など） | P | ❌ | |
+| Shared Signals（CAEP、RISC） | S | ❌ | |
+
+## 3. アカウントとセルフサービス
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| 登録・複数メール・外部 ID の連携と解除 | P | ✅ | |
+| 復旧 | P | ✅ | |
+| セッションの一覧と失効 | P | ✅ | |
+| アカウントの削除・統合 | P C | ✅ | |
+| 本人のデータの書き出し（GDPR） | C | ❌ | |
+| 利用規約・同意の版と記録 | C P | ❌ | |
+| 段階的なプロフィール収集 | P | ❌ | |
+| 本人の Personal Access Token | P | ❌ | |
+| 本人が許可した連携先の一覧と取り消し | P | ⛔ | ADR 0026 |
+
+## 4. IdP として
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| OIDC の認可コード + PKCE、Discovery、JWKS、UserInfo | S | ✅ | |
+| リフレッシュ、イントロスペクション、失効 | S（RFC 7662、7009） | ✅ | |
+| Back-Channel Logout | S | ✅ | |
+| RP-Initiated Logout、Front-Channel Logout | S | ✅ | ADR 0094（`oidc_logout`） |
+| Session Management | S | ❌ | |
+| `profile`・`address`・`phone` スコープ、`claims` パラメーター | S | ⛔ | 適合性メモ |
+| `form_post`・`fragment`、JAR（RFC 9101） | S | ⛔ | 適合性メモ |
+| PAR（RFC 9126） | S | ❌ | |
+| RS256 | S | ⛔ | ADR 0005 |
+| JWT アクセストークン（RFC 9068） | S P | ⛔ | ADR 0021 |
+| `offline_access` | S | ⛔ | ADR 0066 |
+| 同意画面・サードパーティ・動的登録（RFC 7591、7592） | S P | ⛔ | ADR 0026 |
+| ロール・Group のクレーム | P | △ | `pre_token` フックで足せる |
+| SAML 2.0 IdP | S P C | ❌ | |
+| WS-Federation、CAS | P | ❌ | |
+| OAuth AS メタデータ（RFC 8414）、Protected Resource Metadata（RFC 9728） | S | ❌ | |
+| Device Authorization Grant（RFC 8628） | S P | ❌ | |
+| CIBA | S | ❌ | |
+| FAPI 2.0 | S C | ❌ | |
+| OpenID4VCI | S | ❌ | |
+
+## 5. M2M と API の保護
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| サービスアカウント（API キー、client_secret、private_key_jwt） | S P | ✅ | 管理 API 専用 |
+| 自前の API 向けの client credentials（`aud`・スコープ、RFC 8707） | S P | ❌ | |
+| Token Exchange（RFC 8693）・委任・なりすまし | S P | ❌ | |
+| DPoP（RFC 9449）、mTLS（RFC 8705） | S | ❌ | |
+| Workload Identity Federation（RFC 7523、SPIFFE） | S P | ❌ | |
+| Org の管理者による Org のサービスアカウントの管理 | P | ❌ | |
+
+## 6. 認可
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| RBAC（ロール、Group、ネスト、Org 階層） | P | ✅ | |
+| 認証の文脈・リスクを条件にした判定 | P | ✅ | |
+| 一括判定・権限の一覧 | P | ❌ | |
+| OpenID AuthZEN の評価 API | S | ❌ | |
+| ReBAC（Zanzibar 型） | P | ⛔ | design.md 1 章 |
+| ポリシー言語（CEL、Cedar、Rego） | P | ❌ | |
+| 時限付きの付与・アクセスの棚卸し | C | ❌ | |
+
+## 7. Org・マルチテナント
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| Org、招待、Membership、停止、削除 | P | ✅ | |
+| ドメインの所有証明、Org 管理ユーザー、Org 専用 SSO（OIDC） | P | ✅ | |
+| ログインポリシー、Quota、階層 | P | ✅ | |
+| 複数 realm | P | △ | 削除と realm ごとのセキュリティの階層が未完 |
+| Org ごとのブランディング・カスタムドメイン | P | ❌ | |
+| Org の owner による親の設定 | P | ❌ | |
+
+## 8. プロビジョニングとディレクトリ
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| SCIM 2.0 サーバー | S P C | ⛔ | design.md 1 章 |
+| SCIM クライアント（連携先へ送り出す） | S P | ❌ | |
+| LDAP／AD の同期 | P | ❌ | |
+| JIT プロビジョニング | P | ✅ | Org 専用 SSO |
+| 一括インポート（パスワードハッシュ付き）・段階的な移行 | P | ❌ | |
+
+## 9. 管理
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| 管理 API の作成・変更・停止・削除 | P | ✅ | |
+| 管理 API の一覧・取得・検索（ユーザー、Org、セッション、connections、署名鍵） | P | ❌ | |
+| 運営者のなりすまし（記録付き） | P | ❌ | |
+| 委任管理 | P C | △ | Org の owner・admin |
+| 管理画面 | P | ⛔ | design.md 1 章 |
+| Terraform プロバイダ・宣言的な設定 | P | ❌ | |
+| クライアント SDK | P | ❌ | |
+
+## 10. 監査・コンプライアンス・プライバシー
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| 改ざん検知付きの監査ログ、SIEM への出力 | C | ✅ | |
+| 監査ログの照会 API | P C | ❌ | |
+| 保持期間、crypto-shredding、legal hold、PII の暗号化 | C | ✅ | |
+| イベントの Webhook の購読を API で管理 | P | △ | 設定ファイル（要確認） |
+| FIPS 140-3 | C | ❌ | |
+
+## 11. 運用と基盤
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| PostgreSQL・Redis・複数インスタンス | P C | ✅ | |
+| 署名付きイメージ、SBOM | C | ✅ | |
+| HSM・クラウド KMS の KeyStore（AWS、GCP、Vault、PKCS#11） | C P | ❌ | |
+| MySQL の Storage | P | ❌ | |
+| メトリクス・トレース | P C | ❌ | |
+| Helm チャート、Kubernetes Operator | P | ❌ | |
+| 役割ごとのプロセス（ADR 0091） | P | ❌ | |
+
+## 12. 拡張性
+
+| 項目 | 出どころ | 状態 | メモ |
+| --- | --- | --- | --- |
+| フロー フック | P | ✅ | |
+| アダプタの自己登録、ビルド時に選ぶフィーチャー | P | ✅ | |
+| 認証方式のプラグイン（ADR 0090） | P | ❌ | |
+| 画面のテーマ、i18n | P | △ | |
+| 通知の文面のテンプレートと SMTP | P | ⛔ | ADR 0031 |
