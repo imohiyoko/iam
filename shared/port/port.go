@@ -40,6 +40,8 @@ type Tx interface {
 	AuditKeys() DataKeyRepo
 	Audit() AuditRepo
 	Outbox() OutboxRepo
+	// EventSubscriptions はイベントの Webhook の購読（フィーチャー event_subscriptions。ADR 0100）。
+	EventSubscriptions() EventSubscriptionRepo
 
 	Users() UserRepo
 	Emails() EmailRepo
@@ -146,11 +148,25 @@ type AuditRepo interface {
 	Scan(ctx context.Context, fromSeq int64, limit int) ([]audit.Record, error)
 	// ListByRealm は realm のイベントを seq の昇順に返す。
 	ListByRealm(ctx context.Context, realmID string, fromSeq int64, limit int) ([]audit.Record, error)
+	// Query は realm のイベントを条件で絞り込み、seq の降順（新しい順）に最大 q.Limit 件返す（ADR 0100）。
+	// 絞り込みは索引の列（audit.IndexOf）で行う。呼び出し側はペイロードと条件を突き合わせ直す（audit.Filter.Matches）。
+	Query(ctx context.Context, q AuditQuery) ([]audit.Record, error)
+	// GetByEventID は realm のイベントをイベント ID で返す。無ければ（保持期間で消したものを含む）errs.NotFound。
+	GetByEventID(ctx context.Context, realmID, eventID string) (audit.Record, error)
 	// Checkpoint は保持期間による切り詰めの位置（最後に消したレコード。design.md 6.5）を返す。切り詰めていなければ nil。
 	Checkpoint(ctx context.Context) (*audit.Checkpoint, error)
 	// Truncate は seq が cp.Seq 以下のレコードを消し、チェックポイントを cp にする。
 	// 最新のレコードは消さない（Last がチェーンの続きを返せるように。呼び出し側が守る）。
 	Truncate(ctx context.Context, cp audit.Checkpoint) error
+}
+
+// AuditQuery は監査ログの照会（ADR 0100）。
+type AuditQuery struct {
+	RealmID string
+	audit.Filter
+	// BeforeSeq が正なら、seq がこれより小さいものだけを返す（ページング）。
+	BeforeSeq int64
+	Limit     int
 }
 
 // OutboxMessage は外部に送る出来事（少なくとも1回。ID で重複排除する）。
@@ -171,6 +187,56 @@ type OutboxRepo interface {
 	MarkDelivered(ctx context.Context, ids []string, at time.Time) error
 	// DeleteDelivered は before より前に配送したメッセージを最大 limit 件消し、消した件数を返す（design.md 9.6）。
 	DeleteDelivered(ctx context.Context, before time.Time, limit int) (int, error)
+}
+
+// EventSubscription はイベントの Webhook の購読（realm ごと。ADR 0100）。
+type EventSubscription struct {
+	ID      string // 外部 ID（evs_）
+	RealmID string
+	URL     string
+	// EventTypes は送るイベントの種類。"." で終われば前方一致、ほかは完全一致。空ならすべて。
+	EventTypes []string
+	// PII は切り詰めた IP と User-Agent の大分類の出し方（omit / pseudonymize）。
+	PII     string
+	Enabled bool
+	// SecretCiphertext は署名の鍵の暗号文（購読の ID を持ち主にしたデータ鍵で暗号化する）。
+	SecretCiphertext []byte
+	// CreatedBy は作った主体の公開 ID。
+	CreatedBy string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	EventSubscriptionDelivery
+}
+
+// EventSubscriptionDelivery は購読の配送の状態。
+type EventSubscriptionDelivery struct {
+	// CursorSeq は送り終えた監査ログの seq（これより後を送る）。
+	CursorSeq int64
+	// Failures は続けて失敗した回数。NextAttemptAt より前は送らない。
+	Failures      int
+	NextAttemptAt *time.Time
+	// LastError は最後の失敗の理由のコード（個人情報を含めない）。成功すれば空。
+	LastError       string
+	LastDeliveredAt *time.Time
+}
+
+// EventSubscriptionRepo は event_subscriptions の Repository。
+type EventSubscriptionRepo interface {
+	Create(ctx context.Context, s EventSubscription) error // ID が重複すれば errs.Conflict
+	Get(ctx context.Context, realmID, id string) (EventSubscription, error)
+	// List は realm の購読を作成の順（同時刻は ID の順）に返す。
+	List(ctx context.Context, realmID string) ([]EventSubscription, error)
+	// Update は設定（URL・種類・PII・有効・秘密の暗号文・更新時刻）を書く。配送の状態は変えない。無ければ errs.NotFound。
+	Update(ctx context.Context, s EventSubscription) error
+	// SetDelivery は配送の状態を書く。CursorSeq は今より大きいときだけ進める（戻さない）。無ければ errs.NotFound。
+	SetDelivery(ctx context.Context, realmID, id string, d EventSubscriptionDelivery) error
+	Delete(ctx context.Context, realmID, id string) error // 無ければ errs.NotFound
+	// Due は全 realm の、有効で NextAttemptAt が now 以前（または無い）購読を、NextAttemptAt の早い順に最大 limit 件返す。
+	Due(ctx context.Context, now time.Time, limit int) ([]EventSubscription, error)
+	// Count は全 realm の購読の数（フィーチャーの無効化。design.md 11.12）。
+	Count(ctx context.Context) (int, error)
+	// Purge は全 realm の購読を最大 limit 件消し、消した購読の ID を返す（データ鍵は呼び出し側が消す）。
+	Purge(ctx context.Context, limit int) ([]string, error)
 }
 
 // ---------------------------------------------------------------------------

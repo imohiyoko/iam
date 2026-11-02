@@ -2574,6 +2574,246 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/audit-events:
+    get:
+      operationId: listAuditEvents
+      summary: 監査ログの照会（ADR 0100）
+      description: |
+        権限 `audit:read`。この realm のイベントを新しい順（seq の降順）に、`limit` 件ずつ返す。続きは `next_cursor` を `after` に渡す。
+        条件はすべて AND。時刻は `since` 以上 `until` 未満。`type_prefix` は前方一致（`login.` など）。`target_id` は details の
+        `*_id` のどれかに一致する ID（対象のユーザー・Membership など）。保持期間で切り詰めたイベントは返らない（ADR 0072）。
+        `include_client_data=true` なら、暗号化した IP と User-Agent の全文を復号して `client` に入れる。権限 `audit:read_client_data` が要り、
+        読めないもの（保持期間・アカウントの削除の後）は `client_unreadable: true`。
+        照会そのものを `audit.read` として監査ログに残す（条件・件数・全文を読んだか）。
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: after, in: query, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: until, in: query, schema: { type: string, format: date-time } }
+        - { name: type, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: type_prefix, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: result, in: query, schema: { type: string, enum: [success, failure] } }
+        - { name: actor_type, in: query, schema: { type: string, maxLength: 50 } }
+        - { name: actor_id, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: org_id, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: target_id, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: include_client_data, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: 新しい順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEvent" }
+                  next_cursor: { type: string, description: 続きがあるときだけ }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/audit-events/{id}:
+    get:
+      operationId: getAuditEvent
+      summary: 監査ログのイベントを1件返す（ADR 0100）
+      description: |
+        権限 `audit:read`。この realm のイベントだけ。保持期間で切り詰めたものは 404。`include_client_data` は一覧と同じ。
+        `audit.read` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: include_client_data, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: イベント
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditEvent" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/audit-events:verify:
+    post:
+      operationId: verifyAuditChain
+      summary: 監査ログのハッシュチェーンを、seq の範囲を指定して検証する（ADR 0100）
+      description: |
+        権限 `audit:read`。チェーンは全 realm で1本なので、既定の realm だけで使える（ほかの realm では 404）。
+        `from_seq` を省くか切り詰めた位置以前なら残っている先頭（チェックポイントの次）から、`to_seq` を省くか最新より後なら最新まで。
+        1回に 100000 件まで（超えれば `400 range_too_large`。範囲を分けて呼び、前の `last_hash` と次の `prev_hash` を突き合わせる）。
+        先頭から検証したとき（`anchored: true`）は、`prev_hash` が Genesis かチェックポイントのハッシュになる。
+        検証の途中で保持期間の掃除が範囲の先頭を消したら `409 truncated_during_verification`（やり直す）。
+        結果を `audit.verified`（失敗なら result が failure）として監査ログに残す。
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from_seq: { type: integer, format: int64, minimum: 1 }
+                to_seq: { type: integer, format: int64, minimum: 1 }
+      responses:
+        "200":
+          description: "検証の結果（壊れていれば `valid: false` と `broken`）"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditChainVerification" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/event-subscriptions:
+    get:
+      operationId: listEventSubscriptions
+      summary: イベントの Webhook の購読の一覧（ADR 0100）
+      description: |
+        権限 `event_subscriptions:manage`。作成の順。署名の鍵は返さない。
+        フィーチャー event_subscriptions が動いていなければ `404 event_subscriptions_disabled`。
+      responses:
+        "200":
+          description: 作成の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subscriptions]
+                properties:
+                  subscriptions:
+                    type: array
+                    items: { $ref: "#/components/schemas/EventSubscription" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createEventSubscription
+      summary: イベントの Webhook の購読を作る（ADR 0100）
+      description: |
+        権限 `event_subscriptions:manage`。この realm の監査ログのイベントを、作った時点の後から `url` に POST する（`{"events": [...]}`）。
+        `url` は https（開発ビルドだけ http）で、公開のアドレスに限る（`400 invalid_url`。送るときにも、つなぐ先のアドレスで確かめる）。
+        `event_types` は種類（`login.succeeded`）か、`.` で終わる前方一致（`login.`）を 20 個まで。省けばすべて（`400 invalid_event_types`）。
+        `pii` は切り詰めた IP と User-Agent の大分類の出し方で、`omit`（既定）か `pseudonymize`（`400 invalid_pii`）。全文は出さない。
+        署名の鍵 `secret` はこの応答でだけ返す（`X-IAM-Signature: t=<UNIX 秒>,v1=<hex(HMAC-SHA-256(secret, "<t>." + 本文))>`）。
+        realm に 20 まで（`409 subscription_limit`）。`event_subscription.created` を監査ログに残す（URL はホスト名だけ）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventSubscriptionInput" }
+      responses:
+        "201":
+          description: 作った
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventSubscriptionWithSecret" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/event-subscriptions/{id}:
+    get:
+      operationId: getEventSubscription
+      summary: イベントの Webhook の購読を返す（配送の状態を含む）
+      description: 権限 `event_subscriptions:manage`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 購読
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventSubscription" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateEventSubscription
+      summary: イベントの Webhook の購読を変える
+      description: |
+        権限 `event_subscriptions:manage`。渡した項目だけ変える（検証は作成と同じ）。`enabled: false` で送るのを止め、`true` に戻すと
+        止めていた間の分から送り直す（失敗の回数と待ちは戻す）。`event_subscription.updated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EventSubscriptionUpdate" }
+      responses:
+        "200":
+          description: 変えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventSubscription" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/event-subscriptions/{id}:delete:
+    post:
+      operationId: deleteEventSubscription
+      summary: イベントの Webhook の購読と署名の鍵を消す
+      description: 権限 `event_subscriptions:manage`。取り消せない。`event_subscription.deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 消した }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/event-subscriptions/{id}:rotate-secret:
+    post:
+      operationId: rotateEventSubscriptionSecret
+      summary: 購読の署名の鍵を作り直す
+      description: |
+        権限 `event_subscriptions:manage`。新しい鍵をこの応答でだけ返し、古い鍵はすぐに使わなくなる（仮名化の値も変わる）。
+        `event_subscription.secret_rotated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 作り直した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventSubscriptionWithSecret" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/event-subscriptions/{id}:test:
+    post:
+      operationId: testEventSubscription
+      summary: 購読の宛先にテストのイベントを1件送る
+      description: |
+        権限 `event_subscriptions:manage`。種類 `event_subscription.test` のイベント（監査ログには載らない）を、本番と同じ署名で送り、
+        結果を返す（`delivered`、`status`、送れなければ `error`：`address_not_allowed`・`timeout`・`connection_failed`）。
+        購読ごとに 1 分に 5 回まで（`429 rate_limited`）。`event_subscription.tested` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 送った結果
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [delivered]
+                properties:
+                  delivered: { type: boolean }
+                  status: { type: integer, description: 宛先の HTTP のステータス（応答があったときだけ） }
+                  error: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3492,3 +3732,113 @@ components:
           maxItems: 10
           items: { type: string }
         settings: { $ref: "#/components/schemas/RealmSettings" }
+    AuditActor:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, description: "user / service_account / system / operator_cli / anonymous など" }
+        id: { type: string }
+    AuditEvent:
+      type: object
+      required: [id, seq, hash, time, type, result, actor]
+      description: 監査ログの1件（design.md 6.2）。`ip`・`user_agent` は切り詰めた値（ADR 0063）
+      properties:
+        id: { type: string }
+        seq: { type: integer, format: int64, description: チェーン上の位置（全 realm で1本） }
+        hash: { type: string, description: チェーンのハッシュ（16進） }
+        time: { type: string, format: date-time }
+        type: { type: string }
+        result: { type: string }
+        actor: { $ref: "#/components/schemas/AuditActor" }
+        org_id: { type: string }
+        session_id: { type: string }
+        ip: { type: string, description: IPv4 /24・IPv6 /48 に切り詰めた値 }
+        user_agent: { type: string, description: ブラウザと OS の大分類 }
+        request_id: { type: string }
+        details:
+          type: object
+          additionalProperties: {}
+        client:
+          type: object
+          description: "`include_client_data=true` で読めたときの全文"
+          properties:
+            ip: { type: string }
+            user_agent: { type: string }
+        client_unreadable: { type: boolean, description: "`include_client_data=true` で、全文が無いか読めない" }
+    AuditChainVerification:
+      type: object
+      required: [valid, from_seq, to_seq, head_seq, anchored, prev_hash]
+      properties:
+        valid: { type: boolean }
+        from_seq: { type: integer, format: int64 }
+        to_seq: { type: integer, format: int64, description: 確かめた最後の seq（範囲が空なら from_seq より小さい） }
+        head_seq: { type: integer, format: int64, description: チェーンの最新の seq }
+        anchored: { type: boolean, description: 先頭（Genesis かチェックポイント）から確かめたか }
+        prev_hash: { type: string, description: from_seq の前のハッシュ（16進） }
+        last_hash: { type: string, description: to_seq のハッシュ（16進。壊れていれば無い） }
+        checkpoint:
+          type: object
+          required: [seq, hash, at]
+          properties:
+            seq: { type: integer, format: int64 }
+            hash: { type: string }
+            at: { type: string, format: date-time }
+        broken:
+          type: object
+          required: [seq, reason]
+          properties:
+            seq: { type: integer, format: int64 }
+            reason:
+              type: string
+              enum: [seq_gap, prev_hash_mismatch, hash_mismatch, payload_invalid, realm_mismatch, unkeyed_record, key_unavailable]
+    EventSubscription:
+      type: object
+      required: [id, url, event_types, pii, enabled, created_at, updated_at, delivery]
+      properties:
+        id: { type: string }
+        url: { type: string }
+        event_types:
+          type: array
+          items: { type: string }
+        pii: { type: string, enum: [omit, pseudonymize] }
+        enabled: { type: boolean }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        delivery:
+          type: object
+          required: [cursor_seq, failures]
+          properties:
+            cursor_seq: { type: integer, format: int64, description: 送り終えた監査ログの seq }
+            failures: { type: integer, description: 続けて失敗した回数 }
+            next_attempt_at: { type: string, format: date-time }
+            last_error: { type: string }
+            last_delivered_at: { type: string, format: date-time }
+    EventSubscriptionWithSecret:
+      allOf:
+        - { $ref: "#/components/schemas/EventSubscription" }
+        - type: object
+          required: [secret]
+          properties:
+            secret: { type: string, description: 署名の鍵（この応答でだけ返す） }
+    EventSubscriptionInput:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, maxLength: 2048 }
+        event_types:
+          type: array
+          maxItems: 20
+          items: { type: string }
+        pii: { type: string, enum: [omit, pseudonymize] }
+        enabled: { type: boolean, default: true }
+    EventSubscriptionUpdate:
+      type: object
+      properties:
+        url: { type: string, maxLength: 2048 }
+        event_types:
+          type: array
+          maxItems: 20
+          items: { type: string }
+        pii: { type: string, enum: [omit, pseudonymize] }
+        enabled: { type: boolean }

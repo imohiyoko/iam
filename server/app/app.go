@@ -26,6 +26,7 @@ import (
 	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/credential"
 	"github.com/imohiyoko/iam/authn/emailflow"
+	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/merge"
@@ -151,6 +152,11 @@ type App struct {
 	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
 	scheduler *eventlog.Scheduler
 	retention *eventlog.Retention
+	// eventSubs はイベントの Webhook の購読（ADR 0100）。フィーチャー event_subscriptions が動いていなければ nil。
+	// eventSubTests はテスト送信の回数の上限。subDelivery は購読の配送（全 realm で1つ。root だけが持つ）。
+	eventSubs     *eventsub.Service
+	eventSubTests *ratelimit.Limiter
+	subDelivery   *eventsub.Deliverer
 	// domainRecheck は証明済みのドメインを確かめ直す（ADR 0087）。フィーチャー org_managed_users が無いか、間隔が 0 なら nil。
 	domainRecheck *org.DomainRechecker
 	// public と admin は待ち受けるハンドラ（複数 realm なら振り分け）。ownPublic と ownAdmin はこの realm のもの。
@@ -278,6 +284,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	// 保持期間を過ぎたデータは1時間ごとに消す（design.md 6.5、9.6、ADR 0072）。
 	a.retention = &eventlog.Retention{Storage: d.Storage, Clock: d.Clock, RealmID: a.realm.ID, Audit: cfg.Realm.AuditRetention.D(),
 		Ended: cfg.Realm.EndedRetention.D(), Interval: time.Hour, Batch: cfg.Outbox.Batch, Log: d.Logger, IndexOnly: a.indexOnlyRealms}
+	if a.eventSubs != nil {
+		a.subDelivery = &eventsub.Deliverer{Storage: d.Storage, Service: a.eventSubs, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(),
+			Batch: cfg.Outbox.Batch, Log: d.Logger}
+	}
 	if a.orgs != nil && plan.IsActive(feature.OrgManagedUsers) && cfg.OrgDomains.Recheck.D() > 0 {
 		a.domainRecheck = &org.DomainRechecker{Storage: d.Storage, Clock: d.Clock, Service: a.orgs, Every: cfg.OrgDomains.Recheck.D(),
 			Grace: cfg.OrgDomains.Grace.D(), Interval: time.Hour, Batch: cfg.Outbox.Batch, Log: d.Logger}
@@ -359,6 +369,11 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	a.flow = &provider.Flow{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, CodeTTL: cfg.OIDC.CodeTTL.D()}
 	if plan.IsActive(feature.CustomAttributes) {
 		a.attributes = &attribute.Service{Clock: d.Clock, Crypter: a.pii}
+	}
+	if plan.IsActive(feature.EventSubscriptions) {
+		// 公開でないアドレスへの送信は開発ビルドだけ許す（ADR 0100）。
+		a.eventSubs = &eventsub.Service{Crypter: a.pii, Clock: d.Clock, Dev: cfg.Dev, AllowPrivateNetworks: cfg.Dev}
+		a.eventSubTests = &ratelimit.Limiter{Cache: d.Ephemeral, Clock: d.Clock, Window: time.Minute, Limit: 5}
 	}
 	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Attributes: a.attributes, Issuer: a.issuer,
 		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D(),
@@ -646,6 +661,12 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	}
 	go func() { a.scheduler.Run(ctx); close(schedDone) }()
 	go func() { a.retention.Run(ctx); close(retDone) }()
+	subDone := make(chan struct{})
+	if a.subDelivery != nil {
+		go func() { a.subDelivery.Run(ctx); close(subDone) }()
+	} else {
+		close(subDone)
+	}
 	recheckDone := make(chan struct{})
 	if a.domainRecheck != nil {
 		go func() { a.domainRecheck.Run(ctx); close(recheckDone) }()
@@ -683,6 +704,7 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	}
 	<-schedDone
 	<-retDone
+	<-subDone
 	<-recheckDone
 	// 止める前に残りを送る（届かなければ次の起動で送る）。
 	for _, r := range relays {

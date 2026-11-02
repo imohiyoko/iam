@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey/attestation"
@@ -112,6 +113,11 @@ var cleaners = map[string]cleaner{
 		rs, err := tx.Realms().List(ctx)
 		return max(len(rs)-1, 0), err
 	}, Hint: "realms other than the default cannot be deleted yet: keep multi_realm enabled while they exist"},
+	// 購読と署名の鍵（データ鍵）を消す（ADR 0100）。
+	feature.EventSubscriptions: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.EventSubscriptions().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return eventsub.Purge(ctx, tx, limit)
+		}},
 	// SAML の connection（realm 共通と Org 専用）を消し、紐付けた外部 ID を無効化する（ADR 0098）。
 	feature.SAML: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		return eachSAMLConnection(ctx, tx, -1, time.Time{}, false)
