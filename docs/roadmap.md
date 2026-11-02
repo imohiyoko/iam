@@ -399,6 +399,18 @@ Group のネスト、Org 階層（M7）。
 - [x] 監査ログ（承認・拒否・発行）、フィーチャーの無効化で連携先の許可を外す、標準の RP（zitadel/oidc の rp）での E2E
 - 端末の名前や場所を確認の画面に出す、承認の通知
 
+#### WebAuthn の attestation と AAGUID の許可リスト（ADR 0096）
+
+**ゴール**：企業が承認した認証器だけで passkey を登録・ログインさせられる。
+
+- [x] フィーチャー `passkey_attestation`（既定オフ）。登録で attestation を求める（既定 `none`、`direct` / `enterprise` は設定）
+- [x] packed・tpm・android-key・apple・fido-u2f の署名を go-webauthn で確かめ、MDS3 と設定の信頼の起点まで連なりをたどる
+- [x] MDS3 の BLOB をポート `FIDOMetadataSource`（`file` / `http`）から読み、署名を確かめ、バックグラウンドで読み直す。ホットパスは外部を呼ばない
+- [x] realm と Org の段の認証器のポリシー（許可・拒否の AAGUID、認定レベルの下限、attestation の要否）。登録・ログイン・2要素目・Org の入場で判定する
+- [x] 拒否はコードだけ返し、AAGUID と判定を監査ログに残す。管理 API の passkey の一覧に AAGUID と認証器の名前を出す
+- [x] 既存の passkey は自己申告の AAGUID で判定し、`require_attestation` では登録し直しを求める。無効化でポリシーを片付ける
+- MDS の BLOB の永続化（再起動の直後に取得できないときの備え）、ポリシーに外れた既存の passkey の一覧と通知
+
 ### M10 エンタープライズの運用
 
 - [x] 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作（ADR 0097）

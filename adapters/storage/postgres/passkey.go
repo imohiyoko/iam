@@ -27,7 +27,8 @@ func toPasskey(r db.AuthnPasskey) (port.Passkey, error) {
 	k := port.Passkey{ID: r.ID, PublicID: r.PublicID, RealmID: r.RealmID, UserID: r.UserID, CredentialID: r.CredentialID,
 		PublicKey: r.PublicKey, Alg: r.Alg, SignCount: uint32(r.SignCount), Flags: uint8(r.Flags), AAGUID: r.Aaguid,
 		Transports: transports, Name: r.Name, CreatedAt: p.at(r.CreatedAt), LastUsedAt: p.null(r.LastUsedAt),
-		RevokedAt: p.null(r.RevokedAt), RevokeReason: r.RevokeReason, PreferredOrgID: r.PreferredOrgID}
+		RevokedAt: p.null(r.RevokedAt), RevokeReason: r.RevokeReason, PreferredOrgID: r.PreferredOrgID,
+		AttestationFormat: r.AttestationFormat, Attested: r.Attested != 0}
 	if len(r.UserHandle) > 0 {
 		k.UserHandle = r.UserHandle
 	}
@@ -54,7 +55,7 @@ func (r passkeys) Create(ctx context.Context, k port.Passkey) error {
 		CredentialID: k.CredentialID, PublicKey: k.PublicKey, Alg: k.Alg, SignCount: int64(k.SignCount), Flags: int64(k.Flags),
 		Aaguid: append([]byte{}, k.AAGUID...), Transports: string(tj), Name: k.Name, CreatedAt: formatTime(k.CreatedAt),
 		LastUsedAt: nullTime(k.LastUsedAt), RevokedAt: nullTime(k.RevokedAt), RevokeReason: k.RevokeReason, PreferredOrgID: k.PreferredOrgID,
-		UserHandle: append([]byte{}, k.UserHandle...)}))
+		UserHandle: append([]byte{}, k.UserHandle...), AttestationFormat: k.AttestationFormat, Attested: boolInt(k.Attested)}))
 }
 
 func (r passkeys) GetByCredentialID(ctx context.Context, realmID string, credentialID []byte) (port.Passkey, error) {
