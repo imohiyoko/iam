@@ -163,6 +163,12 @@ func TestPasskeyAttestation(t *testing.T) {
 	if status, out, _ := l.passkeyLogin(t, key); status != 403 || out["error"] != "passkey_not_allowed" {
 		t.Fatalf("login with denied passkey: %d %v", status, out)
 	}
+	if !slices.ContainsFunc(l.auditTypes(t), func(e audit.Event) bool {
+		return e.Type == "login.failed" && e.Details["aaguid"] == attYubi.String() && e.Details["reason"] == attestation.ReasonDenied &&
+			e.Details["tier"] == "realm"
+	}) {
+		t.Fatal("login.failed does not record the passkey policy decision")
+	}
 
 	// フィーチャーの無効化で、Org のログインポリシーの passkey を外す。
 	r, err := l.a.DisableFeature(context.Background(), feature.PasskeyAttestation, true)
