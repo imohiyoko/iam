@@ -9,7 +9,7 @@
 
 - **最低限**：個人識別。1ユーザーに複数のメールアドレス・複数の OAuth を紐付ける
 - **ゴール**：ユーザーと Group の多対多。ログインに使った手がかり（メール、passkey、IP など）で Org を選ぶ
-- **当面やらない**：SCIM、ReBAC、管理画面の作り込み（必要になれば M7 で検討。Org 専用 SSO は拡張フィーチャーとして後から）
+- **最終形**：エンタープライズ向けの全部入り。範囲は [scope.md](scope.md) で定め、以前に外した SCIM・ReBAC・管理画面なども既定オフのフィーチャーとして含める（ADR 0089）
 
 ## 2. 基本方針
 
@@ -286,6 +286,7 @@ Org のポリシーで受け入れる経路を絞れる。
 
 argon2id。パスワードのみのログインには警告 `single_factor`。レートリミットはアカウント単位と IP 単位。アカウント単位はアドレスと接続元の組で数え（`per_account`）、アドレス全体には
 高めの上限（`per_account_total`）を置く。第三者が上限を使い切って本人を締め出すのを難しくする。
+リバースプロキシの後ろでは `server.trusted_proxies` にプロキシの範囲を書き、接続元を X-Forwarded-For から求める（ADR 0088）。
 
 #### メールのコード・リンクの安全策
 
@@ -568,7 +569,7 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 - EventSink で出す（標準出力 JSON Lines / syslog RFC 5424 / OTLP / Webhook）。独自 JSON か OCSF を選べる
 - outbox 経由（少なくとも1回。イベント ID で重複排除）
 - 個人情報の出し方を出力先ごとに選ぶ：そのまま / 仮名化（既定）/ 出さない（ADR 0071）
-- Storage の監査ログはハッシュチェーンにする
+- Storage の監査ログはハッシュチェーンにする。KeyStore に監査の鍵があれば HMAC-SHA-256 で作り、DB を書き換えられる人でも鍵が無ければ作り直せない。鍵付きの範囲は KeyStore の `audit_unkeyed_until` で決め、鍵なしに戻したレコードも改ざんとみなす（ADR 0086）
 
 ### 6.4 アプリケーションログ
 
@@ -742,6 +743,7 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 
 - フィーチャー `org_managed_users`。Org の owner が公開 API の `/v1/me/orgs/{id}/domains` でドメインを登録し、`_iam-challenge.<domain>` に TXT `iam-domain-verification=<token>` を置いて `:verify` で証明する
 - 証明済みのドメインは realm で1つの Org だけが持てる（`domain_taken`）。DNS はトランザクションの外で引く
+- 証明済みのドメインは `org_domains.recheck`（既定 1 日）ごとに TXT を確かめ直し、`org_domains.grace`（既定 7 日）の間ずっと無ければ証明を外す（ADR 0087）
 - 管理ユーザーは `users.managed_org_id`（ADR 0076）。Org の owner が求め（`:request-management`）、本人が受け入れる（`:accept-management`）。対象は、この Org で使う確認済みのメールが証明済みドメインのメンバー。管理ユーザーはその Org を抜けられず、自分でアカウントを消せない。Org が手放す・除名・削除すると個人ユーザーに戻る
 - 招待の `managed` で、新しく登録した人を最初から管理ユーザーにする。管理ユーザーは管理する Org に入れなければログインできず（停止・ログインポリシー）、Org の owner がアカウントを消せる
 - Org 専用 SSO（ADR 0077）：Org の owner が `/v1/me/orgs/{id}/connections` で OIDC の connection を登録する。その Org の管理ユーザーだけがログインでき、未登録なら証明済みドメインのアドレスで管理ユーザーとして作る。戻り先は固定、トークンエンドポイントは公開のアドレスに限る。ログインポリシー `require_sso`、`/v1/login/sso:discover` でドメインから探す。SAML は後に回す

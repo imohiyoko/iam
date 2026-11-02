@@ -4,7 +4,8 @@
 - 日付: 2026-11-02
 - 関連: [design.md](../design.md) 2.8、3.1、4.1、4.4、9.4、11.0、11.12、[0010](0010-feature-toggles.md)、
   [0022](0022-deny-reason-disclosure.md)、[0033](0033-security-settings-hierarchy.md)、[0038](0038-library-selection.md)、
-  [0049](0049-passkey-details.md)、[0062](0062-org-tier-settings.md)、[0069](0069-org-login-policy.md)
+  [0049](0049-passkey-details.md)、[0062](0062-org-tier-settings.md)、[0069](0069-org-login-policy.md)、
+  [0089](0089-enterprise-full-scope.md)、[0090](0090-authenticator-plugins.md)
 
 ## 背景
 
@@ -83,6 +84,7 @@ passkey の登録は attestation を求めていない（`none`）。認証器�
   - 許可・拒否の一覧と認定のレベルは、保存した AAGUID で判定する
   - `require_attestation` を入れると既存の passkey は通らない。利用者は登録し直す（入れる前に管理 API の一覧で `attested` を確かめる）
 - 統合（0082）で移す passkey も、この2つの列を保つ
+- 認証方式のプラグイン（0090）で passkey を `authn_credentials` に移すときは、この2つの列も移す
 
 ### 監査と管理 API
 

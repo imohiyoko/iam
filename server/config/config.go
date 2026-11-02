@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
@@ -52,6 +53,9 @@ type Config struct {
 	Security Security `yaml:"security"`
 
 	Outbox Outbox `yaml:"outbox"`
+
+	// OrgDomains は証明済みのドメインの確かめ直し（フィーチャー org_managed_users。ADR 0087）。
+	OrgDomains OrgDomains `yaml:"org_domains"`
 
 	// IDs は採番の方式（ADR 0045）。
 	IDs IDs `yaml:"ids"`
@@ -174,6 +178,35 @@ type Server struct {
 	PublicURL string `yaml:"public_url"`
 	// LoginTemplates はホスト型ログイン画面のテンプレート（login.html）を置いたディレクトリ。空なら組み込みのもの。
 	LoginTemplates string `yaml:"login_templates"`
+	// TrustedProxies は X-Forwarded-For を信じる接続元（リバースプロキシ・ロードバランサー）の IP か CIDR（ADR 0088）。
+	// 空なら X-Forwarded-For を読まず、接続元は RemoteAddr。
+	TrustedProxies []string `yaml:"trusted_proxies"`
+}
+
+// TrustedProxyPrefixes は TrustedProxies を範囲にする。IP だけなら /32（IPv6 は /128）。誤った値があればエラー。
+func (s Server) TrustedProxyPrefixes() ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(s.TrustedProxies))
+	for _, v := range s.TrustedProxies {
+		if p, err := netip.ParsePrefix(v); err == nil {
+			if p.Addr().Is4In6() {
+				// 照合は Unmap した IPv4 で行うので、IPv4 射影の CIDR は IPv4 の CIDR に直す。
+				// /96 より短いと IPv4 射影の外の IPv6 まで含むので受け付けない。
+				if p.Bits() < 96 {
+					return nil, fmt.Errorf("server.trusted_proxies: %q is an IPv4-mapped prefix shorter than /96", v)
+				}
+				p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+			}
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(v)
+		if err != nil {
+			return nil, fmt.Errorf("server.trusted_proxies: %q is not an IP or CIDR", v)
+		}
+		a = a.Unmap()
+		out = append(out, netip.PrefixFrom(a, a.BitLen()))
+	}
+	return out, nil
 }
 
 // Adapter はアダプタの選択とその設定。driver 以外の項目はアダプタに渡す。
@@ -353,6 +386,14 @@ type Outbox struct {
 	Batch    int      `yaml:"batch"`
 }
 
+// OrgDomains は証明済みのドメインの確かめ直しの設定（ADR 0087）。
+type OrgDomains struct {
+	// Recheck は1つのドメインの TXT を確かめ直す間隔。0 なら確かめ直さない。
+	Recheck Duration `yaml:"recheck"`
+	// Grace は TXT が見つからなくなってから証明を外すまでの猶予。
+	Grace Duration `yaml:"grace"`
+}
+
 // Duration は "30s"、"720h" などの形の時間。日数は "30d" と書ける。
 type Duration time.Duration
 
@@ -418,8 +459,9 @@ func Default() Config {
 			Login: Login{MinResponseTime: Duration(300 * time.Millisecond),
 				RateLimit: RateLimit{Window: Duration(10 * time.Minute), PerIP: 100, PerAccount: 5, PerAccountTotal: 20}},
 		},
-		Outbox: Outbox{Interval: Duration(time.Second), Batch: 100},
-		IDs:    IDs{Internal: "uuidv7", External: "random"},
+		Outbox:     Outbox{Interval: Duration(time.Second), Batch: 100},
+		OrgDomains: OrgDomains{Recheck: Duration(day), Grace: Duration(7 * day)},
+		IDs:        IDs{Internal: "uuidv7", External: "random"},
 		OIDC: OIDC{CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
 			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day)},
 		ServiceAccounts: ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
@@ -550,6 +592,9 @@ func (c Config) WarningActions() map[string]warning.Action {
 // Validate は設定の矛盾を検出する。危険な構成は起動を拒否する（design.md 2.5）。
 func (c Config) Validate() error {
 	var problems []string
+	if _, err := c.Server.TrustedProxyPrefixes(); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if c.Server.PublicAddr == "" || c.Server.AdminAddr == "" {
 		problems = append(problems, "server.public_addr and server.admin_addr are required")
 	} else if c.Server.PublicAddr == c.Server.AdminAddr {
@@ -672,6 +717,9 @@ func (c Config) Validate() error {
 	}
 	if c.Outbox.Interval.D() <= 0 {
 		problems = append(problems, "outbox.interval must be positive")
+	}
+	if c.OrgDomains.Recheck.D() < 0 || c.OrgDomains.Grace.D() < 0 {
+		problems = append(problems, "org_domains.recheck and org_domains.grace must not be negative")
 	}
 	problems = append(problems, c.validatePasskey()...)
 	problems = append(problems, c.validateAttestation()...)

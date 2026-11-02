@@ -423,16 +423,17 @@ type OrgAncestor struct {
 }
 
 type OrgDomain struct {
-	ID         string
-	PublicID   string
-	RealmID    string
-	OrgID      string
-	Domain     string
-	Token      string
-	VerifiedAt sql.NullString
-	CheckedAt  sql.NullString
-	CreatedBy  string
-	CreatedAt  string
+	ID           string
+	PublicID     string
+	RealmID      string
+	OrgID        string
+	Domain       string
+	Token        string
+	VerifiedAt   sql.NullString
+	CheckedAt    sql.NullString
+	CreatedBy    string
+	CreatedAt    string
+	MissingSince sql.NullString
 }
 
 type OrgQuotaGrant struct {
@@ -468,6 +469,7 @@ type SharedAuditCheckpoint struct {
 	Seq       int64
 	Hash      []byte
 	CreatedAt string
+	KeyID     string
 }
 
 type SharedAuditClientKey struct {
@@ -483,6 +485,7 @@ type SharedAuditEvent struct {
 	PrevHash []byte
 	Hash     []byte
 	Payload  []byte
+	KeyID    string
 }
 
 type SharedInstalledFeature struct {

@@ -42,10 +42,12 @@ type ClientSealer struct {
 	Clock   clock.Clock
 	// Retention は全文を読める期間。0 なら DefaultClientRetention。
 	Retention time.Duration
+	// AuditKeys は監査ログのハッシュチェーンの鍵（ADR 0086）。nil か、鍵を置いていなければ鍵なしのチェーンにする。
+	AuditKeys port.AuditKeyStore
 }
 
-// Storage は、トランザクションの中の Record が全文を暗号化するようにした s を返す。
-// これを通さない Storage への Record は、切り詰めた値だけを残す（全文は残さない）。
+// Storage は、トランザクションの中の Record が全文を暗号化し、チェーンを監査の鍵で作るようにした s を返す。
+// これを通さない Storage への Record は、切り詰めた値だけを残し（全文は残さない）、チェーンは鍵なし。
 func (c *ClientSealer) Storage(s port.Storage) port.Storage { return sealingStorage{s, c} }
 
 type sealingStorage struct {

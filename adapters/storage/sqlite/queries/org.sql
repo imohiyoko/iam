@@ -107,8 +107,12 @@ SELECT * FROM org_domains WHERE realm_id = ? AND domain = ? AND verified_at IS N
 -- name: ListOrgDomainsByOrg :many
 SELECT * FROM org_domains WHERE realm_id = ? AND org_id = ? ORDER BY created_at, id;
 
+-- name: ListOrgDomainsToRecheck :many
+SELECT * FROM org_domains WHERE verified_at IS NOT NULL AND (checked_at IS NULL OR checked_at <= sqlc.arg(before))
+ORDER BY checked_at IS NOT NULL, checked_at, id LIMIT sqlc.arg(lim);
+
 -- name: UpdateOrgDomain :execrows
-UPDATE org_domains SET verified_at = ?, checked_at = ? WHERE realm_id = ? AND id = ?;
+UPDATE org_domains SET verified_at = ?, checked_at = ?, missing_since = ? WHERE realm_id = ? AND id = ?;
 
 -- name: DeleteOrgDomain :execrows
 DELETE FROM org_domains WHERE realm_id = ? AND id = ?;

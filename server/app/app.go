@@ -137,6 +137,8 @@ type App struct {
 	// scheduler は時刻の境界の出来事（停止・有効期間）を監査ログに出す（design.md 4.8）。
 	scheduler *eventlog.Scheduler
 	retention *eventlog.Retention
+	// domainRecheck は証明済みのドメインを確かめ直す（ADR 0087）。フィーチャー org_managed_users が無いか、間隔が 0 なら nil。
+	domainRecheck *org.DomainRechecker
 	// public と admin は待ち受けるハンドラ（複数 realm なら振り分け）。ownPublic と ownAdmin はこの realm のもの。
 	public, admin       http.Handler
 	ownPublic, ownAdmin http.Handler
@@ -164,6 +166,15 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		return nil, err
 	}
 
+	// 監査ログの IP と User-Agent の全文は、本人のデータ鍵と日ごとの鍵で暗号化する（ADR 0063）。
+	// 監査ログは最初の1件（新しい DB のフィーチャーの記録）から監査の鍵で鍵付きにする（ADR 0086）。
+	crypter := pii.New(d.KeyStore)
+	clientSealer := &eventlog.ClientSealer{Crypter: crypter, Clock: d.Clock, Retention: cfg.Realm.ClientDataRetention.D()}
+	if ak, ok := d.KeyStore.(port.AuditKeyStore); ok {
+		clientSealer.AuditKeys = ak
+	}
+	d.Storage = clientSealer.Storage(d.Storage)
+
 	enabled := derefFeatures(cfg.Features)
 	var ledger []port.FeatureRecord
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
@@ -184,10 +195,6 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 		d.Logger.Warn("feature", "message", w)
 	}
 
-	// 監査ログの IP と User-Agent の全文は、本人のデータ鍵と日ごとの鍵で暗号化する（ADR 0063）。
-	crypter := pii.New(d.KeyStore)
-	clientSealer := &eventlog.ClientSealer{Crypter: crypter, Clock: d.Clock, Retention: cfg.Realm.ClientDataRetention.D()}
-	d.Storage = clientSealer.Storage(d.Storage)
 	a := &App{cfg: cfg, deps: d, plan: plan, binary: binary, clientSealer: clientSealer, pii: crypter}
 	a.root = a
 	a.checkClockSkew(ctx)
@@ -257,6 +264,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	// 保持期間を過ぎたデータは1時間ごとに消す（design.md 6.5、9.6、ADR 0072）。
 	a.retention = &eventlog.Retention{Storage: d.Storage, Clock: d.Clock, RealmID: a.realm.ID, Audit: cfg.Realm.AuditRetention.D(),
 		Ended: cfg.Realm.EndedRetention.D(), Interval: time.Hour, Batch: cfg.Outbox.Batch, Log: d.Logger, IndexOnly: a.indexOnlyRealms}
+	if a.orgs != nil && plan.IsActive(feature.OrgManagedUsers) && cfg.OrgDomains.Recheck.D() > 0 {
+		a.domainRecheck = &org.DomainRechecker{Storage: d.Storage, Clock: d.Clock, Service: a.orgs, Every: cfg.OrgDomains.Recheck.D(),
+			Grace: cfg.OrgDomains.Grace.D(), Interval: time.Hour, Batch: cfg.Outbox.Batch, Log: d.Logger}
+	}
 	a.notifier = &eventlog.Relay{
 		Storage: d.Storage, Topic: notify.Topic, Deliver: notify.Deliverer(d.Notifier, d.Clock, d.Logger), Clock: d.Clock,
 		Interval: cfg.Outbox.Interval.D(), Batch: cfg.Outbox.Batch, Log: d.Logger,
@@ -414,8 +425,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	if err != nil {
 		return err
 	}
-	a.ownPublic = withCommon(newPublicHandler(a, login))
-	a.ownAdmin = withCommon(newAdminHandler(a))
+	trusted, err := cfg.Server.TrustedProxyPrefixes()
+	if err != nil {
+		return err
+	}
+	a.ownPublic = withCommon(newPublicHandler(a, login), trusted)
+	a.ownAdmin = withCommon(newAdminHandler(a), trusted)
 	return nil
 }
 
@@ -494,6 +509,15 @@ func checkKeys(ctx context.Context, ks port.KeyStore) error {
 	}
 	if k, err := ks.IndexKey(ctx, iid); err != nil || len(k) != pii.KeySize {
 		return fmt.Errorf("app: keystore: index key %q unusable: %v", iid, err)
+	}
+	if aks, ok := ks.(port.AuditKeyStore); ok {
+		aid, err := aks.CurrentAuditKeyID(ctx)
+		if err != nil {
+			return fmt.Errorf("app: keystore: %w", err)
+		}
+		if k, err := aks.AuditKey(ctx, aid); aid != "" && (err != nil || len(k) != pii.KeySize) {
+			return fmt.Errorf("app: keystore: audit key %q unusable: %v", aid, err)
+		}
 	}
 	return nil
 }
@@ -586,6 +610,12 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	}
 	go func() { a.scheduler.Run(ctx); close(schedDone) }()
 	go func() { a.retention.Run(ctx); close(retDone) }()
+	recheckDone := make(chan struct{})
+	if a.domainRecheck != nil {
+		go func() { a.domainRecheck.Run(ctx); close(recheckDone) }()
+	} else {
+		close(recheckDone)
+	}
 	if a.realms != nil {
 		// 他のインスタンスで作った・変えた realm を、要求が無くても読み直す（ADR 0083）。
 		go a.watchRealms(ctx)
@@ -617,6 +647,7 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener) error {
 	}
 	<-schedDone
 	<-retDone
+	<-recheckDone
 	// 止める前に残りを送る（届かなければ次の起動で送る）。
 	for _, r := range relays {
 		if _, err := r.Flush(shutdownCtx); err != nil {
