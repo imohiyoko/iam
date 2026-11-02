@@ -109,6 +109,15 @@ var cleaners = map[string]cleaner{
 		rs, err := tx.Realms().List(ctx)
 		return max(len(rs)-1, 0), err
 	}, Hint: "realms other than the default cannot be deleted yet: keep multi_realm enabled while they exist"},
+	// 連携先の Front-Channel Logout の登録を外す（ADR 0094。post_logout_redirect_uris は前からある項目なので残す）。
+	feature.OIDCLogout: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachClient(ctx, tx, -1, func(port.Client) (bool, error) { return true, nil })
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
+			c.FrontchannelLogoutURI, c.FrontchannelLogoutSessionRequired, c.UpdatedAt = "", false, now
+			return true, tx.Clients().Update(ctx, c)
+		})
+	}},
 	feature.Password: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.Passwords().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.Passwords().Purge(ctx, limit)
@@ -181,6 +190,38 @@ func eachOwnedConnections(ctx context.Context, tx port.Tx, limit int, now time.T
 			c, err := org.PurgeConnections(ctx, tx, r.ID, o, now, limit-n)
 			if n += c; err != nil {
 				return n, err
+			}
+		}
+	}
+	return n, nil
+}
+
+// eachClient は全 realm の、Front-Channel Logout を登録した連携先（フィーチャー oidc_logout のデータ）に fn を呼び、
+// true を返した数を数える。limit が 0 以上なら、その数で止める。
+func eachClient(ctx context.Context, tx port.Tx, limit int, fn func(port.Client) (bool, error)) (int, error) {
+	realms, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range realms {
+		cs, err := tx.Clients().List(ctx, r.ID)
+		if err != nil {
+			return n, err
+		}
+		for _, c := range cs {
+			if c.FrontchannelLogoutURI == "" && !c.FrontchannelLogoutSessionRequired {
+				continue
+			}
+			if limit >= 0 && n >= limit {
+				return n, nil
+			}
+			ok, err := fn(c)
+			if err != nil {
+				return n, err
+			}
+			if ok {
+				n++
 			}
 		}
 	}

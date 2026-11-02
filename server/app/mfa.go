@@ -31,7 +31,13 @@ var restrictedAllowed = map[string][]port.SessionRestriction{
 	"POST /v1/me/totp:confirm":                   {port.RestrictionEnroll, port.RestrictionRecovery},
 	"POST /v1/me/password:set":                   {port.RestrictionRecovery},
 	"POST /v1/recovery:complete":                 {port.RestrictionRecovery},
+	// RP-Initiated Logout（ADR 0094）。POST /v1/logout と同じく、どの制限つきのセッションでもログアウトできる。
+	"GET " + oidcEndSession:         allRestrictions,
+	"POST " + oidcEndSession:        allRestrictions,
+	"POST " + oidcEndSessionConfirm: allRestrictions,
 }
+
+var allRestrictions = []port.SessionRestriction{port.RestrictionSecondFactor, port.RestrictionEnroll, port.RestrictionRecovery, port.RestrictionDeletion}
 
 func restrictionAllows(r port.SessionRestriction, method, path string) bool {
 	return r == port.RestrictionNone || slices.Contains(restrictedAllowed[method+" "+path], r) || methodRestricted(r, method, path)

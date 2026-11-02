@@ -12,25 +12,27 @@ import (
 
 const createClient = `-- name: CreateClient :exec
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
-    id_token_alg, backchannel_logout_uri, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateClientParams struct {
-	ID                     string
-	PublicID               string
-	RealmID                string
-	Name                   string
-	TrustLevel             string
-	RedirectUris           string
-	PostLogoutRedirectUris string
-	AuthMethod             string
-	SecretHash             []byte
-	Jwks                   []byte
-	IDTokenAlg             string
-	BackchannelLogoutUri   string
-	CreatedAt              string
-	UpdatedAt              string
+	ID                                string
+	PublicID                          string
+	RealmID                           string
+	Name                              string
+	TrustLevel                        string
+	RedirectUris                      string
+	PostLogoutRedirectUris            string
+	AuthMethod                        string
+	SecretHash                        []byte
+	Jwks                              []byte
+	IDTokenAlg                        string
+	BackchannelLogoutUri              string
+	FrontchannelLogoutUri             string
+	FrontchannelLogoutSessionRequired int64
+	CreatedAt                         string
+	UpdatedAt                         string
 }
 
 func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) error {
@@ -47,6 +49,8 @@ func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) erro
 		arg.Jwks,
 		arg.IDTokenAlg,
 		arg.BackchannelLogoutUri,
+		arg.FrontchannelLogoutUri,
+		arg.FrontchannelLogoutSessionRequired,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -242,7 +246,7 @@ func (q *Queries) EraseUserGrants(ctx context.Context, arg EraseUserGrantsParams
 }
 
 const getClient = `-- name: GetClient :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at FROM authn_clients WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required FROM authn_clients WHERE realm_id = ? AND id = ?
 `
 
 type GetClientParams struct {
@@ -268,12 +272,14 @@ func (q *Queries) GetClient(ctx context.Context, arg GetClientParams) (AuthnClie
 		&i.BackchannelLogoutUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FrontchannelLogoutUri,
+		&i.FrontchannelLogoutSessionRequired,
 	)
 	return i, err
 }
 
 const getClientByPublicID = `-- name: GetClientByPublicID :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at FROM authn_clients WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required FROM authn_clients WHERE realm_id = ? AND public_id = ?
 `
 
 type GetClientByPublicIDParams struct {
@@ -299,6 +305,8 @@ func (q *Queries) GetClientByPublicID(ctx context.Context, arg GetClientByPublic
 		&i.BackchannelLogoutUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FrontchannelLogoutUri,
+		&i.FrontchannelLogoutSessionRequired,
 	)
 	return i, err
 }
@@ -360,7 +368,7 @@ func (q *Queries) GetOIDCToken(ctx context.Context, arg GetOIDCTokenParams) (Aut
 }
 
 const listClients = `-- name: ListClients :many
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id
 `
 
 func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClient, error) {
@@ -387,6 +395,8 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 			&i.BackchannelLogoutUri,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.FrontchannelLogoutUri,
+			&i.FrontchannelLogoutSessionRequired,
 		); err != nil {
 			return nil, err
 		}
@@ -530,23 +540,25 @@ func (q *Queries) RevokeGrant(ctx context.Context, arg RevokeGrantParams) (int64
 
 const updateClient = `-- name: UpdateClient :execrows
 UPDATE authn_clients SET name = ?, trust_level = ?, redirect_uris = ?, post_logout_redirect_uris = ?, auth_method = ?, secret_hash = ?, jwks = ?,
-    id_token_alg = ?, backchannel_logout_uri = ?, updated_at = ?
+    id_token_alg = ?, backchannel_logout_uri = ?, frontchannel_logout_uri = ?, frontchannel_logout_session_required = ?, updated_at = ?
 WHERE realm_id = ? AND id = ?
 `
 
 type UpdateClientParams struct {
-	Name                   string
-	TrustLevel             string
-	RedirectUris           string
-	PostLogoutRedirectUris string
-	AuthMethod             string
-	SecretHash             []byte
-	Jwks                   []byte
-	IDTokenAlg             string
-	BackchannelLogoutUri   string
-	UpdatedAt              string
-	RealmID                string
-	ID                     string
+	Name                              string
+	TrustLevel                        string
+	RedirectUris                      string
+	PostLogoutRedirectUris            string
+	AuthMethod                        string
+	SecretHash                        []byte
+	Jwks                              []byte
+	IDTokenAlg                        string
+	BackchannelLogoutUri              string
+	FrontchannelLogoutUri             string
+	FrontchannelLogoutSessionRequired int64
+	UpdatedAt                         string
+	RealmID                           string
+	ID                                string
 }
 
 func (q *Queries) UpdateClient(ctx context.Context, arg UpdateClientParams) (int64, error) {
@@ -560,6 +572,8 @@ func (q *Queries) UpdateClient(ctx context.Context, arg UpdateClientParams) (int
 		arg.Jwks,
 		arg.IDTokenAlg,
 		arg.BackchannelLogoutUri,
+		arg.FrontchannelLogoutUri,
+		arg.FrontchannelLogoutSessionRequired,
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.ID,

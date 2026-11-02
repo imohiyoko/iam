@@ -115,6 +115,32 @@ func (r users) List(ctx context.Context, realmID, afterID string, limit int) ([]
 	return rows(rs, err, toUser)
 }
 
+func (r users) Search(ctx context.Context, realmID string, f port.UserSearch) ([]port.User, error) {
+	rs, err := r.q.SearchUsers(ctx, db.SearchUsersParams{RealmID: realmID, After: f.After, UserID: f.UserID, Status: string(f.Status),
+		CreatedFrom: optTime(f.CreatedFrom), CreatedBefore: optTime(f.CreatedBefore), OrgID: f.OrgID, Suspended: tristate(f.Suspended),
+		Now: formatTime(f.Now), Lim: int64(f.Limit)})
+	return rows(rs, err, toUser)
+}
+
+// optTime は検索の時刻の引数（nil は空の文字列で、絞り込まない）。
+func optTime(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return formatTime(*t)
+}
+
+// tristate は検索の「問わない・はい・いいえ」の引数（空・yes・no）。
+func tristate(t port.Tristate) string {
+	switch t {
+	case port.TriYes:
+		return "yes"
+	case port.TriNo:
+		return "no"
+	}
+	return ""
+}
+
 // ---------------------------------------------------------------------------
 
 type emails struct{ q *db.Queries }
@@ -219,6 +245,11 @@ func (r identities) ListByUser(ctx context.Context, realmID, userID string) ([]p
 	return rows(rs, err, toIdentity)
 }
 
+func (r identities) CountActiveByConnection(ctx context.Context, realmID, connectionID string) (int, error) {
+	n, err := r.q.CountActiveIdentitiesByConnection(ctx, db.CountActiveIdentitiesByConnectionParams{RealmID: realmID, ConnectionID: connectionID})
+	return int(n), mapErr(err)
+}
+
 // ---------------------------------------------------------------------------
 
 type connections struct{ q *db.Queries }
@@ -256,6 +287,11 @@ func (r connections) ListByOwner(ctx context.Context, realmID, orgID string) ([]
 func (r connections) CountOwned(ctx context.Context, realmID string) (int, error) {
 	n, err := r.q.CountOwnedConnections(ctx, realmID)
 	return int(n), mapErr(err)
+}
+
+func (r connections) UpdateConfig(ctx context.Context, realmID, id string, config []byte) error {
+	n, err := r.q.UpdateConnectionConfig(ctx, db.UpdateConnectionConfigParams{Config: nonNil(config), RealmID: realmID, ID: id})
+	return affected(n, err, "connection")
 }
 
 func (r connections) Delete(ctx context.Context, realmID, id string) error {

@@ -1042,4 +1042,5 @@ var authnIsolationCases = []IsolationCase{
 	orgDomainIsolationCase,
 	orgHierarchyIsolationCase,
 	managedUserIsolationCase,
+	adminReadIsolationCase,
 }
