@@ -94,3 +94,28 @@ func TestKeysSignVerifyAndRotate(t *testing.T) {
 		t.Fatal("expired key still verifies")
 	}
 }
+
+// TestKeysVerifyType は typ の違う JWS（Logout Token）を ID トークンとして受け付けないことを確かめる（Token Exchange。ADR 0099）。
+func TestKeysVerifyType(t *testing.T) {
+	k := testkit.New(t)
+	keys := &provider.Keys{Crypter: k.Crypter, Clock: k.Clock, RetiredKeyTTL: 24 * time.Hour}
+	k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		for _, alg := range provider.Algs {
+			logout, err := keys.Sign(ctx, tx, k.RealmID, alg, "logout+jwt", []byte(`{"sub":"x"}`))
+			if err != nil {
+				return err
+			}
+			if _, err := keys.VerifyType(ctx, tx, k.RealmID, logout, "JWT"); err == nil {
+				t.Fatalf("%s: logout token accepted as JWT", alg)
+			}
+			idt, err := keys.Sign(ctx, tx, k.RealmID, alg, "JWT", []byte(`{"sub":"x"}`))
+			if err != nil {
+				return err
+			}
+			if b, err := keys.VerifyType(ctx, tx, k.RealmID, idt, "JWT"); err != nil || !strings.Contains(string(b), `"sub"`) {
+				t.Fatalf("%s: id token = %s, %v", alg, b, err)
+			}
+		}
+		return nil
+	})
+}

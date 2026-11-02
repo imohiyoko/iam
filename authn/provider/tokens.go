@@ -64,6 +64,10 @@ type Tokens struct {
 	Attributes *attribute.Service
 	// Hooks はフロー フック（pre_token）。フィーチャー flow_hooks が動いていなければ nil。
 	Hooks *hook.Runner
+	// TokenExchange は Token Exchange の委任（フィーチャー token_exchange。ADR 0099）が動いているか。
+	TokenExchange bool
+	// Impersonation はなりすまし。フィーチャー impersonation が動いていなければ nil。
+	Impersonation *Impersonation
 	// Issuer は iss（server.public_url）。
 	Issuer                               string
 	AccessTokenTTL, IDTokenTTL, GrantTTL time.Duration
@@ -317,7 +321,7 @@ func (t *Tokens) Validate(ctx context.Context, tx port.Tx, realmID, token string
 	if err != nil {
 		return Access{}, err
 	}
-	next, err := t.aliveUntil(ctx, tx, realmID, g.SID, g.UserID, g.OrgID, now)
+	next, err := t.grantAliveUntil(ctx, tx, g, now)
 	if err != nil {
 		return Access{}, err
 	}
@@ -476,6 +480,10 @@ type Introspection struct {
 	AMR       []string `json:"amr,omitempty"`
 	// Risk はログインの系列の今のセッションのリスクの点数（種類 → 点数。ADR 0084）。毎回セッションから求める。
 	Risk map[string]int `json:"risk,omitempty"`
+	// Act は Token Exchange で発行したトークンの行為者（RFC 8693 4.1。ADR 0099）。
+	Act json.RawMessage `json:"act,omitempty"`
+	// Impersonation は運営者のなりすましのトークンか（act.sub が運営者。sid は出さない）。
+	Impersonation bool `json:"impersonation,omitempty"`
 }
 
 // Introspect はトークン（アクセストークンかリフレッシュトークン）が今使えるかを返す（RFC 7662）。
@@ -499,7 +507,7 @@ func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token stri
 	if err != nil {
 		return Introspection{}, err
 	}
-	if err := t.alive(ctx, tx, realmID, g.SID, g.UserID, g.OrgID, now); err != nil {
+	if _, err := t.grantAliveUntil(ctx, tx, g, now); err != nil {
 		if errors.Is(err, ErrInvalidToken) {
 			return Introspection{}, nil
 		}
@@ -521,9 +529,10 @@ func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token stri
 	if tok.Kind == port.TokenRefresh {
 		typ = "refresh_token"
 	}
-	return Introspection{Active: true, Scope: strings.Join(g.Scopes, " "), ClientID: cl.PublicID, TokenType: typ, Exp: tok.ExpiresAt.Unix(),
+	out := Introspection{Active: true, Scope: strings.Join(g.Scopes, " "), ClientID: cl.PublicID, TokenType: typ, Exp: tok.ExpiresAt.Unix(),
 		Iat: tok.CreatedAt.Unix(), Sub: u.PublicID, Aud: []string{cl.PublicID}, Iss: t.Issuer, SID: g.SID, OrgID: orgPublicID,
-		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods, Risk: risk}, nil
+		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods, Risk: risk}
+	return out, exchangeIntrospection(&out, g)
 }
 
 // LineageRisk はログインの系列 sid の今のセッションのリスクの点数（一覧で有効な種類だけ）。今のセッションが無ければ nil。

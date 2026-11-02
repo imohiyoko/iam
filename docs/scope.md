@@ -97,7 +97,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | --- | --- | --- | --- |
 | サービスアカウント（API キー、client_secret、private_key_jwt） | S P | ✅ | 管理 API 専用 |
 | 自前の API 向けの client credentials（`aud`・スコープ、RFC 8707） | S P | ❌ | |
-| Token Exchange（RFC 8693）・委任・なりすまし | S P | ❌ | |
+| Token Exchange（RFC 8693）・委任・なりすまし | S P | ✅ | ADR 0099 |
 | DPoP（RFC 9449）、mTLS（RFC 8705） | S | ❌ | |
 | Workload Identity Federation（RFC 7523、SPIFFE） | S P | ❌ | |
 | Org の管理者による Org のサービスアカウントの管理 | P | ❌ | |
@@ -141,7 +141,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | --- | --- | --- | --- |
 | 管理 API の作成・変更・停止・削除 | P | ✅ | |
 | 管理 API の一覧・取得・検索（ユーザー、Org、セッション、connections、署名鍵） | P | ❌ | |
-| 運営者のなりすまし（記録付き） | P | ❌ | |
+| 運営者のなりすまし（記録付き） | P | ✅ | Token Exchange で（ADR 0099） |
 | 委任管理 | P C | △ | Org の owner・admin |
 | 管理画面 | P | ⛔ | design.md 1 章 |
 | Terraform プロバイダ・宣言的な設定 | P | ❌ | |

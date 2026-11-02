@@ -79,6 +79,9 @@ const (
 	// PermRequirementsManage は操作の名前空間ごとの設定（要件と段階の境界。ADR 0084）。resource_type = action_namespace の
 	// リソース単位の付与で、1つの名前空間に限れる。
 	PermRequirementsManage = "requirements:manage"
+	// PermUsersImpersonate は Token Exchange による運営者のなりすまし（フィーチャー impersonation。ADR 0099）。realm:owner だけが
+	// 持ち、サポートの担当には独自のロールで渡す。対象のロールの権限をすべて持つことも求める（outranks）。
+	PermUsersImpersonate = "users:impersonate"
 )
 
 // 本人の重要な操作の名前（ADR 0084）。付与は要らず、直近の認証（max_auth_age）に加えて、名前空間 `me` と active な Org の
@@ -108,7 +111,7 @@ func suspend(categories ...string) []string {
 
 var builtin = map[string][]string{
 	RealmOwner: append([]string{PermRealmsManage, PermRiskTypesManage, PermRiskWrite, PermRequirementsManage, PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
-		PermCredentialsRevoke, PermSuspensionsAny}, suspend("tos_violation", "customer_request", "security_risk", "billing")...),
+		PermCredentialsRevoke, PermSuspensionsAny, PermUsersImpersonate}, suspend("tos_violation", "customer_request", "security_risk", "billing")...),
 	RealmAdmin: append([]string{PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke},
 		suspend("tos_violation", "customer_request")...),
 	RealmSecurity:        append([]string{PermSessionsRevoke, PermCredentialsRevoke}, suspend("security_risk")...),

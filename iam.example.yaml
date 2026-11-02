@@ -96,6 +96,10 @@ oidc:
   access_token_ttl: 10m  # 不透明なアクセストークンの寿命（失効はイントロスペクションに validity_max_delay の内に効く）
   refresh_token_ttl: 30d  # リフレッシュトークンの寿命（ローテーションし、再利用を検知したらファミリーごと失効）
   retired_key_ttl: 7d  # ローテーションした古い署名鍵を JWKS に残す期間
+  impersonation:  # 運営者のなりすまし（フィーチャー impersonation。ADR 0099）
+    token_ttl: 10m  # なりすましのアクセストークンの寿命（1時間以下）
+    max_auth_age: 5m  # 運営者が直近に認証していなければならない時間（step-up）
+    min_factors: 2  # 運営者のセッションに要る認証要素の数（0〜3）
 
 service_accounts:  # 汎用サービスアカウント（フィーチャー service_accounts。ADR 0074）
   token_ttl: 10m  # client credentials で発行するアクセストークンの寿命（1時間以下）

@@ -230,6 +230,15 @@ func (k *Keys) Sign(ctx context.Context, tx port.Tx, realmID, alg, typ string, c
 
 // Verify は realm の鍵（JWKS に載っているもの）で JWS を検証し、ペイロードを返す。
 func (k *Keys) Verify(ctx context.Context, tx port.Tx, realmID, compact string) ([]byte, error) {
+	return k.verify(ctx, tx, realmID, compact, "")
+}
+
+// VerifyType は Verify に加えて、ヘッダーの typ が typ であることを確かめる（ID トークンと Logout Token を取り違えないように）。
+func (k *Keys) VerifyType(ctx context.Context, tx port.Tx, realmID, compact, typ string) ([]byte, error) {
+	return k.verify(ctx, tx, realmID, compact, typ)
+}
+
+func (k *Keys) verify(ctx context.Context, tx port.Tx, realmID, compact, typ string) ([]byte, error) {
 	sig, err := jose.ParseSigned(compact, []jose.SignatureAlgorithm{jose.ES256, AlgMLDSA65})
 	if err != nil {
 		return nil, errs.WithCode(errs.KindInvalid, "invalid_token", "malformed jws")
@@ -238,6 +247,9 @@ func (k *Keys) Verify(ctx context.Context, tx port.Tx, realmID, compact string) 
 		return nil, errs.WithCode(errs.KindInvalid, "invalid_token", "unexpected signatures")
 	}
 	h := sig.Signatures[0].Header
+	if got, _ := h.ExtraHeaders[jose.HeaderType].(string); typ != "" && got != typ {
+		return nil, errs.WithCode(errs.KindInvalid, "invalid_token", "unexpected typ")
+	}
 	ks, err := k.published(ctx, tx, realmID)
 	if err != nil {
 		return nil, err

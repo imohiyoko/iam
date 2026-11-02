@@ -10,10 +10,21 @@ import (
 	"database/sql"
 )
 
+const countExchangedGrants = `-- name: CountExchangedGrants :one
+SELECT count(*) FROM authn_oidc_grants WHERE exchange = ?
+`
+
+func (q *Queries) CountExchangedGrants(ctx context.Context, exchange string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countExchangedGrants, exchange)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createClient = `-- name: CreateClient :exec
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
-    id_token_alg, backchannel_logout_uri, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    id_token_alg, backchannel_logout_uri, created_at, updated_at, token_exchange)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateClientParams struct {
@@ -31,6 +42,7 @@ type CreateClientParams struct {
 	BackchannelLogoutUri   string
 	CreatedAt              string
 	UpdatedAt              string
+	TokenExchange          []byte
 }
 
 func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) error {
@@ -49,13 +61,15 @@ func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) erro
 		arg.BackchannelLogoutUri,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.TokenExchange,
 	)
 	return err
 }
 
 const createGrant = `-- name: CreateGrant :exec
-INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason,
+    exchange, parent_id, actor_user_id, act, audiences)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateGrantParams struct {
@@ -72,6 +86,11 @@ type CreateGrantParams struct {
 	ExpiresAt    string
 	RevokedAt    sql.NullString
 	RevokeReason string
+	Exchange     string
+	ParentID     string
+	ActorUserID  string
+	Act          []byte
+	Audiences    string
 }
 
 func (q *Queries) CreateGrant(ctx context.Context, arg CreateGrantParams) error {
@@ -89,6 +108,11 @@ func (q *Queries) CreateGrant(ctx context.Context, arg CreateGrantParams) error 
 		arg.ExpiresAt,
 		arg.RevokedAt,
 		arg.RevokeReason,
+		arg.Exchange,
+		arg.ParentID,
+		arg.ActorUserID,
+		arg.Act,
+		arg.Audiences,
 	)
 	return err
 }
@@ -212,7 +236,8 @@ func (q *Queries) DeleteSigningKey(ctx context.Context, arg DeleteSigningKeyPara
 }
 
 const eraseUserGrantTokens = `-- name: EraseUserGrantTokens :exec
-DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_grants g WHERE g.realm_id = ?1 AND g.user_id = ?2)
+DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_grants g WHERE g.realm_id = ?1
+    AND (g.user_id = ?2 OR g.actor_user_id = ?2))
 `
 
 type EraseUserGrantTokensParams struct {
@@ -226,7 +251,7 @@ func (q *Queries) EraseUserGrantTokens(ctx context.Context, arg EraseUserGrantTo
 }
 
 const eraseUserGrants = `-- name: EraseUserGrants :exec
-DELETE FROM authn_oidc_grants WHERE realm_id = ? AND user_id = ?
+DELETE FROM authn_oidc_grants WHERE realm_id = ?1 AND (user_id = ?2 OR actor_user_id = ?2)
 `
 
 type EraseUserGrantsParams struct {
@@ -240,7 +265,7 @@ func (q *Queries) EraseUserGrants(ctx context.Context, arg EraseUserGrantsParams
 }
 
 const getClient = `-- name: GetClient :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at FROM authn_clients WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, token_exchange FROM authn_clients WHERE realm_id = ? AND id = ?
 `
 
 type GetClientParams struct {
@@ -266,12 +291,13 @@ func (q *Queries) GetClient(ctx context.Context, arg GetClientParams) (AuthnClie
 		&i.BackchannelLogoutUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TokenExchange,
 	)
 	return i, err
 }
 
 const getClientByPublicID = `-- name: GetClientByPublicID :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at FROM authn_clients WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, token_exchange FROM authn_clients WHERE realm_id = ? AND public_id = ?
 `
 
 type GetClientByPublicIDParams struct {
@@ -297,12 +323,13 @@ func (q *Queries) GetClientByPublicID(ctx context.Context, arg GetClientByPublic
 		&i.BackchannelLogoutUri,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TokenExchange,
 	)
 	return i, err
 }
 
 const getGrant = `-- name: GetGrant :one
-SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason FROM authn_oidc_grants WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, exchange, parent_id, actor_user_id, act, audiences FROM authn_oidc_grants WHERE realm_id = ? AND id = ?
 `
 
 type GetGrantParams struct {
@@ -327,6 +354,11 @@ func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (AuthnOidcGr
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.RevokeReason,
+		&i.Exchange,
+		&i.ParentID,
+		&i.ActorUserID,
+		&i.Act,
+		&i.Audiences,
 	)
 	return i, err
 }
@@ -357,7 +389,7 @@ func (q *Queries) GetOIDCToken(ctx context.Context, arg GetOIDCTokenParams) (Aut
 }
 
 const listClients = `-- name: ListClients :many
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, token_exchange FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id
 `
 
 func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClient, error) {
@@ -384,6 +416,7 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 			&i.BackchannelLogoutUri,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TokenExchange,
 		); err != nil {
 			return nil, err
 		}
@@ -399,7 +432,7 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 }
 
 const listGrantsBySID = `-- name: ListGrantsBySID :many
-SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason FROM authn_oidc_grants WHERE realm_id = ? AND sid = ? ORDER BY created_at, id
+SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, exchange, parent_id, actor_user_id, act, audiences FROM authn_oidc_grants WHERE realm_id = ? AND sid = ? ORDER BY created_at, id
 `
 
 type ListGrantsBySIDParams struct {
@@ -430,6 +463,11 @@ func (q *Queries) ListGrantsBySID(ctx context.Context, arg ListGrantsBySIDParams
 			&i.ExpiresAt,
 			&i.RevokedAt,
 			&i.RevokeReason,
+			&i.Exchange,
+			&i.ParentID,
+			&i.ActorUserID,
+			&i.Act,
+			&i.Audiences,
 		); err != nil {
 			return nil, err
 		}
@@ -479,6 +517,39 @@ func (q *Queries) ListSigningKeys(ctx context.Context, realmID string) ([]AuthnS
 	return items, nil
 }
 
+const purgeExchangedGrantTokens = `-- name: PurgeExchangedGrantTokens :exec
+DELETE FROM authn_oidc_tokens WHERE grant_id IN (
+    SELECT g.id FROM authn_oidc_grants g WHERE g.exchange = ?1 ORDER BY g.id LIMIT ?2)
+`
+
+type PurgeExchangedGrantTokensParams struct {
+	Exchange string
+	Lim      int64
+}
+
+func (q *Queries) PurgeExchangedGrantTokens(ctx context.Context, arg PurgeExchangedGrantTokensParams) error {
+	_, err := q.db.ExecContext(ctx, purgeExchangedGrantTokens, arg.Exchange, arg.Lim)
+	return err
+}
+
+const purgeExchangedGrants = `-- name: PurgeExchangedGrants :execrows
+DELETE FROM authn_oidc_grants WHERE id IN (
+    SELECT g.id FROM authn_oidc_grants g WHERE g.exchange = ?1 ORDER BY g.id LIMIT ?2)
+`
+
+type PurgeExchangedGrantsParams struct {
+	Exchange string
+	Lim      int64
+}
+
+func (q *Queries) PurgeExchangedGrants(ctx context.Context, arg PurgeExchangedGrantsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeExchangedGrants, arg.Exchange, arg.Lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const retireSigningKey = `-- name: RetireSigningKey :execrows
 UPDATE authn_signing_keys SET retired_at = ? WHERE realm_id = ? AND id = ?
 `
@@ -526,7 +597,7 @@ func (q *Queries) RevokeGrant(ctx context.Context, arg RevokeGrantParams) (int64
 
 const updateClient = `-- name: UpdateClient :execrows
 UPDATE authn_clients SET name = ?, trust_level = ?, redirect_uris = ?, post_logout_redirect_uris = ?, auth_method = ?, secret_hash = ?, jwks = ?,
-    id_token_alg = ?, backchannel_logout_uri = ?, updated_at = ?
+    id_token_alg = ?, backchannel_logout_uri = ?, updated_at = ?, token_exchange = ?
 WHERE realm_id = ? AND id = ?
 `
 
@@ -541,6 +612,7 @@ type UpdateClientParams struct {
 	IDTokenAlg             string
 	BackchannelLogoutUri   string
 	UpdatedAt              string
+	TokenExchange          []byte
 	RealmID                string
 	ID                     string
 }
@@ -557,6 +629,7 @@ func (q *Queries) UpdateClient(ctx context.Context, arg UpdateClientParams) (int
 		arg.IDTokenAlg,
 		arg.BackchannelLogoutUri,
 		arg.UpdatedAt,
+		arg.TokenExchange,
 		arg.RealmID,
 		arg.ID,
 	)

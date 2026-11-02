@@ -36,6 +36,7 @@ type AuthnClient struct {
 	BackchannelLogoutUri   string
 	CreatedAt              string
 	UpdatedAt              string
+	TokenExchange          []byte
 }
 
 type AuthnConnection struct {
@@ -62,6 +63,11 @@ type AuthnOidcGrant struct {
 	ExpiresAt    string
 	RevokedAt    sql.NullString
 	RevokeReason string
+	Exchange     string
+	ParentID     string
+	ActorUserID  string
+	Act          []byte
+	Audiences    string
 }
 
 type AuthnOidcToken struct {

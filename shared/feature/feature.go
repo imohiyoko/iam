@@ -32,6 +32,8 @@ const (
 	AccountMerge        = "account_merge"
 	CustomAttributes    = "custom_attributes"
 	FlowHooks           = "flow_hooks"
+	TokenExchange       = "token_exchange"
+	Impersonation       = "impersonation"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

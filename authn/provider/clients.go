@@ -209,6 +209,10 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	}
 	cl.Name, cl.RedirectURIs, cl.PostLogoutRedirectURIs, cl.AuthMethod = in.Name, in.RedirectURIs, in.PostLogoutRedirectURIs, in.AuthMethod
 	cl.JWKS, cl.IDTokenAlg, cl.BackchannelLogoutURI, cl.UpdatedAt = in.JWKS, in.IDTokenAlg, in.BackchannelLogoutURI, c.Clock.Now()
+	if cl.AuthMethod == port.ClientAuthNone {
+		// 公開クライアントには交換を許さない（ADR 0099）。
+		cl.TokenExchange = nil
+	}
 	if err := tx.Clients().Update(ctx, cl); err != nil {
 		return port.Client{}, "", err
 	}

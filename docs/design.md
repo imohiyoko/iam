@@ -551,6 +551,16 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 
 - 当面はホスト先が管理 API で登録したファーストパーティのみ。同意画面なし、動的クライアント登録なし
 - 将来のサードパーティ開放に備え `clients.trust_level` を持つ
+- 機密の連携先ごとに、Token Exchange で許す aud・受け付ける元の連携先・なりすましの可否を管理 API で置く（既定は何も許さない。5.6）
+
+### 5.6 Token Exchange
+
+RFC 8693。token エンドポイントで受け、不透明なアクセストークンだけを発行する（ADR 0099）。
+
+- 委任（`token_exchange`）：本人のアクセストークンか ID トークンを、行為者（`act`）付きのトークンに替える。aud は連携先ごとの許可の中から選び（RFC 8707 の `resource` も可）、スコープは縮めるだけ。重ねられるのは 4 回まで
+- なりすまし（`impersonation`）：運営者が自分のトークンと `requested_subject` で本人のトークンを得る。権限 `users:impersonate`・outranks・step-up（直近の多要素の認証）・レートリミットを満たしたときだけ。寿命は短く（既定 10 分）、監査ログと本人への通知を残す
+- 交換の認可は元の認可（`parent_id`）とログインの系列に結び付ける。元の失効・系列の終わり・本人が使えなくなることは交換したトークンにもすぐ効く。リフレッシュトークンは出さない
+- イントロスペクションは `act`・交換の `aud`、なりすましには `impersonation: true` を返す
 
 ## 6. 監査ログとイベント出力
 
@@ -701,6 +711,8 @@ POST   /v1/me/sessions/{id}:revoke | /v1/me/credentials/{id}:revoke
 | アカウント統合（11.6） | オフ | ― | 統合 API なし |
 | カスタム属性（11.7） | オフ | ― | 属性の読み書きなし |
 | フロー フック（11.8） | オフ | ― | フックを一切呼ばない |
+| Token Exchange の委任（5.6） | オフ | ― | token-exchange の grant を受けない。交換のトークンは使えない |
+| なりすまし（5.6） | オフ | Token Exchange | `requested_subject` を受けない。なりすましのトークンは使えない |
 
 ### 11.1 複数 realm
 

@@ -121,6 +121,8 @@ type App struct {
 	issuer string
 	flow   *provider.Flow
 	tokens *provider.Tokens
+	// impersonationLimit は運営者ごとのなりすましの回数の上限（フィーチャー impersonation。ADR 0099）。
+	impersonationLimit *ratelimit.Limiter
 	// authz は認可の判定（ADR 0064）。manage はロール・付与・Group の管理。
 	authz  *check.Checker
 	manage *manage.Service
@@ -330,6 +332,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D()}
 	if a.issuer != "" {
 		a.sessions.Lineages = a.tokens
+	}
+	// Token Exchange（ADR 0099）。なりすましは token_exchange に依存する（Requires）ので、動いていれば両方動いている。
+	a.tokens.TokenExchange = plan.IsActive(feature.TokenExchange)
+	if plan.IsActive(feature.Impersonation) {
+		a.impersonationLimit = a.limiter(cfg.Security.Login.RateLimit.PerAccount)
+		a.tokens.Impersonation = &provider.Impersonation{TTL: cfg.OIDC.Impersonation.TokenTTL.D(), Notify: a.notify, Authorize: a.authorizeImpersonation}
 	}
 	a.email = &emailflow.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions,

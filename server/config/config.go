@@ -99,6 +99,18 @@ type OIDC struct {
 	RefreshTokenTTL Duration `yaml:"refresh_token_ttl"`
 	// RetiredKeyTTL はローテーションで退役した署名鍵を JWKS に残す期間（id_token_ttl より長くする）。
 	RetiredKeyTTL Duration `yaml:"retired_key_ttl"`
+	// Impersonation は Token Exchange による運営者のなりすまし（フィーチャー impersonation。ADR 0099）。
+	Impersonation Impersonation `yaml:"impersonation"`
+}
+
+// Impersonation はなりすましの寿命と step-up の条件。
+type Impersonation struct {
+	// TokenTTL はなりすましのアクセストークンの寿命（元のアクセストークンの期限より長くはしない）。1時間以下。
+	TokenTTL Duration `yaml:"token_ttl"`
+	// MaxAuthAge は運営者の直近の認証からの時間の上限（step-up。1時間以下）。
+	MaxAuthAge Duration `yaml:"max_auth_age"`
+	// MinFactors は運営者の認証の要素の数の下限（0〜3。既定 2）。
+	MinFactors int `yaml:"min_factors"`
 }
 
 // Passkey は passkey の Relying Party の設定。省略した項目は server.public_url から決める。
@@ -430,7 +442,8 @@ func Default() Config {
 		Outbox:     Outbox{Interval: Duration(time.Second), Batch: 100},
 		OrgDomains: OrgDomains{Recheck: Duration(day), Grace: Duration(7 * day)},
 		IDs:        IDs{Internal: "uuidv7", External: "random"},
-		OIDC: OIDC{CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
+		OIDC: OIDC{Impersonation: Impersonation{TokenTTL: Duration(10 * time.Minute), MaxAuthAge: Duration(5 * time.Minute), MinFactors: 2},
+			CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
 			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day)},
 		ServiceAccounts: ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
 	}
@@ -582,6 +595,12 @@ func (c Config) Validate() error {
 	}
 	if o.RetiredKeyTTL <= o.IDTokenTTL {
 		problems = append(problems, "oidc.retired_key_ttl must be longer than oidc.id_token_ttl")
+	}
+	if im := o.Impersonation; im.TokenTTL <= 0 || im.TokenTTL > Duration(time.Hour) || im.MaxAuthAge <= 0 || im.MaxAuthAge > Duration(time.Hour) {
+		problems = append(problems, "oidc.impersonation: token_ttl and max_auth_age must be positive and at most 1h")
+	}
+	if m := o.Impersonation.MinFactors; m < 0 || m > 3 {
+		problems = append(problems, "oidc.impersonation.min_factors must be between 0 and 3")
 	}
 	if t := c.ServiceAccounts.TokenTTL; t <= 0 || t > Duration(time.Hour) {
 		problems = append(problems, "service_accounts.token_ttl must be positive and at most 1h")
