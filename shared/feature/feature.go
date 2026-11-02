@@ -36,6 +36,7 @@ const (
 	HOTP                = "hotp"
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
+	SAML                = "saml"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

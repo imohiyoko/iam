@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/server/publicapi"
@@ -45,13 +46,20 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 		h = withStepUp(h)
 	}
 	api := a.withLoginGuard(a.withSession(h))
-	protected := http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	csrf := http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isHosted(r.URL.Path) {
 			login.ServeHTTP(w, r)
 			return
 		}
 		api.ServeHTTP(w, r)
 	}))
+	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isSAMLACS(r) {
+			login.ServeHTTP(w, r)
+			return
+		}
+		csrf.ServeHTTP(w, r)
+	})
 	provider := newOIDCHandler(a)
 	if provider == nil {
 		return protected
@@ -63,6 +71,12 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 		}
 		protected.ServeHTTP(w, r)
 	})
+}
+
+// isSAMLACS は SAML の ACS への POST かを返す。IdP から別サイトの POST で届くので、CrossOriginProtection の外に置く。
+// ACS の画面は値を画面に渡すだけで状態を変えない（確かめるのは同じオリジンから呼ぶ完了の API。ADR 0098）。
+func isSAMLACS(r *http.Request) bool {
+	return r.Method == http.MethodPost && r.URL.Path == saml.ACSPath
 }
 
 func (s publicServer) Logout(ctx context.Context, _ publicapi.LogoutRequestObject) (publicapi.LogoutResponseObject, error) {

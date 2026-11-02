@@ -108,3 +108,4 @@
 | [0093](0093-acr-aal-step-up.md) | 認証の強さは amr から AAL を求めて acr で出し、足りなければ step-up（RFC 9470）を求める | 承認 |
 | [0096](0096-passkey-attestation.md) | passkey の attestation を MDS と設定の信頼の起点で確かめ、認証器のポリシーを realm と Org の段で判定する | 承認 |
 | [0097](0097-admin-read-api.md) | 管理 API の一覧・取得・検索は運営者ロールに読み取りの権限を足し、メールはブラインドインデックスの完全一致で引く | 承認 |
+| [0098](0098-saml-sp.md) | 外部 IdP としての SAML 2.0 は goxmldsig で署名を確かめ、プロトコルの確認は自前の薄い層で行う | 承認 |
