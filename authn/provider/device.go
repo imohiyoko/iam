@@ -326,17 +326,22 @@ func (d *Device) Poll(ctx context.Context, realmID, clientID, deviceCode string)
 }
 
 // pace は前のポーリングから間隔が空いているかを確かめる。速すぎれば間隔を延ばして ErrDeviceSlowDown を返す。
-// 時刻と間隔は秘密でないので封をしない。並行のポーリングでは数え漏れがありうる（間隔の目安に使うだけ）。
 func (d *Device) pace(ctx context.Context, dkey string, r DeviceRequest, now time.Time) error {
-	key := digestKey(devicePollPrefix, dkey)
-	p := devicePoll{Interval: d.interval()}
-	b, ok, err := d.Cache.Get(ctx, key)
+	return pacePoll(ctx, d.Cache, digestKey(devicePollPrefix, dkey), d.interval(), now, r.ExpiresAt)
+}
+
+// pacePoll はポーリングの間隔を確かめる（RFC 8628 3.5。CIBA も同じ。ADR 0095、0114）。key に最後の時刻と間隔を置き、
+// 間隔（base より短くしない）より速ければ間隔を slowDownStep 延ばして（maxDeviceInterval まで）ErrDeviceSlowDown を返す。
+// 時刻と間隔は秘密でないので封をしない。並行のポーリングでは数え漏れがありうる（間隔の目安に使うだけ）。
+func pacePoll(ctx context.Context, cache port.EphemeralStore, key string, base time.Duration, now, until time.Time) error {
+	p := devicePoll{Interval: base}
+	b, ok, err := cache.Get(ctx, key)
 	if err != nil {
 		return err
 	}
 	if ok {
 		_ = json.Unmarshal(b, &p)
-		p.Interval = max(p.Interval, d.interval())
+		p.Interval = max(p.Interval, base)
 	}
 	fast := !p.Last.IsZero() && now.Sub(p.Last) < p.Interval
 	if fast {
@@ -347,7 +352,7 @@ func (d *Device) pace(ctx context.Context, dkey string, r DeviceRequest, now tim
 	if err != nil {
 		return err
 	}
-	if err := d.Cache.Set(ctx, key, nb, r.ExpiresAt.Sub(now)); err != nil {
+	if err := cache.Set(ctx, key, nb, until.Sub(now)); err != nil {
 		return err
 	}
 	if fast {

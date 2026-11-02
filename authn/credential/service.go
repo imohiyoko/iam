@@ -81,6 +81,9 @@ type Service struct {
 	// nil ならディレクトリでの引き当てはできない（errs.Unavailable）。
 	Directory func(ctx context.Context, realmID, connection, attribute, value string) (string, error)
 	Log       *slog.Logger
+	// OnBackchannel は、方式の Callback が CIBA のチャレンジ（BeginBackchannel）への応答を受けたときに呼ぶ（ref は
+	// MethodCallbackResult.Ref。ADR 0114）。nil なら呼ばない。
+	OnBackchannel func(ctx context.Context, realmID, method, ref string)
 }
 
 // Client は要求の接続元（監査ログとセッション）。
@@ -439,7 +442,88 @@ func (s *Service) Callback(ctx context.Context, realmID, name string, p json.Raw
 		return nil, err
 	}
 	s.record(ctx, realmID, name, c, r.Events)
+	if r.Ref != "" && s.OnBackchannel != nil {
+		s.OnBackchannel(ctx, realmID, name, r.Ref)
+	}
 	return payload(r.Payload), nil
+}
+
+// Backchannel は CIBA の要求のために本人の端末へ送ったチャレンジ（ADR 0114）。State は秘密を含みうるので、呼び出し側が封をして置く。
+type Backchannel struct {
+	Method string `json:"method"`
+	Ref    string `json:"ref"`
+	State  []byte `json:"state"`
+}
+
+// ErrNoBackchannel は、本人の端末へ CIBA の要求を送れる方式が無いか、本人が端末を登録していないこと。
+var ErrNoBackchannel = errs.New(errs.KindNotFound, "backchannel authenticator")
+
+// BeginBackchannel は、CIBA の要求を本人（userID は内部 ID）の端末に送る（port.BackchannelAuthenticator の方式を名前の順に試し、
+// 本人が認証情報を持つ最初のもの）。送れる方式が無ければ ErrNoBackchannel、送信の失敗は port.ErrDeliveryFailed、
+// 上限は *ratelimit.ExceededError。方式の監査ログを記録する。
+func (s *Service) BeginBackchannel(ctx context.Context, realmID, userID string, req port.BackchannelRequest, c Client) (Backchannel, error) {
+	if userID == "" {
+		return Backchannel{}, ErrNoBackchannel
+	}
+	for _, name := range s.Methods.Names("") {
+		a, _ := s.Methods.Get(name)
+		bc, ok := a.(port.BackchannelAuthenticator)
+		if !ok {
+			continue
+		}
+		env := s.env(ctx, nil, realmID, userID, a, "")
+		env.ClientIP = c.IP
+		ch, err := bc.BeginBackchannel(ctx, env, req)
+		if errors.Is(err, errs.NotFound) {
+			continue
+		}
+		if err != nil {
+			return Backchannel{}, err
+		}
+		if ch.Ref == "" {
+			return Backchannel{}, fmt.Errorf("credential: method %s returned a backchannel challenge without a reference", name)
+		}
+		if err := s.deliver(ctx, realmID, name, ch, c); err != nil {
+			return Backchannel{}, err
+		}
+		return Backchannel{Method: name, Ref: ch.Ref, State: ch.State}, nil
+	}
+	return Backchannel{}, ErrNoBackchannel
+}
+
+// CompleteBackchannel は BeginBackchannel のチャレンジの結果を取り出す（1回だけ）。承認なら使った認証情報（最終使用を記録する）と
+// amr を返す。届いていなければ port.ErrMethodPending、拒否・期限切れ・無効化した端末は ErrAuthFailed。
+func (s *Service) CompleteBackchannel(ctx context.Context, realmID, userID string, b Backchannel) (port.Credential, []string, error) {
+	a, err := s.Method(b.Method, "")
+	if err != nil {
+		return port.Credential{}, nil, err
+	}
+	if _, ok := a.(port.BackchannelAuthenticator); !ok || userID == "" {
+		return port.Credential{}, nil, ErrUnknownMethod
+	}
+	r, err := a.Complete(ctx, s.env(ctx, nil, realmID, userID, a, ""), port.MethodRequest{State: b.State})
+	if errors.Is(err, port.ErrMethodPending) {
+		return port.Credential{}, nil, err
+	}
+	if rejectedByUser(err) || errors.Is(err, errs.NotFound) {
+		return port.Credential{}, nil, ErrAuthFailed
+	}
+	if err != nil {
+		return port.Credential{}, nil, err
+	}
+	var cred port.Credential
+	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		cred, err = s.used(ctx, tx, realmID, userID, b.Method, r)
+		return err
+	})
+	if errors.Is(err, errRejected) {
+		return port.Credential{}, nil, ErrAuthFailed
+	}
+	if err != nil {
+		return port.Credential{}, nil, err
+	}
+	return cred, amr(a, r), nil
 }
 
 // ErrEndpointRejected は方式のエンドポイントが入力を拒んだこと（照合の失敗・入力の誤り・見つからない。外には 400）。

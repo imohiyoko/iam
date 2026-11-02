@@ -3166,6 +3166,65 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/backchannel-requests:
+    get:
+      operationId: listMyBackchannelRequests
+      summary: 本人宛ての未決の CIBA の要求の一覧（フィーチャー ciba。ADR 0114）
+      description: |
+        連携先が本人を指して始めた CIBA の要求のうち、まだ承認も拒否もしていない期限の内のものを新しい順に返す（16 件まで）。
+        動いていなければ 404。`binding_message` は連携先の画面に出ているものと同じかを確かめるためのもの。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 新しい順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [backchannel_requests]
+                properties:
+                  backchannel_requests:
+                    type: array
+                    items: { $ref: "#/components/schemas/BackchannelRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/backchannel-requests/{id}:approve:
+    post:
+      operationId: approveMyBackchannelRequest
+      summary: 本人宛ての CIBA の要求を承認する
+      description: |
+        今のセッションのログインの系列（`sid`・`auth_time`・`amr`・active な Org）でトークンを発行させる（Device Authorization Grant と
+        同じ。ADR 0095）。判断は要求ごとに 1 回だけ。active な Org が使えない（`org_unavailable`）か、要求の `acr_values` を今の
+        セッションが満たさない（`unmet_authentication_requirements`）ときは拒否として記録して 403。知らない・期限切れ・判断済みは 404。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, maxLength: 64 } }
+      responses:
+        "204": { description: 承認した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/backchannel-requests/{id}:deny:
+    post:
+      operationId: denyMyBackchannelRequest
+      summary: 本人宛ての CIBA の要求を拒否する
+      description: 連携先のポーリングには `access_denied` を返す。知らない・期限切れ・判断済みは 404。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, maxLength: 64 } }
+      responses:
+        "204": { description: 拒否した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -3949,3 +4008,15 @@ components:
         max_lifetime_seconds: { type: integer, format: int64, description: 今効く寿命の上限（realm とホスト先の短い方。0 なら上限なし） }
         allowed_scopes: { type: array, items: { type: string }, description: 作れるスコープ（空なら形だけを確かめる） }
         require_expiry: { type: boolean }
+    BackchannelRequest:
+      type: object
+      required: [id, client_id, client_name, scopes, created_at, expires_at]
+      description: 本人宛ての CIBA の要求（ADR 0114）。`auth_req_id` は含めない
+      properties:
+        id: { type: string, description: 本人の API で使う要求の ID }
+        client_id: { type: string }
+        client_name: { type: string }
+        scopes: { type: array, items: { type: string } }
+        binding_message: { type: string, description: 連携先が付けた確認の文言（無ければ省く） }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
