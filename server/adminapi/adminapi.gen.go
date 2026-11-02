@@ -178,6 +178,39 @@ func (e AttributeDefInputType) Valid() bool {
 	}
 }
 
+// Defines values for AuditChainVerificationBrokenReason.
+const (
+	HashMismatch     AuditChainVerificationBrokenReason = "hash_mismatch"
+	KeyUnavailable   AuditChainVerificationBrokenReason = "key_unavailable"
+	PayloadInvalid   AuditChainVerificationBrokenReason = "payload_invalid"
+	PrevHashMismatch AuditChainVerificationBrokenReason = "prev_hash_mismatch"
+	RealmMismatch    AuditChainVerificationBrokenReason = "realm_mismatch"
+	SeqGap           AuditChainVerificationBrokenReason = "seq_gap"
+	UnkeyedRecord    AuditChainVerificationBrokenReason = "unkeyed_record"
+)
+
+// Valid indicates whether the value is a known member of the AuditChainVerificationBrokenReason enum.
+func (e AuditChainVerificationBrokenReason) Valid() bool {
+	switch e {
+	case HashMismatch:
+		return true
+	case KeyUnavailable:
+		return true
+	case PayloadInvalid:
+		return true
+	case PrevHashMismatch:
+		return true
+	case RealmMismatch:
+		return true
+	case SeqGap:
+		return true
+	case UnkeyedRecord:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CheckRequestPrincipalType.
 const (
 	CheckRequestPrincipalTypeUser CheckRequestPrincipalType = "user"
@@ -241,6 +274,78 @@ func (e ClientInputTokenEndpointAuthMethod) Valid() bool {
 	case ClientInputTokenEndpointAuthMethodNone:
 		return true
 	case ClientInputTokenEndpointAuthMethodPrivateKeyJwt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EventSubscriptionPii.
+const (
+	EventSubscriptionPiiOmit         EventSubscriptionPii = "omit"
+	EventSubscriptionPiiPseudonymize EventSubscriptionPii = "pseudonymize"
+)
+
+// Valid indicates whether the value is a known member of the EventSubscriptionPii enum.
+func (e EventSubscriptionPii) Valid() bool {
+	switch e {
+	case EventSubscriptionPiiOmit:
+		return true
+	case EventSubscriptionPiiPseudonymize:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EventSubscriptionInputPii.
+const (
+	EventSubscriptionInputPiiOmit         EventSubscriptionInputPii = "omit"
+	EventSubscriptionInputPiiPseudonymize EventSubscriptionInputPii = "pseudonymize"
+)
+
+// Valid indicates whether the value is a known member of the EventSubscriptionInputPii enum.
+func (e EventSubscriptionInputPii) Valid() bool {
+	switch e {
+	case EventSubscriptionInputPiiOmit:
+		return true
+	case EventSubscriptionInputPiiPseudonymize:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EventSubscriptionUpdatePii.
+const (
+	EventSubscriptionUpdatePiiOmit         EventSubscriptionUpdatePii = "omit"
+	EventSubscriptionUpdatePiiPseudonymize EventSubscriptionUpdatePii = "pseudonymize"
+)
+
+// Valid indicates whether the value is a known member of the EventSubscriptionUpdatePii enum.
+func (e EventSubscriptionUpdatePii) Valid() bool {
+	switch e {
+	case EventSubscriptionUpdatePiiOmit:
+		return true
+	case EventSubscriptionUpdatePiiPseudonymize:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EventSubscriptionWithSecretPii.
+const (
+	EventSubscriptionWithSecretPiiOmit         EventSubscriptionWithSecretPii = "omit"
+	EventSubscriptionWithSecretPiiPseudonymize EventSubscriptionWithSecretPii = "pseudonymize"
+)
+
+// Valid indicates whether the value is a known member of the EventSubscriptionWithSecretPii enum.
+func (e EventSubscriptionWithSecretPii) Valid() bool {
+	switch e {
+	case EventSubscriptionWithSecretPiiOmit:
+		return true
+	case EventSubscriptionWithSecretPiiPseudonymize:
 		return true
 	default:
 		return false
@@ -658,6 +763,24 @@ func (e SuspensionTargetType) Valid() bool {
 	}
 }
 
+// Defines values for ListAuditEventsParamsResult.
+const (
+	Failure ListAuditEventsParamsResult = "failure"
+	Success ListAuditEventsParamsResult = "success"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditEventsParamsResult enum.
+func (e ListAuditEventsParamsResult) Valid() bool {
+	switch e {
+	case Failure:
+		return true
+	case Success:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListOrgsParamsKind.
 const (
 	ListOrgsParamsKindPersonal ListOrgsParamsKind = "personal"
@@ -962,6 +1085,80 @@ type AttributeDefUpdate struct {
 	Values       *[]string `json:"values,omitempty"`
 }
 
+// AuditActor defines model for AuditActor.
+type AuditActor struct {
+	Id *string `json:"id,omitempty"`
+
+	// Type user / service_account / system / operator_cli / anonymous など
+	Type string `json:"type"`
+}
+
+// AuditChainVerification defines model for AuditChainVerification.
+type AuditChainVerification struct {
+	// Anchored 先頭（Genesis かチェックポイント）から確かめたか
+	Anchored bool `json:"anchored"`
+	Broken   *struct {
+		Reason AuditChainVerificationBrokenReason `json:"reason"`
+		Seq    int64                              `json:"seq"`
+	} `json:"broken,omitempty"`
+	Checkpoint *struct {
+		At   time.Time `json:"at"`
+		Hash string    `json:"hash"`
+		Seq  int64     `json:"seq"`
+	} `json:"checkpoint,omitempty"`
+	FromSeq int64 `json:"from_seq"`
+
+	// HeadSeq チェーンの最新の seq
+	HeadSeq int64 `json:"head_seq"`
+
+	// LastHash to_seq のハッシュ（16進。壊れていれば無い）
+	LastHash *string `json:"last_hash,omitempty"`
+
+	// PrevHash from_seq の前のハッシュ（16進）
+	PrevHash string `json:"prev_hash"`
+
+	// ToSeq 確かめた最後の seq（範囲が空なら from_seq より小さい）
+	ToSeq int64 `json:"to_seq"`
+	Valid bool  `json:"valid"`
+}
+
+// AuditChainVerificationBrokenReason defines model for AuditChainVerification.Broken.Reason.
+type AuditChainVerificationBrokenReason string
+
+// AuditEvent 監査ログの1件（design.md 6.2）。`ip`・`user_agent` は切り詰めた値（ADR 0063）
+type AuditEvent struct {
+	Actor AuditActor `json:"actor"`
+
+	// Client `include_client_data=true` で読めたときの全文
+	Client *struct {
+		Ip        *string `json:"ip,omitempty"`
+		UserAgent *string `json:"user_agent,omitempty"`
+	} `json:"client,omitempty"`
+
+	// ClientUnreadable `include_client_data=true` で、全文が無いか読めない
+	ClientUnreadable *bool                   `json:"client_unreadable,omitempty"`
+	Details          *map[string]interface{} `json:"details,omitempty"`
+
+	// Hash チェーンのハッシュ（16進）
+	Hash string `json:"hash"`
+	Id   string `json:"id"`
+
+	// Ip IPv4 /24・IPv6 /48 に切り詰めた値
+	Ip        *string `json:"ip,omitempty"`
+	OrgId     *string `json:"org_id,omitempty"`
+	RequestId *string `json:"request_id,omitempty"`
+	Result    string  `json:"result"`
+
+	// Seq チェーン上の位置（全 realm で1本）
+	Seq       int64     `json:"seq"`
+	SessionId *string   `json:"session_id,omitempty"`
+	Time      time.Time `json:"time"`
+	Type      string    `json:"type"`
+
+	// UserAgent ブラウザと OS の大分類
+	UserAgent *string `json:"user_agent,omitempty"`
+}
+
 // CheckRequest defines model for CheckRequest.
 type CheckRequest struct {
 	// AccessToken 主体のアクセストークン。`sid` と同じく IAM が文脈を組み立てる（`sid` より優先）。使えないか主体のものでなければ文脈なし
@@ -1124,6 +1321,81 @@ type Error struct {
 	// Quota Quota の不足（`quota_exceeded`）。`from` から `until`（無ければ無期限）の間、上限 `limit` に `count` 人がいる
 	Quota *QuotaShortage `json:"quota,omitempty"`
 }
+
+// EventSubscription defines model for EventSubscription.
+type EventSubscription struct {
+	CreatedAt time.Time `json:"created_at"`
+	CreatedBy *string   `json:"created_by,omitempty"`
+	Delivery  struct {
+		// CursorSeq 送り終えた監査ログの seq
+		CursorSeq int64 `json:"cursor_seq"`
+
+		// Failures 続けて失敗した回数
+		Failures        int        `json:"failures"`
+		LastDeliveredAt *time.Time `json:"last_delivered_at,omitempty"`
+		LastError       *string    `json:"last_error,omitempty"`
+		NextAttemptAt   *time.Time `json:"next_attempt_at,omitempty"`
+	} `json:"delivery"`
+	Enabled    bool                 `json:"enabled"`
+	EventTypes []string             `json:"event_types"`
+	Id         string               `json:"id"`
+	Pii        EventSubscriptionPii `json:"pii"`
+	UpdatedAt  time.Time            `json:"updated_at"`
+	Url        string               `json:"url"`
+}
+
+// EventSubscriptionPii defines model for EventSubscription.Pii.
+type EventSubscriptionPii string
+
+// EventSubscriptionInput defines model for EventSubscriptionInput.
+type EventSubscriptionInput struct {
+	Enabled    *bool                      `json:"enabled,omitempty"`
+	EventTypes *[]string                  `json:"event_types,omitempty"`
+	Pii        *EventSubscriptionInputPii `json:"pii,omitempty"`
+	Url        string                     `json:"url"`
+}
+
+// EventSubscriptionInputPii defines model for EventSubscriptionInput.Pii.
+type EventSubscriptionInputPii string
+
+// EventSubscriptionUpdate defines model for EventSubscriptionUpdate.
+type EventSubscriptionUpdate struct {
+	Enabled    *bool                       `json:"enabled,omitempty"`
+	EventTypes *[]string                   `json:"event_types,omitempty"`
+	Pii        *EventSubscriptionUpdatePii `json:"pii,omitempty"`
+	Url        *string                     `json:"url,omitempty"`
+}
+
+// EventSubscriptionUpdatePii defines model for EventSubscriptionUpdate.Pii.
+type EventSubscriptionUpdatePii string
+
+// EventSubscriptionWithSecret defines model for EventSubscriptionWithSecret.
+type EventSubscriptionWithSecret struct {
+	CreatedAt time.Time `json:"created_at"`
+	CreatedBy *string   `json:"created_by,omitempty"`
+	Delivery  struct {
+		// CursorSeq 送り終えた監査ログの seq
+		CursorSeq int64 `json:"cursor_seq"`
+
+		// Failures 続けて失敗した回数
+		Failures        int        `json:"failures"`
+		LastDeliveredAt *time.Time `json:"last_delivered_at,omitempty"`
+		LastError       *string    `json:"last_error,omitempty"`
+		NextAttemptAt   *time.Time `json:"next_attempt_at,omitempty"`
+	} `json:"delivery"`
+	Enabled    bool                           `json:"enabled"`
+	EventTypes []string                       `json:"event_types"`
+	Id         string                         `json:"id"`
+	Pii        EventSubscriptionWithSecretPii `json:"pii"`
+
+	// Secret 署名の鍵（この応答でだけ返す）
+	Secret    string    `json:"secret"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Url       string    `json:"url"`
+}
+
+// EventSubscriptionWithSecretPii defines model for EventSubscriptionWithSecret.Pii.
+type EventSubscriptionWithSecretPii string
 
 // Group defines model for Group.
 type Group struct {
@@ -1824,6 +2096,36 @@ type Validity struct {
 	ValidUntil *time.Time `json:"valid_until,omitempty"`
 }
 
+// ListAuditEventsParams defines parameters for ListAuditEvents.
+type ListAuditEventsParams struct {
+	Limit             *int                         `form:"limit,omitempty" json:"limit,omitempty"`
+	After             *string                      `form:"after,omitempty" json:"after,omitempty"`
+	Since             *time.Time                   `form:"since,omitempty" json:"since,omitempty"`
+	Until             *time.Time                   `form:"until,omitempty" json:"until,omitempty"`
+	Type              *string                      `form:"type,omitempty" json:"type,omitempty"`
+	TypePrefix        *string                      `form:"type_prefix,omitempty" json:"type_prefix,omitempty"`
+	Result            *ListAuditEventsParamsResult `form:"result,omitempty" json:"result,omitempty"`
+	ActorType         *string                      `form:"actor_type,omitempty" json:"actor_type,omitempty"`
+	ActorId           *string                      `form:"actor_id,omitempty" json:"actor_id,omitempty"`
+	OrgId             *string                      `form:"org_id,omitempty" json:"org_id,omitempty"`
+	TargetId          *string                      `form:"target_id,omitempty" json:"target_id,omitempty"`
+	IncludeClientData *bool                        `form:"include_client_data,omitempty" json:"include_client_data,omitempty"`
+}
+
+// ListAuditEventsParamsResult defines parameters for ListAuditEvents.
+type ListAuditEventsParamsResult string
+
+// GetAuditEventParams defines parameters for GetAuditEvent.
+type GetAuditEventParams struct {
+	IncludeClientData *bool `form:"include_client_data,omitempty" json:"include_client_data,omitempty"`
+}
+
+// VerifyAuditChainJSONBody defines parameters for VerifyAuditChain.
+type VerifyAuditChainJSONBody struct {
+	FromSeq *int64 `json:"from_seq,omitempty"`
+	ToSeq   *int64 `json:"to_seq,omitempty"`
+}
+
 // CreateConnectionJSONBody defines parameters for CreateConnection.
 type CreateConnectionJSONBody struct {
 	ClientId     string   `json:"client_id"`
@@ -2013,6 +2315,9 @@ type CreateAttributeDefJSONRequestBody = AttributeDefInput
 // UpdateAttributeDefJSONRequestBody defines body for UpdateAttributeDef for application/json ContentType.
 type UpdateAttributeDefJSONRequestBody = AttributeDefUpdate
 
+// VerifyAuditChainJSONRequestBody defines body for VerifyAuditChain for application/json ContentType.
+type VerifyAuditChainJSONRequestBody VerifyAuditChainJSONBody
+
 // CheckAuthzJSONRequestBody defines body for CheckAuthz for application/json ContentType.
 type CheckAuthzJSONRequestBody = CheckRequest
 
@@ -2036,6 +2341,12 @@ type DeleteConnectionJSONRequestBody DeleteConnectionJSONBody
 
 // CreateSAMLConnectionJSONRequestBody defines body for CreateSAMLConnection for application/json ContentType.
 type CreateSAMLConnectionJSONRequestBody CreateSAMLConnectionJSONBody
+
+// CreateEventSubscriptionJSONRequestBody defines body for CreateEventSubscription for application/json ContentType.
+type CreateEventSubscriptionJSONRequestBody = EventSubscriptionInput
+
+// UpdateEventSubscriptionJSONRequestBody defines body for UpdateEventSubscription for application/json ContentType.
+type UpdateEventSubscriptionJSONRequestBody = EventSubscriptionUpdate
 
 // CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
 type CreateGroupJSONRequestBody = GroupInput
@@ -2177,6 +2488,15 @@ type ServerInterface interface {
 	// DeleteAttributeDef カスタム属性の定義と、そのすべての値を消す
 	// (POST /v1/admin/attributes/{key}:delete)
 	DeleteAttributeDef(w http.ResponseWriter, r *http.Request, key string)
+	// ListAuditEvents 監査ログの照会（ADR 0100）
+	// (GET /v1/admin/audit-events)
+	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
+	// GetAuditEvent 監査ログのイベントを1件返す（ADR 0100）
+	// (GET /v1/admin/audit-events/{id})
+	GetAuditEvent(w http.ResponseWriter, r *http.Request, id string, params GetAuditEventParams)
+	// VerifyAuditChain 監査ログのハッシュチェーンを、seq の範囲を指定して検証する（ADR 0100）
+	// (POST /v1/admin/audit-events:verify)
+	VerifyAuditChain(w http.ResponseWriter, r *http.Request)
 	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
 	// (POST /v1/admin/authz:check)
 	CheckAuthz(w http.ResponseWriter, r *http.Request)
@@ -2222,6 +2542,27 @@ type ServerInterface interface {
 	// CreateSAMLConnection IdP 接続（SAML 2.0）を登録する（ADR 0098）
 	// (POST /v1/admin/connections:saml)
 	CreateSAMLConnection(w http.ResponseWriter, r *http.Request)
+	// ListEventSubscriptions イベントの Webhook の購読の一覧（ADR 0100）
+	// (GET /v1/admin/event-subscriptions)
+	ListEventSubscriptions(w http.ResponseWriter, r *http.Request)
+	// CreateEventSubscription イベントの Webhook の購読を作る（ADR 0100）
+	// (POST /v1/admin/event-subscriptions)
+	CreateEventSubscription(w http.ResponseWriter, r *http.Request)
+	// GetEventSubscription イベントの Webhook の購読を返す（配送の状態を含む）
+	// (GET /v1/admin/event-subscriptions/{id})
+	GetEventSubscription(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateEventSubscription イベントの Webhook の購読を変える
+	// (PATCH /v1/admin/event-subscriptions/{id})
+	UpdateEventSubscription(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteEventSubscription イベントの Webhook の購読と署名の鍵を消す
+	// (POST /v1/admin/event-subscriptions/{id}:delete)
+	DeleteEventSubscription(w http.ResponseWriter, r *http.Request, id string)
+	// RotateEventSubscriptionSecret 購読の署名の鍵を作り直す
+	// (POST /v1/admin/event-subscriptions/{id}:rotate-secret)
+	RotateEventSubscriptionSecret(w http.ResponseWriter, r *http.Request, id string)
+	// TestEventSubscription 購読の宛先にテストのイベントを1件送る
+	// (POST /v1/admin/event-subscriptions/{id}:test)
+	TestEventSubscription(w http.ResponseWriter, r *http.Request, id string)
 	// ListGroups realm の範囲の Group の一覧（3.2）
 	// (GET /v1/admin/groups)
 	ListGroups(w http.ResponseWriter, r *http.Request)
@@ -2646,6 +2987,238 @@ func (siw *ServerInterfaceWrapper) DeleteAttributeDef(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ListAuditEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditEventsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "since" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "since", r.URL.Query(), &params.Since, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "since"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "since", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "until" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "until", r.URL.Query(), &params.Until, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "until"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "until", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", r.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "type_prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type_prefix", r.URL.Query(), &params.TypePrefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "type_prefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type_prefix", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "result" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "result", r.URL.Query(), &params.Result, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "result"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "result", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actor_type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_type", r.URL.Query(), &params.ActorType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actor_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_id", r.URL.Query(), &params.ActorId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "org_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "org_id", r.URL.Query(), &params.OrgId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "org_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "target_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "target_id", r.URL.Query(), &params.TargetId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "target_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "target_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "include_client_data" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "include_client_data", r.URL.Query(), &params.IncludeClientData, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "include_client_data"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_client_data", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAuditEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuditEvent operation middleware
+func (siw *ServerInterfaceWrapper) GetAuditEvent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAuditEventParams
+
+	// ------------- Optional query parameter "include_client_data" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "include_client_data", r.URL.Query(), &params.IncludeClientData, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "include_client_data"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_client_data", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuditEvent(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyAuditChain operation middleware
+func (siw *ServerInterfaceWrapper) VerifyAuditChain(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyAuditChain(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CheckAuthz operation middleware
 func (siw *ServerInterfaceWrapper) CheckAuthz(w http.ResponseWriter, r *http.Request) {
 
@@ -2955,6 +3528,164 @@ func (siw *ServerInterfaceWrapper) CreateSAMLConnection(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateSAMLConnection(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListEventSubscriptions operation middleware
+func (siw *ServerInterfaceWrapper) ListEventSubscriptions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListEventSubscriptions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateEventSubscription operation middleware
+func (siw *ServerInterfaceWrapper) CreateEventSubscription(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateEventSubscription(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetEventSubscription operation middleware
+func (siw *ServerInterfaceWrapper) GetEventSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetEventSubscription(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateEventSubscription operation middleware
+func (siw *ServerInterfaceWrapper) UpdateEventSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateEventSubscription(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteEventSubscription operation middleware
+func (siw *ServerInterfaceWrapper) DeleteEventSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteEventSubscription(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateEventSubscriptionSecret operation middleware
+func (siw *ServerInterfaceWrapper) RotateEventSubscriptionSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateEventSubscriptionSecret(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestEventSubscription operation middleware
+func (siw *ServerInterfaceWrapper) TestEventSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestEventSubscription(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5676,6 +6407,16 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/realms/{realm_id}", wrapper.GetRealm)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/realms/{realm_id}", wrapper.UpdateRealm)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/realms/{realm_id}/operators", wrapper.CreateRealmOperator)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/audit-events", wrapper.ListAuditEvents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/audit-events/{id}", wrapper.GetAuditEvent)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/audit-events:verify", wrapper.VerifyAuditChain)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/event-subscriptions", wrapper.ListEventSubscriptions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/event-subscriptions", wrapper.CreateEventSubscription)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/event-subscriptions/{id}", wrapper.GetEventSubscription)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/v1/admin/event-subscriptions/{id}", wrapper.UpdateEventSubscription)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/event-subscriptions/{id}:delete", wrapper.DeleteEventSubscription)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/event-subscriptions/{id}:rotate-secret", wrapper.RotateEventSubscriptionSecret)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/event-subscriptions/{id}:test", wrapper.TestEventSubscription)
 
 	return m
 }
@@ -6150,6 +6891,232 @@ func (response DeleteAttributeDef404JSONResponse) VisitDeleteAttributeDefRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEventsRequestObject struct {
+	Params ListAuditEventsParams
+}
+
+type ListAuditEventsResponseObject interface {
+	VisitListAuditEventsResponse(w http.ResponseWriter) error
+}
+
+type ListAuditEvents200JSONResponse struct {
+	Events []AuditEvent `json:"events"`
+
+	// NextCursor 続きがあるときだけ
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents400JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListAuditEvents400JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents401JSONResponse Error
+
+func (response ListAuditEvents401JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAuditEvents403JSONResponse Error
+
+func (response ListAuditEvents403JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuditEventRequestObject struct {
+	Id     string `json:"id"`
+	Params GetAuditEventParams
+}
+
+type GetAuditEventResponseObject interface {
+	VisitGetAuditEventResponse(w http.ResponseWriter) error
+}
+
+type GetAuditEvent200JSONResponse AuditEvent
+
+func (response GetAuditEvent200JSONResponse) VisitGetAuditEventResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuditEvent401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetAuditEvent401JSONResponse) VisitGetAuditEventResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuditEvent403JSONResponse Error
+
+func (response GetAuditEvent403JSONResponse) VisitGetAuditEventResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuditEvent404JSONResponse Error
+
+func (response GetAuditEvent404JSONResponse) VisitGetAuditEventResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyAuditChainRequestObject struct {
+	Body *VerifyAuditChainJSONRequestBody
+}
+
+type VerifyAuditChainResponseObject interface {
+	VisitVerifyAuditChainResponse(w http.ResponseWriter) error
+}
+
+type VerifyAuditChain200JSONResponse AuditChainVerification
+
+func (response VerifyAuditChain200JSONResponse) VisitVerifyAuditChainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyAuditChain400JSONResponse struct{ ErrorJSONResponse }
+
+func (response VerifyAuditChain400JSONResponse) VisitVerifyAuditChainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyAuditChain401JSONResponse Error
+
+func (response VerifyAuditChain401JSONResponse) VisitVerifyAuditChainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyAuditChain403JSONResponse Error
+
+func (response VerifyAuditChain403JSONResponse) VisitVerifyAuditChainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyAuditChain404JSONResponse Error
+
+func (response VerifyAuditChain404JSONResponse) VisitVerifyAuditChainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyAuditChain409JSONResponse Error
+
+func (response VerifyAuditChain409JSONResponse) VisitVerifyAuditChainResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -7236,6 +8203,512 @@ func (response CreateSAMLConnection409JSONResponse) VisitCreateSAMLConnectionRes
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEventSubscriptionsRequestObject struct {
+}
+
+type ListEventSubscriptionsResponseObject interface {
+	VisitListEventSubscriptionsResponse(w http.ResponseWriter) error
+}
+
+type ListEventSubscriptions200JSONResponse struct {
+	Subscriptions []EventSubscription `json:"subscriptions"`
+}
+
+func (response ListEventSubscriptions200JSONResponse) VisitListEventSubscriptionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEventSubscriptions401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListEventSubscriptions401JSONResponse) VisitListEventSubscriptionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEventSubscriptions403JSONResponse Error
+
+func (response ListEventSubscriptions403JSONResponse) VisitListEventSubscriptionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListEventSubscriptions404JSONResponse Error
+
+func (response ListEventSubscriptions404JSONResponse) VisitListEventSubscriptionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEventSubscriptionRequestObject struct {
+	Body *CreateEventSubscriptionJSONRequestBody
+}
+
+type CreateEventSubscriptionResponseObject interface {
+	VisitCreateEventSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type CreateEventSubscription201JSONResponse EventSubscriptionWithSecret
+
+func (response CreateEventSubscription201JSONResponse) VisitCreateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEventSubscription400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateEventSubscription400JSONResponse) VisitCreateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEventSubscription401JSONResponse Error
+
+func (response CreateEventSubscription401JSONResponse) VisitCreateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEventSubscription403JSONResponse Error
+
+func (response CreateEventSubscription403JSONResponse) VisitCreateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEventSubscription404JSONResponse Error
+
+func (response CreateEventSubscription404JSONResponse) VisitCreateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEventSubscription409JSONResponse Error
+
+func (response CreateEventSubscription409JSONResponse) VisitCreateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEventSubscriptionRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetEventSubscriptionResponseObject interface {
+	VisitGetEventSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type GetEventSubscription200JSONResponse EventSubscription
+
+func (response GetEventSubscription200JSONResponse) VisitGetEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEventSubscription401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetEventSubscription401JSONResponse) VisitGetEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEventSubscription403JSONResponse Error
+
+func (response GetEventSubscription403JSONResponse) VisitGetEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEventSubscription404JSONResponse Error
+
+func (response GetEventSubscription404JSONResponse) VisitGetEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateEventSubscriptionRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateEventSubscriptionJSONRequestBody
+}
+
+type UpdateEventSubscriptionResponseObject interface {
+	VisitUpdateEventSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type UpdateEventSubscription200JSONResponse EventSubscription
+
+func (response UpdateEventSubscription200JSONResponse) VisitUpdateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateEventSubscription400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateEventSubscription400JSONResponse) VisitUpdateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateEventSubscription401JSONResponse Error
+
+func (response UpdateEventSubscription401JSONResponse) VisitUpdateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateEventSubscription403JSONResponse Error
+
+func (response UpdateEventSubscription403JSONResponse) VisitUpdateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateEventSubscription404JSONResponse Error
+
+func (response UpdateEventSubscription404JSONResponse) VisitUpdateEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteEventSubscriptionRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteEventSubscriptionResponseObject interface {
+	VisitDeleteEventSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type DeleteEventSubscription204Response struct {
+}
+
+func (response DeleteEventSubscription204Response) VisitDeleteEventSubscriptionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteEventSubscription401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteEventSubscription401JSONResponse) VisitDeleteEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteEventSubscription403JSONResponse Error
+
+func (response DeleteEventSubscription403JSONResponse) VisitDeleteEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteEventSubscription404JSONResponse Error
+
+func (response DeleteEventSubscription404JSONResponse) VisitDeleteEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEventSubscriptionSecretRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RotateEventSubscriptionSecretResponseObject interface {
+	VisitRotateEventSubscriptionSecretResponse(w http.ResponseWriter) error
+}
+
+type RotateEventSubscriptionSecret200JSONResponse EventSubscriptionWithSecret
+
+func (response RotateEventSubscriptionSecret200JSONResponse) VisitRotateEventSubscriptionSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEventSubscriptionSecret401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RotateEventSubscriptionSecret401JSONResponse) VisitRotateEventSubscriptionSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEventSubscriptionSecret403JSONResponse Error
+
+func (response RotateEventSubscriptionSecret403JSONResponse) VisitRotateEventSubscriptionSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateEventSubscriptionSecret404JSONResponse Error
+
+func (response RotateEventSubscriptionSecret404JSONResponse) VisitRotateEventSubscriptionSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestEventSubscriptionRequestObject struct {
+	Id string `json:"id"`
+}
+
+type TestEventSubscriptionResponseObject interface {
+	VisitTestEventSubscriptionResponse(w http.ResponseWriter) error
+}
+
+type TestEventSubscription200JSONResponse struct {
+	Delivered bool    `json:"delivered"`
+	Error     *string `json:"error,omitempty"`
+
+	// Status 宛先の HTTP のステータス（応答があったときだけ）
+	Status *int `json:"status,omitempty"`
+}
+
+func (response TestEventSubscription200JSONResponse) VisitTestEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestEventSubscription401JSONResponse struct{ ErrorJSONResponse }
+
+func (response TestEventSubscription401JSONResponse) VisitTestEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestEventSubscription403JSONResponse Error
+
+func (response TestEventSubscription403JSONResponse) VisitTestEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestEventSubscription404JSONResponse Error
+
+func (response TestEventSubscription404JSONResponse) VisitTestEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestEventSubscription429JSONResponse Error
+
+func (response TestEventSubscription429JSONResponse) VisitTestEventSubscriptionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -14030,6 +15503,15 @@ type StrictServerInterface interface {
 	// DeleteAttributeDef カスタム属性の定義と、そのすべての値を消す
 	// (POST /v1/admin/attributes/{key}:delete)
 	DeleteAttributeDef(ctx context.Context, request DeleteAttributeDefRequestObject) (DeleteAttributeDefResponseObject, error)
+	// ListAuditEvents 監査ログの照会（ADR 0100）
+	// (GET /v1/admin/audit-events)
+	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
+	// GetAuditEvent 監査ログのイベントを1件返す（ADR 0100）
+	// (GET /v1/admin/audit-events/{id})
+	GetAuditEvent(ctx context.Context, request GetAuditEventRequestObject) (GetAuditEventResponseObject, error)
+	// VerifyAuditChain 監査ログのハッシュチェーンを、seq の範囲を指定して検証する（ADR 0100）
+	// (POST /v1/admin/audit-events:verify)
+	VerifyAuditChain(ctx context.Context, request VerifyAuditChainRequestObject) (VerifyAuditChainResponseObject, error)
 	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
 	// (POST /v1/admin/authz:check)
 	CheckAuthz(ctx context.Context, request CheckAuthzRequestObject) (CheckAuthzResponseObject, error)
@@ -14075,6 +15557,27 @@ type StrictServerInterface interface {
 	// CreateSAMLConnection IdP 接続（SAML 2.0）を登録する（ADR 0098）
 	// (POST /v1/admin/connections:saml)
 	CreateSAMLConnection(ctx context.Context, request CreateSAMLConnectionRequestObject) (CreateSAMLConnectionResponseObject, error)
+	// ListEventSubscriptions イベントの Webhook の購読の一覧（ADR 0100）
+	// (GET /v1/admin/event-subscriptions)
+	ListEventSubscriptions(ctx context.Context, request ListEventSubscriptionsRequestObject) (ListEventSubscriptionsResponseObject, error)
+	// CreateEventSubscription イベントの Webhook の購読を作る（ADR 0100）
+	// (POST /v1/admin/event-subscriptions)
+	CreateEventSubscription(ctx context.Context, request CreateEventSubscriptionRequestObject) (CreateEventSubscriptionResponseObject, error)
+	// GetEventSubscription イベントの Webhook の購読を返す（配送の状態を含む）
+	// (GET /v1/admin/event-subscriptions/{id})
+	GetEventSubscription(ctx context.Context, request GetEventSubscriptionRequestObject) (GetEventSubscriptionResponseObject, error)
+	// UpdateEventSubscription イベントの Webhook の購読を変える
+	// (PATCH /v1/admin/event-subscriptions/{id})
+	UpdateEventSubscription(ctx context.Context, request UpdateEventSubscriptionRequestObject) (UpdateEventSubscriptionResponseObject, error)
+	// DeleteEventSubscription イベントの Webhook の購読と署名の鍵を消す
+	// (POST /v1/admin/event-subscriptions/{id}:delete)
+	DeleteEventSubscription(ctx context.Context, request DeleteEventSubscriptionRequestObject) (DeleteEventSubscriptionResponseObject, error)
+	// RotateEventSubscriptionSecret 購読の署名の鍵を作り直す
+	// (POST /v1/admin/event-subscriptions/{id}:rotate-secret)
+	RotateEventSubscriptionSecret(ctx context.Context, request RotateEventSubscriptionSecretRequestObject) (RotateEventSubscriptionSecretResponseObject, error)
+	// TestEventSubscription 購読の宛先にテストのイベントを1件送る
+	// (POST /v1/admin/event-subscriptions/{id}:test)
+	TestEventSubscription(ctx context.Context, request TestEventSubscriptionRequestObject) (TestEventSubscriptionResponseObject, error)
 	// ListGroups realm の範囲の Group の一覧（3.2）
 	// (GET /v1/admin/groups)
 	ListGroups(ctx context.Context, request ListGroupsRequestObject) (ListGroupsResponseObject, error)
@@ -14580,6 +16083,93 @@ func (sh *strictHandler) DeleteAttributeDef(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// ListAuditEvents operation middleware
+func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams) {
+	var request ListAuditEventsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAuditEvents(ctx, request.(ListAuditEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAuditEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
+		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAuditEvent operation middleware
+func (sh *strictHandler) GetAuditEvent(w http.ResponseWriter, r *http.Request, id string, params GetAuditEventParams) {
+	var request GetAuditEventRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAuditEvent(ctx, request.(GetAuditEventRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAuditEvent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAuditEventResponseObject); ok {
+		if err := validResponse.VisitGetAuditEventResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyAuditChain operation middleware
+func (sh *strictHandler) VerifyAuditChain(w http.ResponseWriter, r *http.Request) {
+	var request VerifyAuditChainRequestObject
+
+	var body VerifyAuditChainJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyAuditChain(ctx, request.(VerifyAuditChainRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyAuditChain")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyAuditChainResponseObject); ok {
+		if err := validResponse.VisitVerifyAuditChainResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // CheckAuthz operation middleware
 func (sh *strictHandler) CheckAuthz(w http.ResponseWriter, r *http.Request) {
 	var request CheckAuthzRequestObject
@@ -15010,6 +16600,198 @@ func (sh *strictHandler) CreateSAMLConnection(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateSAMLConnectionResponseObject); ok {
 		if err := validResponse.VisitCreateSAMLConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListEventSubscriptions operation middleware
+func (sh *strictHandler) ListEventSubscriptions(w http.ResponseWriter, r *http.Request) {
+	var request ListEventSubscriptionsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListEventSubscriptions(ctx, request.(ListEventSubscriptionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListEventSubscriptions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListEventSubscriptionsResponseObject); ok {
+		if err := validResponse.VisitListEventSubscriptionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateEventSubscription operation middleware
+func (sh *strictHandler) CreateEventSubscription(w http.ResponseWriter, r *http.Request) {
+	var request CreateEventSubscriptionRequestObject
+
+	var body CreateEventSubscriptionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateEventSubscription(ctx, request.(CreateEventSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateEventSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateEventSubscriptionResponseObject); ok {
+		if err := validResponse.VisitCreateEventSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetEventSubscription operation middleware
+func (sh *strictHandler) GetEventSubscription(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetEventSubscriptionRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetEventSubscription(ctx, request.(GetEventSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetEventSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetEventSubscriptionResponseObject); ok {
+		if err := validResponse.VisitGetEventSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateEventSubscription operation middleware
+func (sh *strictHandler) UpdateEventSubscription(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateEventSubscriptionRequestObject
+
+	request.Id = id
+
+	var body UpdateEventSubscriptionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateEventSubscription(ctx, request.(UpdateEventSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateEventSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateEventSubscriptionResponseObject); ok {
+		if err := validResponse.VisitUpdateEventSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteEventSubscription operation middleware
+func (sh *strictHandler) DeleteEventSubscription(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteEventSubscriptionRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteEventSubscription(ctx, request.(DeleteEventSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteEventSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteEventSubscriptionResponseObject); ok {
+		if err := validResponse.VisitDeleteEventSubscriptionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateEventSubscriptionSecret operation middleware
+func (sh *strictHandler) RotateEventSubscriptionSecret(w http.ResponseWriter, r *http.Request, id string) {
+	var request RotateEventSubscriptionSecretRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateEventSubscriptionSecret(ctx, request.(RotateEventSubscriptionSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateEventSubscriptionSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateEventSubscriptionSecretResponseObject); ok {
+		if err := validResponse.VisitRotateEventSubscriptionSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TestEventSubscription operation middleware
+func (sh *strictHandler) TestEventSubscription(w http.ResponseWriter, r *http.Request, id string) {
+	var request TestEventSubscriptionRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TestEventSubscription(ctx, request.(TestEventSubscriptionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestEventSubscription")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TestEventSubscriptionResponseObject); ok {
+		if err := validResponse.VisitTestEventSubscriptionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

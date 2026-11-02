@@ -106,15 +106,17 @@ const (
 	RecoveryCode   Prefix = "rcv"
 	Notification   Prefix = "ntf"
 	Event          Prefix = "evt"
-	Outbox         Prefix = "obx"
-	Group          Prefix = "grp"
-	Role           Prefix = "rol"
-	RoleBinding    Prefix = "rbd"
-	Flow           Prefix = "flw"
-	Request        Prefix = "req"
-	MasterKey      Prefix = "mk"
-	IndexKey       Prefix = "ik"
-	AuditKey       Prefix = "ak"
+	// EventSubscription はイベントの Webhook の購読（ADR 0100）。
+	EventSubscription Prefix = "evs"
+	Outbox            Prefix = "obx"
+	Group             Prefix = "grp"
+	Role              Prefix = "rol"
+	RoleBinding       Prefix = "rbd"
+	Flow              Prefix = "flw"
+	Request           Prefix = "req"
+	MasterKey         Prefix = "mk"
+	IndexKey          Prefix = "ik"
+	AuditKey          Prefix = "ak"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。

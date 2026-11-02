@@ -57,6 +57,7 @@ func Run(t *testing.T, h Harness) {
 	tests = append(tests, authnTests...)
 	tests = append(tests, retentionTests...)
 	tests = append(tests, featureDataTests...)
+	tests = append(tests, auditQueryTests...)
 	tests = append(tests, adminReadTests...)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, h) })
@@ -550,7 +551,7 @@ var IsolationCases = append([]IsolationCase{
 			return len(rs), err
 		},
 	},
-}, authnIsolationCases...)
+}, append(authnIsolationCases, auditQueryIsolationCases...)...)
 
 // CheckRealmIsolation は cases を2つの realm で実行し、自分の realm では見え、別の realm では見えないことを確かめる。
 func CheckRealmIsolation(t *testing.T, s port.Storage, clk clock.Clock, cases []IsolationCase) {

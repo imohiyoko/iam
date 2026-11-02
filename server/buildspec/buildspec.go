@@ -16,6 +16,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/imohiyoko/iam/authn/attribute"
+	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method/hotp"
@@ -28,6 +29,7 @@ import (
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/shared/acr"
+	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/plugin"
 	"github.com/imohiyoko/iam/shared/realm"
@@ -60,6 +62,8 @@ var featureCatalog = map[string]struct {
 	feature.OIDCLogout:         {provider.LogoutFeature, module + "/features/oidclogout"},
 	feature.HOTP:               {hotp.Feature, module + "/features/hotp"},
 	feature.SAML:               {saml.Feature, module + "/features/saml"},
+	feature.OrgAuditLog:        {eventlog.OrgAuditLogFeature, module + "/features/orgauditlog"},
+	feature.EventSubscriptions: {eventsub.Feature, module + "/features/eventsubscriptions"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

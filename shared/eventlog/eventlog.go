@@ -86,21 +86,9 @@ func Verify(ctx context.Context, s port.Storage) (last []byte, n int64, err erro
 // VerifyWith は監査の鍵 keys（nil なら鍵なしのレコードだけ）でチェーンを検証する。
 func VerifyWith(ctx context.Context, s port.Storage, keys port.AuditKeyStore) (last []byte, n int64, err error) {
 	const page = 500
-	c := audit.Chain{Prev: audit.Genesis, Next: 1}
-	if keys != nil {
-		c.Keys = func(kid string) ([]byte, error) { return keys.AuditKey(ctx, kid) }
-		// 鍵を置いていれば、鍵なしで許す範囲より後は鍵付きでなければならない（ADR 0086）。
-		kid, err := keys.CurrentAuditKeyID(ctx)
-		if err != nil {
-			return nil, 0, err
-		}
-		if kid != "" {
-			until, err := keys.AuditUnkeyedUntil(ctx)
-			if err != nil {
-				return nil, 0, err
-			}
-			c.KeyedFrom = until + 1
-		}
+	c, err := chainWith(ctx, keys)
+	if err != nil {
+		return nil, 0, err
 	}
 	if err := s.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cp, err := tx.Audit().Checkpoint(ctx)
@@ -128,6 +116,35 @@ func VerifyWith(ctx context.Context, s port.Storage, keys port.AuditKeyStore) (l
 			return c.Prev, c.Next - 1, nil
 		}
 	}
+}
+
+// newChain は s の監査の鍵（ClientSealer を通した Storage なら）で確かめる、先頭からのチェーンの状態を作る。
+func newChain(ctx context.Context, s port.Storage) (audit.Chain, error) {
+	var keys port.AuditKeyStore
+	if ss, ok := s.(sealingStorage); ok {
+		keys = ss.c.AuditKeys
+	}
+	return chainWith(ctx, keys)
+}
+
+// chainWith は監査の鍵 keys で確かめる、先頭からのチェーンの状態を作る。鍵を置いていれば、鍵なしで許す範囲より後は
+// 鍵付きでなければならない（ADR 0086）。
+func chainWith(ctx context.Context, keys port.AuditKeyStore) (audit.Chain, error) {
+	c := audit.Chain{Prev: audit.Genesis, Next: 1}
+	if keys == nil {
+		return c, nil
+	}
+	c.Keys = func(kid string) ([]byte, error) { return keys.AuditKey(ctx, kid) }
+	kid, err := keys.CurrentAuditKeyID(ctx)
+	if err != nil || kid == "" {
+		return c, err
+	}
+	until, err := keys.AuditUnkeyedUntil(ctx)
+	if err != nil {
+		return c, err
+	}
+	c.KeyedFrom = until + 1
+	return c, nil
 }
 
 // Relay は outbox のメッセージを外部に送る（少なくとも1回）。受け取る側は ID で重複排除する。

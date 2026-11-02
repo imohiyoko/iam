@@ -63,7 +63,8 @@ DELETE FROM shared_audit_client_keys WHERE owner = $1;
 SELECT seq, realm_id, prev_hash, hash, payload, key_id FROM shared_audit_events ORDER BY seq DESC LIMIT 1;
 
 -- name: AppendAuditEvent :exec
-INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload, key_id) VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO shared_audit_events (seq, realm_id, prev_hash, hash, payload, key_id, event_id, occurred_unix, event_type, result, actor_type, actor_id, org_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
 
 -- name: ScanAuditEvents :many
 SELECT seq, realm_id, prev_hash, hash, payload, key_id FROM shared_audit_events WHERE seq >= sqlc.arg(seq) ORDER BY seq LIMIT sqlc.arg('limit')::bigint;
@@ -80,6 +81,9 @@ ON CONFLICT (id) DO UPDATE SET seq = excluded.seq, hash = excluded.hash, created
 
 -- name: TruncateAuditEvents :exec
 DELETE FROM shared_audit_events WHERE seq <= $1;
+
+-- name: TruncateAuditRefs :exec
+DELETE FROM shared_audit_refs WHERE seq <= $1;
 
 -- name: AddOutbox :exec
 INSERT INTO shared_outbox (id, topic, payload, created_at) VALUES ($1, $2, $3, $4);

@@ -82,6 +82,11 @@ const (
 	// PermUsersImpersonate は Token Exchange による運営者のなりすまし（フィーチャー impersonation。ADR 0099）。realm:owner だけが
 	// 持ち、サポートの担当には独自のロールで渡す。対象のロールの権限をすべて持つことも求める（outranks）。
 	PermUsersImpersonate = "users:impersonate"
+	// PermAuditRead は監査ログの照会とチェーンの検証（ADR 0100）。PermAuditReadClientData は暗号化した IP と User-Agent の全文の復号。
+	PermAuditRead           = "audit:read"
+	PermAuditReadClientData = "audit:read_client_data"
+	// PermEventSubscriptionsManage はイベントの Webhook の購読の管理（ADR 0100）。
+	PermEventSubscriptionsManage = "event_subscriptions:manage"
 	// 運営者の参照（ADR 0097）。PermUsersRead はユーザーの一覧・検索・詳細と、ユーザーの Membership の一覧。メールアドレスの
 	// 表示は別に PermPIIRead が要る。PermSessionsRead はユーザーのセッションの一覧。PermRolesRead・PermGroupsRead は主体の
 	// ロールの付与と Group の所属の逆引き。PermConnectionsRead は IdP 接続、PermSigningKeysRead は署名鍵の一覧。
@@ -121,14 +126,14 @@ func suspend(categories ...string) []string {
 }
 
 var builtin = map[string][]string{
-	RealmOwner: append([]string{PermRealmsManage, PermRiskTypesManage, PermRiskWrite, PermRequirementsManage, PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
+	RealmOwner: append([]string{PermAuditRead, PermAuditReadClientData, PermEventSubscriptionsManage, PermRealmsManage, PermRiskTypesManage, PermRiskWrite, PermRequirementsManage, PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
 		PermCredentialsRevoke, PermSuspensionsAny, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermSigningKeysRead, PermUsersEmails,
 		PermUsersImpersonate},
 		suspend("tos_violation", "customer_request", "security_risk", "billing")...),
-	RealmAdmin: append([]string{PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke,
+	RealmAdmin: append([]string{PermAuditRead, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke,
 		PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermUsersEmails},
 		suspend("tos_violation", "customer_request")...),
-	RealmSecurity: append([]string{PermSessionsRevoke, PermCredentialsRevoke, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermSigningKeysRead},
+	RealmSecurity: append([]string{PermAuditRead, PermAuditReadClientData, PermSessionsRevoke, PermCredentialsRevoke, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermSigningKeysRead},
 		suspend("security_risk")...),
 	RealmSupport:         {PermAttributesRead, PermOrgsRead, PermSuspensionsRead, PermUsersRecover, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead},
 	RealmBilling:         suspend("billing"),
