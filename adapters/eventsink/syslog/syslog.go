@@ -2,7 +2,7 @@
 //
 // 項目：
 //   - address：送り先（host:port）。必須
-//   - network：tcp（既定）・tls・udp。tcp と tls は RFC 6587 のオクテット数えの枠付けで送る
+//   - network：tls（既定）・tcp・udp。tcp と udp は平文なので、閉じたネットワークの中でだけ使う。tcp と tls は RFC 6587 のオクテット数えの枠付けで送る
 //   - app_name：APP-NAME（既定 iam）。facility：0〜23（既定 13 = log audit）
 //   - sinkfmt.Options（format、pii、pseudonym_key_env）
 //
@@ -44,7 +44,7 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		s := &Sink{Address: cfg.Option("address", ""), Network: cfg.Option("network", "tcp"), AppName: cfg.Option("app_name", "iam"), enc: enc}
+		s := &Sink{Address: cfg.Option("address", ""), Network: cfg.Option("network", "tls"), AppName: cfg.Option("app_name", "iam"), enc: enc}
 		if s.Address == "" {
 			return nil, errors.New("eventsink syslog: address is required")
 		}
@@ -64,7 +64,7 @@ func init() {
 // Sink は syslog の送り先に書く。接続は使い回し、失敗したら次の Emit でつなぎ直す。
 type Sink struct {
 	Address  string
-	Network  string // tcp / tls / udp
+	Network  string // tls / tcp / udp
 	AppName  string
 	Facility int
 	Hostname string

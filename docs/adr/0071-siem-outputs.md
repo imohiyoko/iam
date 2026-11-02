@@ -11,7 +11,7 @@
 
 ## 決定
 
-- アダプタ：`stdout`（JSON Lines）、`syslog`（RFC 5424。tcp・tls は RFC 6587 のオクテット数えの枠付け、udp）、
+- アダプタ：`stdout`（JSON Lines）、`syslog`（RFC 5424。tls（既定）・tcp は RFC 6587 のオクテット数えの枠付け、udp）、
   `otlp`（OTLP/HTTP の JSON。各イベントを LogRecord にする）、`webhook`（`{"events": [...]}` を POST。
   `secret_env` があれば `X-IAM-Signature: t=<秒>,v1=<HMAC-SHA-256("<t>.<本文>")>`）
 - 共通の項目（`adapters/eventsink/sinkfmt`）：`format`（`iam` か `ocsf`）、`pii`（`raw`・`pseudonymize`・`omit`）、
