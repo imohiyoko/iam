@@ -64,7 +64,7 @@ type UserRepo interface {
 	// ReleaseManaged は管理ユーザーを全 realm から最大 limit 人、個人ユーザーに戻し、戻した数を返す。
 	ReleaseManaged(ctx context.Context, limit int, at time.Time) (int, error)
 	// Erase はユーザーを削除済み（墓標）にし、メール（インデックスごと。再登録できるように）・外部 ID の紐付け・passkey・
-	// TOTP・パスワード・リカバリーコード・セッション・ロールの付与・連携先への認可・カスタム属性の値を消す（4.10）。データ鍵、Membership、個人 Org、停止の記録は
+	// TOTP・汎用の認証情報・パスワード・リカバリーコード・セッション・ロールの付与・連携先への認可・カスタム属性の値を消す（4.10）。データ鍵、Membership、個人 Org、停止の記録は
 	// 呼び出し側が扱う。無ければ errs.NotFound。
 	Erase(ctx context.Context, realmID, id string, at time.Time) error
 	// SetMerged は active なユーザーを統合済み（merged、統合先 into）にし、削除の予定を外す（11.6）。active でなければ errs.NotFound。

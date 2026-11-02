@@ -101,6 +101,7 @@ const (
 	RefreshToken   Prefix = "rtk"
 	Passkey        Prefix = "psk"
 	TOTP           Prefix = "otp"
+	Credential     Prefix = "crd" // 汎用の認証情報（authn_credentials。ADR 0090）
 	Password       Prefix = "pwd"
 	RecoveryCode   Prefix = "rcv"
 	Notification   Prefix = "ntf"

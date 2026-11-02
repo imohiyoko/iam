@@ -365,6 +365,107 @@ paths:
         "403": { $ref: "#/components/responses/Denied" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/login/methods/{method}:begin:
+    post:
+      operationId: beginMethodLogin
+      summary: 認証方式のプラグインでログインを始める（1要素目）
+      description: |
+        方式（`{method}`）は、1要素目に使えるもので、そのフィーチャーが動いているもの（ADR 0090、0092）。無ければ 404。
+        `payload` と応答の `payload` の形は方式ごとに決まる。失敗の理由は返さない（4.9）。
+      parameters:
+        - { name: method, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MethodBeginRequest" }
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MethodChallenge" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/login/methods/{method}:complete:
+    post:
+      operationId: completeMethodLogin
+      summary: 認証方式のプラグインでログインを完了する（1要素目）
+      description: |
+        フローを確かめ、セッションを発行する。2要素目が要れば制限つきのセッション（`next: second_factor`）。
+        フローは1回限りで、照合に失敗しても回数の上限（`security.second_factor.max_attempts`）までは同じフロー ID を使える。
+      parameters:
+        - { name: method, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MethodCompleteRequest" }
+      responses:
+        "200":
+          description: ログインした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/login/second-factor/{method}:begin:
+    post:
+      operationId: beginSecondFactorMethod
+      summary: 認証方式のプラグインで2要素目の確認を始める
+      description: |
+        2要素目の確認待ち（`next: second_factor`）か登録だけ（`next: enroll`）のセッションで使う。方式は2要素目に使えるもので、
+        本人がその方式の認証情報を持たなければ 404（`second_factor_methods` に載る名前を使う）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: method, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MethodBeginRequest" }
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MethodChallenge" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/login/second-factor/{method}:complete:
+    post:
+      operationId: completeSecondFactorMethod
+      summary: 認証方式のプラグインで2要素目を確かめ、通常のセッションに替える
+      description: |
+        成功すると制限つきのセッションを失効させ、通常のセッションを発行する（amr に方式の amr と `mfa` を加える。ADR 0050）。
+        失敗の理由は返さない（4.9）。照合はユーザーごとにレートリミットする。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: method, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MethodCompleteRequest" }
+      responses:
+        "200":
+          description: 確かめた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   /v1/recovery/code:redeem:
     post:
       operationId: redeemRecoveryCode
@@ -651,7 +752,7 @@ paths:
   /v1/me/methods:
     get:
       operationId: listMyMethods
-      summary: 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、パスワード）の一覧
+      summary: 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、認証方式のプラグインの認証情報、パスワード）の一覧
       security:
         - cookieAuth: []
         - bearerAuth: []
@@ -662,7 +763,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [emails, identities, passkeys, totp, recovery_codes_remaining]
+                required: [emails, identities, passkeys, totp, credentials, recovery_codes_remaining]
                 properties:
                   recovery_codes_remaining: { type: integer, description: 未使用のリカバリーコードの数 }
                   emails:
@@ -677,6 +778,10 @@ paths:
                   totp:
                     type: array
                     items: { $ref: "#/components/schemas/MyTOTP" }
+                  credentials:
+                    type: array
+                    description: 認証方式のプラグインの、無効化していない認証情報（ADR 0092）
+                    items: { $ref: "#/components/schemas/MyCredential" }
                   password:
                     type: object
                     description: 設定したパスワード（無ければ省略）
@@ -1218,6 +1323,91 @@ paths:
         "204": { description: 無効化した }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/credentials/{method}:enroll-begin:
+    post:
+      operationId: beginEnrollCredential
+      summary: 認証方式のプラグインの認証情報の登録を始める
+      description: |
+        方式（`{method}`）は、そのフィーチャーが動いているもの（ADR 0090、0092）。無ければ 404。応答の `payload` は方式ごとの形で、
+        秘密を含みうるので本人にだけ返す。登録だけのセッション（`next: enroll`）では2要素目に使える方式だけを使え、
+        復旧専用のセッションでも使える。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: method, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MethodBeginRequest" }
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MethodChallenge" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/credentials/{method}:enroll-complete:
+    post:
+      operationId: completeEnrollCredential
+      summary: 認証方式のプラグインの認証情報の登録を完了する
+      description: |
+        確認に失敗すれば 401（回数の上限まではフローを使える）。登録だけのセッション（`next: enroll`）で完了すると、
+        登録の確認を2要素目として通常のセッションに替え、`login` で返す（Cookie も差し替える）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: method, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MethodCompleteRequest" }
+      responses:
+        "200":
+          description: 登録した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [credential, payload]
+                properties:
+                  credential: { $ref: "#/components/schemas/MyCredential" }
+                  payload: { type: object, additionalProperties: true, description: 方式ごとの応答 }
+                  login: { $ref: "#/components/schemas/LoginResult" }
+                  recovery_codes:
+                    type: array
+                    description: 最初の強い認証手段なら、リカバリーコード（表示は1回だけ。4.12）
+                    items: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/me/credentials/{id}:revoke:
+    post:
+      operationId: revokeMyCredential
+      summary: 認証方式のプラグインの認証情報を無効化する
+      description: |
+        1要素目に使える方式の、最後のログインの手段なら `409 last_method`。その認証情報を使ったセッションは、
+        遅くとも `validity_max_delay` の後に使えなくなる。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: 無効化した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /v1/me/orgs:
     get:
@@ -2642,7 +2832,7 @@ components:
             決まった API にしか使えない（他は未ログインの扱い）。
         second_factor_methods:
           type: array
-          description: "`next: second_factor` のとき使える2要素目（`passkey`、`totp`）"
+          description: "`next: second_factor` のとき使える2要素目（`passkey`、`totp`、認証方式のプラグインの名前（`hotp` など））"
           items: { type: string }
         warnings:
           type: array
@@ -2945,6 +3135,32 @@ components:
       properties:
         id: { type: string, description: 公開の TOTP の ID（otp_…） }
         created_at: { type: string, format: date-time }
+    MyCredential:
+      type: object
+      required: [id, method, created_at]
+      properties:
+        id: { type: string, description: 公開の認証情報の ID（crd_…） }
+        method: { type: string, description: 方式の名前（hotp など） }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+    MethodBeginRequest:
+      type: object
+      properties:
+        payload: { type: object, additionalProperties: true, description: 方式ごとの入力 }
+    MethodCompleteRequest:
+      type: object
+      required: [flow_id]
+      properties:
+        flow_id: { type: string }
+        payload: { type: object, additionalProperties: true, description: 方式ごとの入力 }
+        return_token: { type: boolean }
+    MethodChallenge:
+      type: object
+      required: [flow_id, payload, expires_at]
+      properties:
+        flow_id: { type: string }
+        payload: { type: object, additionalProperties: true, description: 方式ごとの応答 }
+        expires_at: { type: string, format: date-time }
     TOTPEnrollment:
       type: object
       required: [flow_id, secret, uri, expires_at]

@@ -33,6 +33,7 @@ const (
 	CustomAttributes    = "custom_attributes"
 	FlowHooks           = "flow_hooks"
 	PasskeyAttestation  = "passkey_attestation"
+	HOTP                = "hotp"
 	OrgAuditLog         = "org_audit_log"
 	EventSubscriptions  = "event_subscriptions"
 	OIDCLogout          = "oidc_logout"

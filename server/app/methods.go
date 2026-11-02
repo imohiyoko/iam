@@ -52,7 +52,8 @@ func (s publicServer) ListMyMethods(ctx context.Context, _ publicapi.ListMyMetho
 	if !ok {
 		return publicapi.ListMyMethods401JSONResponse{UnauthenticatedJSONResponse: unauthenticated()}, nil
 	}
-	out := publicapi.ListMyMethods200JSONResponse{Emails: []publicapi.MyEmail{}, Identities: []publicapi.MyIdentity{}, Passkeys: []publicapi.MyPasskey{}, Totp: []publicapi.MyTOTP{}}
+	out := publicapi.ListMyMethods200JSONResponse{Emails: []publicapi.MyEmail{}, Identities: []publicapi.MyIdentity{}, Passkeys: []publicapi.MyPasskey{}, Totp: []publicapi.MyTOTP{},
+		Credentials: []publicapi.MyCredential{}}
 	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		m, err := s.a.accounts.ListMethods(ctx, tx, s.a.realm.ID, au.PrincipalID)
 		if err != nil {
@@ -77,6 +78,9 @@ func (s publicServer) ListMyMethods(ctx context.Context, _ publicapi.ListMyMetho
 		}
 		for _, t := range m.TOTP {
 			out.Totp = append(out.Totp, myTOTP(t))
+		}
+		for _, c := range m.Credentials {
+			out.Credentials = append(out.Credentials, myCredential(c))
 		}
 		if out.RecoveryCodesRemaining, err = recovery.Remaining(ctx, tx, s.a.realm.ID, au.PrincipalID); err != nil {
 			return err

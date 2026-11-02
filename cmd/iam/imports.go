@@ -10,6 +10,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/customattributes"
 	_ "github.com/imohiyoko/iam/features/eventsubscriptions"
 	_ "github.com/imohiyoko/iam/features/flowhooks"
+	_ "github.com/imohiyoko/iam/features/hotp"
 	_ "github.com/imohiyoko/iam/features/multirealm"
 	_ "github.com/imohiyoko/iam/features/nestedgroups"
 	_ "github.com/imohiyoko/iam/features/oidclogout"
