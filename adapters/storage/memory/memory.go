@@ -57,18 +57,20 @@ type state struct {
 	// revokedPasskeys は無効化した credential_id（realm と credential_id の組）。再登録を拒否する（4.6）。
 	revokedPasskeys map[string]time.Time
 	totps           map[string]port.TOTPCredential
-	passwords       map[string]port.PasswordCredential
-	recoveryCodes   map[string]port.RecoveryCode
-	suspensions     map[string]port.Suspension
-	scheduled       map[string]port.ScheduledEvent
-	connections     map[string]port.Connection
-	sessions        map[string]port.Session
-	accounts        map[string]port.ServiceAccount
-	credentials     map[string]port.ServiceAccountCredential
-	saTokens        map[string]port.ServiceAccountToken
-	roleBindings    map[string]port.RoleBinding
-	roles           map[string]port.Role
-	groups          map[string]port.Group
+	// authnCreds は汎用の認証情報（ADR 0092）。
+	authnCreds    map[string]port.Credential
+	passwords     map[string]port.PasswordCredential
+	recoveryCodes map[string]port.RecoveryCode
+	suspensions   map[string]port.Suspension
+	scheduled     map[string]port.ScheduledEvent
+	connections   map[string]port.Connection
+	sessions      map[string]port.Session
+	accounts      map[string]port.ServiceAccount
+	credentials   map[string]port.ServiceAccountCredential
+	saTokens      map[string]port.ServiceAccountToken
+	roleBindings  map[string]port.RoleBinding
+	roles         map[string]port.Role
+	groups        map[string]port.Group
 	// groupMembers のキーは group_id + member_type + member_id。
 	groupMembers map[string]port.GroupMember
 	// groupClosure のキーは realm_id + group_id + ancestor_id。値は depth。
@@ -108,7 +110,8 @@ func New(clk clock.Clock) *Storage {
 		dataKeys: map[string]port.DataKey{}, auditKeys: map[string]port.DataKey{}, outboxIx: map[string]int{},
 		users: map[string]port.User{}, emails: map[string]port.UserEmail{}, identities: map[string]port.Identity{},
 		passkeys: map[string]port.Passkey{}, revokedPasskeys: map[string]time.Time{}, totps: map[string]port.TOTPCredential{},
-		passwords: map[string]port.PasswordCredential{}, suspensions: map[string]port.Suspension{},
+		authnCreds: map[string]port.Credential{},
+		passwords:  map[string]port.PasswordCredential{}, suspensions: map[string]port.Suspension{},
 		scheduled: map[string]port.ScheduledEvent{}, recoveryCodes: map[string]port.RecoveryCode{},
 		connections: map[string]port.Connection{}, sessions: map[string]port.Session{},
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
@@ -167,6 +170,7 @@ func (t *tx) Emails() port.EmailRepo                     { return emails{t} }
 func (t *tx) Identities() port.IdentityRepo              { return identities{t} }
 func (t *tx) Passkeys() port.PasskeyRepo                 { return passkeys{t} }
 func (t *tx) TOTP() port.TOTPRepo                        { return totps{t} }
+func (t *tx) Credentials() port.CredentialRepo           { return authnCredentials{t} }
 func (t *tx) Passwords() port.PasswordRepo               { return passwords{t} }
 func (t *tx) RecoveryCodes() port.RecoveryCodeRepo       { return recoveryCodes{t} }
 func (t *tx) Suspensions() port.SuspensionRepo           { return suspensions{t} }

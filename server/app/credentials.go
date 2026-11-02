@@ -49,7 +49,8 @@ func (s adminServer) ListUserCredentials(ctx context.Context, req adminapi.ListU
 
 // credentialsOut は有効な認証情報の一覧（個人情報は含めない）。
 func (s adminServer) credentialsOut(ctx context.Context, tx port.Tx, m account.Methods) (adminapi.UserCredentials, error) {
-	out := adminapi.UserCredentials{Passkeys: []adminapi.UserPasskey{}, Identities: []adminapi.UserIdentity{}, Totp: []adminapi.UserTOTP{}}
+	out := adminapi.UserCredentials{Passkeys: []adminapi.UserPasskey{}, Identities: []adminapi.UserIdentity{}, Totp: []adminapi.UserTOTP{},
+		Credentials: []adminapi.UserCredential{}}
 	slugs, err := connectionSlugs(ctx, tx, s.a.realm.ID)
 	if err != nil {
 		return out, err
@@ -62,6 +63,9 @@ func (s adminServer) credentialsOut(ctx context.Context, tx port.Tx, m account.M
 	}
 	for _, t := range m.TOTP {
 		out.Totp = append(out.Totp, adminapi.UserTOTP{Id: t.PublicID, CreatedAt: t.CreatedAt})
+	}
+	for _, c := range m.Credentials {
+		out.Credentials = append(out.Credentials, adminapi.UserCredential{Id: c.PublicID, Method: c.Method, CreatedAt: c.CreatedAt, LastUsedAt: c.LastUsedAt})
 	}
 	if m.Password != nil {
 		out.Password = &adminapi.UserPassword{CreatedAt: m.Password.CreatedAt}
@@ -182,6 +186,6 @@ func (s adminServer) RevokeAllUserCredentials(ctx context.Context, req adminapi.
 		return nil, err
 	}
 	s.a.sessions.ForgetIDs(ctx, s.a.realm.ID, revoked)
-	return adminapi.RevokeAllUserCredentials200JSONResponse{Passkeys: r.Passkeys, Identities: r.Identities, Totp: r.TOTP,
+	return adminapi.RevokeAllUserCredentials200JSONResponse{Passkeys: r.Passkeys, Identities: r.Identities, Totp: r.TOTP, Credentials: r.Credentials,
 		Password: r.Password, RecoveryCodes: r.RecoveryCodes, Sessions: len(revoked)}, nil
 }

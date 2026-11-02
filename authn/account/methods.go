@@ -41,6 +41,8 @@ type Methods struct {
 	TOTP       []port.TOTPCredential // 2要素目だけに使う（ログインの手段には数えない）
 	// Password は有効なパスワード（フィーチャー password）。無ければ nil。
 	Password *port.PasswordCredential
+	// Credentials は無効化していない汎用の認証情報（認証方式のプラグイン。ADR 0092）。
+	Credentials []port.Credential
 }
 
 // ListMethods はユーザーのメールと、無効化していない外部 ID の紐付けと passkey を返す。
@@ -61,7 +63,16 @@ func (s *Service) ListMethods(ctx context.Context, tx port.Tx, realmID, userID s
 	if err != nil {
 		return Methods{}, err
 	}
+	cs, err := tx.Credentials().ListByUser(ctx, realmID, userID, "")
+	if err != nil {
+		return Methods{}, err
+	}
 	m := Methods{Emails: es}
+	for _, c := range cs {
+		if c.RevokedAt == nil {
+			m.Credentials = append(m.Credentials, c)
+		}
+	}
 	switch pw, err := tx.Passwords().GetActive(ctx, realmID, userID); {
 	case err == nil:
 		m.Password = &pw
@@ -86,9 +97,15 @@ func (s *Service) ListMethods(ctx context.Context, tx port.Tx, realmID, userID s
 	return m, nil
 }
 
-// loginMethods はログインに使える手段の数。外部 ID の紐付け、passkey、パスワード、`code` が有効なら確認済みのメール。
+// loginMethods はログインに使える手段の数。外部 ID の紐付け、passkey、パスワード、`code` が有効なら確認済みのメール、
+// 動いている方式のうち1要素目に使えるものの汎用の認証情報。
 func (s *Service) loginMethods(m Methods) int {
 	n := len(m.Identities) + len(m.Passkeys)
+	for _, c := range m.Credentials {
+		if s.Methods.Supports(c.Method, port.UsageFirstFactor) {
+			n++
+		}
+	}
 	if m.Password != nil {
 		n++
 	}

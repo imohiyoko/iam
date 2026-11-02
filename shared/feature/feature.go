@@ -35,6 +35,7 @@ const (
 	TokenExchange       = "token_exchange"
 	Impersonation       = "impersonation"
 	PasskeyAttestation  = "passkey_attestation"
+	HOTP                = "hotp"
 	OIDCLogout          = "oidc_logout"
 	ACR                 = "acr"
 )

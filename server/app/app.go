@@ -24,10 +24,12 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/attribute"
+	"github.com/imohiyoko/iam/authn/credential"
 	"github.com/imohiyoko/iam/authn/emailflow"
 	"github.com/imohiyoko/iam/authn/hook"
 	"github.com/imohiyoko/iam/authn/loginlink"
 	"github.com/imohiyoko/iam/authn/merge"
+	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/authn/oauth"
 	"github.com/imohiyoko/iam/authn/org"
@@ -68,9 +70,12 @@ type Deps struct {
 	// DNS は Org のドメインの証明で TXT を引く。nil なら net.DefaultResolver。
 	DNS org.TXTResolver
 	// Hooks は Go のインターフェースで実装したフロー フック（11.8）。設定の hooks で url の無いものに使う。
-	Hooks  map[string]port.FlowHook
-	Clock  clock.Clock
-	Logger *slog.Logger
+	Hooks map[string]port.FlowHook
+	// Methods は Go のインターフェースで実装した認証方式のプラグイン（組み込みとテスト用。ADR 0092）。フィーチャーを問わずに動く。
+	// features/<name> で登録した方式は、フィーチャーが動いているときだけ動く。
+	Methods []port.Authenticator
+	Clock   clock.Clock
+	Logger  *slog.Logger
 }
 
 // App は組み立て済みの IAM。
@@ -112,6 +117,9 @@ type App struct {
 	metadata *attestation.Metadata
 	// totp は TOTP の登録と照合（2要素目）。
 	totp *totp.Service
+	// methods は動いている認証方式のプラグイン、credentials はそれを呼ぶコアのサービス（ADR 0092）。
+	methods     *method.Set
+	credentials *credential.Service
 	// password はメール + パスワード。フィーチャー password が動いていなければ nil。
 	password *password.Service
 	perIP    *ratelimit.Limiter
@@ -314,8 +322,13 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	for _, v := range rs.VerifiedVia {
 		via = append(via, port.VerifiedVia(v))
 	}
+	methods, err := method.Active(plan.IsActive, d.Methods...)
+	if err != nil {
+		return err
+	}
+	a.methods, a.sessions.Methods = methods, methods
 	a.accounts = &account.Service{Crypter: a.pii, Clock: d.Clock, VerifiedVia: via, ExtraCategories: cfg.Security.SuspensionCategories,
-		DeletionGrace: rs.userDeletionGrace(), IndexOnly: rs.EmailStorage == "index_only", Roles: authzRoles{}}
+		DeletionGrace: rs.userDeletionGrace(), IndexOnly: rs.EmailStorage == "index_only", Roles: authzRoles{}, Methods: methods}
 	a.notify = &notify.Service{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock}
 	if plan.IsActive(feature.Org) {
 		a.orgs = &org.Service{Clock: d.Clock, Crypter: a.pii, Accounts: a.accounts, Notify: a.notify, Policy: org.CreationPolicy(rs.OrgCreation),
@@ -407,6 +420,11 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	a.totp = &totp.Service{
 		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Issuer: issuer,
 		TTL: cfg.Security.SecondFactor.TTL.D(), MaxAttempts: cfg.Security.SecondFactor.MaxAttempts,
+		PerUser: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
+	}
+	a.credentials = &credential.Service{
+		Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Accounts: a.accounts, Sessions: a.sessions, Methods: methods,
+		Issuer: issuer, TTL: cfg.Security.SecondFactor.TTL.D(), MaxAttempts: cfg.Security.SecondFactor.MaxAttempts,
 		PerUser: a.limiter(cfg.Security.Login.RateLimit.PerAccount), Log: d.Logger,
 	}
 	if plan.IsActive(feature.Password) {

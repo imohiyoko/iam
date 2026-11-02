@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/imohiyoko/iam/authn/hook"
+	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
@@ -41,6 +42,8 @@ type Service struct {
 	DeletionGrace time.Duration
 	// IndexOnly はメールの最小化モード（9.6）。アドレスの暗号文を持たず、インデックスだけを置く。
 	IndexOnly bool
+	// Methods は動いている認証方式のプラグイン（ADR 0092）。1要素目に使える方式の認証情報を、ログインの手段に数える。
+	Methods *method.Set
 }
 
 // UserRoles はユーザーのロールを確かめるもの（authz。authn は authz を import しない）。

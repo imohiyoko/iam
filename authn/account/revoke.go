@@ -24,12 +24,14 @@ const (
 // Revoked は一括の無効化で無効化した数。
 type Revoked struct {
 	Passkeys, Identities, TOTP int
-	Password                   bool
+	// Credentials は汎用の認証情報（ADR 0092）の数。
+	Credentials int
+	Password    bool
 	// RecoveryCodes は消した未使用のリカバリーコードの数。
 	RecoveryCodes int
 }
 
-// AdminRevokeCredential はユーザーの passkey・外部 ID の紐付け・TOTP を公開 ID（psk_ / idn_ / otp_）で
+// AdminRevokeCredential はユーザーの passkey・外部 ID の紐付け・TOTP・汎用の認証情報を公開 ID（psk_ / idn_ / otp_ / crd_）で
 // 無効化する。そのユーザーの有効なものでなければ errs.NotFound。その認証情報で作ったセッションは、次の検証
 // （遅くとも validity_max_delay の後）から使えない。
 func (s *Service) AdminRevokeCredential(ctx context.Context, tx port.Tx, realmID string, u port.User, publicID string, actor audit.Actor, requestID string) error {
@@ -69,6 +71,8 @@ func (s *Service) AdminRevokeCredential(ctx context.Context, tx port.Tx, realmID
 			return err
 		}
 		return s.record(ctx, tx, realmID, "totp.revoked", actor, requestID, map[string]any{"user_id": u.PublicID, "totp_id": c.PublicID, "reason": ReasonRevokedByAdmin})
+	case string(id.Credential):
+		return s.adminRevokeCredential(ctx, tx, realmID, u, publicID, actor, requestID)
 	}
 	return errs.New(errs.KindNotFound, "credential")
 }
@@ -86,7 +90,7 @@ func (s *Service) AdminRevokePassword(ctx context.Context, tx port.Tx, realmID s
 	return s.record(ctx, tx, realmID, "password.removed", actor, requestID, map[string]any{"user_id": u.PublicID, "reason": ReasonRevokedByAdmin})
 }
 
-// RevokeAllCredentials は侵害時の初動として、ユーザーの passkey・外部 ID の紐付け・TOTP・パスワードをすべて無効化する。
+// RevokeAllCredentials は侵害時の初動として、ユーザーの passkey・外部 ID の紐付け・TOTP・汎用の認証情報・パスワードをすべて無効化する。
 // リカバリーコードも消す（漏れていてもよいように）。メールは残す（復旧の経路。4.12）。呼び出し側はユーザーの全セッションを失効させる。
 func (s *Service) RevokeAllCredentials(ctx context.Context, tx port.Tx, realmID string, u port.User, actor audit.Actor, requestID string) (Revoked, error) {
 	m, err := s.ListMethods(ctx, tx, realmID, u.ID)
@@ -113,6 +117,12 @@ func (s *Service) RevokeAllCredentials(ctx context.Context, tx port.Tx, realmID 
 		}
 		out.TOTP++
 	}
+	for _, c := range m.Credentials {
+		if err := tx.Credentials().Revoke(ctx, realmID, c.ID, now, ReasonCompromised); err != nil {
+			return Revoked{}, err
+		}
+		out.Credentials++
+	}
 	if m.Password != nil {
 		if err := tx.Passwords().Revoke(ctx, realmID, m.Password.ID, now, ReasonCompromised); err != nil && !errors.Is(err, errs.NotFound) {
 			return Revoked{}, err
@@ -132,7 +142,7 @@ func (s *Service) RevokeAllCredentials(ctx context.Context, tx port.Tx, realmID 
 		return Revoked{}, err
 	}
 	return out, s.record(ctx, tx, realmID, "credentials.revoked_all", actor, requestID, map[string]any{
-		"user_id": u.PublicID, "passkeys": out.Passkeys, "identities": out.Identities, "totp": out.TOTP, "password": out.Password,
+		"user_id": u.PublicID, "passkeys": out.Passkeys, "identities": out.Identities, "totp": out.TOTP, "credentials": out.Credentials, "password": out.Password,
 		"recovery_codes": out.RecoveryCodes, "reason": ReasonCompromised,
 	})
 }

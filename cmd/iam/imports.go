@@ -9,6 +9,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/acr"
 	_ "github.com/imohiyoko/iam/features/customattributes"
 	_ "github.com/imohiyoko/iam/features/flowhooks"
+	_ "github.com/imohiyoko/iam/features/hotp"
 	_ "github.com/imohiyoko/iam/features/impersonation"
 	_ "github.com/imohiyoko/iam/features/multirealm"
 	_ "github.com/imohiyoko/iam/features/nestedgroups"
