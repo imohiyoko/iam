@@ -23,6 +23,7 @@ import (
 	"github.com/imohiyoko/iam/authn/lockout"
 	"github.com/imohiyoko/iam/authn/merge"
 	"github.com/imohiyoko/iam/authn/method/hotp"
+	kerberosmethod "github.com/imohiyoko/iam/authn/method/kerberos"
 	"github.com/imohiyoko/iam/authn/method/ldap"
 	"github.com/imohiyoko/iam/authn/method/passkey"
 	"github.com/imohiyoko/iam/authn/method/password"
@@ -80,6 +81,7 @@ var featureCatalog = map[string]struct {
 	feature.SMSOTP:             {sms.Feature, module + "/features/sms"},
 	feature.PushAuth:           {push.Feature, module + "/features/push"},
 	feature.X509:               {x509method.Feature, module + "/features/x509"},
+	feature.Kerberos:           {kerberosmethod.Feature, module + "/features/kerberos"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

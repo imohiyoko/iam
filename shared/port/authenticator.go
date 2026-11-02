@@ -138,6 +138,22 @@ type MethodEnv struct {
 	// 待ち受け（秘密鍵の所持は TLS のハンドシェイクで確かめてある）か、設定で信じたプロキシのヘッダーから、コアが取り出す。
 	// 無ければ nil。連鎖・用途・失効は方式が確かめる。
 	ClientCertificates [][]byte
+	// Negotiate は要求の `Authorization: Negotiate` の SPNEGO のトークン（RFC 4559。Base64 を戻したもの。ADR 0107）。コアは
+	// 汎用のログインの完了と登録のパスでだけ取り出す。無ければ nil。確かめるのは方式。
+	Negotiate []byte
+	// Principals は、方式が自分で確かめた本人の名前（Kerberos のプリンシパルなど）をユーザーに引き当てる（ADR 0107）。1要素目の
+	// Complete でだけ渡し、それ以外では nil。
+	Principals MethodPrincipals
+}
+
+// MethodPrincipals は、方式が確かめた外部の名前から本人を引き当てる、コアの手段（ADR 0107）。方式は Storage を触らないので、
+// 結び付けの規則に要る検索だけをコアが行う。どれも、ログインできる状態のユーザーだけを返し、無ければ errs.NotFound（理由を区別しない）。
+type MethodPrincipals interface {
+	// EmailUser は確認済みのメールアドレスのユーザーの内部 ID を返す。
+	EmailUser(ctx context.Context, email string) (string, error)
+	// DirectoryUser は realm 共通の LDAP の connection（slug）で、属性 attribute が value の項目をちょうど 1 件探し、その外部 ID
+	// を紐付けたユーザーの内部 ID を返す（ADR 0102）。ディレクトリに届かなければ errs.Unavailable に一致するエラー。
+	DirectoryUser(ctx context.Context, connection, attribute, value string) (string, error)
 }
 
 // MethodRequest はクライアントからの入力。
@@ -175,6 +191,10 @@ type MethodEvent struct {
 // ErrMethodPending は、別の経路からの応答がまだ届いていないこと（MethodInfo.OutOfBand の方式の Complete）。コアはフローを、
 // 回数を数えずに置き直す。
 var ErrMethodPending = errs.WithCode(errs.KindFailedPrecondition, "authorization_pending", "method: authorization pending")
+
+// ErrNegotiate は、方式が HTTP の Negotiate の認証（RFC 4559）を求めること（要求に `Authorization: Negotiate` が無い。ADR 0107）。
+// コアはフローを回数を数えずに置き直し、401 と `WWW-Authenticate: Negotiate` を返す（ブラウザがトークンを付けて送り直す）。
+var ErrNegotiate = errs.WithCode(errs.KindUnauthenticated, "negotiate", "method: negotiate authentication required")
 
 // ErrDeliveryFailed は送信（Deliver）の失敗。
 var ErrDeliveryFailed = errs.WithCode(errs.KindUnavailable, "delivery_failed", "method: delivery failed")

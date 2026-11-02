@@ -556,3 +556,80 @@ func TestSyncOnMissingNone(t *testing.T) {
 		t.Fatalf("on_missing none = %+v", res)
 	}
 }
+
+// UserBy は Kerberos のプリンシパルの結び付け（ADR 0107）：サービスアカウントで探し、紐付いた外部 ID のユーザーを返す。
+func TestUserBy(t *testing.T) {
+	e := setup(t, ldaptest.LDAPS)
+	e.person("alice", "uuid-alice", "alice@example.com")
+	e.person("bob", "uuid-bob", "bob@example.com")
+	e.srv.Add("uid=carol,"+people, map[string][]string{"objectClass": {"inetOrgPerson"}, "uid": {"carol"}, "entryUUID": {"uuid-carol"},
+		"userPassword": {"pw-carol"}, "krbPrincipalName": {"carol@EXAMPLE.COM"}, "mail": {"carol@example.com"}})
+	e.conn(t, "corp", "", e.input())
+	alice, err := e.login("corp", "alice", "pw-alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	carol, err := e.login("corp", "carol", "pw-carol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	publicID := func(internal string) string {
+		var u port.User
+		e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+			var err error
+			u, err = tx.Users().Get(ctx, e.k.RealmID, internal)
+			return err
+		})
+		return u.PublicID
+	}
+	if got, err := e.svc.UserBy(ctx, e.k.RealmID, "corp", "uid", "alice"); err != nil || publicID(got) != alice.UserID {
+		t.Fatalf("uid = %q, %v", got, err)
+	}
+	if got, err := e.svc.UserBy(ctx, e.k.RealmID, "corp", "krbPrincipalName", "carol@EXAMPLE.COM"); err != nil || publicID(got) != carol.UserID {
+		t.Fatalf("krbPrincipalName = %q, %v", got, err)
+	}
+	for name, c := range map[string][2]string{
+		"no entry":      {"uid", "nobody"},
+		"not linked":    {"uid", "bob"},
+		"wildcard":      {"uid", "*"},
+		"injection":     {"uid", "alice)(uid=*"},
+		"bad attribute": {"uid)(x", "alice"},
+		"empty":         {"uid", ""},
+	} {
+		if _, err := e.svc.UserBy(ctx, e.k.RealmID, "corp", c[0], c[1]); !errors.Is(err, errs.NotFound) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := e.svc.UserBy(ctx, e.k.RealmID, "nope", "uid", "alice"); !errors.Is(err, errs.NotFound) {
+		t.Errorf("unknown connection: %v", err)
+	}
+	// 1 件より多く当たれば誰にもしない。
+	e.srv.Add("uid=alice2,"+people, map[string][]string{"objectClass": {"inetOrgPerson"}, "uid": {"alice"}, "entryUUID": {"uuid-alice2"}})
+	if _, err := e.svc.UserBy(ctx, e.k.RealmID, "corp", "uid", "alice"); !errors.Is(err, errs.NotFound) {
+		t.Errorf("two entries: %v", err)
+	}
+	e.srv.SetDown(true)
+	if _, err := e.svc.UserBy(ctx, e.k.RealmID, "corp", "uid", "carol"); !errors.Is(err, ldap.ErrUnavailable) || !errors.Is(err, errs.Unavailable) {
+		t.Errorf("down: %v", err)
+	}
+}
+
+func TestUserByOrgConnection(t *testing.T) {
+	e := setup(t, ldaptest.LDAPS)
+	e.person("alice", "uuid-alice", "alice@acme.example")
+	orgID := id.New(id.Org)
+	e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		return tx.Orgs().Create(ctx, port.Org{ID: orgID, PublicID: id.NewExternal(id.Org), RealmID: e.k.RealmID, Kind: port.OrgShared, Name: "acme",
+			CreatedAt: e.k.Clock.Now(), UpdatedAt: e.k.Clock.Now()})
+	})
+	e.svc.OAuth.OrgSSO = &fakeOrgSSO{domain: "acme.example"}
+	e.svc.OAuth.AllowPrivateNetworks = true
+	c := e.conn(t, "", orgID, e.input(func(in *ldap.ConnectionInput) { in.TrustEmail = false }))
+	if _, err := e.svc.UserBy(context.Background(), e.k.RealmID, c.Slug, "uid", "alice"); !errors.Is(err, errs.NotFound) {
+		t.Fatalf("org connection: %v", err)
+	}
+	if binds, _, _ := e.srv.Stats(); len(binds) != 0 {
+		t.Fatalf("connected for an org connection: %v", binds)
+	}
+}

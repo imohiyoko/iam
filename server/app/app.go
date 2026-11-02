@@ -533,6 +533,10 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		Issuer: issuer, TTL: cfg.Security.SecondFactor.TTL.D(), MaxAttempts: cfg.Security.SecondFactor.MaxAttempts,
 		PerUser: a.limiter(cfg.Security.Login.RateLimit.PerAccount), PerLogin: a.accountLimiter(), Log: d.Logger,
 	}
+	if a.ldap != nil {
+		// Kerberos のプリンシパルを LDAP の connection で引く（ADR 0107）。
+		a.credentials.Directory = a.ldap.UserBy
+	}
 	a.loginProtection(cfg, d, plan)
 	a.credentials.Lockout = a.lockout
 	a.password = nil

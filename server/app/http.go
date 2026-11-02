@@ -45,7 +45,7 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 	if a.acrActive() {
 		h = withStepUp(h)
 	}
-	api := a.withLoginGuard(a.withSession(h))
+	api := a.withLoginGuard(withNegotiate(a.withSession(h)))
 	csrf := http.NewCrossOriginProtection().Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isHosted(r.URL.Path) {
 			login.ServeHTTP(w, r)
