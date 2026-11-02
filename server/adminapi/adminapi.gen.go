@@ -1845,6 +1845,20 @@ type DeleteConnectionJSONBody struct {
 	RevokeIdentities *bool `json:"revoke_identities,omitempty"`
 }
 
+// CreateSAMLConnectionJSONBody defines parameters for CreateSAMLConnection.
+type CreateSAMLConnectionJSONBody struct {
+	EmailAttribute *string `json:"email_attribute,omitempty"`
+
+	// EntityId メタデータに IdP が複数あるときに選ぶ
+	EntityId     *string `json:"entity_id,omitempty"`
+	MetadataUrl  *string `json:"metadata_url,omitempty"`
+	MetadataXml  *string `json:"metadata_xml,omitempty"`
+	NameIdFormat *string `json:"name_id_format,omitempty"`
+	SignRequests *bool   `json:"sign_requests,omitempty"`
+	Slug         string  `json:"slug"`
+	TrustEmail   *bool   `json:"trust_email,omitempty"`
+}
+
 // ListOrgsParams defines parameters for ListOrgs.
 type ListOrgsParams struct {
 	Limit      *int                  `form:"limit,omitempty" json:"limit,omitempty"`
@@ -2019,6 +2033,9 @@ type UpdateConnectionJSONRequestBody UpdateConnectionJSONBody
 
 // DeleteConnectionJSONRequestBody defines body for DeleteConnection for application/json ContentType.
 type DeleteConnectionJSONRequestBody DeleteConnectionJSONBody
+
+// CreateSAMLConnectionJSONRequestBody defines body for CreateSAMLConnection for application/json ContentType.
+type CreateSAMLConnectionJSONRequestBody CreateSAMLConnectionJSONBody
 
 // CreateGroupJSONRequestBody defines body for CreateGroup for application/json ContentType.
 type CreateGroupJSONRequestBody = GroupInput
@@ -2202,6 +2219,9 @@ type ServerInterface interface {
 	// DeleteConnection IdP 接続を消す（ADR 0097）
 	// (POST /v1/admin/connections/{id}:delete)
 	DeleteConnection(w http.ResponseWriter, r *http.Request, id string)
+	// CreateSAMLConnection IdP 接続（SAML 2.0）を登録する（ADR 0098）
+	// (POST /v1/admin/connections:saml)
+	CreateSAMLConnection(w http.ResponseWriter, r *http.Request)
 	// ListGroups realm の範囲の Group の一覧（3.2）
 	// (GET /v1/admin/groups)
 	ListGroups(w http.ResponseWriter, r *http.Request)
@@ -2921,6 +2941,20 @@ func (siw *ServerInterfaceWrapper) DeleteConnection(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteConnection(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSAMLConnection operation middleware
+func (siw *ServerInterfaceWrapper) CreateSAMLConnection(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSAMLConnection(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5558,6 +5592,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/action-namespaces/{name}", wrapper.PutActionNamespace)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/connections", wrapper.ListConnections)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections", wrapper.CreateConnection)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/connections:saml", wrapper.CreateSAMLConnection)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs", wrapper.ListOrgs)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/orgs", wrapper.CreateOrg)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/orgs/{id}", wrapper.GetOrg)
@@ -7094,6 +7129,106 @@ func (response DeleteConnection404JSONResponse) VisitDeleteConnectionResponse(w 
 type DeleteConnection409JSONResponse Error
 
 func (response DeleteConnection409JSONResponse) VisitDeleteConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLConnectionRequestObject struct {
+	Body *CreateSAMLConnectionJSONRequestBody
+}
+
+type CreateSAMLConnectionResponseObject interface {
+	VisitCreateSAMLConnectionResponse(w http.ResponseWriter) error
+}
+
+type CreateSAMLConnection201JSONResponse struct {
+	AcsUrl      string `json:"acs_url"`
+	Id          string `json:"id"`
+	IdpEntityId string `json:"idp_entity_id"`
+	Slug        string `json:"slug"`
+
+	// SpEntityId SP の Entity ID。SP のメタデータの URL でもある
+	SpEntityId string `json:"sp_entity_id"`
+}
+
+func (response CreateSAMLConnection201JSONResponse) VisitCreateSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLConnection400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateSAMLConnection400JSONResponse) VisitCreateSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLConnection401JSONResponse Error
+
+func (response CreateSAMLConnection401JSONResponse) VisitCreateSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLConnection403JSONResponse Error
+
+func (response CreateSAMLConnection403JSONResponse) VisitCreateSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLConnection404JSONResponse Error
+
+func (response CreateSAMLConnection404JSONResponse) VisitCreateSAMLConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSAMLConnection409JSONResponse Error
+
+func (response CreateSAMLConnection409JSONResponse) VisitCreateSAMLConnectionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -13937,6 +14072,9 @@ type StrictServerInterface interface {
 	// DeleteConnection IdP 接続を消す（ADR 0097）
 	// (POST /v1/admin/connections/{id}:delete)
 	DeleteConnection(ctx context.Context, request DeleteConnectionRequestObject) (DeleteConnectionResponseObject, error)
+	// CreateSAMLConnection IdP 接続（SAML 2.0）を登録する（ADR 0098）
+	// (POST /v1/admin/connections:saml)
+	CreateSAMLConnection(ctx context.Context, request CreateSAMLConnectionRequestObject) (CreateSAMLConnectionResponseObject, error)
 	// ListGroups realm の範囲の Group の一覧（3.2）
 	// (GET /v1/admin/groups)
 	ListGroups(ctx context.Context, request ListGroupsRequestObject) (ListGroupsResponseObject, error)
@@ -14841,6 +14979,37 @@ func (sh *strictHandler) DeleteConnection(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteConnectionResponseObject); ok {
 		if err := validResponse.VisitDeleteConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSAMLConnection operation middleware
+func (sh *strictHandler) CreateSAMLConnection(w http.ResponseWriter, r *http.Request) {
+	var request CreateSAMLConnectionRequestObject
+
+	var body CreateSAMLConnectionJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSAMLConnection(ctx, request.(CreateSAMLConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSAMLConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSAMLConnectionResponseObject); ok {
+		if err := validResponse.VisitCreateSAMLConnectionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

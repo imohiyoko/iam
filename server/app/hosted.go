@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -22,6 +23,8 @@ import (
 //	GET /login/email#token=…   メールのマジックリンク（要求したブラウザでだけ通る）
 //	GET /login/link#token=…    運営者が発行したログイン用リンク
 //	GET /login/oauth/callback  プロバイダからの戻り先（connection の redirect_uris に登録する）
+//	POST /login/saml/acs       SAML の IdP からの応答（HTTP-POST。ADR 0098）。画面が完了の API に渡す
+//	GET /login/saml/metadata/{connection}  SAML の SP のメタデータ（IdP に登録する）
 //
 // トークンは URL のフラグメントで受け取るため、サーバーのログにも Referer にも残らない。
 
@@ -44,7 +47,7 @@ var catalog = map[string]texts{
 		CodeSent: "If the address can sign in, we sent a 6-digit code. It expires in a few minutes.", Code: "Code",
 		Verify: "Sign in", UseAnother: "Use another address", Working: "Signing in…", TOTP: "Code from your authenticator app",
 		Messages: map[string]string{
-			"done": "You are signed in.", "warnings": "You are signed in. Please review your account security.",
+			"done": "You are signed in.", "linked": "The account is linked.", "warnings": "You are signed in. Please review your account security.",
 			"authentication_failed": "Sign-in failed. Please try again.", "invalid_email": "Enter a valid email address.",
 			"rate_limited": "Too many attempts. Please wait and try again.", "account_exists": "This email is already registered. Sign in with your email first, then link this provider.",
 			"email_unverified": "The provider has not verified your email address.", "error": "Something went wrong. Please try again.",
@@ -63,7 +66,7 @@ var catalog = map[string]texts{
 		CodeSent: "ログインできるアドレスなら、6桁のコードを送りました。数分で期限が切れます。", Code: "コード",
 		Verify: "ログイン", UseAnother: "別のアドレスを使う", Working: "ログインしています…", TOTP: "認証アプリのコード",
 		Messages: map[string]string{
-			"done": "ログインしました。", "warnings": "ログインしました。アカウントの安全性を確認してください。",
+			"done": "ログインしました。", "linked": "アカウントを連携しました。", "warnings": "ログインしました。アカウントの安全性を確認してください。",
 			"authentication_failed": "ログインできませんでした。もう一度お試しください。", "invalid_email": "正しいメールアドレスを入力してください。",
 			"rate_limited": "試行が多すぎます。しばらく待ってからお試しください。", "account_exists": "このメールは登録済みです。先にメールでログインしてから、このプロバイダを連携してください。",
 			"email_unverified": "プロバイダでメールアドレスが確認されていません。", "error": "問題が起きました。もう一度お試しください。",
@@ -119,6 +122,10 @@ type pageData struct {
 	T           texts
 	Messages    map[string]string
 	Connections []string
+	// ConnectionTypes は connection の種類（oidc・saml）。画面がフローの開始の API を選ぶのに使う。
+	ConnectionTypes map[string]string
+	// SAMLResponse と RelayState は ACS に POST された値（saml_callback の画面だけ）。
+	SAMLResponse, RelayState string
 }
 
 // lang は Accept-Language から対応する言語を選ぶ（品質値は見ず、書かれた順に最初に対応するもの）。
@@ -135,6 +142,7 @@ func lang(r *http.Request) string {
 
 var pages = map[string]string{
 	"/login": "login", "/login/email": "magic_link", "/login/link": "link", "/login/oauth/callback": "oauth_callback",
+	"/login/saml/acs": "saml_callback",
 }
 
 func (h *hosted) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -153,20 +161,30 @@ func (h *hosted) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.assets.ServeHTTP(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, saml.MetadataPath) {
+		h.serveSAMLMetadata(w, r)
+		return
+	}
 	page, ok := pages[r.URL.Path]
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+	var d pageData
+	switch {
+	case page == "saml_callback" && r.Method == http.MethodPost:
+		if d, ok = h.samlACS(w, r); !ok {
+			return
+		}
+	case r.Method != http.MethodGet && r.Method != http.MethodHead, page == "saml_callback":
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	l := lang(r)
-	d := pageData{Lang: l, Page: page, Base: h.a.base, T: catalog[l], Messages: catalog[l].Messages, ReturnTo: safeReturnTo(r.URL.Query().Get("return_to"))}
+	d.Lang, d.Page, d.Base, d.T, d.Messages, d.ReturnTo = l, page, h.a.base, catalog[l], catalog[l].Messages, safeReturnTo(r.URL.Query().Get("return_to"))
 	if page == "login" {
 		var err error
-		if d.Connections, err = h.connections(r.Context()); err != nil {
+		if d.Connections, d.ConnectionTypes, err = h.connections(r.Context()); err != nil {
 			h.a.deps.Logger.ErrorContext(r.Context(), "hosted login: list connections", "error", err)
 		}
 	}
@@ -180,18 +198,20 @@ func (h *hosted) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(buf.Bytes())
 }
 
-func (h *hosted) connections(ctx context.Context) ([]string, error) {
+func (h *hosted) connections(ctx context.Context) ([]string, map[string]string, error) {
 	var out []string
+	types := map[string]string{}
 	err := h.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		cs, err := tx.Connections().List(ctx, h.a.realm.ID)
 		for _, c := range cs {
-			if c.OwnerOrgID == "" { // Org 専用 SSO はドメインから探す（ADR 0077）
+			if c.OwnerOrgID == "" && h.a.connectionUsable(c) { // Org 専用 SSO はドメインから探す（ADR 0077）
 				out = append(out, c.Slug)
+				types[c.Slug] = c.Type
 			}
 		}
 		return err
 	})
-	return out, err
+	return out, types, err
 }
 
 // isHosted は画面のパスかを返す。

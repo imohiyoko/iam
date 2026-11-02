@@ -11,6 +11,7 @@ import (
 	"github.com/imohiyoko/iam/authn/method"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/passkey/attestation"
+	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/feature"
@@ -114,6 +115,12 @@ var cleaners = map[string]cleaner{
 	// 連携先の許可と交換の認可を消す（ADR 0099）。
 	feature.TokenExchange: exchangeCleaner,
 	feature.Impersonation: impersonationCleaner,
+	// SAML の connection（realm 共通と Org 専用）を消し、紐付けた外部 ID を無効化する（ADR 0098）。
+	feature.SAML: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachSAMLConnection(ctx, tx, -1, time.Time{}, false)
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachSAMLConnection(ctx, tx, limit, now, true)
+	}},
 	// Org のログインポリシーの passkey と、realm の設定の passkey_policy を外す（ADR 0096）。設定ファイルの realm.passkey_policy は
 	// 運用者が消す（フィーチャーが止まっていれば使わない）。登録済みの passkey の attestation の列は残す。
 	feature.PasskeyAttestation: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
@@ -218,37 +225,34 @@ func eachOwnedConnections(ctx context.Context, tx port.Tx, limit int, now time.T
 	return n, nil
 }
 
-// eachRealmPasskeyPolicy は、設定に認証器のポリシー（passkey_policy）を持つ realm の行を数える。purge なら limit（0 以上なら）
-// まで、ポリシーを null（無し）にする（ADR 0096）。
-func eachRealmPasskeyPolicy(ctx context.Context, tx port.Tx, limit int, now time.Time, purge bool) (int, error) {
-	rs, err := tx.Realms().List(ctx)
+// eachSAMLConnection は全 realm の SAML の connection を数える。purge なら limit（0 以上なら）まで、外部 ID を無効化して消す。
+func eachSAMLConnection(ctx context.Context, tx port.Tx, limit int, now time.Time, purge bool) (int, error) {
+	realms, err := tx.Realms().List(ctx)
 	if err != nil {
 		return 0, err
 	}
 	n := 0
-	for _, r := range rs {
-		if limit >= 0 && n >= limit {
-			break
-		}
-		var m map[string]json.RawMessage
-		if len(r.Settings) == 0 || json.Unmarshal(r.Settings, &m) != nil {
-			continue
-		}
-		var p *attestation.Policy
-		if raw, ok := m["passkey_policy"]; !ok || json.Unmarshal(raw, &p) != nil || p.Empty() {
-			continue
-		}
-		n++
-		if !purge {
-			continue
-		}
-		m["passkey_policy"] = json.RawMessage("null")
-		if r.Settings, err = json.Marshal(m); err != nil {
+	for _, r := range realms {
+		cs, err := tx.Connections().List(ctx, r.ID)
+		if err != nil {
 			return n, err
 		}
-		r.UpdatedAt = now
-		if err := tx.Realms().Update(ctx, r); err != nil {
-			return n, err
+		for _, c := range cs {
+			if c.Type != saml.Type {
+				continue
+			}
+			if limit >= 0 && n >= limit {
+				return n, nil
+			}
+			if purge {
+				if _, err := tx.Identities().RevokeByConnection(ctx, r.ID, c.ID, now, org.RevokeConnectionDeleted); err != nil {
+					return n, err
+				}
+				if err := tx.Connections().Delete(ctx, r.ID, c.ID); err != nil {
+					return n, err
+				}
+			}
+			n++
 		}
 	}
 	return n, nil
@@ -567,4 +571,40 @@ func (a *App) DisableFeature(ctx context.Context, name string, purge bool) (Disa
 		return err
 	})
 	return res, err
+}
+
+// eachRealmPasskeyPolicy は、設定に認証器のポリシー（passkey_policy）を持つ realm の行を数える。purge なら limit（0 以上なら）
+// まで、ポリシーを null（無し）にする（ADR 0096）。
+func eachRealmPasskeyPolicy(ctx context.Context, tx port.Tx, limit int, now time.Time, purge bool) (int, error) {
+	rs, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range rs {
+		if limit >= 0 && n >= limit {
+			break
+		}
+		var m map[string]json.RawMessage
+		if len(r.Settings) == 0 || json.Unmarshal(r.Settings, &m) != nil {
+			continue
+		}
+		var p *attestation.Policy
+		if raw, ok := m["passkey_policy"]; !ok || json.Unmarshal(raw, &p) != nil || p.Empty() {
+			continue
+		}
+		n++
+		if !purge {
+			continue
+		}
+		m["passkey_policy"] = json.RawMessage("null")
+		if r.Settings, err = json.Marshal(m); err != nil {
+			return n, err
+		}
+		r.UpdatedAt = now
+		if err := tx.Realms().Update(ctx, r); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }

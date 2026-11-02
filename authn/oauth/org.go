@@ -148,15 +148,15 @@ func (s *Service) orgClient(ctx context.Context, req *http.Request) (*http.Clien
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		if addrs, err = r.LookupNetIP(ctx, "ip", host); err != nil {
-			return nil, fmt.Errorf("token endpoint: resolve: %w", err)
+			return nil, fmt.Errorf("endpoint: resolve: %w", err)
 		}
 	}
 	if len(addrs) == 0 {
-		return nil, errors.New("token endpoint: no address")
+		return nil, errors.New("endpoint: no address")
 	}
 	for _, a := range addrs {
 		if !PublicAddr(a) {
-			return nil, fmt.Errorf("token endpoint: %s is not a public address", a)
+			return nil, fmt.Errorf("endpoint: %s is not a public address", a)
 		}
 	}
 	base, ok := c.Transport.(*http.Transport)
@@ -213,4 +213,19 @@ func PublicAddr(a netip.Addr) bool {
 		}
 	}
 	return true
+}
+
+// OrgSSOEnabled は Org 専用の connection を使えるか（フィーチャー org_managed_users が動いているか）を返す。
+func (s *Service) OrgSSOEnabled() bool { return s.OrgSSO != nil }
+
+// ManagedByOwner は、ユーザー（内部 ID）が Org 専用の connection を持つ Org の管理ユーザーかを確かめる
+// （そうでなければ ErrNotManagedByOwner）。SAML の connection の連携でも使う。
+func (s *Service) ManagedByOwner(ctx context.Context, realmID string, c port.Connection, userID string) error {
+	return s.managedByOwner(ctx, realmID, c, userID)
+}
+
+// GuardedClient は、外部の URL（Org の IdP のメタデータなど）に問い合わせる接続を返す。リダイレクトを追わず、
+// 公開のアドレスでなければ断り、解決したアドレスに直接つなぐ（orgClient と同じ。SSRF と DNS rebinding を防ぐ）。
+func (s *Service) GuardedClient(ctx context.Context, req *http.Request) (*http.Client, error) {
+	return s.orgClient(ctx, req)
 }

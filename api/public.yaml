@@ -207,12 +207,69 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/login/saml/{connection}:start:
+    post:
+      operationId: startSAMLLogin
+      summary: 外部 IdP（SAML 2.0）による登録・ログインを始める（ADR 0098）
+      description: |
+        IdP への AuthnRequest（HTTP-Redirect）の URL を返す。ブラウザをそこへ移す。IdP はホスト型ログイン画面の ACS
+        （`/login/saml/acs`）に応答を POST し、画面が `/v1/login/saml:complete` に渡す。`flow_id` は要求した側だけが持つ秘密で、
+        ブラウザには `__Host-iam_saml` Cookie でも渡す。フィーチャー `saml` が動いていなければ 404。
+      parameters:
+        - { name: connection, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SAMLStarted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/login/saml:complete:
+    post:
+      operationId: completeSAMLLogin
+      summary: IdP の応答（SAMLResponse と RelayState）でフローを完了する（ADR 0098）
+      description: |
+        `flow_id` は本文か `__Host-iam_saml` Cookie で渡す。署名を確かめた Assertion だけを受け、応答は始めたフローに結び付けて 1 回だけ受ける。
+        失敗は理由を問わず `401 authentication_failed`。登録・ログインの扱いは `/v1/login/oauth:complete` と同じ
+        （`409 account_exists`、`400 email_unverified`、Org 専用 SSO の `400 email_domain_not_verified`・`409 quota_exceeded`・`403`）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [saml_response, relay_state]
+              properties:
+                flow_id: { type: string }
+                saml_response: { type: string, description: ACS に POST された SAMLResponse（base64）のまま }
+                relay_state: { type: string, maxLength: 80 }
+                return_token: { type: boolean }
+      responses:
+        "200":
+          description: ログインした
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: メールが別のユーザーで登録済み（自動リンクしない）、Org 専用 SSO で Org の Quota が足りない
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   /v1/login/sso:discover:
     post:
       operationId: discoverSSO
       summary: メールのドメインから Org 専用 SSO の connection を探す（ADR 0077）
       description: |
-        アドレスのドメインを証明済みの Org があれば、その Org の connection（`/v1/login/oauth/{connection}:start` に渡す）を返す。
+        アドレスのドメインを証明済みの Org があれば、その Org の connection を返す。`entries` の `type` が `oidc` なら
+        `/v1/login/oauth/{connection}:start`、`saml` なら `/v1/login/saml/{connection}:start` に渡す（`connections` は互換のための slug の一覧）。
         無ければ空。ドメインが SSO を使うことは公開の情報とみなす（アドレスの登録の有無は返さない）。
       requestBody:
         required: true
@@ -230,11 +287,19 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [connections]
+                required: [connections, entries]
                 properties:
                   connections:
                     type: array
                     items: { type: string, description: connection（公開の ID） }
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      required: [connection, type]
+                      properties:
+                        connection: { type: string, description: connection（公開の ID） }
+                        type: { type: string, enum: [oidc, saml] }
         "400": { $ref: "#/components/responses/BadRequest" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
@@ -955,6 +1020,60 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/MyIdentity" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/identities/saml/{connection}:start:
+    post:
+      operationId: startLinkSAMLIdentity
+      summary: 外部 IdP（SAML 2.0）の連携を始める（ADR 0098）
+      description: |
+        ログイン済みの本人だけが連携できる（4.2）。IdP の応答はホスト型ログイン画面の ACS に届き、画面が
+        `/v1/me/identities/saml:complete` に渡す（`relay_state` は `link.` で始まる）。`flow_id` はブラウザには `__Host-iam_saml` Cookie でも渡す。
+        Org 専用 SSO の connection は、その Org の管理ユーザーだけが連携できる（`409 not_managed_by_org`。ADR 0077）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: connection, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 開始した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SAMLStarted" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/me/identities/saml:complete:
+    post:
+      operationId: completeLinkSAMLIdentity
+      summary: IdP の応答で SAML の連携を完了する（ADR 0098）
+      description: |
+        フローを始めた本人のセッションでだけ完了できる。失敗は `401 authentication_failed`。
+        外部 ID が既にどれかのユーザーに紐付いていれば `409 identity_exists`。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [saml_response, relay_state]
+              properties:
+                flow_id: { type: string }
+                saml_response: { type: string }
+                relay_state: { type: string, maxLength: 80 }
+      responses:
+        "200":
+          description: 連携した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MyIdentity" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
   /v1/me/identities/{id}:unlink:
@@ -2038,6 +2157,38 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /v1/me/orgs/{id}/connections:saml:
+    post:
+      operationId: addOrgSAMLConnection
+      summary: Org 専用 SSO の connection（SAML 2.0）を登録する（Org の owner。ADR 0077、0098）
+      description: |
+        Org の IdP（SAML 2.0）を、メタデータの XML か URL で登録する。URL は https に限り、公開のアドレスに限って登録のときに一度だけ取得する。
+        IdP には応答の `saml.sp_entity_id`・`saml.acs_url`（Org は選べない）か、SP のメタデータ（`saml.sp_entity_id` の URL）を登録する。
+        Assertion は署名を必須とし（SHA-256 以上）、暗号化された Assertion は受けない。NameID を外部 ID にし、メールは `email_attribute`
+        （空なら既定の名前、無ければ emailAddress 形式の NameID）から読む。登録は Org が証明したドメインのアドレスに限る。
+        フィーチャー `saml` と `org_managed_users` が要る（無ければ 404）。上限・個人 Org・設定の誤りは OIDC の connection と同じ。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SAMLConnectionInput" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrgConnection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Denied" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /v1/me/orgs/{id}/connections/{connection_id}:delete:
     post:
       operationId: deleteOrgConnection
@@ -3020,9 +3171,12 @@ components:
         created_at: { type: string, format: date-time }
     OrgConnection:
       type: object
-      required: [id, issuer, authorization_endpoint, token_endpoint, client_id, scopes, redirect_uri, created_at]
+      required: [id, type, issuer, authorization_endpoint, token_endpoint, client_id, scopes, redirect_uri, created_at]
+      description: OIDC の項目（issuer から redirect_uri まで）は `type` が `oidc` のときだけ値を持つ（`saml` なら空）。
       properties:
-        id: { type: string, description: "公開の connection ID（con_…）。`/v1/login/oauth/{connection}:start` に渡す" }
+        id: { type: string, description: "公開の connection ID（con_…）。`/v1/login/oauth/{connection}:start`（SAML なら `/v1/login/saml/{connection}:start`）に渡す" }
+        type: { type: string, enum: [oidc, saml] }
+        saml: { $ref: "#/components/schemas/SAMLConnectionInfo" }
         issuer: { type: string }
         authorization_endpoint: { type: string }
         token_endpoint: { type: string }
@@ -3032,6 +3186,36 @@ components:
           items: { type: string }
         redirect_uri: { type: string, description: IdP に登録する戻り先 }
         created_at: { type: string, format: date-time }
+    SAMLStarted:
+      type: object
+      required: [flow_id, redirect_url, expires_at]
+      properties:
+        flow_id: { type: string }
+        redirect_url: { type: string, description: IdP の SingleSignOnService への URL（AuthnRequest を含む） }
+        expires_at: { type: string, format: date-time }
+    SAMLConnectionInput:
+      type: object
+      description: "`metadata_xml` と `metadata_url` のどちらか 1 つ。"
+      properties:
+        metadata_xml: { type: string, maxLength: 1048576, description: IdP のメタデータ（EntityDescriptor） }
+        metadata_url: { type: string, maxLength: 2048 }
+        entity_id: { type: string, maxLength: 1024, description: メタデータに IdP が複数あるときに選ぶ }
+        sign_requests: { type: boolean, description: AuthnRequest に署名する（ECDSA-SHA256） }
+        name_id_format: { type: string, maxLength: 256, description: 求める NameID の形式（transient は使えない） }
+        email_attribute: { type: string, maxLength: 256, description: メールの属性の名前 }
+    SAMLConnectionInfo:
+      type: object
+      required: [idp_entity_id, sso_url, sp_entity_id, acs_url, sign_requests]
+      properties:
+        idp_entity_id: { type: string }
+        sso_url: { type: string }
+        metadata_url: { type: string }
+        sp_entity_id: { type: string, description: SP の Entity ID。SP のメタデータの URL でもある }
+        acs_url: { type: string, description: IdP に登録する ACS（HTTP-POST） }
+        sign_requests: { type: boolean }
+        name_id_format: { type: string }
+        email_attribute: { type: string }
+        idp_certificate_expires_at: { type: string, format: date-time, description: IdP の署名の証明書の最も遅い期限 }
     MyEmail:
       type: object
       required: [id, email, primary, verified, created_at]
