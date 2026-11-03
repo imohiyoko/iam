@@ -679,6 +679,21 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] 無効化で連携先の設定と結び付けたトークンを消す。memory・SQLite・PostgreSQL の契約テスト、証明の解析のファジング（`FuzzParse`）
 - 連携先の証明書の失効（OCSP・CRL）の確かめ、realm ごとの CA、JWT のアクセストークンの `cnf` クレーム
 
+#### Workload Identity Federation（ADR 0116）
+
+**ゴール**：CI・Kubernetes・クラウドのワークロードが、秘密を置かずに基盤の JWT をサービスアカウントのトークンに替えられる。
+
+- [x] フィーチャー `workload_identity`（既定オフ。`service_accounts` に依存）。オフなら交換は `unsupported_grant_type`、管理 API は 404
+- [x] 管理 API で発行者（issuer・aud・固定の JWKS か jwks_uri か Discovery・alg・寿命の上限・停止）と結び付け（サービスアカウントと条件）を置く。
+  結び付けは outranks を満たすときだけ作れるテストがある
+- [x] `POST /v1/admin/token` の RFC 8693 の交換。違う aud・違う issuer・期限切れ・未来の iat・寿命の超過・条件に合わない・alg none・HS256・
+  署名を外した・書き換えた・知らない鍵・`jti` の再送・クライアントの認証の併用を拒むテストがある
+- [x] JWKS は https・公開のアドレスだけ・転送なし・大きさの上限で取得し、キャッシュと発行者ごとの取得の回数の上限を持つ。ループバックにつながないテストがある
+- [x] 発行したトークンに `resource`・`scope`（RFC 8707）と DPoP が効く。結び付けの削除・発行者の停止で発行済みのトークンが使えなくなるテストがある
+- [x] 監査ログ（発行者・結び付けの作成・変更・削除、`service_account.token_issued`、署名を確かめた後の拒否）、無効化で発行者・結び付け・
+  発行したトークンを消す、memory・SQLite・PostgreSQL の契約テスト、条件と JSON Pointer の解析のファジング
+- X.509-SVID（SPIFFE）、否定や OR を含む条件、Org の管理者による結び付け、JWKS の取得の失敗時に古い鍵を使う選択
+
 ### M12 認可の拡張
 
 - 一括判定、権限の一覧、OpenID AuthZEN、ReBAC、ポリシー言語、時限付きの付与と棚卸し

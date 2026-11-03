@@ -2239,6 +2239,15 @@ paths:
         スコープは `scope`（リソースのスコープの中から。省けばリソースのスコープのすべて）。このトークンは管理 API では使えず、
         リソースサーバーが `/oauth2/introspect` で確かめる。リソースが使えなければ `400 invalid_target`、スコープが許されて
         いなければ `400 invalid_scope`。フィーチャーが動いていないときに `resource` を付ければ `400 invalid_target`。
+
+        フィーチャー `workload_identity`（ADR 0116）では、`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`（RFC 8693）で
+        外部の発行者の JWT（`subject_token`、`subject_token_type` は `urn:ietf:params:oauth:token-type:jwt` か `…:id_token`）を、
+        登録した発行者と結び付けの条件で確かめてサービスアカウントのトークンに替える。クライアントの認証（`client_secret`・
+        `client_assertion`・`Authorization`）・`actor_token` は付けない（`400 invalid_request`）。`client_id` はサービスアカウントの ID で、
+        条件を満たす結び付けのサービスアカウントが 2 つ以上あるときに選ぶ。`audience` は受けない（`400 invalid_target`。`resource` を使う）。
+        `requested_token_type` は省くか `urn:ietf:params:oauth:token-type:access_token`。確かめられなければ理由を区別せず
+        `400 invalid_grant`。`resource`・`scope`・DPoP は client credentials と同じ。応答に `issued_token_type` を付ける。
+        フィーチャーが動いていなければ `400 unsupported_grant_type`。
       security: []
       parameters:
         - { name: Authorization, in: header, schema: { type: string } }
@@ -2263,6 +2272,12 @@ paths:
                   type: array
                   items: { type: string }
                   description: 自前の API の URI（RFC 8707。1 つだけ。フィーチャー `resource_indicators`）
+                subject_token: { type: string, description: "交換する外部の JWT（RFC 8693。フィーチャー `workload_identity`）" }
+                subject_token_type: { type: string }
+                requested_token_type: { type: string }
+                audience: { type: array, items: { type: string } }
+                actor_token: { type: string }
+                actor_token_type: { type: string }
       responses:
         "200":
           description: 発行した
@@ -2278,6 +2293,7 @@ paths:
                   token_type: { type: string, enum: [Bearer, DPoP] }
                   expires_in: { type: integer }
                   scope: { type: string, description: "`resource` を付けたときの、許したスコープ（空白区切り）" }
+                  issued_token_type: { type: string, description: "交換（RFC 8693）のとき `urn:ietf:params:oauth:token-type:access_token`" }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -3349,6 +3365,167 @@ paths:
       description: 権限 `clients:manage`。発行済みのトークンは次の検証から使えない。`oauth_resource.deleted` を監査ログに残す。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 消した
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/workload-identity/providers:
+    get:
+      operationId: listWorkloadIdentityProviders
+      summary: Workload Identity Federation の発行者の一覧（ADR 0116）
+      description: |
+        権限 `service_accounts:manage`。作成の順。フィーチャー `workload_identity` が動いていなければ `404 workload_identity_disabled`。
+      responses:
+        "200":
+          description: 作成の順
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkloadIdentityProviders" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createWorkloadIdentityProvider
+      summary: 外部の JWT の発行者を登録する
+      description: |
+        権限 `service_accounts:manage`。`issuer` は https の絶対 URL（クエリ・フラグメント・利用者情報なし。JWT の `iss` と完全一致で比べる。
+        realm の中で一意。重複は `409 issuer_exists`）。`audiences` は 1〜10 個（JWT の `aud` がどれかを含むこと）。
+        鍵は `jwks`（固定の JWKS。公開鍵だけ）か `jwks_uri`（https）のどちらか。どちらも無ければ `issuer` の
+        `/.well-known/openid-configuration` の `jwks_uri` を、公開のアドレスに限って取得する（1 時間キャッシュする）。
+        `algorithms` は RS256・RS384・RS512・PS256・PS384・PS512・ES256・ES384・ES512・EdDSA から（既定は RS256 と ES256）。
+        `max_token_lifetime` は 60〜86400 秒（既定 3600）。入力の誤りは `400 invalid_provider`。
+        `workload_identity.provider.created` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkloadIdentityProviderInput" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkloadIdentityProvider" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/workload-identity/providers/{id}:
+    get:
+      operationId: getWorkloadIdentityProvider
+      summary: 発行者を返す
+      description: 権限 `service_accounts:manage`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 発行者
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkloadIdentityProvider" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateWorkloadIdentityProvider
+      summary: 発行者を置き換える
+      description: |
+        権限 `service_accounts:manage`。省いた項目は既定に戻る。`disabled` にすると交換を受けず、この発行者で発行したトークンも
+        次の検証から使えない。`workload_identity.provider.updated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkloadIdentityProviderInput" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkloadIdentityProvider" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/workload-identity/providers/{id}:delete:
+    post:
+      operationId: deleteWorkloadIdentityProvider
+      summary: 発行者を消す
+      description: |
+        権限 `service_accounts:manage`。結び付けも消え、発行済みのトークンは次の検証から使えない。
+        `workload_identity.provider.deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 消した
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/workload-identity/providers/{id}/bindings:
+    get:
+      operationId: listWorkloadIdentityBindings
+      summary: 発行者の結び付けの一覧
+      description: 権限 `service_accounts:manage`。作成の順。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 作成の順
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkloadIdentityBindings" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createWorkloadIdentityBinding
+      summary: 条件を満たす外部の主体をサービスアカウントに結び付ける
+      description: |
+        権限 `service_accounts:manage` と、サービスアカウントのロールの権限をすべて持つこと（認証情報の追加と同じ。足りなければ 403）。
+        `conditions` は 1〜20 個の AND。1 つの条件は `claim`（JSON Pointer。`/repository`、`/kubernetes.io/namespace`）と、
+        `equals`（文字列）・`in`（文字列の一覧。1〜50 個）・`prefix`（空でない文字列）のちょうど 1 つ。クレームの値が文字列のときだけ比べる
+        （大文字・小文字を区別する完全一致）。誤りは `400 invalid_conditions`。発行者ごとに 100 個まで（`409 too_many_bindings`）。
+        削除したサービスアカウントは `409 service_account_deleted`。`workload_identity.binding.created` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkloadIdentityBindingInput" }
+      responses:
+        "201":
+          description: 結び付けた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkloadIdentityBinding" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/workload-identity/providers/{id}/bindings/{binding_id}:delete:
+    post:
+      operationId: deleteWorkloadIdentityBinding
+      summary: 結び付けを消す
+      description: |
+        権限 `service_accounts:manage`。この結び付けで発行したトークンは次の検証から使えない。
+        `workload_identity.binding.deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: binding_id, in: path, required: true, schema: { type: string } }
       responses:
         "204":
           description: 消した
@@ -4781,3 +4958,85 @@ components:
         resources:
           type: array
           items: { $ref: "#/components/schemas/OAuthResource" }
+    WorkloadIdentityProviderInput:
+      type: object
+      required: [name, issuer, audiences]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        issuer: { type: string, maxLength: 2048, description: JWT の `iss`（https。完全一致） }
+        audiences:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { type: string, maxLength: 1024 }
+        jwks_uri: { type: string, maxLength: 2048, description: 鍵の URL（https。Discovery を飛ばす。`jwks` とは併せない） }
+        jwks:
+          type: object
+          additionalProperties: true
+          description: 固定の JWKS（公開鍵だけ。ネットワークに出ない。`jwks_uri` とは併せない）
+        algorithms:
+          type: array
+          items: { type: string, enum: [RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384, ES512, EdDSA] }
+        max_token_lifetime: { type: integer, minimum: 60, maximum: 86400, description: 秒。既定 3600 }
+        disabled: { type: boolean }
+    WorkloadIdentityProvider:
+      type: object
+      required: [id, name, issuer, audiences, algorithms, max_token_lifetime, disabled, created_at, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        issuer: { type: string }
+        audiences: { type: array, items: { type: string } }
+        jwks_uri: { type: string }
+        jwks: { type: object, additionalProperties: true }
+        algorithms: { type: array, items: { type: string } }
+        max_token_lifetime: { type: integer }
+        disabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    WorkloadIdentityProviders:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items: { $ref: "#/components/schemas/WorkloadIdentityProvider" }
+    WorkloadIdentityCondition:
+      type: object
+      required: [claim]
+      properties:
+        claim: { type: string, maxLength: 256, description: JSON Pointer（RFC 6901） }
+        equals: { type: string, maxLength: 1024 }
+        in:
+          type: array
+          maxItems: 50
+          items: { type: string, maxLength: 1024 }
+        prefix: { type: string, maxLength: 1024 }
+    WorkloadIdentityBindingInput:
+      type: object
+      required: [service_account_id, conditions]
+      properties:
+        service_account_id: { type: string }
+        conditions:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: "#/components/schemas/WorkloadIdentityCondition" }
+    WorkloadIdentityBinding:
+      type: object
+      required: [id, provider_id, service_account_id, conditions, created_at]
+      properties:
+        id: { type: string }
+        provider_id: { type: string }
+        service_account_id: { type: string }
+        conditions:
+          type: array
+          items: { $ref: "#/components/schemas/WorkloadIdentityCondition" }
+        created_at: { type: string, format: date-time }
+    WorkloadIdentityBindings:
+      type: object
+      required: [bindings]
+      properties:
+        bindings:
+          type: array
+          items: { $ref: "#/components/schemas/WorkloadIdentityBinding" }

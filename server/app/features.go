@@ -249,6 +249,12 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.SAMLIdP().Purge(ctx, limit)
 		}},
+	// Workload Identity Federation の発行者・結び付けと、結び付けで発行したアクセストークンを消す（ADR 0116）。
+	// 取得した JWKS と jti は EphemeralStore にあり、期限で消える。
+	feature.WorkloadIdentity: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.WorkloadIdentity().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return tx.WorkloadIdentity().Purge(ctx, limit)
+		}},
 }
 
 // eachRealmRequiringPAR は realm の設定の require_pushed_authorization_requests が真の realm を数える。now が零でなければ、

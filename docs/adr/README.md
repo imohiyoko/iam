@@ -126,3 +126,4 @@
 | [0113](0113-sender-constrained-tokens.md) | 送信者制約トークンは DPoP と OAuth の mTLS の 2 つのフィーチャーにし、iam の資源でも結び付けを確かめる | 承認 |
 | [0114](0114-ciba.md) | CIBA は状態を EphemeralStore に置き、本人の承認はプッシュの端末と本人の API で受ける | 承認 |
 | [0115](0115-saml-idp.md) | SAML 2.0 の IdP を持ち、要求は登録した SP の完全一致と署名で確かめ、応答は realm の ES256 の鍵で XML 署名する | 承認 |
+| [0116](0116-workload-identity-federation.md) | Workload Identity Federation は RFC 8693 の交換で外部の JWT をサービスアカウントのトークンに替え、条件は完全一致・一覧・前方一致に限る | 承認 |

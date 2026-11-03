@@ -230,6 +230,9 @@ saml_service_providers  id, realm_id, entity_id, name, config（ACS・SLO・証�
 saml_idp_certificates  realm_id, key_id, der, PK (realm_id, key_id)。SAML の IdP の署名鍵の自己署名の証明書
 oauth_resources      id, realm_id, uri（resource の値で aud になる）, name, scopes, clients, service_accounts
                      UNIQUE (realm_id, uri)。自前の API（RFC 8707。5.10、ADR 0112）
+workload_identity_providers  id, realm_id, issuer, name, config（aud・鍵・alg・寿命の上限。JSON）, disabled
+                     UNIQUE (realm_id, issuer)。Workload Identity Federation の発行者（5.12、ADR 0116）
+workload_identity_bindings  id, realm_id, provider_id, service_account_id, conditions（JSON）。発行者の結び付け
 
 user_attributes      user_id, key, value, PK (user_id, key)（11.7 の汎用形。アダプタが別の持ち方を選んでもよい）
 
@@ -703,6 +706,24 @@ ADR 0112。
 - iam の資源：UserInfo と管理 API（DPoP に結び付けたサービスアカウントのアクセストークン）は、結び付けたトークンに同じ鍵の
   `Authorization: DPoP` と証明（`ath` 付き）、同じクライアント証明書を求める。フィーチャーが止まっていれば結び付けたトークンは通さない
 
+### 5.12 Workload Identity Federation
+
+フィーチャー `workload_identity`（既定オフ。`service_accounts` に依存。ADR 0116）。CI・Kubernetes・クラウドのワークロードが、基盤の署名した
+JWT をサービスアカウントのアクセストークン（11.2）に替える。秘密をワークロードに置かない。
+
+- 管理 API `/v1/admin/workload-identity/providers`（`service_accounts:manage`）で発行者（`issuer` の完全一致、`audiences`、鍵は固定の `jwks`・
+  `jwks_uri`・Discovery のどれか、`algorithms`、`max_token_lifetime`、`disabled`）を、`…/{id}/bindings` で結び付け（サービスアカウントと条件）を置く。
+  結び付けを作るには、そのサービスアカウントのロールの権限をすべて持つこと
+- 条件は 1〜20 個の AND。`claim`（JSON Pointer）の値（文字列だけ）を `equals`・`in`・`prefix` で比べる。式の評価はしない。空の条件は受けない
+- 交換は `POST /v1/admin/token` の RFC 8693（`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`、`subject_token_type` は `…:jwt` か
+  `…:id_token`）。クライアントの認証は付けない。alg（RS*・PS*・ES*・EdDSA。none と HS* は無い）、署名、`iss`・`aud`・`exp`・`nbf`・`iat`（ずれ 60 秒）、
+  寿命の上限、`jti` の 1 回だけ（EphemeralStore）を確かめ、条件を満たす結び付けを選ぶ（2 つのサービスアカウントに当たれば `client_id` で選ぶ）。
+  失敗は理由を区別せず `invalid_grant`。`resource`・`scope`（5.10）と DPoP（5.11）は client credentials と同じ
+- JWKS は https で、公開のアドレスにだけ、転送に従わずに取得し（5 秒、256 KiB）、EphemeralStore に 1 時間置く。知らない `kid` で取得し直す。
+  取得は発行者ごとに 1 分に 5 回まで。失敗すれば拒む
+- 発行したトークンの認証情報は結び付けで、検証のたびに結び付けと発行者が使えることを確かめる。結び付けの削除・発行者の停止と削除・
+  無効化は次の要求から効く。amr は `workload_identity`
+
 ## 6. 監査ログとイベント出力
 
 ### 6.1 記録するもの
@@ -907,6 +928,7 @@ ADR 0112。
 | SAML 2.0 の IdP（5.9、ADR 0115） | オフ | ― | `/saml/idp/*` は 404、SP の管理 API は `404 saml_idp_disabled`。無効化は SP の登録と署名の証明書を消して完了 |
 | PAR（5.10、ADR 0112） | オフ | ― | `/oauth2/par` は 404、`request_uri` は `request_uri_not_supported`、PAR の必須は効かず新しく置けない。無効化で連携先と realm の必須を外して完了 |
 | 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
+| Workload Identity Federation（5.12、ADR 0116） | オフ | サービスアカウント | `/v1/admin/token` の交換は `unsupported_grant_type`、管理 API は `404 workload_identity_disabled`。結び付けで発行したトークンは通らない。無効化で発行者・結び付け・発行したトークンを消して完了 |
 
 ### 11.1 複数 realm
 
@@ -932,6 +954,7 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 - 管理 API の `/v1/admin/service-accounts` で作る（権限 `service_accounts:manage`）。realm か Org（`org_id`）に属し、有効期間・停止（4.7）・論理削除を持つ。Org が削除・停止・有効期間の外なら使えない
 - `POST /v1/admin/token`（管理 API）が client credentials で不透明なアクセストークン（`sat_…`、既定 10 分）を発行する。検証のたびに状態を確かめるので、停止・削除・認証情報の無効化は次の要求から効く
 - `resource`（と `scope`）を付ければ、管理 API ではなく登録した自前の API に向けたトークンになる（フィーチャー `resource_indicators`。5.10、ADR 0112）
+- 外部の基盤の JWT を RFC 8693 で同じエンドポイントでアクセストークンに替えられる（フィーチャー `workload_identity`。5.12、ADR 0116）
 - 配信用（2.4）は `iam service-account create` で作る。フィーチャーがオフでも作れ、認証できるのは配信用だけ
 - Org の管理者が公開 API で扱う口は後に回す
 

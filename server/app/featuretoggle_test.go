@@ -18,16 +18,35 @@ import (
 // allFeaturesEnv はすべてのフィーチャーを設定で有効にした構成（空の DB なので台帳でも active になる）。
 func allFeaturesEnv(t *testing.T) *loginEnv {
 	t.Helper()
+	return allFeaturesEnvWithout(t, "")
+}
+
+// allFeaturesEnvWithout は、dependency に依存するフィーチャー（Requires）をバイナリから外した全部入り（dependency だけを
+// 無効にして起動し直す確かめに使う）。dependency が空なら全部入り。
+func allFeaturesEnvWithout(t *testing.T, dependency string) *loginEnv {
+	t.Helper()
+	binary := dependentsRemoved(dependency)
 	return newLoginEnvWith(t, func(c *config.Config) {
 		c.Realm.VerifiedVia = []string{"code", "oauth_provider", "admin", "invitation"}
 		c.Realm.OrgDeletionGrace = 0
 		names := []string{}
-		for _, f := range feature.Registered() {
+		for _, f := range binary {
 			names = append(names, f.Name)
 		}
 		c.Features = &names
 		c.Security.Password.Argon2 = config.Argon2{MemoryKiB: 8, Iterations: 1, Parallelism: 1}
-	}, feature.Registered())
+	}, binary)
+}
+
+// dependentsRemoved は登録したフィーチャーから、dependency に依存するものを外す。
+func dependentsRemoved(dependency string) []feature.Feature {
+	out := []feature.Feature{}
+	for _, f := range feature.Registered() {
+		if dependency == "" || !slices.Contains(f.Requires, dependency) {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // restart は同じ Storage で、設定のフィーチャーとバイナリを変えて起動し直す。
@@ -82,7 +101,7 @@ func (l *loginEnv) ledgerState(t *testing.T, name string) port.FeatureState {
 func disableWithData(t *testing.T, l *loginEnv, name string, remaining int) {
 	t.Helper()
 	ctx := context.Background()
-	all := feature.Registered()
+	all := dependentsRemoved(name)
 	// 台帳にある間は、含まないバイナリでは起動できない。
 	if _, err := New(ctx, l.e.cfg, l.e.deps, without(all, name)); !errors.Is(err, feature.ErrLedgerMismatch) {
 		t.Fatalf("%s: start without the feature while active: %v", name, err)

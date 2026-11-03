@@ -51,6 +51,7 @@ import (
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/warning"
+	"github.com/imohiyoko/iam/authn/workloadidentity"
 	"github.com/imohiyoko/iam/authn/wsfed"
 	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/manage"
@@ -166,6 +167,8 @@ type App struct {
 	mtlsTLS *tls.Config
 	// serviceAccounts はサービスアカウントの管理と client credentials（ADR 0074）。
 	serviceAccounts *serviceaccount.Service
+	// workloadIdentity は Workload Identity Federation（ADR 0116）。フィーチャー workload_identity が動いていなければ nil。
+	workloadIdentity *workloadidentity.Service
 	// clients と keys は OIDC Provider の連携先と ID トークンの署名鍵（5.5、9.3）。
 	clients *provider.Clients
 	keys    *provider.Keys
@@ -477,6 +480,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	if plan.IsActive(feature.ResourceIndicators) {
 		a.resources = &provider.Resources{Clock: d.Clock}
 		a.serviceAccounts.Resource = provider.ResourceForServiceAccount
+	}
+	a.workloadIdentity = nil
+	if plan.IsActive(feature.WorkloadIdentity) {
+		// 発行者の JWKS は公開のアドレスからだけ取得する（開発ビルドを除く。ADR 0116）。
+		a.workloadIdentity = &workloadidentity.Service{Storage: d.Storage, Cache: d.Ephemeral, Clock: d.Clock, AllowPrivateNetworks: cfg.Dev, Log: d.Logger}
+		a.serviceAccounts.Federation = a.workloadIdentity
 	}
 	a.device, a.deviceTmpl = nil, nil
 	if plan.IsActive(feature.DeviceFlow) {

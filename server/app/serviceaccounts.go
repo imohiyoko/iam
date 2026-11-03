@@ -408,7 +408,8 @@ func (s adminServer) ListServiceAccountSuspensions(ctx context.Context, req admi
 	return nil, errUnexpected(o)
 }
 
-// IssueServiceAccountToken は client credentials のトークンのエンドポイント（RFC 6749 4.4、RFC 7523）。
+// IssueServiceAccountToken は client credentials のトークンのエンドポイント（RFC 6749 4.4、RFC 7523）と、
+// Workload Identity Federation の交換（RFC 8693。ADR 0116）。
 func (s adminServer) IssueServiceAccountToken(ctx context.Context, req adminapi.IssueServiceAccountTokenRequestObject) (adminapi.IssueServiceAccountTokenResponseObject, error) {
 	if o, off := s.serviceAccountsOff(); off {
 		return adminapi.IssueServiceAccountToken404JSONResponse(o.body), nil
@@ -422,7 +423,8 @@ func (s adminServer) IssueServiceAccountToken(ctx context.Context, req adminapi.
 		// 自前の API に向けたトークン（RFC 8707、ADR 0112）。
 		tr.Resources = *req.Body.Resource
 	}
-	if h := deref(req.Params.Authorization); h != "" {
+	exchange := tr.GrantType == serviceaccount.GrantTokenExchange
+	if h := deref(req.Params.Authorization); h != "" && !exchange {
 		id, secret, ok := basicAuth(h)
 		if !ok || tr.ClientSecret != "" || (tr.ClientID != "" && tr.ClientID != id) {
 			return adminapi.IssueServiceAccountToken400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", ""))}, nil
@@ -438,12 +440,26 @@ func (s adminServer) IssueServiceAccountToken(ctx context.Context, req adminapi.
 		return nil, err
 	}
 	tr.JKT = jkt
+	if exchange {
+		// Workload Identity Federation（RFC 8693。ADR 0116）。外部の JWT はトランザクションの外で確かめる（JWKS の取得があるため）。
+		// DPoP の証明を確かめた後にする（証明の誤りで jti を使い切らない）。
+		code, err := s.workloadExchange(ctx, req.Body, deref(req.Params.Authorization), &tr)
+		if err != nil {
+			return nil, err
+		}
+		if code != "" {
+			return adminapi.IssueServiceAccountToken400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError(code, ""))}, nil
+		}
+	}
 	var is serviceaccount.Issued
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
 		is, err = s.a.serviceAccounts.Token(ctx, tx, s.a.realm.ID, tr, requestID(ctx))
 		return err
 	})
+	if tr.Federated != nil && errors.Is(err, serviceaccount.ErrInvalidGrant) {
+		s.workloadDenied(ctx, tr.Federated)
+	}
 	switch {
 	case errors.Is(err, serviceaccount.ErrInvalidClient):
 		return adminapi.IssueServiceAccountToken401JSONResponse(adminError("invalid_client", "")), nil
@@ -461,6 +477,10 @@ func (s adminServer) IssueServiceAccountToken(ctx context.Context, req adminapi.
 	if is.Audience != "" {
 		scope := strings.Join(is.Scopes, " ")
 		out.Body.Scope = &scope
+	}
+	if tr.Federated != nil {
+		t := tokenTypeAccessToken
+		out.Body.IssuedTokenType = &t
 	}
 	return out, nil
 }

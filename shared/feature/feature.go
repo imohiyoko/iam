@@ -71,6 +71,8 @@ const (
 	PAR = "par"
 	// ResourceIndicators は自前の API（リソースサーバー）向けのトークン（RFC 8707。ADR 0112）。
 	ResourceIndicators = "resource_indicators"
+	// WorkloadIdentity は Workload Identity Federation（外部の JWT をサービスアカウントのトークンに替える。ADR 0116）。
+	WorkloadIdentity = "workload_identity"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

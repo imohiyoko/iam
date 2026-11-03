@@ -421,7 +421,8 @@ func TestServiceAccountValidity(t *testing.T) {
 
 // フィーチャーを無効にするとき、配信用は残し、汎用のサービスアカウントだけを片付ける（11.12）。
 func TestDisableServiceAccountsWithData(t *testing.T) {
-	l := allFeaturesEnv(t)
+	// workload_identity は service_accounts に依存するので、バイナリから外しておく（ADR 0116）。
+	l := allFeaturesEnvWithout(t, feature.ServiceAccounts)
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	for _, n := range []string{"a", "b"} {
 		if code, out := l.admin(t, "/v1/admin/service-accounts", owner, map[string]any{"name": n}); code != 201 {

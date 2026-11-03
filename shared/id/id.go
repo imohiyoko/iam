@@ -122,6 +122,9 @@ const (
 	SAMLServiceProvider Prefix = "ssp"
 	// OAuthResource は自前の API（リソースサーバー。RFC 8707、ADR 0112）。
 	OAuthResource Prefix = "rsc"
+	// WorkloadIdentityProvider と WorkloadIdentityBinding は Workload Identity Federation の発行者と結び付け（ADR 0116）。
+	WorkloadIdentityProvider Prefix = "wip"
+	WorkloadIdentityBinding  Prefix = "wib"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。
