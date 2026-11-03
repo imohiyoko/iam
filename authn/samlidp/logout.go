@@ -131,15 +131,16 @@ func (s *Service) Matches(ctx context.Context, lp LogoutPending, userID, orgID, 
 		return false, nil
 	}
 	var want string
+	var editable bool
 	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		vals, err := s.Tokens.SubjectClaims(ctx, tx, lp.RealmID, userID, orgID, cfg.NameIDSource == SourceEmail, s.Attributes)
 		if err != nil {
 			return err
 		}
-		if editable, err := editableNameIDSource(ctx, tx, lp.RealmID, cfg.NameIDSource); err != nil {
+		// 登録の後で属性を本人が書けるようにしたなら、NameID の値は本人が変えられるので照合に使わない。
+		// ログアウトはセッションを終えるだけなので、SessionIndex が合えば受ける（transient と同じ決め方）。
+		if editable, err = editableNameIDSource(ctx, tx, lp.RealmID, cfg.NameIDSource); err != nil || editable {
 			return err
-		} else if editable {
-			return errNoNameID
 		}
 		want, err = s.nameID(format, cfg.NameIDSource, vals)
 		return err
@@ -149,6 +150,9 @@ func (s *Service) Matches(ctx context.Context, lp LogoutPending, userID, orgID, 
 	}
 	if err != nil {
 		return false, err
+	}
+	if editable {
+		return hasIndex, nil
 	}
 	return samlxml.Same(want, lp.NameID), nil
 }

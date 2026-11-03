@@ -427,7 +427,9 @@ func TestSAMLIdPEditableNameIDSource(t *testing.T) {
 			t.Fatalf("define %v: %d %v", body["key"], code, out)
 		}
 	}
-	body := map[string]any{"entity_id": samlSP, "name": "App", "acs": []map[string]any{{"url": samlACS}}, "name_id_source": "attribute:nickname"}
+	body := map[string]any{"entity_id": samlSP, "name": "App", "acs": []map[string]any{{"url": samlACS}}, "name_id_source": "attribute:nickname",
+		"slo":                  []map[string]any{{"url": samlSPSLO, "binding": samlidp.BindingRedirect}},
+		"signing_certificates": []string{base64.StdEncoding.EncodeToString(samlTestSP.cert)}}
 	if code, out := l.admin(t, "/v1/admin/saml/service-providers", owner, body); code != 400 || out["error"] != "invalid_service_provider" {
 		t.Fatalf("editable source: %d %v", code, out)
 	}
@@ -442,14 +444,38 @@ func TestSAMLIdPEditableNameIDSource(t *testing.T) {
 	}
 	now := l.a.deps.Clock.Now()
 	w := l.oidcDo(t, "GET", samlidp.SSOPath+"?"+samlRedirect(samlAuthnRequest("_e1", now, ""), "", false), nil, cookie)
-	if _, vals := samlPosted(t, w.Body.String()); l.samlVerify(t, vals.Get("SAMLResponse"), "_e1").NameID != "E-1" {
+	_, vals := samlPosted(t, w.Body.String())
+	if l.samlVerify(t, vals.Get("SAMLResponse"), "_e1").NameID != "E-1" {
 		t.Fatalf("attribute name id: %s", w.Body)
 	}
+	raw, _ := base64.StdEncoding.DecodeString(vals.Get("SAMLResponse"))
+	idx := regexp.MustCompile(`SessionIndex="([^"]+)"`).FindStringSubmatch(string(raw))
+	if idx == nil {
+		t.Fatalf("no session index: %s", raw)
+	}
+	index := idx[1]
 	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/attributes/employee_no", map[string]any{"user_editable": true, "in_token": true}); code != 200 {
 		t.Fatalf("make editable: %d %v", code, out)
 	}
 	w = l.oidcDo(t, "GET", samlidp.SSOPath+"?"+samlRedirect(samlAuthnRequest("_e2", now, ""), "", false), nil, cookie)
 	if _, vals := samlPosted(t, w.Body.String()); samlStatus(t, vals.Get("SAMLResponse")) != samlidp.StatusInvalidNameID {
 		t.Fatalf("editable after registration: %s", w.Body)
+	}
+	// 既に渡したセッションは、SessionIndex が合えばログアウトできる（NameID は照合に使わない）。
+	alive := func() bool {
+		code, _ := l.meDo(t, "GET", cookie, "/v1/me/sessions", nil)
+		return code == 200
+	}
+	withIndex := func(id, nameID, index string) string {
+		return strings.Replace(samlLogoutRequest(id, nameID, now), "</samlp:LogoutRequest>",
+			`<samlp:SessionIndex>`+index+`</samlp:SessionIndex></samlp:LogoutRequest>`, 1)
+	}
+	u := location(t, l.oidcDo(t, "GET", samlidp.SLOPath+"?"+samlRedirect(withIndex("_e3", "E-1", "_other"), "", true), nil, cookie))
+	if m, err := samlidp.DecodeRedirect(u.RawQuery, "SAMLResponse"); err != nil || !strings.Contains(string(m.XML), samlidp.StatusUnknownPrincipal) || !alive() {
+		t.Fatalf("wrong session index: %v alive=%v", err, alive())
+	}
+	u = location(t, l.oidcDo(t, "GET", samlidp.SLOPath+"?"+samlRedirect(withIndex("_e4", "anything", index), "", true), nil, cookie))
+	if m, err := samlidp.DecodeRedirect(u.RawQuery, "SAMLResponse"); err != nil || !strings.Contains(string(m.XML), samlidp.StatusSuccess) || alive() {
+		t.Fatalf("logout by session index: %v alive=%v", err, alive())
 	}
 }
