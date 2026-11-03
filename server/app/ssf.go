@@ -312,7 +312,8 @@ func (a *App) ssfVerify(w http.ResponseWriter, r *http.Request, c ssf.Caller) {
 		a.ssfFail(w, r, err)
 		return
 	}
-	if err := a.ssfVerifyLimit.Allow(r.Context(), "ssf-verify:"+a.realm.ID+":"+in.StreamID); err != nil {
+	// 呼び出した受信側ごとに数える（ほかの受信側が、他人のストリームの上限を使い切れないように）。
+	if err := a.ssfVerifyLimit.Allow(r.Context(), "ssf-verify:"+a.realm.ID+":"+c.AccountID+":"+in.StreamID); err != nil {
 		if _, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 			writeError(w, http.StatusTooManyRequests, codeRateLimited)
 			return

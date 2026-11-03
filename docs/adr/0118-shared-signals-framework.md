@@ -111,8 +111,8 @@ iam は次の 2 つの役を持つ。
 | CAEP `device-compliance-change` | `record_device_posture`：端末の準拠状態を記録（下記） |
 | ほか | 記録だけ（`ignored`） |
 
-- どの SET も `ssf.signal_received`（送信側・イベント・jti の参照・対象・結果 `applied`・`not_allowed`・`unknown_subject`・`ignored`・`stale`・
-  `refused`）を監査ログに残す。動作そのものも各機能の監査ログ（`session.revoked` など）に、主体 `ssf_transmitter` で残る
+- 初めて処理した SET（確かめを通り、jti が初めてのもの）は `ssf.signal_received`（送信側・イベント・jti の参照・対象・結果
+  `applied`・`not_allowed`・`unknown_subject`・`ignored`・`stale`・`refused`）を監査ログに残す。同じ jti の2度目は残さない。動作そのものも各機能の監査ログ（`session.revoked` など）に、主体 `ssf_transmitter` で残る
 - 送信側の登録の監査ログ：`ssf.transmitter_created`・`updated`・`deleted`
 
 ### 端末の準拠状態（device posture input）

@@ -366,7 +366,8 @@ func (r *Receiver) Receive(ctx context.Context, realmID, tid, bearer string, bod
 	})
 	if err != nil {
 		// 動かせなかった SET は、送信側が送り直したときにもう一度試す。
-		if derr := r.Replay.Delete(ctx, "ssf:rx:jti:v1:"+base64.RawURLEncoding.EncodeToString(jh[:])); derr != nil {
+		// 要求の取り消し（送信側の切断）に関わらず忘れる。忘れられないと、送り直した SET を重複として黙って捨ててしまう。
+		if derr := r.Replay.Delete(context.WithoutCancel(ctx), "ssf:rx:jti:v1:"+base64.RawURLEncoding.EncodeToString(jh[:])); derr != nil {
 			r.logger().WarnContext(ctx, "ssf: could not forget jti", "error", derr)
 		}
 		return Received{}, err

@@ -162,6 +162,17 @@ func assurance(ctx context.Context, tx port.Tx, e audit.Event, user string) ([]i
 	if err != nil {
 		return nil, err
 	}
+	// replaced は共有のブラウザで別の人のセッションのこともある。同じ本人のセッションのときだけ前後を比べる。
+	u, err := tx.Users().GetByPublicID(ctx, e.RealmID, user)
+	if errors.Is(err, errs.NotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if old.PrincipalType != port.PrincipalUser || old.PrincipalID != u.ID {
+		return nil, nil
+	}
 	amr := stringList(e.Details["amr"])
 	before, after := acr.AAL(old.AuthMethods), acr.AAL(amr)
 	if before == after || after == 0 {

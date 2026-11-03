@@ -906,3 +906,42 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("outcomes = %v", outcomes)
 	}
 }
+
+// TestAssuranceLevelChange は、入れ替えた前のセッションが同じ本人のものだけ AAL を比べる（共有のブラウザの別の人のセッションでは送らない）。
+func TestAssuranceLevelChange(t *testing.T) {
+	e := newTxEnv(t)
+	u, v := e.k.SeedUser(t), e.k.SeedUser(t)
+	reqd := []string{ssf.EventAssuranceLevelChange}
+	var s port.SSFStream
+	now := e.k.Clock.Now()
+	sess := func(id string, owner port.User) port.Session {
+		return port.Session{ID: id, RealmID: e.k.RealmID, PrincipalType: port.PrincipalUser, PrincipalID: owner.ID, SID: id,
+			TokenHash: []byte(id), AuthMethods: []string{"pwd"}, AuthenticatedAt: now, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(time.Hour)}
+	}
+	e.k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		if s, err = e.tr.Create(ctx, tx, e.k.RealmID, receiver, ssf.StreamInput{Delivery: &ssf.Delivery{Method: ssf.DeliveryPollURN}, EventsRequested: &reqd}); err != nil {
+			return err
+		}
+		for _, x := range []port.Session{sess("ses_own", u), sess("ses_other", v)} {
+			if err := tx.Sessions().Create(ctx, x); err != nil {
+				return err
+			}
+		}
+		return e.tr.AddSubject(ctx, tx, e.k.RealmID, issuer, receiver, s.ID, &ssf.Subject{Format: ssf.FormatIssSub, Iss: issuer, Sub: u.PublicID})
+	})
+	amr := []any{"pwd", "otp"}
+	e.record(t, audit.Event{Type: "session.created", Details: map[string]any{"user_id": u.PublicID, "amr": amr, "replaced": "ses_other"}})
+	e.record(t, audit.Event{Type: "session.created", Details: map[string]any{"user_id": u.PublicID, "amr": amr, "previous": "ses_own"}})
+	got := e.poll(t, s.ID, ssf.PollRequest{})
+	if len(got.Sets) != 1 {
+		t.Fatalf("poll = %+v", got)
+	}
+	for _, x := range got.Sets {
+		set := e.decode(t, x)
+		if set.Event != ssf.EventAssuranceLevelChange || set.String("previous_level") != "nist-aal1" || set.String("current_level") != "nist-aal2" ||
+			set.String("change_direction") != "increase" || set.Subject.Sub != u.PublicID {
+			t.Fatalf("assurance-level-change = %+v", set)
+		}
+	}
+}

@@ -88,8 +88,9 @@ func TestSSFTransmitter(t *testing.T) {
 
 	// 受信側は、<issuer>/ssf に向けた ssf スコープのトークンで呼ぶ。
 	sa, secret := l.serviceAccountSecret(t, owner, "receiver")
+	sa2, secret2 := l.serviceAccountSecret(t, owner, "other receiver")
 	if code, out := l.admin(t, "/v1/admin/oauth/resources", owner, map[string]any{"uri": testIssuer + "/ssf", "name": "SSF",
-		"scopes": []string{"ssf", "other"}, "service_accounts": []string{sa}}); code != 201 {
+		"scopes": []string{"ssf", "other"}, "service_accounts": []string{sa, sa2}}); code != 201 {
 		t.Fatalf("resource: %d %v", code, out)
 	}
 	tokenFor := func(scope string) string {
@@ -135,6 +136,17 @@ func TestSSFTransmitter(t *testing.T) {
 	if code, _ := l.ssfDo(t, "POST", ssfAddSubjectPath, tok, map[string]any{"stream_id": sid,
 		"subject": map[string]any{"format": "iss_sub", "iss": testIssuer, "sub": "usr_00000000000000000000000000"}}); code != 404 {
 		t.Fatalf("unknown subject: %d", code)
+	}
+	// ほかの受信側は、他人のストリームの検証の上限を使い切れない。
+	code, out := l.token(t, url.Values{"grant_type": {"client_credentials"}, "resource": {testIssuer + "/ssf"}, "scope": {"ssf"}}, sa2+":"+secret2)
+	if code != 200 {
+		t.Fatalf("other token: %d %v", code, out)
+	}
+	other := out["access_token"].(string)
+	for range 6 {
+		if code, _ := l.ssfDo(t, "POST", ssfVerifyPath, other, map[string]any{"stream_id": sid}); code != 404 && code != 429 {
+			t.Fatalf("other receiver verifies: %d", code)
+		}
 	}
 	if code, out := l.ssfDo(t, "POST", ssfVerifyPath, tok, map[string]any{"stream_id": sid, "state": "abc"}); code != 204 {
 		t.Fatalf("verify: %d %v", code, out)
