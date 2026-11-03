@@ -1,4 +1,4 @@
-// Package sdjwt は SD-JWT（RFC 9901）と SD-JWT VC の提示（key binding 付き）を確かめる（ADR 0108）。
+// Package sdjwt は SD-JWT（RFC 9901）と SD-JWT VC の提示（key binding 付き）を確かめ（ADR 0108）、発行のために組み立てる（ADR 0119）。
 //
 // JWS の署名の確認は go-jose に任せ、受ける alg を非対称の署名に限る。開示（disclosure）の処理は RFC 9901 7.1 のとおりに自前で行い、
 // 少しでも形が外れたものは拒む（fail-closed）。入力は攻撃者のものとして扱い、大きさと入れ子に上限を置く。

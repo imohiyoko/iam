@@ -51,6 +51,7 @@ import (
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/ssf"
+	"github.com/imohiyoko/iam/authn/vci"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authn/workloadidentity"
 	"github.com/imohiyoko/iam/authn/wsfed"
@@ -214,6 +215,8 @@ type App struct {
 	// 動いていなければ nil。
 	dpop      *dpop.Verifier
 	oauthMTLS *provider.MTLS
+	// vci は OpenID4VCI の発行者（ADR 0119）。フィーチャー openid4vci が動いていないか、issuer（server.public_url）が無ければ nil。
+	vci *vci.Service
 	// ssfTx と ssfRx は OpenID Shared Signals Framework の送信側と受信側（ADR 0118）。フィーチャー ssf_transmitter・ssf_receiver が
 	// 動いていなければ nil。ssfVerifyLimit は検証のイベントの回数の上限、ssfDelivery は push の配送（全 realm で1つ。root だけが持つ）。
 	ssfTx          *ssf.Transmitter
@@ -554,6 +557,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		// SP に渡す Response は realm の issuer と ES256 の鍵で署名する（ADR 0115）。
 		a.samlIdP = &samlidp.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Tokens: a.tokens,
 			Issuer: a.issuer, Attributes: a.attributes != nil, HardwareAAL: a.hardwareAAL(), Log: d.Logger}
+	}
+	a.vci = nil
+	if plan.IsActive(feature.OpenID4VCI) && a.issuer != "" {
+		// 資格情報は realm の issuer と ES256 の鍵で署名する（ADR 0119）。
+		a.vci = &vci.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Sessions: a.sessions,
+			Accounts: a.accounts, Attributes: a.attributes, Issuer: a.issuer, AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), Log: d.Logger}
 	}
 	if plan.IsActive(feature.Impersonation) {
 		a.impersonationLimit = a.limiter(cfg.Security.Login.RateLimit.PerAccount)

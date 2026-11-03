@@ -233,6 +233,10 @@ oauth_resources      id, realm_id, uri（resource の値で aud になる）, na
 workload_identity_providers  id, realm_id, issuer, name, config（aud・鍵・alg・寿命の上限。JSON）, disabled
                      UNIQUE (realm_id, issuer)。Workload Identity Federation の発行者（5.13、ADR 0116）
 workload_identity_bindings  id, realm_id, provider_id, service_account_id, conditions（JSON）。発行者の結び付け
+vci_credential_configurations  id, realm_id, configuration_id, scope, config（形式・vct・表示・クレームの対応・有効期間。JSON）
+                     UNIQUE (realm_id, configuration_id)、scope は realm で一意。OpenID4VCI の資格情報の定義（5.14、ADR 0119）
+vci_issued_credentials  id, realm_id, user_id, configuration_id, status_index, holder_jkt, issued_at, expires_at, revoked_at
+                     UNIQUE (realm_id, status_index)。発行した資格情報の記録（クレームの値は持たない）
 ssf_streams          id, realm_id, service_account_id, delivery_method（push / poll）, endpoint_url, authorization_ciphertext, events_requested
                      events_delivered, status, cursor_seq, next_attempt_at, failures。SSF の送信側のストリーム（5.15、ADR 0118）
 ssf_stream_subjects  stream_id, realm_id, subject（ユーザーの公開 ID）, PK (stream_id, subject)
@@ -743,6 +747,26 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 - 発行したトークンの認証情報は結び付けで、検証のたびに結び付けと発行者が使えることを確かめる。結び付けの削除・発行者の停止と削除・
   無効化は次の要求から効く。amr は `workload_identity`
 
+### 5.14 OpenID4VCI の発行者
+
+フィーチャー `openid4vci`（既定オフ。ADR 0119）。realm の issuer が OpenID for Verifiable Credential Issuance 1.0 の Credential Issuer になり、
+認可サーバーも同じ（OIDC Provider の token エンドポイント）。発行するのは SD-JWT VC（`dc+sd-jwt`）だけで、mdoc は後続。
+
+- 資格情報の定義は管理 API（`/v1/admin/vci/credential-configurations`、`clients:manage`）で realm ごとに置く。クレームはプロフィール
+  （`user_id`・`email`・`email_verified`・`attribute:<key>`）か定数から作り、クレームごとに選択的に開示するか（既定は開示する）と必須を決める。
+  SD-JWT VC で開示してはならない名前（`iss`・`cnf`・`status` など）は置けない。メタデータは `/.well-known/openid-credential-issuer`
+- Pre-Authorized Code Flow：本人が直近の本人確認のあと `/v1/me/verifiable-credentials/offers` で申し出（値と参照の URI。QR にできる）を作る。
+  コードは 10 分・1 回だけで、作ったセッションの系列に結び付く。`tx_code`（6 桁）は求めたときか定義の必須のとき。5 回誤れば申し出を消す。
+  引き換えた `vci_` のアクセストークンは EphemeralStore に封をして置き、ウォレットの認証は受けない
+- Authorization Code Flow：定義の `scope` を既存の認可要求で求める。定義のスコープを含む要求は `openid` 無しでも受け、そのときは ID トークンを出さない。
+  アクセストークンは UserInfo と同じに確かめる（送信者制約を含む）。`authorization_details` は後続
+- `c_nonce` は `/oauth2/vci/nonce` が封をした値（5 分）で、状態を持たずに出し、使ったら EphemeralStore の印で 2 度目を拒む。proof は `jwt` だけで、
+  `typ`・`alg`（鍵の曲線と合うこと）・公開鍵の `jwk`・`aud`（issuer）・`iat`（5 分以内）・`nonce`・`iss`（クライアント ID と同じ）を確かめる
+- 資格情報は realm の ES256 の鍵で署名し、`cnf.jwk` に holder の鍵、`status` に Token Status List の番号を入れる。発行者の公開鍵は
+  `/.well-known/jwt-vc-issuer`。status list（`/oauth2/vci/status-list`、1 bit、realm に 1 つ）は番号を乱数で選び、失効で 1 にする
+- 失効は本人・運営者の API と、アカウントの削除。発行の記録は期限で消える。停止は status に出さない（後続）
+- 監査ログは `vci.configuration_*`・`vci.offer_created`・`vci.token_issued`・`vci.token_rejected`・`vci.credential_issued`・
+  `vci.credential_rejected`・`vci.credential_revoked`。クレームの値は残さない
 ### 5.15 Shared Signals Framework（CAEP・RISC）
 
 フィーチャー `ssf_transmitter`（前提は `resource_indicators` と `service_accounts`）と `ssf_receiver`。どちらも既定オフ（ADR 0118）。
@@ -963,6 +987,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
 | FAPI 2.0 Security Profile（5.12、ADR 0117） | オフ | ― | 連携先と realm の `fapi2_security_profile` を新しく置けず、realm の設定は効かない（連携先の設定は外れるまで強いる）。前提の `par` と `dpop` か `mtls_client_auth` は登録で確かめる。無効化で連携先と realm の設定を外して完了 |
 | Workload Identity Federation（5.13、ADR 0116） | オフ | サービスアカウント | `/v1/admin/token` の交換は `unsupported_grant_type`、管理 API は `404 workload_identity_disabled`。結び付けで発行したトークンは通らない。無効化で発行者・結び付け・発行したトークンを消して完了 |
+| OpenID4VCI の発行者（5.14、ADR 0119） | オフ | ― | 発行者のメタデータ・nonce・credential・申し出・status list は 404、Pre-Authorized Code の grant は `unsupported_grant_type`、定義のスコープは認可要求で選べない。管理 API は `404 openid4vci_disabled`。無効化は定義と発行の記録を消して完了（status list も出なくなる） |
 | SSF の送信側（5.15、ADR 0118） | オフ | ― | `/.well-known/ssf-configuration` と `/ssf/*` の送信側の API は 404、ストリームの管理 API は `404 ssf_transmitter_disabled`。SET を送らない。無効化でストリーム（対象・poll の待ち・Authorization の鍵）を消して完了 |
 | SSF の受信側（5.15、ADR 0118） | オフ | ― | `/ssf/receiver/*` は 404、送信側の管理 API は `404 ssf_receiver_disabled`。無効化で送信側の登録と端末の準拠状態を消して完了 |
 

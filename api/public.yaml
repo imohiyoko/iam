@@ -3225,6 +3225,104 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/verifiable-credentials/configurations:
+    get:
+      operationId: listMyVerifiableCredentialConfigurations
+      summary: 本人が申し出を作れる資格情報の定義（フィーチャー openid4vci。ADR 0119）
+      description: 動いていなければ 404。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 作成の順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [configurations]
+                properties:
+                  configurations:
+                    type: array
+                    items: { $ref: "#/components/schemas/VerifiableCredentialConfiguration" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/verifiable-credentials/offers:
+    post:
+      operationId: createMyVerifiableCredentialOffer
+      summary: ウォレットへの資格情報の申し出を作る（OpenID4VCI の Pre-Authorized Code Flow。ADR 0119）
+      description: |
+        直近の本人確認が要る（`max_auth_age` と名前空間 `me` の要件 `me:verifiable_credentials`。満たさなければ `401 reauthentication_required`）。
+        `credential_offer_uri`（値で渡す `openid-credential-offer://` の URI）か `credential_offer_reference_uri`（参照で渡す URI）を QR にするか、
+        同じ端末のウォレットへ遷移する。期限は 10 分で、引き換えは 1 回だけ。`tx_code` を求めた（か定義が `require_tx_code`）なら、
+        応答の `tx_code`（6 桁の数字。この応答でだけ返す）をウォレットに入れさせる。知らない定義は `400 unknown_credential_configuration`。
+        資格情報は申し出を作ったセッションの系列に結び付き、ログアウトなどで系列が終われば発行されない。`vci.offer_created` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential_configuration_ids]
+              properties:
+                credential_configuration_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items: { type: string, maxLength: 128 }
+                tx_code: { type: boolean, description: tx_code を求める }
+      responses:
+        "201":
+          description: 作った
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VerifiableCredentialOffer" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/verifiable-credentials:
+    get:
+      operationId: listMyVerifiableCredentials
+      summary: 本人に発行した Verifiable Credential の記録の一覧（ADR 0119）
+      description: 発行の新しい順。期限の過ぎた記録は消えていることがある。動いていなければ 404。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 記録
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [credentials]
+                properties:
+                  credentials:
+                    type: array
+                    items: { $ref: "#/components/schemas/VerifiableCredential" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/verifiable-credentials/{id}:revoke:
+    post:
+      operationId: revokeMyVerifiableCredential
+      summary: 本人に発行した Verifiable Credential を失効させる（Token Status List）
+      description: 元には戻せない。知らない・他人のものは 404。`vci.credential_revoked` を監査ログに残す。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, maxLength: 64 } }
+      responses:
+        "204": { description: 失効させた }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -4020,3 +4118,41 @@ components:
         binding_message: { type: string, description: 連携先が付けた確認の文言（無ければ省く） }
         created_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+    VerifiableCredentialConfiguration:
+      type: object
+      required: [configuration_id, vct, display, require_tx_code]
+      properties:
+        configuration_id: { type: string }
+        vct: { type: string }
+        display:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string }
+              locale: { type: string }
+        require_tx_code: { type: boolean }
+    VerifiableCredentialOffer:
+      type: object
+      required: [credential_offer, credential_offer_uri, credential_offer_reference_uri, expires_at]
+      description: 資格情報の申し出（OpenID4VCI 4.1）
+      properties:
+        credential_offer:
+          type: object
+          additionalProperties: true
+          description: 申し出の値（`credential_issuer`・`credential_configuration_ids`・`grants`）
+        credential_offer_uri: { type: string, description: "値で渡す申し出の URI（`openid-credential-offer://?credential_offer=…`）" }
+        credential_offer_reference_uri: { type: string, description: "参照で渡す申し出の URI（`openid-credential-offer://?credential_offer_uri=…`）" }
+        tx_code: { type: string, description: ウォレットに入れさせる tx_code（求めたときだけ。この応答でだけ返す） }
+        expires_at: { type: string, format: date-time }
+    VerifiableCredential:
+      type: object
+      required: [id, configuration_id, issued_at, expires_at]
+      description: 本人に発行した資格情報の記録（クレームの値は含めない）
+      properties:
+        id: { type: string }
+        configuration_id: { type: string }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }

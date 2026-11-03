@@ -39,6 +39,7 @@ import (
 	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/ssf"
+	"github.com/imohiyoko/iam/authn/vci"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authn/workloadidentity"
 	"github.com/imohiyoko/iam/authn/wsfed"
@@ -108,6 +109,8 @@ var featureCatalog = map[string]struct {
 	feature.FAPI2: {provider.FAPI2Feature, module + "/features/fapi2"},
 	// ADR 0116。
 	feature.WorkloadIdentity: {workloadidentity.Feature, module + "/features/workloadidentity"},
+	// ADR 0119。
+	feature.OpenID4VCI: {vci.Feature, module + "/features/openid4vci"},
 	// ADR 0118。
 	feature.SSFTransmitter: {ssf.TransmitterFeature, module + "/features/ssftransmitter"},
 	feature.SSFReceiver:    {ssf.ReceiverFeature, module + "/features/ssfreceiver"},

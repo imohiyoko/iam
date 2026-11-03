@@ -111,6 +111,9 @@ type state struct {
 	// wiProviders と wiBindings は Workload Identity Federation の発行者と結び付け（ADR 0116）。キーは realm_id + ID。
 	wiProviders map[string]port.WorkloadIdentityProvider
 	wiBindings  map[string]port.WorkloadIdentityBinding
+	// vciConfigs と vciCreds は OpenID4VCI の資格情報の定義と発行の記録（ADR 0119）。キーは realm_id + ID。
+	vciConfigs map[string]port.VCICredentialConfiguration
+	vciCreds   map[string]port.VCIIssuedCredential
 	// ssfStreams・ssfSubjects・ssfPoll・ssfTransmitters・devicePostures は SSF（ADR 0118）。キーは realm_id + ID、
 	// stream_id + subject、stream_id + jti、realm_id + ID、realm_id + user_id + device_id。
 	ssfStreams      map[string]port.SSFStream
@@ -149,6 +152,7 @@ func New(clk clock.Clock) *Storage {
 		wsfedRPs:  map[string]port.WSFedRelyingParty{}, wsfedCerts: map[string]port.WSFedCertificate{},
 		pats: map[string]port.PersonalAccessToken{}, patPolicies: map[string]port.PersonalAccessTokenPolicy{},
 		samlSPs: map[string]port.SAMLServiceProvider{}, samlCerts: map[string]port.SAMLIdPCertificate{},
+		vciConfigs: map[string]port.VCICredentialConfiguration{}, vciCreds: map[string]port.VCIIssuedCredential{},
 		ssfStreams: map[string]port.SSFStream{}, ssfSubjects: map[string]ssfSubject{}, ssfPoll: map[string]port.SSFPollEvent{},
 		ssfTransmitters: map[string]port.SSFTransmitter{}, devicePostures: map[string]port.DevicePosture{},
 		oauthResources: map[string]port.OAuthResource{},
@@ -246,6 +250,9 @@ func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t
 
 // SAMLIdP は SAML の SP の登録と IdP の署名の証明書（ADR 0115）。
 func (t *tx) SAMLIdP() port.SAMLIdPRepo { return samlIdP{t} }
+
+// VCI は OpenID4VCI の資格情報の定義と発行の記録（ADR 0119）。
+func (t *tx) VCI() port.VCIRepo { return vci{t} }
 
 // setKey は map の値を設定し、取り消し方を記録する。
 func setKey[K comparable, V any](t *tx, m map[K]V, k K, v V) {

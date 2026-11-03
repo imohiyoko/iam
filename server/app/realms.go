@@ -427,7 +427,7 @@ func (a *App) resolve(r *http.Request) (ra *App, rest string, ok bool) {
 	}
 	// RFC 8414 3.1・RFC 9728 3.1：issuer（resource）にパスがあれば、既知の場所はホストの直下の .well-known の後ろにパスを置く
 	// （/.well-known/oauth-authorization-server/realms/{slug}）。/realms/{slug}/.well-known/... と同じものを返す（ADR 0112）。
-	for _, wk := range []string{wellKnownAS, wellKnownResource, wellKnownSSF} {
+	for _, wk := range []string{wellKnownAS, wellKnownResource, wellKnownCredentialIssuer, wellKnownJWTVCIssuer, wellKnownSSF} {
 		if tail, ok := strings.CutPrefix(r.URL.Path, wk+realmPathPrefix); ok {
 			x := t.bySlug[tail]
 			if x == nil || len(x.realm.Hosts) > 0 {
