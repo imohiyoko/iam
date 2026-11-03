@@ -406,3 +406,50 @@ func TestSAMLIdPDisabled(t *testing.T) {
 		t.Fatalf("admin: %d %v", code, out)
 	}
 }
+
+// 本人が書ける属性は NameID の出どころにできない（本人が値を変えて SP の別の利用者になりすませる）。
+// 登録の後で属性を本人が書けるように変えたら、その NameID の Assertion は出さない。
+func TestSAMLIdPEditableNameIDSource(t *testing.T) {
+	l := newLoginEnvWith(t, func(c *config.Config) {
+		withIssuer(c)
+		var names []string
+		for _, f := range feature.Registered() {
+			if f.DefaultEnabled {
+				names = append(names, f.Name)
+			}
+		}
+		names = append(names, feature.SAMLIdP, feature.CustomAttributes)
+		c.Features = &names
+	}, feature.Registered())
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	for _, body := range []map[string]any{{"key": "nickname", "type": "string", "user_editable": true}, {"key": "employee_no", "type": "string", "in_token": true}} {
+		if code, out := l.adminDo(t, "POST", owner, "/v1/admin/attributes", body); code != 201 {
+			t.Fatalf("define %v: %d %v", body["key"], code, out)
+		}
+	}
+	body := map[string]any{"entity_id": samlSP, "name": "App", "acs": []map[string]any{{"url": samlACS}}, "name_id_source": "attribute:nickname"}
+	if code, out := l.admin(t, "/v1/admin/saml/service-providers", owner, body); code != 400 || out["error"] != "invalid_service_provider" {
+		t.Fatalf("editable source: %d %v", code, out)
+	}
+	body["name_id_source"] = "attribute:employee_no"
+	if code, out := l.admin(t, "/v1/admin/saml/service-providers", owner, body); code != 201 {
+		t.Fatalf("register: %d %v", code, out)
+	}
+	_, cookie := l.login(t, "alice@example.com")
+	alice := l.userID(t, "alice@example.com")
+	if code, out := l.adminDo(t, "PATCH", owner, "/v1/admin/users/"+alice+"/attributes", map[string]any{"attributes": map[string]any{"employee_no": "E-1"}}); code != 200 {
+		t.Fatalf("set value: %d %v", code, out)
+	}
+	now := l.a.deps.Clock.Now()
+	w := l.oidcDo(t, "GET", samlidp.SSOPath+"?"+samlRedirect(samlAuthnRequest("_e1", now, ""), "", false), nil, cookie)
+	if _, vals := samlPosted(t, w.Body.String()); l.samlVerify(t, vals.Get("SAMLResponse"), "_e1").NameID != "E-1" {
+		t.Fatalf("attribute name id: %s", w.Body)
+	}
+	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/attributes/employee_no", map[string]any{"user_editable": true, "in_token": true}); code != 200 {
+		t.Fatalf("make editable: %d %v", code, out)
+	}
+	w = l.oidcDo(t, "GET", samlidp.SSOPath+"?"+samlRedirect(samlAuthnRequest("_e2", now, ""), "", false), nil, cookie)
+	if _, vals := samlPosted(t, w.Body.String()); samlStatus(t, vals.Get("SAMLResponse")) != samlidp.StatusInvalidNameID {
+		t.Fatalf("editable after registration: %s", w.Body)
+	}
+}

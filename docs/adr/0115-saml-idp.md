@@ -57,7 +57,8 @@ SAML の IdP は両方にまたがる：SP からの AuthnRequest・LogoutReques
     ECDSA P-256・P-384・P-521。期限切れは登録しない）と `require_signed_requests`（署名の無い AuthnRequest を受けない）
   - `encryption_certificate`：あれば Assertion を必ず暗号化する（RSA 2048 bit 以上）
   - `name_id_format`（persistent（既定）・emailAddress・unspecified・transient）と `name_id_source`（`user_id`（既定）・`email`・
-    `attribute:<キー>`。emailAddress の既定は `email`）
+    `attribute:<キー>`。emailAddress の既定は `email`）。本人が書ける属性（`user_editable`）は NameID にしない。本人が値を SP の
+    別の利用者の識別子に変えてなりすませるため。登録で拒み、後で書けるように変えたら Assertion を出さない（`InvalidNameIDPolicy`）
   - `attributes`：属性の対応（32 個まで）。`source` は 0110 と同じ（`user_id`・確認済みの `email`・`org_id`・`amr`・`attribute:<キー>`）、
     `name`・`name_format`（uri（既定）・basic・unspecified）・`friendly_name`
   - `sign_assertion`（既定 true）・`sign_response`（既定 false）。どちらも false は受けない。`allow_idp_initiated`（既定 false）。

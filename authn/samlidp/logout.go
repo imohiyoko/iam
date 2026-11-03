@@ -136,6 +136,11 @@ func (s *Service) Matches(ctx context.Context, lp LogoutPending, userID, orgID, 
 		if err != nil {
 			return err
 		}
+		if editable, err := editableNameIDSource(ctx, tx, lp.RealmID, cfg.NameIDSource); err != nil {
+			return err
+		} else if editable {
+			return errNoNameID
+		}
 		want, err = s.nameID(format, cfg.NameIDSource, vals)
 		return err
 	})

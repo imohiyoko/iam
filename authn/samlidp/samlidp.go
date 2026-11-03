@@ -447,6 +447,9 @@ func (s *Service) Create(ctx context.Context, tx port.Tx, realmID string, in Inp
 	if err != nil {
 		return port.SAMLServiceProvider{}, err
 	}
+	if err := checkNameIDSource(ctx, tx, realmID, in.Config.NameIDSource); err != nil {
+		return port.SAMLServiceProvider{}, err
+	}
 	sp, err := apply(port.SAMLServiceProvider{ID: id.NewExternal(id.SAMLServiceProvider), RealmID: realmID, CreatedAt: now, UpdatedAt: now}, in)
 	if err != nil {
 		return port.SAMLServiceProvider{}, err
@@ -464,6 +467,9 @@ func (s *Service) Update(ctx context.Context, tx port.Tx, sp port.SAMLServicePro
 	now := s.Clock.Now()
 	in, err := Validate(in, now)
 	if err != nil {
+		return port.SAMLServiceProvider{}, err
+	}
+	if err := checkNameIDSource(ctx, tx, sp.RealmID, in.Config.NameIDSource); err != nil {
 		return port.SAMLServiceProvider{}, err
 	}
 	if sp, err = apply(sp, in); err != nil {
@@ -523,4 +529,36 @@ func (s *Service) log() *slog.Logger {
 		return slog.Default()
 	}
 	return s.Log
+}
+
+// errEditableNameIDSource は NameID の出どころが、本人が書ける属性であること。
+var errEditableNameIDSource = errInvalid("name_id_source must not be a user-editable attribute")
+
+// editableNameIDSource は、NameID の出どころが本人の書ける属性かを返す。本人が書ける値を NameID にすると、
+// 本人が値を SP の別の利用者の識別子に変えてなりすませる。定義が無ければ false（値も無いので NameID は出ない）。
+func editableNameIDSource(ctx context.Context, tx port.Tx, realmID, source string) (bool, error) {
+	key, ok := strings.CutPrefix(source, SourceAttributePrefix)
+	if !ok {
+		return false, nil
+	}
+	d, err := tx.Attributes().GetDef(ctx, realmID, key)
+	if errors.Is(err, errs.NotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return d.UserEditable, nil
+}
+
+// checkNameIDSource は、登録のときに本人が書ける属性を NameID の出どころにさせない。
+func checkNameIDSource(ctx context.Context, tx port.Tx, realmID, source string) error {
+	editable, err := editableNameIDSource(ctx, tx, realmID, source)
+	if err != nil {
+		return err
+	}
+	if editable {
+		return errEditableNameIDSource
+	}
+	return nil
 }

@@ -255,6 +255,12 @@ func (s *Service) Issue(ctx context.Context, sp port.SAMLServiceProvider, cfg Co
 		if subject == "" {
 			return errors.New("samlidp: no subject for user")
 		}
+		// 登録の後で属性を本人が書けるように変えても、その値を NameID にしない。
+		if editable, err := editableNameIDSource(ctx, tx, p.RealmID, cfg.NameIDSource); err != nil {
+			return err
+		} else if editable && format != NameIDTransient {
+			return errNoNameID
+		}
 		nameID, err := s.nameID(format, cfg.NameIDSource, vals)
 		if err != nil {
 			return err
