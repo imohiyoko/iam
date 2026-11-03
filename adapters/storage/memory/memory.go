@@ -108,6 +108,9 @@ type state struct {
 	// samlSPs と samlCerts は SAML の SP の登録と IdP の署名の証明書（ADR 0115）。キーは realm_id + ID / key_id。
 	samlSPs   map[string]port.SAMLServiceProvider
 	samlCerts map[string]port.SAMLIdPCertificate
+	// wiProviders と wiBindings は Workload Identity Federation の発行者と結び付け（ADR 0116）。キーは realm_id + ID。
+	wiProviders map[string]port.WorkloadIdentityProvider
+	wiBindings  map[string]port.WorkloadIdentityBinding
 }
 
 // Storage はインメモリの Storage。
@@ -140,6 +143,7 @@ func New(clk clock.Clock) *Storage {
 		pats: map[string]port.PersonalAccessToken{}, patPolicies: map[string]port.PersonalAccessTokenPolicy{},
 		samlSPs: map[string]port.SAMLServiceProvider{}, samlCerts: map[string]port.SAMLIdPCertificate{},
 		oauthResources: map[string]port.OAuthResource{},
+		wiProviders:    map[string]port.WorkloadIdentityProvider{}, wiBindings: map[string]port.WorkloadIdentityBinding{},
 	}}
 }
 
@@ -219,6 +223,9 @@ func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t} }
 
 // OAuthResources は自前の API（リソースサーバー）の登録（ADR 0112）。
 func (t *tx) OAuthResources() port.OAuthResourceRepo { return oauthResources{t} }
+
+// WorkloadIdentity は Workload Identity Federation の発行者と結び付け（ADR 0116）。
+func (t *tx) WorkloadIdentity() port.WorkloadIdentityRepo { return workloadIdentity{t} }
 
 // PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t} }

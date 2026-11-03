@@ -101,7 +101,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 自前の API 向けの client credentials（`aud`・スコープ、RFC 8707） | S P | ✅ | フィーチャー `resource_indicators`（ADR 0112）。入口は `/v1/admin/token`。認可コードフローの `resource` も |
 | Token Exchange（RFC 8693）・委任・なりすまし | S P | ✅ | ADR 0099 |
 | DPoP（RFC 9449）、mTLS（RFC 8705） | S | ✅ | フィーチャー `dpop`・`mtls_client_auth`（ADR 0113）。`cnf` の結び付け、公開クライアントのリフレッシュトークン、nonce、UserInfo と管理 API での確かめ |
-| Workload Identity Federation（RFC 7523、SPIFFE） | S P | ❌ | |
+| Workload Identity Federation（RFC 7523、SPIFFE） | S P | ✅ | フィーチャー `workload_identity`（ADR 0116）。入口は `/v1/admin/token` の RFC 8693。GitHub Actions・GitLab CI・Kubernetes・クラウドの JWT。SPIFFE は JWT-SVID だけ |
 | Org の管理者による Org のサービスアカウントの管理 | P | ❌ | |
 
 ## 6. 認可

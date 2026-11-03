@@ -39,6 +39,7 @@ import (
 	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
+	"github.com/imohiyoko/iam/authn/workloadidentity"
 	"github.com/imohiyoko/iam/authn/wsfed"
 	"github.com/imohiyoko/iam/authz/manage"
 	"github.com/imohiyoko/iam/shared/acr"
@@ -104,6 +105,8 @@ var featureCatalog = map[string]struct {
 	feature.ResourceIndicators: {provider.ResourceFeature, module + "/features/resourceindicators"},
 	// ADR 0117。
 	feature.FAPI2: {provider.FAPI2Feature, module + "/features/fapi2"},
+	// ADR 0116。
+	feature.WorkloadIdentity: {workloadidentity.Feature, module + "/features/workloadidentity"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。
