@@ -144,7 +144,11 @@ func (s *Service) NewConnection(ctx context.Context, realmID, slug, ownerOrgID s
 		}
 		var err error
 		if raw, err = s.fetch(ctx, in.MetadataURL); err != nil {
-			return port.Connection{}, invalid("could not fetch the metadata: %v", err)
+			// 誤りには解決したアドレスや接続の結果が入るので、呼び出し側には返さずログにだけ残す（内部のネットワークを探らせない）。
+			if s.Log != nil {
+				s.Log.WarnContext(ctx, "saml: fetch the IdP metadata", "url", in.MetadataURL, "error", err)
+			}
+			return port.Connection{}, invalid("could not fetch the metadata")
 		}
 	}
 	md, err := ParseIdPMetadata(raw, in.EntityID, s.Dev)

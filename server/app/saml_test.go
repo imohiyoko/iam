@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"html"
 	"io"
 	"net/http"
@@ -308,6 +309,13 @@ func TestSAMLRealmConnection(t *testing.T) {
 	if code, out := l.admin(t, "/v1/admin/connections:saml", owner, body); code != 400 || out["error"] != "invalid_connection" {
 		t.Fatalf("both metadata: %d %v", code, out)
 	}
+	// 取得の誤りに、解決したアドレスや接続の結果を出さない（内部のネットワークを探らせない）。
+	delete(body, "metadata_xml")
+	body["metadata_url"] = "https://127.0.0.1:1/md"
+	if code, out := l.admin(t, "/v1/admin/connections:saml", owner, body); code != 400 || strings.Contains(fmt.Sprint(out), "127.0.0.1") {
+		t.Fatalf("fetch error leaks the address: %d %v", code, out)
+	}
+	body["metadata_xml"] = string(idp.Metadata())
 	delete(body, "metadata_url")
 	body["trust_email"] = false
 	if code, out := l.admin(t, "/v1/admin/connections:saml", owner, body); code != 201 {
