@@ -259,6 +259,9 @@ type Issue struct {
 	// 本人の端末の署名がこの認証の要素なので2要素目の確認待ちにはせず、端末の記憶（ブラウザの端末ではない）も見ない。
 	// Org の選択とログインポリシー・警告・フックは通常のログインと同じに効く。
 	Backchannel bool
+	// Previous は同じ本人確認の続きとして置き換えた前のセッション（2要素目の確認）。監査ログの details の previous に残し、
+	// SSF の assurance-level-change で前後の認証の強さを比べる（ADR 0118）。
+	Previous string
 }
 
 // Issued は発行したセッションと、クライアントに渡すトークン。
@@ -456,6 +459,9 @@ func (m *Manager) Issue(ctx context.Context, tx port.Tx, in Issue) (Issued, erro
 	if in.Backchannel {
 		details["backchannel"] = true
 	}
+	if in.Previous != "" {
+		details["previous"] = in.Previous
+	}
 	if restriction != port.RestrictionNone {
 		details["restriction"] = string(restriction)
 	}
@@ -640,7 +646,7 @@ func (m *Manager) CompleteSecondFactor(ctx context.Context, tx port.Tx, realmID,
 	is, err := m.Issue(ctx, tx, Issue{
 		RealmID: realmID, UserID: old.PrincipalID, AuthMethods: amr, Credentials: append(slices.Clone(old.AuthCredentialIDs), f.CredentialID),
 		IP: f.IP, UserAgent: f.UserAgent, RequestID: f.RequestID, Carried: carried, AuthenticatedAt: old.AuthenticatedAt,
-		OrgID: old.ActiveOrgID, OrgFallback: true,
+		OrgID: old.ActiveOrgID, OrgFallback: true, Previous: old.ID,
 	})
 	if err != nil {
 		return Issued{}, err

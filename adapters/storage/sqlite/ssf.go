@@ -1,0 +1,259 @@
+package sqlite
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	"github.com/imohiyoko/iam/adapters/storage/sqlite/db"
+	"github.com/imohiyoko/iam/shared/port"
+)
+
+// OpenID Shared Signals Framework（ADR 0118）：送信側のストリーム（authn_ssf_streams・authn_ssf_stream_subjects・
+// authn_ssf_poll_events）、受信側が信頼する送信側（authn_ssf_transmitters）、端末の準拠状態（authn_device_postures）。
+
+type ssfStreams struct{ q *db.Queries }
+
+func toSSFStream(r db.AuthnSsfStream) (port.SSFStream, error) {
+	var p times
+	s := port.SSFStream{ID: r.ID, RealmID: r.RealmID, ServiceAccountID: r.ServiceAccountID, DeliveryMethod: r.DeliveryMethod,
+		EndpointURL: r.EndpointUrl, AuthorizationCiphertext: r.AuthorizationCiphertext, Description: r.Description, Status: r.Status,
+		StatusReason: r.StatusReason, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt),
+		SSFStreamDelivery: port.SSFStreamDelivery{CursorSeq: r.CursorSeq, Failures: int(r.Failures), NextAttemptAt: p.null(r.NextAttemptAt),
+			LastError: r.LastError, LastDeliveredAt: p.null(r.LastDeliveredAt)}}
+	if len(s.AuthorizationCiphertext) == 0 {
+		s.AuthorizationCiphertext = nil
+	}
+	if err := json.Unmarshal([]byte(r.EventsRequested), &s.EventsRequested); err != nil {
+		return port.SSFStream{}, err
+	}
+	if err := json.Unmarshal([]byte(r.EventsDelivered), &s.EventsDelivered); err != nil {
+		return port.SSFStream{}, err
+	}
+	return s, p.err
+}
+
+func (r ssfStreams) Create(ctx context.Context, s port.SSFStream) error {
+	return mapErr(r.q.CreateSSFStream(ctx, db.CreateSSFStreamParams{ID: s.ID, RealmID: s.RealmID, ServiceAccountID: s.ServiceAccountID,
+		DeliveryMethod: s.DeliveryMethod, EndpointUrl: s.EndpointURL, AuthorizationCiphertext: nonNil(s.AuthorizationCiphertext),
+		EventsRequested: jsonList(s.EventsRequested), EventsDelivered: jsonList(s.EventsDelivered), Description: s.Description,
+		Status: s.Status, StatusReason: s.StatusReason, CreatedAt: formatTime(s.CreatedAt), UpdatedAt: formatTime(s.UpdatedAt),
+		CursorSeq: s.CursorSeq, Failures: int64(s.Failures), NextAttemptAt: nullTime(s.NextAttemptAt), LastError: s.LastError,
+		LastDeliveredAt: nullTime(s.LastDeliveredAt)}))
+}
+
+func (r ssfStreams) Get(ctx context.Context, realmID, id string) (port.SSFStream, error) {
+	row, err := r.q.GetSSFStream(ctx, db.GetSSFStreamParams{RealmID: realmID, ID: id})
+	return one(row, err, toSSFStream)
+}
+
+func (r ssfStreams) List(ctx context.Context, realmID string) ([]port.SSFStream, error) {
+	rs, err := r.q.ListSSFStreams(ctx, realmID)
+	return rows(rs, err, toSSFStream)
+}
+
+func (r ssfStreams) Update(ctx context.Context, s port.SSFStream) error {
+	n, err := r.q.UpdateSSFStream(ctx, db.UpdateSSFStreamParams{DeliveryMethod: s.DeliveryMethod, EndpointUrl: s.EndpointURL,
+		AuthorizationCiphertext: nonNil(s.AuthorizationCiphertext), EventsRequested: jsonList(s.EventsRequested),
+		EventsDelivered: jsonList(s.EventsDelivered), Description: s.Description, Status: s.Status, StatusReason: s.StatusReason,
+		UpdatedAt: formatTime(s.UpdatedAt), RealmID: s.RealmID, ID: s.ID})
+	return affected(n, err, "ssf stream")
+}
+
+func (r ssfStreams) SetDelivery(ctx context.Context, realmID, id string, d port.SSFStreamDelivery) error {
+	n, err := r.q.SetSSFStreamDelivery(ctx, db.SetSSFStreamDeliveryParams{CursorSeq: d.CursorSeq, Failures: int64(d.Failures),
+		NextAttemptAt: nullTime(d.NextAttemptAt), LastError: d.LastError, LastDeliveredAt: nullTime(d.LastDeliveredAt), RealmID: realmID, ID: id})
+	return affected(n, err, "ssf stream")
+}
+
+func (r ssfStreams) Delete(ctx context.Context, realmID, id string) error {
+	n, err := r.q.DeleteSSFStream(ctx, db.DeleteSSFStreamParams{RealmID: realmID, ID: id})
+	if err := affected(n, err, "ssf stream"); err != nil {
+		return err
+	}
+	return r.dropChildren(ctx, id)
+}
+
+func (r ssfStreams) dropChildren(ctx context.Context, id string) error {
+	if err := r.q.DeleteSSFStreamSubjects(ctx, id); err != nil {
+		return mapErr(err)
+	}
+	return mapErr(r.q.DeleteSSFPollEvents(ctx, id))
+}
+
+func (r ssfStreams) DuePush(ctx context.Context, now time.Time, limit int) ([]port.SSFStream, error) {
+	rs, err := r.q.DuePushSSFStreams(ctx, db.DuePushSSFStreamsParams{Now: nullTime(&now), Lim: int64(limit)})
+	return rows(rs, err, toSSFStream)
+}
+
+func (r ssfStreams) AddSubject(ctx context.Context, realmID, streamID, subject string, at time.Time) error {
+	return mapErr(r.q.AddSSFStreamSubject(ctx, db.AddSSFStreamSubjectParams{StreamID: streamID, RealmID: realmID, Subject: subject,
+		CreatedAt: formatTime(at)}))
+}
+
+func (r ssfStreams) RemoveSubject(ctx context.Context, realmID, streamID, subject string) error {
+	n, err := r.q.RemoveSSFStreamSubject(ctx, db.RemoveSSFStreamSubjectParams{RealmID: realmID, StreamID: streamID, Subject: subject})
+	return affected(n, err, "ssf subject")
+}
+
+func (r ssfStreams) HasSubject(ctx context.Context, realmID, streamID, subject string) (bool, error) {
+	n, err := r.q.HasSSFStreamSubject(ctx, db.HasSSFStreamSubjectParams{RealmID: realmID, StreamID: streamID, Subject: subject})
+	return n > 0, mapErr(err)
+}
+
+func (r ssfStreams) CountSubjects(ctx context.Context, realmID, streamID string) (int, error) {
+	n, err := r.q.CountSSFStreamSubjects(ctx, db.CountSSFStreamSubjectsParams{RealmID: realmID, StreamID: streamID})
+	return int(n), mapErr(err)
+}
+
+func (r ssfStreams) RemoveSubjectEverywhere(ctx context.Context, realmID, subject string) (int, error) {
+	n, err := r.q.RemoveSSFSubjectEverywhere(ctx, db.RemoveSSFSubjectEverywhereParams{RealmID: realmID, Subject: subject})
+	return int(n), mapErr(err)
+}
+
+func (r ssfStreams) AddPollEvents(ctx context.Context, evs []port.SSFPollEvent) error {
+	for _, e := range evs {
+		if err := r.q.AddSSFPollEvent(ctx, db.AddSSFPollEventParams{StreamID: e.StreamID, RealmID: e.RealmID, Jti: e.JTI, Seq: e.Seq,
+			SetJwt: e.SET, CreatedAt: formatTime(e.CreatedAt)}); err != nil {
+			return mapErr(err)
+		}
+	}
+	return nil
+}
+
+func toSSFPollEvent(r db.AuthnSsfPollEvent) (port.SSFPollEvent, error) {
+	var p times
+	e := port.SSFPollEvent{StreamID: r.StreamID, RealmID: r.RealmID, JTI: r.Jti, Seq: r.Seq, SET: r.SetJwt, CreatedAt: p.at(r.CreatedAt)}
+	return e, p.err
+}
+
+func (r ssfStreams) ListPollEvents(ctx context.Context, realmID, streamID string, limit int) ([]port.SSFPollEvent, error) {
+	rs, err := r.q.ListSSFPollEvents(ctx, db.ListSSFPollEventsParams{RealmID: realmID, StreamID: streamID, Lim: int64(limit)})
+	return rows(rs, err, toSSFPollEvent)
+}
+
+func (r ssfStreams) CountPollEvents(ctx context.Context, realmID, streamID string) (int, error) {
+	n, err := r.q.CountSSFPollEvents(ctx, db.CountSSFPollEventsParams{RealmID: realmID, StreamID: streamID})
+	return int(n), mapErr(err)
+}
+
+func (r ssfStreams) AckPollEvents(ctx context.Context, realmID, streamID string, jtis []string) (int, error) {
+	total := 0
+	for _, j := range jtis {
+		n, err := r.q.AckSSFPollEvent(ctx, db.AckSSFPollEventParams{RealmID: realmID, StreamID: streamID, Jti: j})
+		if err != nil {
+			return 0, mapErr(err)
+		}
+		total += int(n)
+	}
+	return total, nil
+}
+
+func (r ssfStreams) Count(ctx context.Context) (int, error) {
+	n, err := r.q.CountSSFStreams(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r ssfStreams) Purge(ctx context.Context, limit int) ([]string, error) {
+	ids, err := r.q.PurgeSSFStreams(ctx, int64(limit))
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	for _, id := range ids {
+		if err := r.dropChildren(ctx, id); err != nil {
+			return nil, err
+		}
+	}
+	return ids, nil
+}
+
+type ssfTransmitters struct{ q *db.Queries }
+
+func toSSFTransmitter(r db.AuthnSsfTransmitter) (port.SSFTransmitter, error) {
+	var p times
+	t := port.SSFTransmitter{ID: r.ID, RealmID: r.RealmID, Name: r.Name, Issuer: r.Issuer, Config: r.Config, PushTokenHash: r.PushTokenHash,
+		Enabled: r.Enabled != 0, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+	return t, p.err
+}
+
+func (r ssfTransmitters) Create(ctx context.Context, t port.SSFTransmitter) error {
+	return mapErr(r.q.CreateSSFTransmitter(ctx, db.CreateSSFTransmitterParams{ID: t.ID, RealmID: t.RealmID, Name: t.Name, Issuer: t.Issuer,
+		Config: nonNil(t.Config), PushTokenHash: nonNil(t.PushTokenHash), Enabled: boolInt(t.Enabled), CreatedAt: formatTime(t.CreatedAt),
+		UpdatedAt: formatTime(t.UpdatedAt)}))
+}
+
+func (r ssfTransmitters) Get(ctx context.Context, realmID, id string) (port.SSFTransmitter, error) {
+	row, err := r.q.GetSSFTransmitter(ctx, db.GetSSFTransmitterParams{RealmID: realmID, ID: id})
+	return one(row, err, toSSFTransmitter)
+}
+
+func (r ssfTransmitters) List(ctx context.Context, realmID string) ([]port.SSFTransmitter, error) {
+	rs, err := r.q.ListSSFTransmitters(ctx, realmID)
+	return rows(rs, err, toSSFTransmitter)
+}
+
+func (r ssfTransmitters) Update(ctx context.Context, t port.SSFTransmitter) error {
+	n, err := r.q.UpdateSSFTransmitter(ctx, db.UpdateSSFTransmitterParams{Name: t.Name, Issuer: t.Issuer, Config: nonNil(t.Config),
+		PushTokenHash: nonNil(t.PushTokenHash), Enabled: boolInt(t.Enabled), UpdatedAt: formatTime(t.UpdatedAt), RealmID: t.RealmID, ID: t.ID})
+	return affected(n, err, "ssf transmitter")
+}
+
+func (r ssfTransmitters) Delete(ctx context.Context, realmID, id string) error {
+	n, err := r.q.DeleteSSFTransmitter(ctx, db.DeleteSSFTransmitterParams{RealmID: realmID, ID: id})
+	return affected(n, err, "ssf transmitter")
+}
+
+func (r ssfTransmitters) Count(ctx context.Context) (int, error) {
+	n, err := r.q.CountSSFTransmitters(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r ssfTransmitters) Purge(ctx context.Context, limit int) (int, error) {
+	n, err := r.q.PurgeSSFTransmitters(ctx, int64(limit))
+	return int(n), mapErr(err)
+}
+
+type devicePostures struct{ q *db.Queries }
+
+func toDevicePosture(r db.AuthnDevicePosture) (port.DevicePosture, error) {
+	var p times
+	d := port.DevicePosture{RealmID: r.RealmID, UserID: r.UserID, DeviceID: r.DeviceID, Status: r.Status, Source: r.Source,
+		EventAt: p.at(r.EventAt), UpdatedAt: p.at(r.UpdatedAt)}
+	return d, p.err
+}
+
+func (r devicePostures) Set(ctx context.Context, d port.DevicePosture) (bool, error) {
+	n, err := r.q.SetDevicePosture(ctx, db.SetDevicePostureParams{RealmID: d.RealmID, UserID: d.UserID, DeviceID: d.DeviceID, Status: d.Status,
+		Source: d.Source, EventAt: formatTime(d.EventAt), UpdatedAt: formatTime(d.UpdatedAt)})
+	return n > 0, mapErr(err)
+}
+
+func (r devicePostures) Get(ctx context.Context, realmID, userID, deviceID string) (port.DevicePosture, error) {
+	row, err := r.q.GetDevicePosture(ctx, db.GetDevicePostureParams{RealmID: realmID, UserID: userID, DeviceID: deviceID})
+	return one(row, err, toDevicePosture)
+}
+
+func (r devicePostures) ListByUser(ctx context.Context, realmID, userID string) ([]port.DevicePosture, error) {
+	rs, err := r.q.ListDevicePosturesByUser(ctx, db.ListDevicePosturesByUserParams{RealmID: realmID, UserID: userID})
+	return rows(rs, err, toDevicePosture)
+}
+
+func (r devicePostures) DeleteByUser(ctx context.Context, realmID, userID string) (int, error) {
+	n, err := r.q.DeleteDevicePosturesByUser(ctx, db.DeleteDevicePosturesByUserParams{RealmID: realmID, UserID: userID})
+	return int(n), mapErr(err)
+}
+
+func (r devicePostures) DeleteBySource(ctx context.Context, realmID, source string) (int, error) {
+	n, err := r.q.DeleteDevicePosturesBySource(ctx, db.DeleteDevicePosturesBySourceParams{RealmID: realmID, Source: source})
+	return int(n), mapErr(err)
+}
+
+func (r devicePostures) Count(ctx context.Context) (int, error) {
+	n, err := r.q.CountDevicePostures(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r devicePostures) Purge(ctx context.Context, limit int) (int, error) {
+	n, err := r.q.PurgeDevicePostures(ctx, int64(limit))
+	return int(n), mapErr(err)
+}

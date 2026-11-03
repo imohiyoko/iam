@@ -108,6 +108,13 @@ type state struct {
 	// samlSPs と samlCerts は SAML の SP の登録と IdP の署名の証明書（ADR 0115）。キーは realm_id + ID / key_id。
 	samlSPs   map[string]port.SAMLServiceProvider
 	samlCerts map[string]port.SAMLIdPCertificate
+	// ssfStreams・ssfSubjects・ssfPoll・ssfTransmitters・devicePostures は SSF（ADR 0118）。キーは realm_id + ID、
+	// stream_id + subject、stream_id + jti、realm_id + ID、realm_id + user_id + device_id。
+	ssfStreams      map[string]port.SSFStream
+	ssfSubjects     map[string]ssfSubject
+	ssfPoll         map[string]port.SSFPollEvent
+	ssfTransmitters map[string]port.SSFTransmitter
+	devicePostures  map[string]port.DevicePosture
 }
 
 // Storage はインメモリの Storage。
@@ -139,6 +146,8 @@ func New(clk clock.Clock) *Storage {
 		wsfedRPs:  map[string]port.WSFedRelyingParty{}, wsfedCerts: map[string]port.WSFedCertificate{},
 		pats: map[string]port.PersonalAccessToken{}, patPolicies: map[string]port.PersonalAccessTokenPolicy{},
 		samlSPs: map[string]port.SAMLServiceProvider{}, samlCerts: map[string]port.SAMLIdPCertificate{},
+		ssfStreams: map[string]port.SSFStream{}, ssfSubjects: map[string]ssfSubject{}, ssfPoll: map[string]port.SSFPollEvent{},
+		ssfTransmitters: map[string]port.SSFTransmitter{}, devicePostures: map[string]port.DevicePosture{},
 		oauthResources: map[string]port.OAuthResource{},
 	}}
 }
@@ -219,6 +228,11 @@ func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t} }
 
 // OAuthResources は自前の API（リソースサーバー）の登録（ADR 0112）。
 func (t *tx) OAuthResources() port.OAuthResourceRepo { return oauthResources{t} }
+
+// SSFStreams・SSFTransmitters・DevicePostures は OpenID Shared Signals Framework の送信側と受信側（ADR 0118）。
+func (t *tx) SSFStreams() port.SSFStreamRepo           { return ssfStreams{t} }
+func (t *tx) SSFTransmitters() port.SSFTransmitterRepo { return ssfTransmitters{t} }
+func (t *tx) DevicePostures() port.DevicePostureRepo   { return devicePostures{t} }
 
 // PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t} }

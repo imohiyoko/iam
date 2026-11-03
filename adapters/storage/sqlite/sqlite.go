@@ -220,6 +220,11 @@ func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t.q} }
 // OAuthResources は自前の API（リソースサーバー）の登録（ADR 0112）。
 func (t *tx) OAuthResources() port.OAuthResourceRepo { return oauthResources{t.q} }
 
+// SSFStreams・SSFTransmitters・DevicePostures は OpenID Shared Signals Framework の送信側と受信側（ADR 0118）。
+func (t *tx) SSFStreams() port.SSFStreamRepo           { return ssfStreams{t.q} }
+func (t *tx) SSFTransmitters() port.SSFTransmitterRepo { return ssfTransmitters{t.q} }
+func (t *tx) DevicePostures() port.DevicePostureRepo   { return devicePostures{t.q} }
+
 // PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t.q} }
 

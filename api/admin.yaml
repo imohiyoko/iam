@@ -3356,6 +3356,132 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/ssf/transmitters:
+    get:
+      operationId: listSSFTransmitters
+      summary: SSF の受信側が信頼する送信側の一覧（ADR 0118）
+      description: 権限 `ssf:manage`。作成の順。フィーチャー `ssf_receiver` が動いていなければ `404 ssf_receiver_disabled`。
+      responses:
+        "200":
+          description: 送信側
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SSFTransmitters" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSSFTransmitter
+      summary: SSF の送信側を登録する（ADR 0118）
+      description: |
+        権限 `ssf:manage`。送信側は SET（RFC 8417）を `push_endpoint`（RFC 8935）に POST する。署名は `jwks_uri`（https。公開のアドレスに限る）か
+        `jwks`（公開鍵だけ）で確かめ、`iss` は `issuer` と完全一致、`aud` は `audience` のどれかと一致、`jti` は1度だけ動かす。
+        送信側は `Authorization: Bearer <push_token>` を付ける（`push_token` はこの応答と作り直しの応答で1度だけ返す）。
+        `allowed_actions` に無い動作は行わない（受けて記録するだけ）。内容が正しくなければ `400 invalid_transmitter`、
+        `issuer` が重複すれば `409 transmitter_exists`。`ssf.transmitter_created` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SSFTransmitterInput" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SSFTransmitter" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/ssf/transmitters/{id}:
+    get:
+      operationId: getSSFTransmitter
+      summary: SSF の送信側を返す
+      description: 権限 `ssf:manage`。`push_token` は返さない。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 送信側
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SSFTransmitter" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateSSFTransmitter
+      summary: SSF の送信側の登録を置き換える
+      description: |
+        権限 `ssf:manage`。`rotate_push_token` が真なら `push_token` を作り直して返す（古い値はすぐに使えない）。
+        `ssf.transmitter_updated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SSFTransmitterInput" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SSFTransmitter" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/ssf/transmitters/{id}:delete:
+    post:
+      operationId: deleteSSFTransmitter
+      summary: SSF の送信側の登録を消す
+      description: 権限 `ssf:manage`。その送信側が知らせた端末の準拠状態も消す。`ssf.transmitter_deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 消した
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/ssf/streams:
+    get:
+      operationId: listSSFStreams
+      summary: SSF の送信側のストリームの一覧（ADR 0118）
+      description: |
+        権限 `ssf:manage`。受信側（サービスアカウント）が SSF のストリーム管理の API で作ったもの。作成の順。push の送り先はホスト名だけ返す。
+        フィーチャー `ssf_transmitter` が動いていなければ `404 ssf_transmitter_disabled`。
+      responses:
+        "200":
+          description: ストリーム
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SSFStreams" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/ssf/streams/{id}:delete:
+    post:
+      operationId: deleteSSFStream
+      summary: SSF の送信側のストリームを消す
+      description: 権限 `ssf:manage`。対象と poll の待ちの SET も消す。`ssf.stream_deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 消した
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4781,3 +4907,83 @@ components:
         resources:
           type: array
           items: { $ref: "#/components/schemas/OAuthResource" }
+    SSFTransmitterInput:
+      type: object
+      required: [name, issuer, audience]
+      properties:
+        name: { type: string, maxLength: 200 }
+        issuer: { type: string, maxLength: 512, description: SET の iss（完全一致） }
+        enabled: { type: boolean, default: true }
+        jwks_uri: { type: string, maxLength: 2048, description: 送信側の JWKS の URL（jwks とどちらか1つ） }
+        jwks:
+          type: object
+          additionalProperties: true
+          description: 送信側の公開鍵の JWK Set（jwks_uri とどちらか1つ）
+        audience:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { type: string, maxLength: 512 }
+          description: 受ける aud
+        allowed_actions:
+          type: array
+          items:
+            type: string
+            enum: [revoke_sessions, revoke_password, suspend_user, record_device_posture]
+          description: 許す動作。無ければ何もしない
+        subject_connection: { type: string, description: iss_sub の対象を外部 ID で引く connection の slug }
+        rotate_push_token: { type: boolean, description: 置き換えのとき、push_token を作り直す }
+    SSFTransmitter:
+      type: object
+      required: [id, name, issuer, enabled, audience, allowed_actions, push_endpoint, created_at, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        issuer: { type: string }
+        enabled: { type: boolean }
+        jwks_uri: { type: string }
+        jwks: { type: object, additionalProperties: true }
+        audience: { type: array, items: { type: string } }
+        allowed_actions: { type: array, items: { type: string } }
+        subject_connection: { type: string }
+        push_endpoint: { type: string, description: 送信側が SET を POST する URL }
+        push_token: { type: string, description: 送信側が付ける Bearer の値（作成と作り直しの応答だけ） }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SSFTransmitters:
+      type: object
+      required: [transmitters]
+      properties:
+        transmitters:
+          type: array
+          items: { $ref: "#/components/schemas/SSFTransmitter" }
+    SSFStream:
+      type: object
+      required: [id, service_account_id, delivery_method, events_delivered, status, created_at, updated_at, delivery]
+      properties:
+        id: { type: string }
+        service_account_id: { type: string }
+        delivery_method: { type: string, enum: [push, poll] }
+        endpoint_host: { type: string }
+        events_delivered: { type: array, items: { type: string } }
+        description: { type: string }
+        status: { type: string, enum: [enabled, paused, disabled] }
+        status_reason: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        delivery:
+          type: object
+          required: [cursor_seq, failures]
+          properties:
+            cursor_seq: { type: integer, format: int64 }
+            failures: { type: integer }
+            last_error: { type: string }
+            last_delivered_at: { type: string, format: date-time }
+            next_attempt_at: { type: string, format: date-time }
+    SSFStreams:
+      type: object
+      required: [streams]
+      properties:
+        streams:
+          type: array
+          items: { $ref: "#/components/schemas/SSFStream" }

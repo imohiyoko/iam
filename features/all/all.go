@@ -39,6 +39,8 @@ import (
 	_ "github.com/imohiyoko/iam/features/samlidp"
 	_ "github.com/imohiyoko/iam/features/serviceaccounts"
 	_ "github.com/imohiyoko/iam/features/sms"
+	_ "github.com/imohiyoko/iam/features/ssfreceiver"
+	_ "github.com/imohiyoko/iam/features/ssftransmitter"
 	_ "github.com/imohiyoko/iam/features/tokenexchange"
 	_ "github.com/imohiyoko/iam/features/warnings"
 	_ "github.com/imohiyoko/iam/features/wsfed"

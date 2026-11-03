@@ -101,6 +101,8 @@ const (
 	// PermPersonalAccessTokensManage は realm の Personal Access Token のポリシーの参照と変更（ADR 0109）。ユーザーのトークンの
 	// 一覧と取り消しは PermCredentialsRevoke。
 	PermPersonalAccessTokensManage = "personal_access_tokens:manage"
+	// PermSSFManage は SSF の受信側が信頼する送信側の登録と、送信側のストリームの参照・削除（ADR 0118）。
+	PermSSFManage = "ssf:manage"
 )
 
 // 本人の重要な操作の名前（ADR 0084）。付与は要らず、直近の認証（max_auth_age）に加えて、名前空間 `me` と active な Org の
@@ -133,12 +135,12 @@ func suspend(categories ...string) []string {
 var builtin = map[string][]string{
 	RealmOwner: append([]string{PermAuditRead, PermAuditReadClientData, PermEventSubscriptionsManage, PermRealmsManage, PermRiskTypesManage, PermRiskWrite, PermRequirementsManage, PermAttributesManage, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermClientsManage, PermSigningKeysRotate, PermRolesManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermUsersLegalHold, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermConnectionsManage, PermPIIRead,
 		PermCredentialsRevoke, PermSuspensionsAny, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermSigningKeysRead, PermUsersEmails,
-		PermUsersImpersonate, PermPersonalAccessTokensManage},
+		PermUsersImpersonate, PermPersonalAccessTokensManage, PermSSFManage},
 		suspend("tos_violation", "customer_request", "security_risk", "billing")...),
 	RealmAdmin: append([]string{PermAuditRead, PermAttributesRead, PermAttributesWrite, PermServiceAccountsManage, PermGroupsManage, PermAuthzCheck, PermOrgsCreate, PermOrgsRead, PermOrgsUpdate, PermOrgsDelete, PermUsersDelete, PermSessionsRevoke, PermUsersCreate, PermUsersUpdate, PermUsersRecover, PermUsersLoginLink, PermCredentialsRevoke,
 		PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermUsersEmails},
 		suspend("tos_violation", "customer_request")...),
-	RealmSecurity: append([]string{PermAuditRead, PermAuditReadClientData, PermSessionsRevoke, PermCredentialsRevoke, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermSigningKeysRead},
+	RealmSecurity: append([]string{PermAuditRead, PermAuditReadClientData, PermSessionsRevoke, PermCredentialsRevoke, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead, PermConnectionsRead, PermSigningKeysRead, PermSSFManage},
 		suspend("security_risk")...),
 	RealmSupport:         {PermAttributesRead, PermOrgsRead, PermSuspensionsRead, PermUsersRecover, PermUsersRead, PermSessionsRead, PermRolesRead, PermGroupsRead},
 	RealmBilling:         suspend("billing"),
