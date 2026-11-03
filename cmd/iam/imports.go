@@ -47,6 +47,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/ssftransmitter"
 	_ "github.com/imohiyoko/iam/features/tokenexchange"
 	_ "github.com/imohiyoko/iam/features/warnings"
+	_ "github.com/imohiyoko/iam/features/workloadidentity"
 	_ "github.com/imohiyoko/iam/features/wsfed"
 	_ "github.com/imohiyoko/iam/features/x509"
 

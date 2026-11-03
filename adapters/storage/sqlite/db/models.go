@@ -420,6 +420,26 @@ type AuthnUserIdentity struct {
 	RevokeReason    string
 }
 
+type AuthnWorkloadIdentityBinding struct {
+	ID               string
+	RealmID          string
+	ProviderID       string
+	ServiceAccountID string
+	Conditions       []byte
+	CreatedAt        string
+}
+
+type AuthnWorkloadIdentityProvider struct {
+	ID        string
+	RealmID   string
+	Issuer    string
+	Name      string
+	Config    []byte
+	Disabled  int64
+	CreatedAt string
+	UpdatedAt string
+}
+
 type AuthnWsfedCertificate struct {
 	RealmID   string
 	KeyID     string

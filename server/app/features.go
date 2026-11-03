@@ -272,6 +272,12 @@ var cleaners = map[string]cleaner{
 		r, err := eachRealmFlag(ctx, tx, "fapi2_security_profile", limit-n, now)
 		return n + r, err
 	}},
+	// Workload Identity Federation の発行者・結び付けと、結び付けで発行したアクセストークンを消す（ADR 0116）。
+	// 取得した JWKS と jti は EphemeralStore にあり、期限で消える。
+	feature.WorkloadIdentity: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.WorkloadIdentity().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return tx.WorkloadIdentity().Purge(ctx, limit)
+		}},
 	// SSF の送信側のストリーム（対象・poll の待ち・push の Authorization の鍵とともに）を消す（ADR 0118）。
 	feature.SSFTransmitter: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.SSFStreams().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {

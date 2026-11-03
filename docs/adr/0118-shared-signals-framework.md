@@ -2,7 +2,7 @@
 
 - 状態: 承認
 - 日付: 2026-11-03
-- 関連: [design.md](../design.md) 5.10、5.13、6.7、11.12、[0074](0074-service-accounts.md)、[0093](0093-acr-aal-step-up.md)、
+- 関連: [design.md](../design.md) 5.10、5.15、6.7、11.12、[0074](0074-service-accounts.md)、[0093](0093-acr-aal-step-up.md)、
   [0100](0100-audit-query-and-event-subscriptions.md)、[0105](0105-risk-based-login-protection.md)、[0112](0112-par-and-resource-indicators.md)
 
 ## 背景

@@ -108,6 +108,9 @@ type state struct {
 	// samlSPs と samlCerts は SAML の SP の登録と IdP の署名の証明書（ADR 0115）。キーは realm_id + ID / key_id。
 	samlSPs   map[string]port.SAMLServiceProvider
 	samlCerts map[string]port.SAMLIdPCertificate
+	// wiProviders と wiBindings は Workload Identity Federation の発行者と結び付け（ADR 0116）。キーは realm_id + ID。
+	wiProviders map[string]port.WorkloadIdentityProvider
+	wiBindings  map[string]port.WorkloadIdentityBinding
 	// ssfStreams・ssfSubjects・ssfPoll・ssfTransmitters・devicePostures は SSF（ADR 0118）。キーは realm_id + ID、
 	// stream_id + subject、stream_id + jti、realm_id + ID、realm_id + user_id + device_id。
 	ssfStreams      map[string]port.SSFStream
@@ -149,6 +152,7 @@ func New(clk clock.Clock) *Storage {
 		ssfStreams: map[string]port.SSFStream{}, ssfSubjects: map[string]ssfSubject{}, ssfPoll: map[string]port.SSFPollEvent{},
 		ssfTransmitters: map[string]port.SSFTransmitter{}, devicePostures: map[string]port.DevicePosture{},
 		oauthResources: map[string]port.OAuthResource{},
+		wiProviders:    map[string]port.WorkloadIdentityProvider{}, wiBindings: map[string]port.WorkloadIdentityBinding{},
 	}}
 }
 
@@ -228,6 +232,9 @@ func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t} }
 
 // OAuthResources は自前の API（リソースサーバー）の登録（ADR 0112）。
 func (t *tx) OAuthResources() port.OAuthResourceRepo { return oauthResources{t} }
+
+// WorkloadIdentity は Workload Identity Federation の発行者と結び付け（ADR 0116）。
+func (t *tx) WorkloadIdentity() port.WorkloadIdentityRepo { return workloadIdentity{t} }
 
 // SSFStreams・SSFTransmitters・DevicePostures は OpenID Shared Signals Framework の送信側と受信側（ADR 0118）。
 func (t *tx) SSFStreams() port.SSFStreamRepo           { return ssfStreams{t} }

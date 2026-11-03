@@ -122,6 +122,9 @@ const (
 	SAMLServiceProvider Prefix = "ssp"
 	// OAuthResource は自前の API（リソースサーバー。RFC 8707、ADR 0112）。
 	OAuthResource Prefix = "rsc"
+	// WorkloadIdentityProvider と WorkloadIdentityBinding は Workload Identity Federation の発行者と結び付け（ADR 0116）。
+	WorkloadIdentityProvider Prefix = "wip"
+	WorkloadIdentityBinding  Prefix = "wib"
 	// SSFStream は SSF の送信側のストリーム、SSFTransmitter は受信側が信頼する送信側（ADR 0118）。
 	SSFStream      Prefix = "sst"
 	SSFTransmitter Prefix = "stx"

@@ -82,6 +82,8 @@ type Tx interface {
 	SAMLIdP() SAMLIdPRepo
 	// OAuthResources は自前の API（リソースサーバー）の登録（フィーチャー resource_indicators。ADR 0112）。
 	OAuthResources() OAuthResourceRepo
+	// WorkloadIdentity は Workload Identity Federation の発行者と結び付け（フィーチャー workload_identity。ADR 0116）。
+	WorkloadIdentity() WorkloadIdentityRepo
 	// SSFStreams は SSF の送信側のストリーム（フィーチャー ssf_transmitter。ADR 0118）。
 	SSFStreams() SSFStreamRepo
 	// SSFTransmitters は SSF の受信側が信頼する送信側（フィーチャー ssf_receiver。ADR 0118）。
