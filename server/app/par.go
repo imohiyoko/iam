@@ -37,7 +37,8 @@ func errRequestURI() *oidc.Error {
 
 // parRequired は連携先に PAR を求めるか（連携先の登録か realm の設定。フィーチャー par が動いているときだけ）。
 func (s *oidcServer) parRequired(cl port.Client) bool {
-	return s.a.par && (cl.RequirePAR || s.a.settings.RequirePushedAuthorizationRequests)
+	// FAPI 2.0 の連携先（ADR 0117）は par が止まっていても求める（request_uri を受けられないので認可要求は通らない。fail-closed）。
+	return s.fapi2(cl) || s.a.par && (cl.RequirePAR || s.a.settings.RequirePushedAuthorizationRequests)
 }
 
 // pushedRequest は request_uri で預かった認可要求を、1 回だけ取り出して認可要求にする（RFC 9126 4）。パラメーターは
@@ -104,7 +105,7 @@ func (s *oidcServer) pushAuthorization(w http.ResponseWriter, r *http.Request) {
 	}
 	params = cloneValues(params)
 	params.Set("client_id", cl.PublicID)
-	if err := s.pushedDPoP(ctx, r, params); err != nil {
+	if err := s.pushedDPoP(ctx, r, params, cl); err != nil {
 		op.WriteError(w, r, err, nil)
 		return
 	}
@@ -126,7 +127,8 @@ func (s *oidcServer) pushAuthorization(w http.ResponseWriter, r *http.Request) {
 
 // pushedDPoP は PAR の要求の DPoP の証明（RFC 9449 10.1）。証明があれば確かめ、その鍵を dpop_jkt として預ける。本文にも
 // dpop_jkt があれば同じ鍵であること。フィーチャー dpop が止まっていれば証明を見ない（dpop_jkt も authRequest が見ない）。
-func (s *oidcServer) pushedDPoP(ctx context.Context, r *http.Request, params url.Values) error {
+// FAPI 2.0 の連携先（ADR 0117）の証明は PS256・ES256・EdDSA だけ。
+func (s *oidcServer) pushedDPoP(ctx context.Context, r *http.Request, params url.Values, cl port.Client) error {
 	proofs := r.Header.Values(dpop.Header)
 	if s.a.dpop == nil || len(proofs) == 0 {
 		return nil
@@ -139,6 +141,9 @@ func (s *oidcServer) pushedDPoP(ctx context.Context, r *http.Request, params url
 		return errInvalidDPoPProof()
 	case err != nil:
 		return s.fail(ctx, err)
+	}
+	if s.fapi2(cl) && !fapi2DPoPAlg(p.Alg) {
+		return errInvalidDPoPProof()
 	}
 	if jkt := params.Get("dpop_jkt"); jkt != "" && jkt != p.JKT {
 		return errInvalidDPoPProof().WithDescription("dpop_jkt does not match the DPoP proof")

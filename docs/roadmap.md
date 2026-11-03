@@ -679,6 +679,24 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] 無効化で連携先の設定と結び付けたトークンを消す。memory・SQLite・PostgreSQL の契約テスト、証明の解析のファジング（`FuzzParse`）
 - 連携先の証明書の失効（OCSP・CRL）の確かめ、realm ごとの CA、JWT のアクセストークンの `cnf` クレーム
 
+#### FAPI 2.0 Security Profile（ADR 0117）
+
+**ゴール**：金融・公共の API の連携先に、FAPI 2.0 Security Profile の求めるもの（PAR・送信者制約・機密の連携先・決まったアルゴリズム・
+短い認可コード・認可応答の `iss`）を、連携先か realm の設定 1 つで強いられる。
+
+- [x] フィーチャー `fapi2`（既定オフ）。連携先と realm（設定ファイルを含む）の `fapi2_security_profile`。`fapi2`・`par` と、`dpop` か
+  `mtls_client_auth` のどれかが止まっていれば、連携先にも realm にも入れられないテストがある
+- [x] 連携先の条件（機密の連携先の認証、送信者制約、ES256 の ID トークン、https の戻り先、Device Authorization Grant なし、JWKS の鍵の種類）を
+  1 つずつ欠いた登録を拒むテストがある。realm で強いると、書かない連携先にも求める
+- [x] PAR + DPoP + private_key_jwt（PS256）の正常系、PAR を通らない認可要求・RS256 の client assertion・ES384 の DPoP の証明・証明の無い
+  交換・60 秒を過ぎた認可コードを拒むテストがある。リフレッシュトークンをローテーションせず、同じものを続けて使える
+- [x] 認可応答（成功、iam のエラー、op のエラー）の `iss`（RFC 9207）と Discovery の `authorization_response_iss_parameter_supported`。
+  realm で強いれば Discovery は強いる認証方式・アルゴリズムだけ
+- [x] 後から条件が崩れた連携先（送信者制約の無効化など）は認証で拒む（fail-closed）。監査ログ、無効化で設定を外す、
+  memory・SQLite・PostgreSQL の契約テスト
+- FAPI 2.0 Message Signing（JAR・JARM・HTTP Message Signatures）、FAPI-CIBA、PS256 の ID トークン（RS256 のフィーチャーの後）、
+  OpenID Foundation の適合試験（FAPI 2.0 Security Profile Final）の実行と既知の差異の記録
+
 ### M12 認可の拡張
 
 - 一括判定、権限の一覧、OpenID AuthZEN、ReBAC、ポリシー言語、時限付きの付与と棚卸し

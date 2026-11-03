@@ -63,7 +63,9 @@ type AuthRequest struct {
 	// DPoPJKT は認可要求の dpop_jkt（RFC 9449 10。フィーチャー dpop。ADR 0113）。あれば認可コードの交換で同じ鍵の証明を求める。
 	DPoPJKT string `json:"dpop_jkt,omitempty"`
 	// Resource は resource（RFC 8707。フィーチャー resource_indicators。ADR 0112）。空なら IAM 自身に向けたトークン。
-	Resource  string    `json:"resource,omitempty"`
+	Resource string `json:"resource,omitempty"`
+	// FAPI2 は FAPI 2.0 Security Profile の連携先の要求（ADR 0117）。認可コードの寿命を FAPI2CodeTTL で切る。
+	FAPI2     bool      `json:"fapi2,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
@@ -183,6 +185,9 @@ func (f *Flow) IssueCode(ctx context.Context, c Code) (string, error) {
 		return "", err
 	}
 	ttl := ttlOr(f.CodeTTL, DefaultCodeTTL)
+	if c.FAPI2 {
+		ttl = min(ttl, FAPI2CodeTTL)
+	}
 	c.ExpiresAt = f.Clock.Now().Add(ttl)
 	return code, f.put(ctx, digestKey("oidc:code:v1:", code), codePurpose, c, ttl)
 }
