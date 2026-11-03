@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -306,8 +307,32 @@ func TestWorkloadIdentityBindingOutranks(t *testing.T) {
 	if code, out := l.admin(t, path, admin, body); code != 403 {
 		t.Fatalf("admin binds an owner account: %d %v", code, out)
 	}
-	if code, out := l.admin(t, path, owner, body); code != 201 {
+	code, out = l.admin(t, path, owner, body)
+	if code != 201 {
 		t.Fatalf("owner binds: %d %v", code, out)
+	}
+	binding := out["id"].(string)
+	// 強いサービスアカウントに結び付いた発行者を、admin が自分の鍵に向け直したり消したりできない。
+	provider := strings.TrimSuffix(path, "/bindings")
+	attacker := map[string]any{"name": "k8s", "issuer": "https://attacker.example", "audiences": []string{"iam"}, "jwks": newWIFPlatform(t).jwks(t)}
+	if code, out := l.adminDo(t, "PUT", admin, provider, attacker); code != 403 {
+		t.Fatalf("admin repoints an owner-bound provider: %d %v", code, out)
+	}
+	if code, out := l.adminDo(t, "POST", admin, path+"/"+binding+":delete", nil); code != 403 {
+		t.Fatalf("admin deletes an owner binding: %d %v", code, out)
+	}
+	if code, out := l.adminDo(t, "POST", admin, provider+":delete", nil); code != 403 {
+		t.Fatalf("admin deletes an owner-bound provider: %d %v", code, out)
+	}
+	if code, out := l.adminDo(t, "PUT", owner, provider, attacker); code != 200 {
+		t.Fatalf("owner updates: %d %v", code, out)
+	}
+	if code, out := l.adminDo(t, "POST", owner, path+"/"+binding+":delete", nil); code != 204 {
+		t.Fatalf("owner deletes the binding: %d %v", code, out)
+	}
+	// 結び付けが無くなれば admin も更新できる。
+	if code, out := l.adminDo(t, "PUT", admin, provider, attacker); code != 200 {
+		t.Fatalf("admin updates an unbound provider: %d %v", code, out)
 	}
 }
 

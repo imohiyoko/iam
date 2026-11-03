@@ -261,6 +261,11 @@ func (s adminServer) UpdateWorkloadIdentityProvider(ctx context.Context, req adm
 		if err != nil {
 			return err
 		}
+		// 発行者・鍵・audience を差し替えると、結び付け済みのサービスアカウントを新しい鍵の持ち主が使える。
+		// 結び付けの作成と同じく、結び付け先をすべて outranks するときだけ許す。
+		if err := s.outranksProviderBindings(ctx, tx, p, x.ID); err != nil {
+			return err
+		}
 		if x, err = s.a.workloadIdentity.UpdateProvider(ctx, tx, x, in, p.Actor, requestID(ctx)); err != nil {
 			return err
 		}
@@ -290,6 +295,10 @@ func (s adminServer) DeleteWorkloadIdentityProvider(ctx context.Context, req adm
 	o, err := s.workloadOp(ctx, func(ctx context.Context, tx port.Tx, p adminPrincipal) error {
 		x, err := s.workloadProvider(ctx, tx, req.Id)
 		if err != nil {
+			return err
+		}
+		// 結び付けも消えるので、認証情報の失効と同じく結び付け先をすべて outranks するときだけ許す。
+		if err := s.outranksProviderBindings(ctx, tx, p, x.ID); err != nil {
 			return err
 		}
 		return s.a.workloadIdentity.DeleteProvider(ctx, tx, x, p.Actor, requestID(ctx))
@@ -408,6 +417,10 @@ func (s adminServer) DeleteWorkloadIdentityBinding(ctx context.Context, req admi
 		if b.ProviderID != x.ID {
 			return errs.New(errs.KindNotFound, "workload identity binding")
 		}
+		// 認証情報の失効と同じく、結び付け先を outranks するときだけ消せる。
+		if err := s.outranksBoundServiceAccount(ctx, tx, p, b.ServiceAccountID); err != nil {
+			return err
+		}
 		return s.a.workloadIdentity.DeleteBinding(ctx, tx, b, p.Actor, requestID(ctx))
 	})
 	switch {
@@ -423,4 +436,40 @@ func (s adminServer) DeleteWorkloadIdentityBinding(ctx context.Context, req admi
 		return adminapi.DeleteWorkloadIdentityBinding404JSONResponse(o.body), nil
 	}
 	return nil, errUnexpected(o)
+}
+
+// outranksProviderBindings は、発行者の結び付け先のサービスアカウントを、呼び出し側がすべて outranks するかを確かめる。
+// service_accounts:manage だけで、強いサービスアカウントに結び付いた発行者を自分の鍵に向け直させない。
+func (s adminServer) outranksProviderBindings(ctx context.Context, tx port.Tx, p adminPrincipal, providerID string) error {
+	bs, err := tx.WorkloadIdentity().ListBindings(ctx, s.a.realm.ID, providerID)
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, b := range bs {
+		if seen[b.ServiceAccountID] {
+			continue
+		}
+		seen[b.ServiceAccountID] = true
+		if err := s.outranksBoundServiceAccount(ctx, tx, p, b.ServiceAccountID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// outranksBoundServiceAccount は、結び付け先のサービスアカウントを呼び出し側が outranks するかを確かめる。
+// 削除済みのサービスアカウントはトークンを得られないので確かめない。
+func (s adminServer) outranksBoundServiceAccount(ctx context.Context, tx port.Tx, p adminPrincipal, id string) error {
+	sa, err := tx.ServiceAccounts().Get(ctx, s.a.realm.ID, id)
+	if errs.KindOf(err) == errs.KindNotFound {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if sa.DeletedAt != nil {
+		return nil
+	}
+	return s.outranksServiceAccount(ctx, tx, p, sa)
 }
