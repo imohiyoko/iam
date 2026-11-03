@@ -28,6 +28,9 @@ func decodeJSON(b []byte) (any, error) {
 	return v, nil
 }
 
+// DecodeJSON は JSON の値を1つ、decodeJSON と同じ厳しさで読む（数は json.Number）。
+func DecodeJSON(b []byte) (any, error) { return decodeJSON(b) }
+
 // DecodeObject は JSON のオブジェクトを1つ、decodeJSON と同じ厳しさで読む（数は json.Number）。
 func DecodeObject(b []byte) (map[string]any, error) { return decodeObject(b) }
 

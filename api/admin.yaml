@@ -3356,6 +3356,140 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/vci/credential-configurations:
+    get:
+      operationId: listVCICredentialConfigurations
+      summary: OpenID4VCI の資格情報の定義の一覧（iam が発行者。ADR 0119）
+      description: 権限 `clients:manage`。作成の順。フィーチャー `openid4vci` が動いていなければ `404 openid4vci_disabled`。
+      responses:
+        "200":
+          description: 定義
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VCICredentialConfigurations" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createVCICredentialConfiguration
+      summary: OpenID4VCI の資格情報の定義を登録する（ADR 0119）
+      description: |
+        権限 `clients:manage`。`configuration_id` は発行者のメタデータの `credential_configurations_supported` のキー（realm の中で一意。
+        英数字と `._:-`、128 文字まで）。`format` は `dc+sd-jwt` だけ（ほかは `400 unsupported_format`）。`scope` は Authorization Code Flow
+        で要求するスコープ（任意。realm の中で一意。OIDC のスコープの名前は使えない）。`claims` は本人のデータからクレーム（最上位）への対応で、
+        `source` は `user_id`・`email`・`email_verified`・`attribute:<key>`・`const`（`value` に JSON の値）。`selectively_disclosable` の既定は真。
+        `mandatory` の値が無い本人には発行しない。`validity` は秒（既定 90 日、1 時間〜5 年）。内容が正しくなければ
+        `400 invalid_credential_configuration`、`configuration_id` が重複すれば `409 configuration_exists`、`scope` が重複すれば `409 scope_exists`。
+        `vci.configuration_created` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VCICredentialConfigurationInput" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VCICredentialConfiguration" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/vci/credential-configurations/{id}:
+    get:
+      operationId: getVCICredentialConfiguration
+      summary: OpenID4VCI の資格情報の定義を返す
+      description: 権限 `clients:manage`。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 定義
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VCICredentialConfiguration" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateVCICredentialConfiguration
+      summary: OpenID4VCI の資格情報の定義を置き換える
+      description: |
+        権限 `clients:manage`。省いた項目は既定に戻る。発行済みの資格情報は変わらない（次の発行から効く）。
+        `vci.configuration_updated` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VCICredentialConfigurationInput" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VCICredentialConfiguration" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/vci/credential-configurations/{id}:delete:
+    post:
+      operationId: deleteVCICredentialConfiguration
+      summary: OpenID4VCI の資格情報の定義を消す
+      description: |
+        権限 `clients:manage`。発行済みの資格情報は失効させない（失効は `POST /v1/admin/vci/credentials/{id}:revoke`）。
+        `vci.configuration_deleted` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 消した
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/vci/credentials:
+    get:
+      operationId: listVCICredentials
+      summary: ユーザーに発行した Verifiable Credential の記録の一覧（ADR 0119）
+      description: |
+        権限 `credentials:revoke`。`user_id` は公開のユーザー ID。発行の新しい順。期限の過ぎた記録は消えていることがある。
+        クレームの値は持たない。フィーチャー `openid4vci` が動いていなければ `404 openid4vci_disabled`。
+      parameters:
+        - { name: user_id, in: query, required: true, schema: { type: string, maxLength: 64 } }
+      responses:
+        "200":
+          description: 記録
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VCIIssuedCredentials" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/vci/credentials/{id}:revoke:
+    post:
+      operationId: revokeVCICredential
+      summary: 発行した Verifiable Credential を失効させる（Token Status List）
+      description: |
+        権限 `credentials:revoke`。status list の値を 1（INVALID）にする。元には戻せない。失効済みなら何もしない。
+        `vci.credential_revoked` を監査ログに残す。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: 失効させた
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4781,3 +4915,96 @@ components:
         resources:
           type: array
           items: { $ref: "#/components/schemas/OAuthResource" }
+    VCIDisplay:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 256 }
+        locale: { type: string, maxLength: 35, description: BCP 47 の言語タグ }
+    VCIClaimInput:
+      type: object
+      required: [name, source]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64, description: クレームの名前（最上位） }
+        source: { type: string, description: "`user_id`・`email`・`email_verified`・`attribute:<key>`・`const`" }
+        value: { description: "`const` の値（JSON の値）" }
+        selectively_disclosable: { type: boolean, description: 選択的に開示できるクレームにするか（既定は真） }
+        mandatory: { type: boolean }
+        display:
+          type: array
+          maxItems: 16
+          items: { $ref: "#/components/schemas/VCIDisplay" }
+    VCIClaim:
+      type: object
+      required: [name, source, selectively_disclosable, mandatory]
+      properties:
+        name: { type: string }
+        source: { type: string }
+        value: {}
+        selectively_disclosable: { type: boolean }
+        mandatory: { type: boolean }
+        display:
+          type: array
+          items: { $ref: "#/components/schemas/VCIDisplay" }
+    VCICredentialConfigurationInput:
+      type: object
+      required: [configuration_id, format, vct, claims]
+      properties:
+        configuration_id: { type: string, maxLength: 128 }
+        scope: { type: string, maxLength: 128 }
+        format: { type: string, description: "`dc+sd-jwt`" }
+        vct: { type: string, maxLength: 256 }
+        display:
+          type: array
+          maxItems: 16
+          items: { $ref: "#/components/schemas/VCIDisplay" }
+        claims:
+          type: array
+          maxItems: 64
+          items: { $ref: "#/components/schemas/VCIClaimInput" }
+        validity: { type: integer, format: int64, description: 有効期間（秒。既定 90 日） }
+        require_tx_code: { type: boolean }
+    VCICredentialConfiguration:
+      type: object
+      required: [id, configuration_id, format, vct, display, claims, validity, require_tx_code, created_at, updated_at]
+      properties:
+        id: { type: string }
+        configuration_id: { type: string }
+        scope: { type: string, description: 無ければ省く }
+        format: { type: string }
+        vct: { type: string }
+        display:
+          type: array
+          items: { $ref: "#/components/schemas/VCIDisplay" }
+        claims:
+          type: array
+          items: { $ref: "#/components/schemas/VCIClaim" }
+        validity: { type: integer, format: int64 }
+        require_tx_code: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    VCICredentialConfigurations:
+      type: object
+      required: [configurations]
+      properties:
+        configurations:
+          type: array
+          items: { $ref: "#/components/schemas/VCICredentialConfiguration" }
+    VCIIssuedCredential:
+      type: object
+      required: [id, configuration_id, status_index, issued_at, expires_at]
+      description: 発行した Verifiable Credential の記録（クレームの値は含めない。ADR 0119）
+      properties:
+        id: { type: string }
+        configuration_id: { type: string }
+        status_index: { type: integer, description: status list の番号 }
+        issued_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time }
+    VCIIssuedCredentials:
+      type: object
+      required: [credentials]
+      properties:
+        credentials:
+          type: array
+          items: { $ref: "#/components/schemas/VCIIssuedCredential" }

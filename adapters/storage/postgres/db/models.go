@@ -621,3 +621,25 @@ type SharedOutbox struct {
 	DeliveredAt sql.NullString
 	Ord         int64
 }
+
+type VciCredentialConfiguration struct {
+	ID              string
+	RealmID         string
+	ConfigurationID string
+	Scope           string
+	Config          []byte
+	CreatedAt       string
+	UpdatedAt       string
+}
+
+type VciIssuedCredential struct {
+	ID              string
+	RealmID         string
+	UserID          string
+	ConfigurationID string
+	StatusIndex     int64
+	HolderJkt       string
+	IssuedAt        string
+	ExpiresAt       string
+	RevokedAt       sql.NullString
+}

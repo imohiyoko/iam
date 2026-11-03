@@ -71,6 +71,8 @@ const (
 	PAR = "par"
 	// ResourceIndicators は自前の API（リソースサーバー）向けのトークン（RFC 8707。ADR 0112）。
 	ResourceIndicators = "resource_indicators"
+	// OpenID4VCI は OpenID for Verifiable Credential Issuance 1.0 の発行者（ADR 0119）。
+	OpenID4VCI = "openid4vci"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

@@ -37,6 +37,7 @@ import (
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/samlidp"
+	"github.com/imohiyoko/iam/authn/vci"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authn/wsfed"
@@ -102,6 +103,8 @@ var featureCatalog = map[string]struct {
 	// ADR 0112。
 	feature.PAR:                {provider.PARFeature, module + "/features/par"},
 	feature.ResourceIndicators: {provider.ResourceFeature, module + "/features/resourceindicators"},
+	// ADR 0119。
+	feature.OpenID4VCI: {vci.Feature, module + "/features/openid4vci"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

@@ -2585,6 +2585,96 @@ type UserTOTP struct {
 	Id        string    `json:"id"`
 }
 
+// VCIClaim defines model for VCIClaim.
+type VCIClaim struct {
+	Display                *[]VCIDisplay `json:"display,omitempty"`
+	Mandatory              bool          `json:"mandatory"`
+	Name                   string        `json:"name"`
+	SelectivelyDisclosable bool          `json:"selectively_disclosable"`
+	Source                 string        `json:"source"`
+	Value                  interface{}   `json:"value,omitempty"`
+}
+
+// VCIClaimInput defines model for VCIClaimInput.
+type VCIClaimInput struct {
+	Display   *[]VCIDisplay `json:"display,omitempty"`
+	Mandatory *bool         `json:"mandatory,omitempty"`
+
+	// Name クレームの名前（最上位）
+	Name string `json:"name"`
+
+	// SelectivelyDisclosable 選択的に開示できるクレームにするか（既定は真）
+	SelectivelyDisclosable *bool `json:"selectively_disclosable,omitempty"`
+
+	// Source `user_id`・`email`・`email_verified`・`attribute:<key>`・`const`
+	Source string `json:"source"`
+
+	// Value `const` の値（JSON の値）
+	Value interface{} `json:"value,omitempty"`
+}
+
+// VCICredentialConfiguration defines model for VCICredentialConfiguration.
+type VCICredentialConfiguration struct {
+	Claims          []VCIClaim   `json:"claims"`
+	ConfigurationId string       `json:"configuration_id"`
+	CreatedAt       time.Time    `json:"created_at"`
+	Display         []VCIDisplay `json:"display"`
+	Format          string       `json:"format"`
+	Id              string       `json:"id"`
+	RequireTxCode   bool         `json:"require_tx_code"`
+
+	// Scope 無ければ省く
+	Scope     *string   `json:"scope,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Validity  int64     `json:"validity"`
+	Vct       string    `json:"vct"`
+}
+
+// VCICredentialConfigurationInput defines model for VCICredentialConfigurationInput.
+type VCICredentialConfigurationInput struct {
+	Claims          []VCIClaimInput `json:"claims"`
+	ConfigurationId string          `json:"configuration_id"`
+	Display         *[]VCIDisplay   `json:"display,omitempty"`
+
+	// Format `dc+sd-jwt`
+	Format        string  `json:"format"`
+	RequireTxCode *bool   `json:"require_tx_code,omitempty"`
+	Scope         *string `json:"scope,omitempty"`
+
+	// Validity 有効期間（秒。既定 90 日）
+	Validity *int64 `json:"validity,omitempty"`
+	Vct      string `json:"vct"`
+}
+
+// VCICredentialConfigurations defines model for VCICredentialConfigurations.
+type VCICredentialConfigurations struct {
+	Configurations []VCICredentialConfiguration `json:"configurations"`
+}
+
+// VCIDisplay defines model for VCIDisplay.
+type VCIDisplay struct {
+	// Locale BCP 47 の言語タグ
+	Locale *string `json:"locale,omitempty"`
+	Name   string  `json:"name"`
+}
+
+// VCIIssuedCredential 発行した Verifiable Credential の記録（クレームの値は含めない。ADR 0119）
+type VCIIssuedCredential struct {
+	ConfigurationId string     `json:"configuration_id"`
+	ExpiresAt       time.Time  `json:"expires_at"`
+	Id              string     `json:"id"`
+	IssuedAt        time.Time  `json:"issued_at"`
+	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
+
+	// StatusIndex status list の番号
+	StatusIndex int `json:"status_index"`
+}
+
+// VCIIssuedCredentials defines model for VCIIssuedCredentials.
+type VCIIssuedCredentials struct {
+	Credentials []VCIIssuedCredential `json:"credentials"`
+}
+
 // Validity defines model for Validity.
 type Validity struct {
 	ValidFrom  *time.Time `json:"valid_from,omitempty"`
@@ -2860,6 +2950,11 @@ type IssueRecoveryLinkJSONBody struct {
 	TtlSeconds *int   `json:"ttl_seconds,omitempty"`
 }
 
+// ListVCICredentialsParams defines parameters for ListVCICredentials.
+type ListVCICredentialsParams struct {
+	UserId string `form:"user_id" json:"user_id"`
+}
+
 // PutActionNamespaceJSONRequestBody defines body for PutActionNamespace for application/json ContentType.
 type PutActionNamespaceJSONRequestBody = ActionNamespaceInput
 
@@ -3039,6 +3134,12 @@ type IssueRecoveryLinkJSONRequestBody IssueRecoveryLinkJSONBody
 
 // SetUserRiskJSONRequestBody defines body for SetUserRisk for application/json ContentType.
 type SetUserRiskJSONRequestBody = RiskUpdate
+
+// CreateVCICredentialConfigurationJSONRequestBody defines body for CreateVCICredentialConfiguration for application/json ContentType.
+type CreateVCICredentialConfigurationJSONRequestBody = VCICredentialConfigurationInput
+
+// UpdateVCICredentialConfigurationJSONRequestBody defines body for UpdateVCICredentialConfiguration for application/json ContentType.
+type UpdateVCICredentialConfigurationJSONRequestBody = VCICredentialConfigurationInput
 
 // CreateWSFedRelyingPartyJSONRequestBody defines body for CreateWSFedRelyingParty for application/json ContentType.
 type CreateWSFedRelyingPartyJSONRequestBody = WSFedRelyingPartyInput
@@ -3468,6 +3569,27 @@ type ServerInterface interface {
 	// UnlockUser ユーザーのロック・待ち時間・失敗の回数を消す（フィーチャー account_lockout。ADR 0105）
 	// (POST /v1/admin/users/{id}:unlock)
 	UnlockUser(w http.ResponseWriter, r *http.Request, id string)
+	// ListVCICredentialConfigurations OpenID4VCI の資格情報の定義の一覧（iam が発行者。ADR 0119）
+	// (GET /v1/admin/vci/credential-configurations)
+	ListVCICredentialConfigurations(w http.ResponseWriter, r *http.Request)
+	// CreateVCICredentialConfiguration OpenID4VCI の資格情報の定義を登録する（ADR 0119）
+	// (POST /v1/admin/vci/credential-configurations)
+	CreateVCICredentialConfiguration(w http.ResponseWriter, r *http.Request)
+	// GetVCICredentialConfiguration OpenID4VCI の資格情報の定義を返す
+	// (GET /v1/admin/vci/credential-configurations/{id})
+	GetVCICredentialConfiguration(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateVCICredentialConfiguration OpenID4VCI の資格情報の定義を置き換える
+	// (PUT /v1/admin/vci/credential-configurations/{id})
+	UpdateVCICredentialConfiguration(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteVCICredentialConfiguration OpenID4VCI の資格情報の定義を消す
+	// (POST /v1/admin/vci/credential-configurations/{id}:delete)
+	DeleteVCICredentialConfiguration(w http.ResponseWriter, r *http.Request, id string)
+	// ListVCICredentials ユーザーに発行した Verifiable Credential の記録の一覧（ADR 0119）
+	// (GET /v1/admin/vci/credentials)
+	ListVCICredentials(w http.ResponseWriter, r *http.Request, params ListVCICredentialsParams)
+	// RevokeVCICredential 発行した Verifiable Credential を失効させる（Token Status List）
+	// (POST /v1/admin/vci/credentials/{id}:revoke)
+	RevokeVCICredential(w http.ResponseWriter, r *http.Request, id string)
 	// ListWSFedRelyingParties WS-Federation の RP の一覧（ADR 0110）
 	// (GET /v1/admin/wsfed/relying-parties)
 	ListWSFedRelyingParties(w http.ResponseWriter, r *http.Request)
@@ -7267,6 +7389,171 @@ func (siw *ServerInterfaceWrapper) UnlockUser(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListVCICredentialConfigurations operation middleware
+func (siw *ServerInterfaceWrapper) ListVCICredentialConfigurations(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListVCICredentialConfigurations(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateVCICredentialConfiguration operation middleware
+func (siw *ServerInterfaceWrapper) CreateVCICredentialConfiguration(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateVCICredentialConfiguration(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetVCICredentialConfiguration operation middleware
+func (siw *ServerInterfaceWrapper) GetVCICredentialConfiguration(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetVCICredentialConfiguration(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateVCICredentialConfiguration operation middleware
+func (siw *ServerInterfaceWrapper) UpdateVCICredentialConfiguration(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateVCICredentialConfiguration(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteVCICredentialConfiguration operation middleware
+func (siw *ServerInterfaceWrapper) DeleteVCICredentialConfiguration(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteVCICredentialConfiguration(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListVCICredentials operation middleware
+func (siw *ServerInterfaceWrapper) ListVCICredentials(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListVCICredentialsParams
+
+	// ------------- Required query parameter "user_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "user_id", r.URL.Query(), &params.UserId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "user_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user_id", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListVCICredentials(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeVCICredential operation middleware
+func (siw *ServerInterfaceWrapper) RevokeVCICredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeVCICredential(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListWSFedRelyingParties operation middleware
 func (siw *ServerInterfaceWrapper) ListWSFedRelyingParties(w http.ResponseWriter, r *http.Request) {
 
@@ -7638,6 +7925,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}", wrapper.GetOAuthResource)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}", wrapper.UpdateOAuthResource)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}:delete", wrapper.DeleteOAuthResource)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/vci/credential-configurations", wrapper.ListVCICredentialConfigurations)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/vci/credential-configurations", wrapper.CreateVCICredentialConfiguration)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/vci/credential-configurations/{id}", wrapper.GetVCICredentialConfiguration)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/vci/credential-configurations/{id}", wrapper.UpdateVCICredentialConfiguration)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/vci/credential-configurations/{id}:delete", wrapper.DeleteVCICredentialConfiguration)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/vci/credentials", wrapper.ListVCICredentials)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/vci/credentials/{id}:revoke", wrapper.RevokeVCICredential)
 
 	return m
 }
@@ -18115,6 +18409,498 @@ func (response UnlockUser404JSONResponse) VisitUnlockUserResponse(w http.Respons
 	return err
 }
 
+type ListVCICredentialConfigurationsRequestObject struct {
+}
+
+type ListVCICredentialConfigurationsResponseObject interface {
+	VisitListVCICredentialConfigurationsResponse(w http.ResponseWriter) error
+}
+
+type ListVCICredentialConfigurations200JSONResponse VCICredentialConfigurations
+
+func (response ListVCICredentialConfigurations200JSONResponse) VisitListVCICredentialConfigurationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVCICredentialConfigurations401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListVCICredentialConfigurations401JSONResponse) VisitListVCICredentialConfigurationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVCICredentialConfigurations403JSONResponse Error
+
+func (response ListVCICredentialConfigurations403JSONResponse) VisitListVCICredentialConfigurationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVCICredentialConfigurations404JSONResponse Error
+
+func (response ListVCICredentialConfigurations404JSONResponse) VisitListVCICredentialConfigurationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVCICredentialConfigurationRequestObject struct {
+	Body *CreateVCICredentialConfigurationJSONRequestBody
+}
+
+type CreateVCICredentialConfigurationResponseObject interface {
+	VisitCreateVCICredentialConfigurationResponse(w http.ResponseWriter) error
+}
+
+type CreateVCICredentialConfiguration201JSONResponse VCICredentialConfiguration
+
+func (response CreateVCICredentialConfiguration201JSONResponse) VisitCreateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVCICredentialConfiguration400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateVCICredentialConfiguration400JSONResponse) VisitCreateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVCICredentialConfiguration401JSONResponse Error
+
+func (response CreateVCICredentialConfiguration401JSONResponse) VisitCreateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVCICredentialConfiguration403JSONResponse Error
+
+func (response CreateVCICredentialConfiguration403JSONResponse) VisitCreateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVCICredentialConfiguration404JSONResponse Error
+
+func (response CreateVCICredentialConfiguration404JSONResponse) VisitCreateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVCICredentialConfiguration409JSONResponse Error
+
+func (response CreateVCICredentialConfiguration409JSONResponse) VisitCreateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVCICredentialConfigurationRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetVCICredentialConfigurationResponseObject interface {
+	VisitGetVCICredentialConfigurationResponse(w http.ResponseWriter) error
+}
+
+type GetVCICredentialConfiguration200JSONResponse VCICredentialConfiguration
+
+func (response GetVCICredentialConfiguration200JSONResponse) VisitGetVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVCICredentialConfiguration401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetVCICredentialConfiguration401JSONResponse) VisitGetVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVCICredentialConfiguration403JSONResponse Error
+
+func (response GetVCICredentialConfiguration403JSONResponse) VisitGetVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVCICredentialConfiguration404JSONResponse Error
+
+func (response GetVCICredentialConfiguration404JSONResponse) VisitGetVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVCICredentialConfigurationRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateVCICredentialConfigurationJSONRequestBody
+}
+
+type UpdateVCICredentialConfigurationResponseObject interface {
+	VisitUpdateVCICredentialConfigurationResponse(w http.ResponseWriter) error
+}
+
+type UpdateVCICredentialConfiguration200JSONResponse VCICredentialConfiguration
+
+func (response UpdateVCICredentialConfiguration200JSONResponse) VisitUpdateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVCICredentialConfiguration400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateVCICredentialConfiguration400JSONResponse) VisitUpdateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVCICredentialConfiguration401JSONResponse Error
+
+func (response UpdateVCICredentialConfiguration401JSONResponse) VisitUpdateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVCICredentialConfiguration403JSONResponse Error
+
+func (response UpdateVCICredentialConfiguration403JSONResponse) VisitUpdateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVCICredentialConfiguration404JSONResponse Error
+
+func (response UpdateVCICredentialConfiguration404JSONResponse) VisitUpdateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVCICredentialConfiguration409JSONResponse Error
+
+func (response UpdateVCICredentialConfiguration409JSONResponse) VisitUpdateVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVCICredentialConfigurationRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteVCICredentialConfigurationResponseObject interface {
+	VisitDeleteVCICredentialConfigurationResponse(w http.ResponseWriter) error
+}
+
+type DeleteVCICredentialConfiguration204Response struct {
+}
+
+func (response DeleteVCICredentialConfiguration204Response) VisitDeleteVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteVCICredentialConfiguration401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteVCICredentialConfiguration401JSONResponse) VisitDeleteVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVCICredentialConfiguration403JSONResponse Error
+
+func (response DeleteVCICredentialConfiguration403JSONResponse) VisitDeleteVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVCICredentialConfiguration404JSONResponse Error
+
+func (response DeleteVCICredentialConfiguration404JSONResponse) VisitDeleteVCICredentialConfigurationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVCICredentialsRequestObject struct {
+	Params ListVCICredentialsParams
+}
+
+type ListVCICredentialsResponseObject interface {
+	VisitListVCICredentialsResponse(w http.ResponseWriter) error
+}
+
+type ListVCICredentials200JSONResponse VCIIssuedCredentials
+
+func (response ListVCICredentials200JSONResponse) VisitListVCICredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVCICredentials401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListVCICredentials401JSONResponse) VisitListVCICredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVCICredentials403JSONResponse Error
+
+func (response ListVCICredentials403JSONResponse) VisitListVCICredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVCICredentials404JSONResponse Error
+
+func (response ListVCICredentials404JSONResponse) VisitListVCICredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeVCICredentialRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RevokeVCICredentialResponseObject interface {
+	VisitRevokeVCICredentialResponse(w http.ResponseWriter) error
+}
+
+type RevokeVCICredential204Response struct {
+}
+
+func (response RevokeVCICredential204Response) VisitRevokeVCICredentialResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeVCICredential401JSONResponse struct{ ErrorJSONResponse }
+
+func (response RevokeVCICredential401JSONResponse) VisitRevokeVCICredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeVCICredential403JSONResponse Error
+
+func (response RevokeVCICredential403JSONResponse) VisitRevokeVCICredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeVCICredential404JSONResponse Error
+
+func (response RevokeVCICredential404JSONResponse) VisitRevokeVCICredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListWSFedRelyingPartiesRequestObject struct {
 }
 
@@ -18907,6 +19693,27 @@ type StrictServerInterface interface {
 	// UnlockUser ユーザーのロック・待ち時間・失敗の回数を消す（フィーチャー account_lockout。ADR 0105）
 	// (POST /v1/admin/users/{id}:unlock)
 	UnlockUser(ctx context.Context, request UnlockUserRequestObject) (UnlockUserResponseObject, error)
+	// ListVCICredentialConfigurations OpenID4VCI の資格情報の定義の一覧（iam が発行者。ADR 0119）
+	// (GET /v1/admin/vci/credential-configurations)
+	ListVCICredentialConfigurations(ctx context.Context, request ListVCICredentialConfigurationsRequestObject) (ListVCICredentialConfigurationsResponseObject, error)
+	// CreateVCICredentialConfiguration OpenID4VCI の資格情報の定義を登録する（ADR 0119）
+	// (POST /v1/admin/vci/credential-configurations)
+	CreateVCICredentialConfiguration(ctx context.Context, request CreateVCICredentialConfigurationRequestObject) (CreateVCICredentialConfigurationResponseObject, error)
+	// GetVCICredentialConfiguration OpenID4VCI の資格情報の定義を返す
+	// (GET /v1/admin/vci/credential-configurations/{id})
+	GetVCICredentialConfiguration(ctx context.Context, request GetVCICredentialConfigurationRequestObject) (GetVCICredentialConfigurationResponseObject, error)
+	// UpdateVCICredentialConfiguration OpenID4VCI の資格情報の定義を置き換える
+	// (PUT /v1/admin/vci/credential-configurations/{id})
+	UpdateVCICredentialConfiguration(ctx context.Context, request UpdateVCICredentialConfigurationRequestObject) (UpdateVCICredentialConfigurationResponseObject, error)
+	// DeleteVCICredentialConfiguration OpenID4VCI の資格情報の定義を消す
+	// (POST /v1/admin/vci/credential-configurations/{id}:delete)
+	DeleteVCICredentialConfiguration(ctx context.Context, request DeleteVCICredentialConfigurationRequestObject) (DeleteVCICredentialConfigurationResponseObject, error)
+	// ListVCICredentials ユーザーに発行した Verifiable Credential の記録の一覧（ADR 0119）
+	// (GET /v1/admin/vci/credentials)
+	ListVCICredentials(ctx context.Context, request ListVCICredentialsRequestObject) (ListVCICredentialsResponseObject, error)
+	// RevokeVCICredential 発行した Verifiable Credential を失効させる（Token Status List）
+	// (POST /v1/admin/vci/credentials/{id}:revoke)
+	RevokeVCICredential(ctx context.Context, request RevokeVCICredentialRequestObject) (RevokeVCICredentialResponseObject, error)
 	// ListWSFedRelyingParties WS-Federation の RP の一覧（ADR 0110）
 	// (GET /v1/admin/wsfed/relying-parties)
 	ListWSFedRelyingParties(ctx context.Context, request ListWSFedRelyingPartiesRequestObject) (ListWSFedRelyingPartiesResponseObject, error)
@@ -22981,6 +23788,198 @@ func (sh *strictHandler) UnlockUser(w http.ResponseWriter, r *http.Request, id s
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UnlockUserResponseObject); ok {
 		if err := validResponse.VisitUnlockUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListVCICredentialConfigurations operation middleware
+func (sh *strictHandler) ListVCICredentialConfigurations(w http.ResponseWriter, r *http.Request) {
+	var request ListVCICredentialConfigurationsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListVCICredentialConfigurations(ctx, request.(ListVCICredentialConfigurationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListVCICredentialConfigurations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListVCICredentialConfigurationsResponseObject); ok {
+		if err := validResponse.VisitListVCICredentialConfigurationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateVCICredentialConfiguration operation middleware
+func (sh *strictHandler) CreateVCICredentialConfiguration(w http.ResponseWriter, r *http.Request) {
+	var request CreateVCICredentialConfigurationRequestObject
+
+	var body CreateVCICredentialConfigurationJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateVCICredentialConfiguration(ctx, request.(CreateVCICredentialConfigurationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateVCICredentialConfiguration")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateVCICredentialConfigurationResponseObject); ok {
+		if err := validResponse.VisitCreateVCICredentialConfigurationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetVCICredentialConfiguration operation middleware
+func (sh *strictHandler) GetVCICredentialConfiguration(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetVCICredentialConfigurationRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetVCICredentialConfiguration(ctx, request.(GetVCICredentialConfigurationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetVCICredentialConfiguration")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetVCICredentialConfigurationResponseObject); ok {
+		if err := validResponse.VisitGetVCICredentialConfigurationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateVCICredentialConfiguration operation middleware
+func (sh *strictHandler) UpdateVCICredentialConfiguration(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateVCICredentialConfigurationRequestObject
+
+	request.Id = id
+
+	var body UpdateVCICredentialConfigurationJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateVCICredentialConfiguration(ctx, request.(UpdateVCICredentialConfigurationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateVCICredentialConfiguration")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateVCICredentialConfigurationResponseObject); ok {
+		if err := validResponse.VisitUpdateVCICredentialConfigurationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteVCICredentialConfiguration operation middleware
+func (sh *strictHandler) DeleteVCICredentialConfiguration(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteVCICredentialConfigurationRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteVCICredentialConfiguration(ctx, request.(DeleteVCICredentialConfigurationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteVCICredentialConfiguration")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteVCICredentialConfigurationResponseObject); ok {
+		if err := validResponse.VisitDeleteVCICredentialConfigurationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListVCICredentials operation middleware
+func (sh *strictHandler) ListVCICredentials(w http.ResponseWriter, r *http.Request, params ListVCICredentialsParams) {
+	var request ListVCICredentialsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListVCICredentials(ctx, request.(ListVCICredentialsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListVCICredentials")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListVCICredentialsResponseObject); ok {
+		if err := validResponse.VisitListVCICredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeVCICredential operation middleware
+func (sh *strictHandler) RevokeVCICredential(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevokeVCICredentialRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeVCICredential(ctx, request.(RevokeVCICredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeVCICredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeVCICredentialResponseObject); ok {
+		if err := validResponse.VisitRevokeVCICredentialResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

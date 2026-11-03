@@ -122,6 +122,9 @@ const (
 	SAMLServiceProvider Prefix = "ssp"
 	// OAuthResource は自前の API（リソースサーバー。RFC 8707、ADR 0112）。
 	OAuthResource Prefix = "rsc"
+	// VCIConfiguration と VCICredential は OpenID4VCI の資格情報の定義と発行の記録（ADR 0119）。
+	VCIConfiguration Prefix = "vcc"
+	VCICredential    Prefix = "vcr"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。

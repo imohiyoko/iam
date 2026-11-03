@@ -1391,6 +1391,42 @@ type TOTPEnrollment struct {
 	Uri string `json:"uri"`
 }
 
+// VerifiableCredential 本人に発行した資格情報の記録（クレームの値は含めない）
+type VerifiableCredential struct {
+	ConfigurationId string     `json:"configuration_id"`
+	ExpiresAt       time.Time  `json:"expires_at"`
+	Id              string     `json:"id"`
+	IssuedAt        time.Time  `json:"issued_at"`
+	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
+}
+
+// VerifiableCredentialConfiguration defines model for VerifiableCredentialConfiguration.
+type VerifiableCredentialConfiguration struct {
+	ConfigurationId string `json:"configuration_id"`
+	Display         []struct {
+		Locale *string `json:"locale,omitempty"`
+		Name   string  `json:"name"`
+	} `json:"display"`
+	RequireTxCode bool   `json:"require_tx_code"`
+	Vct           string `json:"vct"`
+}
+
+// VerifiableCredentialOffer 資格情報の申し出（OpenID4VCI 4.1）
+type VerifiableCredentialOffer struct {
+	// CredentialOffer 申し出の値（`credential_issuer`・`credential_configuration_ids`・`grants`）
+	CredentialOffer map[string]interface{} `json:"credential_offer"`
+
+	// CredentialOfferReferenceUri 参照で渡す申し出の URI（`openid-credential-offer://?credential_offer_uri=…`）
+	CredentialOfferReferenceUri string `json:"credential_offer_reference_uri"`
+
+	// CredentialOfferUri 値で渡す申し出の URI（`openid-credential-offer://?credential_offer=…`）
+	CredentialOfferUri string    `json:"credential_offer_uri"`
+	ExpiresAt          time.Time `json:"expires_at"`
+
+	// TxCode ウォレットに入れさせる tx_code（求めたときだけ。この応答でだけ返す）
+	TxCode *string `json:"tx_code,omitempty"`
+}
+
 // Warning defines model for Warning.
 type Warning struct {
 	Action WarningAction `json:"action"`
@@ -1710,6 +1746,14 @@ type ConfirmRegisterTOTPJSONBody struct {
 	ReturnToken *bool  `json:"return_token,omitempty"`
 }
 
+// CreateMyVerifiableCredentialOfferJSONBody defines parameters for CreateMyVerifiableCredentialOffer.
+type CreateMyVerifiableCredentialOfferJSONBody struct {
+	CredentialConfigurationIds []string `json:"credential_configuration_ids"`
+
+	// TxCode tx_code を求める
+	TxCode *bool `json:"tx_code,omitempty"`
+}
+
 // RedeemRecoveryCodeJSONBody defines parameters for RedeemRecoveryCode.
 type RedeemRecoveryCodeJSONBody struct {
 	Code        string `json:"code"`
@@ -1914,6 +1958,9 @@ type CreateMyPersonalAccessTokenJSONRequestBody = CreatePersonalAccessToken
 
 // ConfirmRegisterTOTPJSONRequestBody defines body for ConfirmRegisterTOTP for application/json ContentType.
 type ConfirmRegisterTOTPJSONRequestBody ConfirmRegisterTOTPJSONBody
+
+// CreateMyVerifiableCredentialOfferJSONRequestBody defines body for CreateMyVerifiableCredentialOffer for application/json ContentType.
+type CreateMyVerifiableCredentialOfferJSONRequestBody CreateMyVerifiableCredentialOfferJSONBody
 
 // CheckMyAuthzJSONRequestBody defines body for CheckMyAuthz for application/json ContentType.
 type CheckMyAuthzJSONRequestBody = MyCheckRequest
@@ -2277,6 +2324,18 @@ type ServerInterface interface {
 	// StartRegisterTOTP TOTP（認証器アプリ）の登録を始める
 	// (POST /v1/me/totp:start)
 	StartRegisterTOTP(w http.ResponseWriter, r *http.Request)
+	// ListMyVerifiableCredentials 本人に発行した Verifiable Credential の記録の一覧（ADR 0119）
+	// (GET /v1/me/verifiable-credentials)
+	ListMyVerifiableCredentials(w http.ResponseWriter, r *http.Request)
+	// ListMyVerifiableCredentialConfigurations 本人が申し出を作れる資格情報の定義（フィーチャー openid4vci。ADR 0119）
+	// (GET /v1/me/verifiable-credentials/configurations)
+	ListMyVerifiableCredentialConfigurations(w http.ResponseWriter, r *http.Request)
+	// CreateMyVerifiableCredentialOffer ウォレットへの資格情報の申し出を作る（OpenID4VCI の Pre-Authorized Code Flow。ADR 0119）
+	// (POST /v1/me/verifiable-credentials/offers)
+	CreateMyVerifiableCredentialOffer(w http.ResponseWriter, r *http.Request)
+	// RevokeMyVerifiableCredential 本人に発行した Verifiable Credential を失効させる（Token Status List）
+	// (POST /v1/me/verifiable-credentials/{id}:revoke)
+	RevokeMyVerifiableCredential(w http.ResponseWriter, r *http.Request, id string)
 	// CheckMyAuthz 本人が操作をできるかを判定する（4.5）
 	// (POST /v1/me:check)
 	CheckMyAuthz(w http.ResponseWriter, r *http.Request)
@@ -5199,6 +5258,74 @@ func (siw *ServerInterfaceWrapper) StartRegisterTOTP(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListMyVerifiableCredentials operation middleware
+func (siw *ServerInterfaceWrapper) ListMyVerifiableCredentials(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyVerifiableCredentials(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyVerifiableCredentialConfigurations operation middleware
+func (siw *ServerInterfaceWrapper) ListMyVerifiableCredentialConfigurations(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyVerifiableCredentialConfigurations(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMyVerifiableCredentialOffer operation middleware
+func (siw *ServerInterfaceWrapper) CreateMyVerifiableCredentialOffer(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMyVerifiableCredentialOffer(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeMyVerifiableCredential operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMyVerifiableCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeMyVerifiableCredential(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CheckMyAuthz operation middleware
 func (siw *ServerInterfaceWrapper) CheckMyAuthz(w http.ResponseWriter, r *http.Request) {
 
@@ -5578,6 +5705,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/backchannel-requests", wrapper.ListMyBackchannelRequests)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/backchannel-requests/{id}:approve", wrapper.ApproveMyBackchannelRequest)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/backchannel-requests/{id}:deny", wrapper.DenyMyBackchannelRequest)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/verifiable-credentials/configurations", wrapper.ListMyVerifiableCredentialConfigurations)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/verifiable-credentials/offers", wrapper.CreateMyVerifiableCredentialOffer)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/verifiable-credentials", wrapper.ListMyVerifiableCredentials)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/verifiable-credentials/{id}:revoke", wrapper.RevokeMyVerifiableCredential)
 
 	return m
 }
@@ -13601,6 +13732,216 @@ func (response StartRegisterTOTP409JSONResponse) VisitStartRegisterTOTPResponse(
 	return err
 }
 
+type ListMyVerifiableCredentialsRequestObject struct {
+}
+
+type ListMyVerifiableCredentialsResponseObject interface {
+	VisitListMyVerifiableCredentialsResponse(w http.ResponseWriter) error
+}
+
+type ListMyVerifiableCredentials200JSONResponse struct {
+	Credentials []VerifiableCredential `json:"credentials"`
+}
+
+func (response ListMyVerifiableCredentials200JSONResponse) VisitListMyVerifiableCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyVerifiableCredentials401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyVerifiableCredentials401JSONResponse) VisitListMyVerifiableCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyVerifiableCredentials404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyVerifiableCredentials404JSONResponse) VisitListMyVerifiableCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyVerifiableCredentialConfigurationsRequestObject struct {
+}
+
+type ListMyVerifiableCredentialConfigurationsResponseObject interface {
+	VisitListMyVerifiableCredentialConfigurationsResponse(w http.ResponseWriter) error
+}
+
+type ListMyVerifiableCredentialConfigurations200JSONResponse struct {
+	Configurations []VerifiableCredentialConfiguration `json:"configurations"`
+}
+
+func (response ListMyVerifiableCredentialConfigurations200JSONResponse) VisitListMyVerifiableCredentialConfigurationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyVerifiableCredentialConfigurations401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyVerifiableCredentialConfigurations401JSONResponse) VisitListMyVerifiableCredentialConfigurationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyVerifiableCredentialConfigurations404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyVerifiableCredentialConfigurations404JSONResponse) VisitListMyVerifiableCredentialConfigurationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyVerifiableCredentialOfferRequestObject struct {
+	Body *CreateMyVerifiableCredentialOfferJSONRequestBody
+}
+
+type CreateMyVerifiableCredentialOfferResponseObject interface {
+	VisitCreateMyVerifiableCredentialOfferResponse(w http.ResponseWriter) error
+}
+
+type CreateMyVerifiableCredentialOffer201JSONResponse VerifiableCredentialOffer
+
+func (response CreateMyVerifiableCredentialOffer201JSONResponse) VisitCreateMyVerifiableCredentialOfferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyVerifiableCredentialOffer400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateMyVerifiableCredentialOffer400JSONResponse) VisitCreateMyVerifiableCredentialOfferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyVerifiableCredentialOffer401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateMyVerifiableCredentialOffer401JSONResponse) VisitCreateMyVerifiableCredentialOfferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyVerifiableCredentialOffer404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateMyVerifiableCredentialOffer404JSONResponse) VisitCreateMyVerifiableCredentialOfferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyVerifiableCredentialRequestObject struct {
+	Id string `json:"id"`
+}
+
+type RevokeMyVerifiableCredentialResponseObject interface {
+	VisitRevokeMyVerifiableCredentialResponse(w http.ResponseWriter) error
+}
+
+type RevokeMyVerifiableCredential204Response struct {
+}
+
+func (response RevokeMyVerifiableCredential204Response) VisitRevokeMyVerifiableCredentialResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeMyVerifiableCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeMyVerifiableCredential401JSONResponse) VisitRevokeMyVerifiableCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyVerifiableCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeMyVerifiableCredential404JSONResponse) VisitRevokeMyVerifiableCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CheckMyAuthzRequestObject struct {
 	Body *CheckMyAuthzJSONRequestBody
 }
@@ -14372,6 +14713,18 @@ type StrictServerInterface interface {
 	// StartRegisterTOTP TOTP（認証器アプリ）の登録を始める
 	// (POST /v1/me/totp:start)
 	StartRegisterTOTP(ctx context.Context, request StartRegisterTOTPRequestObject) (StartRegisterTOTPResponseObject, error)
+	// ListMyVerifiableCredentials 本人に発行した Verifiable Credential の記録の一覧（ADR 0119）
+	// (GET /v1/me/verifiable-credentials)
+	ListMyVerifiableCredentials(ctx context.Context, request ListMyVerifiableCredentialsRequestObject) (ListMyVerifiableCredentialsResponseObject, error)
+	// ListMyVerifiableCredentialConfigurations 本人が申し出を作れる資格情報の定義（フィーチャー openid4vci。ADR 0119）
+	// (GET /v1/me/verifiable-credentials/configurations)
+	ListMyVerifiableCredentialConfigurations(ctx context.Context, request ListMyVerifiableCredentialConfigurationsRequestObject) (ListMyVerifiableCredentialConfigurationsResponseObject, error)
+	// CreateMyVerifiableCredentialOffer ウォレットへの資格情報の申し出を作る（OpenID4VCI の Pre-Authorized Code Flow。ADR 0119）
+	// (POST /v1/me/verifiable-credentials/offers)
+	CreateMyVerifiableCredentialOffer(ctx context.Context, request CreateMyVerifiableCredentialOfferRequestObject) (CreateMyVerifiableCredentialOfferResponseObject, error)
+	// RevokeMyVerifiableCredential 本人に発行した Verifiable Credential を失効させる（Token Status List）
+	// (POST /v1/me/verifiable-credentials/{id}:revoke)
+	RevokeMyVerifiableCredential(ctx context.Context, request RevokeMyVerifiableCredentialRequestObject) (RevokeMyVerifiableCredentialResponseObject, error)
 	// CheckMyAuthz 本人が操作をできるかを判定する（4.5）
 	// (POST /v1/me:check)
 	CheckMyAuthz(ctx context.Context, request CheckMyAuthzRequestObject) (CheckMyAuthzResponseObject, error)
@@ -17763,6 +18116,111 @@ func (sh *strictHandler) StartRegisterTOTP(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StartRegisterTOTPResponseObject); ok {
 		if err := validResponse.VisitStartRegisterTOTPResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyVerifiableCredentials operation middleware
+func (sh *strictHandler) ListMyVerifiableCredentials(w http.ResponseWriter, r *http.Request) {
+	var request ListMyVerifiableCredentialsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyVerifiableCredentials(ctx, request.(ListMyVerifiableCredentialsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyVerifiableCredentials")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyVerifiableCredentialsResponseObject); ok {
+		if err := validResponse.VisitListMyVerifiableCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyVerifiableCredentialConfigurations operation middleware
+func (sh *strictHandler) ListMyVerifiableCredentialConfigurations(w http.ResponseWriter, r *http.Request) {
+	var request ListMyVerifiableCredentialConfigurationsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyVerifiableCredentialConfigurations(ctx, request.(ListMyVerifiableCredentialConfigurationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyVerifiableCredentialConfigurations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyVerifiableCredentialConfigurationsResponseObject); ok {
+		if err := validResponse.VisitListMyVerifiableCredentialConfigurationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateMyVerifiableCredentialOffer operation middleware
+func (sh *strictHandler) CreateMyVerifiableCredentialOffer(w http.ResponseWriter, r *http.Request) {
+	var request CreateMyVerifiableCredentialOfferRequestObject
+
+	var body CreateMyVerifiableCredentialOfferJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMyVerifiableCredentialOffer(ctx, request.(CreateMyVerifiableCredentialOfferRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMyVerifiableCredentialOffer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMyVerifiableCredentialOfferResponseObject); ok {
+		if err := validResponse.VisitCreateMyVerifiableCredentialOfferResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeMyVerifiableCredential operation middleware
+func (sh *strictHandler) RevokeMyVerifiableCredential(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevokeMyVerifiableCredentialRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeMyVerifiableCredential(ctx, request.(RevokeMyVerifiableCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeMyVerifiableCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeMyVerifiableCredentialResponseObject); ok {
+		if err := validResponse.VisitRevokeMyVerifiableCredentialResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

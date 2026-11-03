@@ -50,6 +50,7 @@ import (
 	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/vci"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authn/wsfed"
 	"github.com/imohiyoko/iam/authz/check"
@@ -207,6 +208,8 @@ type App struct {
 	// 動いていなければ nil。
 	dpop      *dpop.Verifier
 	oauthMTLS *provider.MTLS
+	// vci は OpenID4VCI の発行者（ADR 0119）。フィーチャー openid4vci が動いていないか、issuer（server.public_url）が無ければ nil。
+	vci *vci.Service
 }
 
 // New は起動前の検査を行い、App を組み立てる。binary はこのバイナリに含まれるフィーチャー。
@@ -519,6 +522,12 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		// SP に渡す Response は realm の issuer と ES256 の鍵で署名する（ADR 0115）。
 		a.samlIdP = &samlidp.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Tokens: a.tokens,
 			Issuer: a.issuer, Attributes: a.attributes != nil, HardwareAAL: a.hardwareAAL(), Log: d.Logger}
+	}
+	a.vci = nil
+	if plan.IsActive(feature.OpenID4VCI) && a.issuer != "" {
+		// 資格情報は realm の issuer と ES256 の鍵で署名する（ADR 0119）。
+		a.vci = &vci.Service{Storage: d.Storage, Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Sessions: a.sessions,
+			Accounts: a.accounts, Attributes: a.attributes, Issuer: a.issuer, AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), Log: d.Logger}
 	}
 	if plan.IsActive(feature.Impersonation) {
 		a.impersonationLimit = a.limiter(cfg.Security.Login.RateLimit.PerAccount)

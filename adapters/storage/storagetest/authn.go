@@ -81,6 +81,7 @@ var authnTests = []struct {
 	{"WSFed", testWSFed},
 	{"SAMLIdP", testSAMLIdP},
 	{"OAuthResources", testOAuthResources},
+	{"VCI", testVCI},
 }
 
 func notFound(what string, err error) error {

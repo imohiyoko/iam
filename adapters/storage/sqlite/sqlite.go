@@ -226,6 +226,9 @@ func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t
 // SAMLIdP は SAML の SP の登録と IdP の署名の証明書（ADR 0115）。
 func (t *tx) SAMLIdP() port.SAMLIdPRepo { return samlIdP{t.q} }
 
+// VCI は OpenID4VCI の資格情報の定義と発行の記録（ADR 0119）。
+func (t *tx) VCI() port.VCIRepo { return vci{t.q} }
+
 // ---------------------------------------------------------------------------
 
 type realms struct{ q *db.Queries }

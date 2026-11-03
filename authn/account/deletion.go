@@ -155,6 +155,10 @@ func (s *Service) purge(ctx context.Context, tx port.Tx, u port.User, actor audi
 	if err := tx.Users().Erase(ctx, u.RealmID, u.ID, s.Clock.Now()); err != nil {
 		return err
 	}
+	// 発行した Verifiable Credential は status list で失効させる（記録は期限まで残す。ADR 0119）。
+	if err := tx.VCI().RevokeCredentialsByUser(ctx, u.RealmID, u.ID, s.Clock.Now()); err != nil {
+		return err
+	}
 	return tx.DataKeys().Delete(ctx, u.ID)
 }
 
