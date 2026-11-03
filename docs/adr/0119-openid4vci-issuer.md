@@ -2,7 +2,7 @@
 
 - 状態: 承認
 - 日付: 2026-11-03
-- 関連: [design.md](../design.md) 5.12、9.3、11.0、[scope.md](../scope.md) 4 章、[0005](0005-crypto-no-rsa-pqc.md)、[0014](0014-pii-encryption-minimization.md)、
+- 関連: [design.md](../design.md) 5.13、9.3、11.0、[scope.md](../scope.md) 4 章、[0005](0005-crypto-no-rsa-pqc.md)、[0014](0014-pii-encryption-minimization.md)、
   [0022](0022-deny-reason-disclosure.md)、[0026](0026-first-party-clients.md)、[0066](0066-oidc-authorization-code-flow.md)、[0073](0073-build-and-feature-toggle.md)、
   [0080](0080-custom-attributes.md)、[0083](0083-multi-realm.md)、[0084](0084-auth-context-and-risk-in-authz.md)、[0089](0089-enterprise-full-scope.md)、
   [0108](0108-openid4vp-verifier.md)、[0112](0112-par-and-resource-indicators.md)、[0113](0113-sender-constrained-tokens.md)
@@ -78,7 +78,7 @@ OAuth 2.0 の 2 つのフロー（事前に認可したコードの Pre-Authoriz
 ### Authorization Code Flow
 
 - 定義の `scope` を、登録した連携先（ウォレット。公開クライアントなら PKCE）が authorize で要求する。`openid` が無くても、定義のスコープを含む
-  認可要求は受ける（OpenID4VCI のウォレットは `openid` を送らない）。トークンは今までどおり（ID トークンも出る）
+  認可要求は受ける（OpenID4VCI のウォレットは `openid` を送らない）。トークンは今までどおりだが、`openid` を含まない認可には ID トークンを出さない（OIDC Core 3.1.2.1）。UserInfo は今までどおり受ける
 - credential エンドポイントは UserInfo と同じ規則でアクセストークンを確かめる（ログインの系列、自前の API に向けたトークンは使えない、
   DPoP・mTLS の結び付け。0112・0113）。認可のスコープに定義のスコープがあるものだけ発行する。proof の `iss` は連携先の `client_id`（あれば比べる）
 - `authorization_details`（`type: openid_credential`）と `issuer_state`、`credential_identifier` は後続（スコープで足りる）。同意の画面は持たない（0026）

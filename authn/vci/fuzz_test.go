@@ -49,4 +49,3 @@ func FuzzParseCredentialRequest(f *testing.F) {
 		}
 	})
 }
-

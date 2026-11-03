@@ -91,7 +91,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | Device Authorization Grant（RFC 8628） | S P | ✅ | フィーチャー `device_flow`（ADR 0095） |
 | CIBA（poll・ping） | S | ✅ | フィーチャー `ciba`（ADR 0114）。手がかりは `login_hint`・`id_token_hint`。承認はプッシュの端末か本人の API。push モードと `login_hint_token` はなし |
 | FAPI 2.0 | S C | △ | フィーチャー `fapi2`（ADR 0117）。Security Profile を連携先か realm の単位で強いる。Message Signing（JAR・JARM）はなし |
-| OpenID4VCI | S | ❌ | |
+| OpenID4VCI | S | △ | フィーチャー `openid4vci`（ADR 0119）。SD-JWT VC（`dc+sd-jwt`）の発行者で、Pre-Authorized Code（tx_code）と scope の Authorization Code Flow、jwt の proof、Token Status List。mdoc・`authorization_details`・応答の暗号化・遅延発行は後続 |
 
 ## 5. M2M と API の保護
 

@@ -25,6 +25,7 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 | RP-Initiated Logout（`oidcc-rp-initiated-logout-*`。フィーチャー `oidc_logout`）：Discovery の `end_session_endpoint`、`id_token_hint`（期限切れ・改ざん・別の連携先・別の realm）、登録と一致しない `post_logout_redirect_uri` の拒否、`state` の受け渡し、確認の画面 | `TestOIDCRPInitiatedLogout`、`TestOIDCE2ERPInitiatedLogout`（zitadel/oidc の rp で）、`TestOIDCRPInitiatedLogoutMultiRealm`、`TestEndSessionRequest` |
 | Front-Channel Logout（`oidcc-frontchannel-*`）：`frontchannel_logout_uri` の iframe、`iss` と `sid`、CSP の `frame-src` | `TestOIDCRPInitiatedLogout`、`TestFrontChannelURLsAndHold` |
 | `acr_values`・`claims` の `id_token.acr`、ID トークンの `acr`（フィーチャー acr。ADR 0093） | `TestACRIDTokenAndStepUp`、`TestACRFeatureOff` |
+| OpenID4VCI 1.0 の発行者（Pre-Authorized Code・tx_code、scope の Authorization Code Flow、nonce、jwt の proof、SD-JWT VC、Token Status List。フィーチャー `openid4vci`） | `TestVCIPreAuthorizedFlow`、`TestVCITxCode`、`TestVCIAuthorizationCodeFlow`、`TestVCIOfferNeedsRecentAuth`、`TestVCIAccountDeletionRevokes`、`TestVCIRealmPathMetadata`、`TestVCIDisabled`、`TestVerifyProof`（authn/vci） |
 
 ## 既知の差異
 
@@ -50,6 +51,9 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 - CIBA（ADR 0114。フィーチャー `ciba`、既定オフ）は poll と ping だけで、push モード・署名した要求（`request`）・
   `login_hint_token`・`user_code` は扱わない。機密の連携先だけ。zitadel/oidc は CIBA を持たないので、backchannel authentication
   エンドポイントと token エンドポイントの CIBA の grant は `op.Server` の前で受ける。ID トークンに `nonce` は無い
+- OpenID4VCI（ADR 0119。フィーチャー `openid4vci`、既定オフ）は、オンのときだけ `grant_types_supported` に
+  `urn:ietf:params:oauth:grant-type:pre-authorized_code` と `pre-authorized_grant_anonymous_access_supported` を載せる。Pre-Authorized Code の
+  grant は `op.Server` の前で受ける。定義のスコープを含む認可要求は `openid` 無しでも受け、そのときは ID トークンを返さない
 - Token Exchange（RFC 8693。フィーチャー `token_exchange`、既定オフ）は、オンのときだけ `grant_types_supported` に
   `urn:ietf:params:oauth:grant-type:token-exchange` を載せる。発行するのは `access_token` だけで、`refresh_token`・`id_token`・
   `jwt` の `requested_token_type` は `invalid_request`。なりすましは Keycloak と同じ拡張のパラメーター `requested_subject` で求める（ADR 0099）

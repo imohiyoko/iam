@@ -409,6 +409,7 @@ Group のネスト、Org 階層（M7）。
 - 外部 IdP：SAML 2.0（Org 専用 SSO と realm の connection）、WS-Federation
 - ディレクトリ：LDAP / AD のバインド認証と同期、Kerberos / SPNEGO
 - 方式：WebAuthn の attestation と AAGUID の許可リスト、HOTP、SMS・音声、プッシュ、X.509・スマートカード、Verifiable Credentials（OpenID4VP）
+- Verifiable Credentials の発行（OpenID4VCI。下記）
 - リスクに応じた追加認証、新しい端末の検知、ボット対策、アカウント単位のロックアウト（下記）
 - Device Authorization Grant（下記）、本人の Personal Access Token（下記）、CIBA（下記）
 
@@ -608,6 +609,26 @@ realm ごとの規則で iam のユーザーに結び付く。
   契約テスト、AuthnRequest・HTTP-Redirect のクエリ・LogoutRequest のファジング
 - RSA-SHA256 の署名（RS256 のフィーチャーの後）、ほかの SP への SLO の伝播と IdP から始める SLO、HTTP-Artifact、SP のメタデータからの登録、
   `pre_token` フックでの属性、Scoping（IdP のプロキシ）
+
+#### OpenID4VCI の発行者（ADR 0119）
+
+**ゴール**：本人が iam のアカウントの属性を SD-JWT VC としてウォレットに受け取り、OpenID4VP の検証者（iam 自身を含む）に提示でき、失効も伝わる。
+
+- [x] フィーチャー `openid4vci`（既定オフ）。実装は `authn/vci`。オフならエンドポイントと本人の API は 404、管理 API は `404 openid4vci_disabled`、
+  Pre-Authorized Code の grant は `unsupported_grant_type`
+- [x] 管理 API（`/v1/admin/vci/credential-configurations`、`clients:manage`）で realm ごとに定義を置ける：`dc+sd-jwt`、vct、表示、クレームの対応
+  （プロフィール・属性・定数）、選択的開示と必須、有効期間、tx_code の必須、scope。`mso_mdoc` は `400 unsupported_format`（mdoc は後続）
+- [x] `/.well-known/openid-credential-issuer`（パスのある issuer は RFC 8414 と同じ形でも）と `/.well-known/jwt-vc-issuer`
+- [x] 本人が直近の本人確認のあと申し出（値と参照の URI）を作り、Pre-Authorized Code（任意の tx_code）で引き換えられる。同じコードの 2 度目・
+  誤った・無い tx_code・5 回の誤りのあと・期限の過ぎたコードを拒むテストがある
+- [x] 定義の scope で Authorization Code Flow（`openid` 無し、ID トークン無し）から発行でき、認可していない定義は `credential_request_denied`
+- [x] nonce エンドポイントと credential エンドポイント。proof の誤った nonce・使った nonce・違う aud・古い iat・違う iss・知らない定義・不正な要求を
+  拒むテストがある
+- [x] 資格情報は realm の ES256 の鍵で署名し、`cnf` で holder の鍵に結び付け、SD-JWT VC の検証（key binding 付き）に通るテストがある
+- [x] Token Status List で失効させ（本人・運営者・アカウントの削除）、status list token に出るテストがある
+- [x] 監査ログ、無効化で定義と記録を消す、memory・SQLite・PostgreSQL の契約テスト、proof と credential の要求のファジング
+- mdoc（`mso_mdoc`）、`authorization_details` と `credential_identifier`、資格情報の応答の暗号化、署名したメタデータ、遅延発行（deferred）、
+  バッチ発行、key attestation、停止の status への反映、ネストしたクレームの開示
 
 ### M10 エンタープライズの運用
 

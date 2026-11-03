@@ -378,8 +378,8 @@ func configurationMetadata(c port.VCICredentialConfiguration, cfg Config) map[st
 		meta["display"] = displays(cfg.Display)
 	}
 	out := map[string]any{
-		"format":                                cfg.Format,
-		"vct":                                   cfg.VCT,
+		"format": cfg.Format,
+		"vct":    cfg.VCT,
 		"cryptographic_binding_methods_supported": []string{"jwk"},
 		"credential_signing_alg_values_supported": []string{port.AlgES256},
 		"proof_types_supported": map[string]any{

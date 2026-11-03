@@ -39,7 +39,7 @@ const (
 	// NoncePath は nonce エンドポイント（OpenID4VCI 7）。
 	NoncePath = "/oauth2/vci/nonce"
 	// CredentialPath は credential エンドポイント（OpenID4VCI 8）。
-	CredentialPath = "/oauth2/vci/credential"
+	CredentialPath = "/oauth2/vci/credential" // #nosec G101 -- パス
 	// OfferPath は参照で渡す申し出（credential_offer_uri。OpenID4VCI 4.1.3）の接頭辞。後ろに ID が付く。
 	OfferPath = "/oauth2/vci/offers/"
 	// StatusListPath は status list token（Token Status List 8）。
@@ -117,25 +117,24 @@ func (e *Error) Error() string { return "vci: " + e.Code + ": " + e.Reason }
 const (
 	CodeInvalidProof                    = "invalid_proof"
 	CodeInvalidNonce                    = "invalid_nonce"
-	CodeInvalidCredentialRequest        = "invalid_credential_request"
+	CodeInvalidCredentialRequest        = "invalid_credential_request" // #nosec G101 -- エラーの code
 	CodeUnknownCredentialConfiguration  = "unknown_credential_configuration"
 	CodeUnknownCredentialIdentifier     = "unknown_credential_identifier"
-	CodeCredentialRequestDenied         = "credential_request_denied"
+	CodeCredentialRequestDenied         = "credential_request_denied" // #nosec G101 -- エラーの code
 	CodeInvalidEncryptionParameters     = "invalid_encryption_parameters"
 	CodeInvalidGrant                    = "invalid_grant"
 	CodeInvalidRequest                  = "invalid_request"
 	CodeInvalidToken                    = "invalid_token"
-	codeInvalidCredentialConfiguration  = "invalid_credential_configuration"
+	codeInvalidCredentialConfiguration  = "invalid_credential_configuration" // #nosec G101 -- エラーの code
 	codeUnsupportedFormat               = "unsupported_format"
 	codeConfigurationExists             = "configuration_exists"
 	codeScopeExists                     = "scope_exists"
-	codeUnknownConfigurationInOffer     = "unknown_credential_configuration"
 	codeStatusListExhausted             = "status_list_exhausted"
 	reasonMissingMandatoryClaim         = "missing_mandatory_claim"
 	reasonConfigurationNotAuthorized    = "configuration_not_authorized"
 	reasonSessionEnded                  = "session_ended"
 	reasonUnsupportedProofType          = "unsupported_proof_type"
-	reasonCredentialIdentifierNotIssued = "credential_identifier_not_issued"
+	reasonCredentialIdentifierNotIssued = "credential_identifier_not_issued" // #nosec G101 -- エラーの code
 )
 
 func vciError(code, reason string) *Error { return &Error{Code: code, Reason: reason} }

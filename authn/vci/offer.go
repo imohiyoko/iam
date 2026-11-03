@@ -24,7 +24,7 @@ const (
 	codePrefix     = "vci:code:v1:"
 	offerPrefix    = "vci:offer:v1:"
 	attemptPrefix  = "vci:txcode:v1:"
-	tokenPrefix    = "vci:token:v1:"
+	tokenPrefix    = "vci:token:v1:" // #nosec G101 -- 鍵の接頭辞
 	noncePrefix    = "vci:nonce:used:v1:"
 	codePurpose    = "flow.vci_pre_authorized_code"
 	offerPurpose   = "flow.vci_offer"
@@ -98,7 +98,7 @@ func newTxCode() (string, error) {
 		if err != nil {
 			return "", err
 		}
-		b.WriteByte(byte('0' + n.Int64()))
+		b.WriteByte("0123456789"[n.Int64()])
 	}
 	return b.String(), nil
 }
@@ -161,7 +161,7 @@ func (s *Service) ByReferenceURI(offerID string) string {
 }
 
 // ErrUnknownConfiguration は申し出の定義が realm に無いこと。
-var ErrUnknownConfiguration = errs.WithCode(errs.KindInvalid, codeUnknownConfigurationInOffer, "unknown credential configuration")
+var ErrUnknownConfiguration = errs.WithCode(errs.KindInvalid, CodeUnknownCredentialConfiguration, "unknown credential configuration")
 
 // CreateOffer は本人の申し出を作る（Pre-Authorized Code Flow。OpenID4VCI 4.1.1）。
 func (s *Service) CreateOffer(ctx context.Context, tx port.Tx, r OfferRequest, actor audit.Actor, requestID string) (Offer, error) {
