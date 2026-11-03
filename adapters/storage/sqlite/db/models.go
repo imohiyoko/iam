@@ -47,6 +47,7 @@ type AuthnClient struct {
 	TlsAuthValue                      string
 	CibaMode                          string
 	CibaNotificationEndpoint          string
+	Fapi2SecurityProfile              int64
 }
 
 type AuthnConnection struct {

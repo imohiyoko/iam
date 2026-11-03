@@ -47,6 +47,8 @@ type realmSettings struct {
 	DisabledMethods []string `json:"disabled_methods"`
 	// RequirePushedAuthorizationRequests はこの realm のすべての連携先に PAR（RFC 9126）を求める（フィーチャー par。ADR 0112）。
 	RequirePushedAuthorizationRequests bool `json:"require_pushed_authorization_requests"`
+	// FAPI2SecurityProfile はこの realm のすべての連携先に FAPI 2.0 Security Profile を強いる（フィーチャー fapi2。ADR 0117）。
+	FAPI2SecurityProfile bool `json:"fapi2_security_profile"`
 }
 
 // maxDisabledMethods は DisabledMethods の件数の上限（API の maxItems と同じ）。
@@ -68,7 +70,7 @@ func defaultRealmSettings(c config.Realm) realmSettings {
 		OrgDeletionGraceSeconds: int64(c.OrgDeletionGrace.D() / time.Second), UserDeletionGraceSeconds: int64(c.UserDeletionGrace.D() / time.Second),
 		EmailStorage: c.EmailStorage, QuotaCount: realmQuotaSettings(c.QuotaCount), DeclaredContextClients: slices.Clone(c.DeclaredContextClients),
 		PasskeyPolicy: normalizedPolicy(c.PasskeyPolicy), DisabledMethods: slices.Clone(c.DisabledMethods),
-		RequirePushedAuthorizationRequests: c.RequirePushedAuthorizationRequests,
+		RequirePushedAuthorizationRequests: c.RequirePushedAuthorizationRequests, FAPI2SecurityProfile: c.FAPI2SecurityProfile,
 	}
 }
 

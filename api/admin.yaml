@@ -4416,6 +4416,13 @@ components:
           type: boolean
           description: |
             認可要求を PAR（RFC 9126）で送らせる。フィーチャー `par` が動いているときだけ true にできる（ADR 0112）。省けば false
+        fapi2_security_profile:
+          type: boolean
+          description: |
+            FAPI 2.0 Security Profile を強いる（ADR 0117）。フィーチャー `fapi2`・`par` と、`dpop` か `mtls_client_auth` が動いているときだけ
+            true にできる。true なら private_key_jwt か mTLS の認証、`dpop_bound_access_tokens` か `tls_client_certificate_bound_access_tokens`、
+            ES256 の ID トークン、https の戻り先が要り、Device Authorization Grant は使えない。PAR を求め、リフレッシュトークンは
+            ローテーションしない。省けば false
     Client:
       type: object
       required: [client_id, name, redirect_uris, post_logout_redirect_uris, token_endpoint_auth_method, id_token_signed_response_alg, trust_level, created_at, updated_at]
@@ -4448,6 +4455,7 @@ components:
         backchannel_token_delivery_mode: { type: string, description: CIBA のトークンの受け取り方（フィーチャー `ciba` が動いていて、登録したときだけ返す） }
         backchannel_client_notification_endpoint: { type: string, description: ping の通知先（ping のときだけ） }
         require_pushed_authorization_requests: { type: boolean, description: PAR を求める連携先だけ true を返す（求めないなら省く） }
+        fapi2_security_profile: { type: boolean, description: FAPI 2.0 Security Profile を強いる連携先だけ true を返す（強いないなら省く） }
         client_secret: { type: string, description: 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す） }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -4511,6 +4519,11 @@ components:
         require_pushed_authorization_requests:
           type: boolean
           description: この realm のすべての連携先に PAR（RFC 9126）を求める（フィーチャー `par`。ADR 0112）
+        fapi2_security_profile:
+          type: boolean
+          description: |
+            この realm のすべての連携先に FAPI 2.0 Security Profile を強いる（フィーチャー `fapi2`。ADR 0117）。条件を満たさない連携先は
+            登録できず、既にあるものは認証できなくなる。Discovery は強いるものだけを出す
     Realm:
       type: object
       required: [id, slug, hosts, default, settings, created_at, updated_at]
@@ -4549,6 +4562,7 @@ components:
               type: array
               items: { type: string }
             require_pushed_authorization_requests: { type: boolean }
+            fapi2_security_profile: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     RealmInput:

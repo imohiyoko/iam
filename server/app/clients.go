@@ -86,6 +86,9 @@ func clientOutBase(c port.Client, secret string, deviceFlow, ciba bool) (adminap
 	if c.RequirePAR {
 		out.RequirePushedAuthorizationRequests = &c.RequirePAR
 	}
+	if c.FAPI2 {
+		out.Fapi2SecurityProfile = &c.FAPI2
+	}
 	return out, nil
 }
 
@@ -117,6 +120,9 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.RequirePushedAuthorizationRequests != nil {
 		in.RequirePAR = *b.RequirePushedAuthorizationRequests
+	}
+	if b.Fapi2SecurityProfile != nil {
+		in.FAPI2 = *b.Fapi2SecurityProfile
 	}
 	if b.DpopBoundAccessTokens != nil {
 		in.DPoPBoundAccessTokens = *b.DpopBoundAccessTokens

@@ -76,7 +76,9 @@ var (
 // Proof は確かめた証明。
 type Proof struct {
 	// JKT は証明の鍵の JWK SHA-256 Thumbprint（base64url）。
-	JKT   string
+	JKT string
+	// Alg は証明の JWS の alg（FAPI 2.0 の連携先はアルゴリズムを絞る。ADR 0117）。
+	Alg   string
 	JTI   string
 	HTM   string
 	HTU   string
@@ -132,7 +134,7 @@ func Parse(raw string) (Proof, error) {
 	if err != nil {
 		return Proof{}, ErrInvalidProof
 	}
-	p := Proof{JKT: base64.RawURLEncoding.EncodeToString(tp), JTI: *c.JTI, HTM: *c.HTM, HTU: *c.HTU,
+	p := Proof{JKT: base64.RawURLEncoding.EncodeToString(tp), Alg: h.Algorithm, JTI: *c.JTI, HTM: *c.HTM, HTU: *c.HTU,
 		IAT: time.Unix(int64(*c.IAT), 0)}
 	if c.ATH != nil {
 		p.ATH = *c.ATH

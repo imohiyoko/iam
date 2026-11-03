@@ -211,7 +211,7 @@ var cleaners = map[string]cleaner{
 		if err != nil {
 			return 0, err
 		}
-		r, err := eachRealmRequiringPAR(ctx, tx, -1, time.Time{})
+		r, err := eachRealmFlag(ctx, tx, "require_pushed_authorization_requests", -1, time.Time{})
 		return n + r, err
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
 		n, err := eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
@@ -224,7 +224,7 @@ var cleaners = map[string]cleaner{
 		if err != nil || n >= limit {
 			return n, err
 		}
-		r, err := eachRealmRequiringPAR(ctx, tx, limit-n, now)
+		r, err := eachRealmFlag(ctx, tx, "require_pushed_authorization_requests", limit-n, now)
 		return n + r, err
 	}},
 	// 自前の API（リソースサーバー）の登録を消す（ADR 0112）。発行済みの aud を持つトークンは、フィーチャーが止まれば
@@ -250,6 +250,28 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.SAMLIdP().Purge(ctx, limit)
 		}},
+	// 連携先と realm の FAPI 2.0 Security Profile を外す（ADR 0117）。PAR の必須・送信者制約の設定は連携先に残したもののまま。
+	feature.FAPI2: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		n, err := eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.FAPI2, nil })
+		if err != nil {
+			return 0, err
+		}
+		r, err := eachRealmFlag(ctx, tx, "fapi2_security_profile", -1, time.Time{})
+		return n + r, err
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		n, err := eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
+			if !c.FAPI2 {
+				return false, nil
+			}
+			c.FAPI2, c.UpdatedAt = false, now
+			return true, tx.Clients().Update(ctx, c)
+		})
+		if err != nil || n >= limit {
+			return n, err
+		}
+		r, err := eachRealmFlag(ctx, tx, "fapi2_security_profile", limit-n, now)
+		return n + r, err
+	}},
 	// SSF の送信側のストリーム（対象・poll の待ち・push の Authorization の鍵とともに）を消す（ADR 0118）。
 	feature.SSFTransmitter: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.SSFStreams().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
@@ -262,9 +284,9 @@ var cleaners = map[string]cleaner{
 		}},
 }
 
-// eachRealmRequiringPAR は realm の設定の require_pushed_authorization_requests が真の realm を数える。now が零でなければ、
-// 最大 limit 件（負なら全部）を偽にする（ほかの設定はそのまま残す）。
-func eachRealmRequiringPAR(ctx context.Context, tx port.Tx, limit int, now time.Time) (int, error) {
+// eachRealmFlag は realm の設定の真偽値の項目 key（require_pushed_authorization_requests など）が真の realm を数える。
+// now が零でなければ、最大 limit 件（負なら全部）を偽にする（ほかの設定はそのまま残す）。
+func eachRealmFlag(ctx context.Context, tx port.Tx, key string, limit int, now time.Time) (int, error) {
 	realms, err := tx.Realms().List(ctx)
 	if err != nil {
 		return 0, err
@@ -279,14 +301,14 @@ func eachRealmRequiringPAR(ctx context.Context, tx port.Tx, limit int, now time.
 			continue
 		}
 		var on bool
-		if json.Unmarshal(m["require_pushed_authorization_requests"], &on) != nil || !on {
+		if json.Unmarshal(m[key], &on) != nil || !on {
 			continue
 		}
 		n++
 		if now.IsZero() {
 			continue
 		}
-		m["require_pushed_authorization_requests"] = json.RawMessage("false")
+		m[key] = json.RawMessage("false")
 		if r.Settings, err = json.Marshal(m); err != nil {
 			return n, err
 		}

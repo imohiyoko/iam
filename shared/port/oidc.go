@@ -82,6 +82,8 @@ type Client struct {
 	CIBANotificationEndpoint string
 	// RequirePAR は認可要求を PAR（RFC 9126）で送らせる（require_pushed_authorization_requests。フィーチャー par。ADR 0112）。
 	RequirePAR bool
+	// FAPI2 はこの連携先に FAPI 2.0 Security Profile を強いる（fapi2_security_profile。フィーチャー fapi2。ADR 0117）。
+	FAPI2 bool
 }
 
 // CIBA のトークンの受け取り方（ADR 0114）。push は持たない。
