@@ -128,3 +128,4 @@
 | [0115](0115-saml-idp.md) | SAML 2.0 の IdP を持ち、要求は登録した SP の完全一致と署名で確かめ、応答は realm の ES256 の鍵で XML 署名する | 承認 |
 | [0116](0116-workload-identity-federation.md) | Workload Identity Federation は RFC 8693 の交換で外部の JWT をサービスアカウントのトークンに替え、条件は完全一致・一覧・前方一致に限る | 承認 |
 | [0117](0117-fapi2-security-profile.md) | FAPI 2.0 Security Profile は連携先と realm の単位のプロファイルにし、PAR・送信者制約・認証方式・アルゴリズムを登録と実行の両方で強いる | 承認 |
+| [0119](0119-openid4vci-issuer.md) | OpenID4VCI の発行者は realm の issuer と同じ認可サーバーにし、SD-JWT VC を realm の ES256 の鍵で署名して、Token Status List で失効させる | 承認 |

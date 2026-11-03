@@ -116,6 +116,8 @@ const (
 	ActionMeDeleteManaged    = "me:delete_managed"    // 管理ユーザーのアカウントの削除（11.3、ADR 0076）
 	// ActionMePersonalAccessTokens は Personal Access Token の作成（ADR 0109）。
 	ActionMePersonalAccessTokens = "me:personal_access_tokens"
+	// ActionMeVerifiableCredentials は Verifiable Credential の申し出の作成（ウォレットへの発行。ADR 0119）。
+	ActionMeVerifiableCredentials = "me:verifiable_credentials" // #nosec G101 -- 権限の名前で、秘密ではない
 )
 
 // SuspensionPerm は停止の種別ごとの停止・解除の権限（`suspensions:<category>`。4.11）。

@@ -186,29 +186,12 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 		CreatedAt: now, ExpiresAt: now.Add(ttl), JKT: b.JKT, X5T: b.X5T}); err != nil {
 		return Issued{}, err
 	}
-	claims, err := t.userClaims(ctx, tx, g)
-	if err != nil {
-		return Issued{}, err
-	}
-	claims["iss"], claims["aud"], claims["azp"] = t.Issuer, cl.PublicID, cl.PublicID
-	claims["iat"], claims["exp"] = now.Unix(), now.Add(ttlOr(t.IDTokenTTL, DefaultIDTokenTTL)).Unix()
-	claims["auth_time"], claims["amr"], claims["sid"] = g.AuthTime.Unix(), g.AuthMethods, g.SID
-	if t.ACR && g.ACR != "" {
-		claims["acr"] = g.ACR
-	}
-	if nonce != "" {
-		claims["nonce"] = nonce
-	}
-	if err := t.hookClaims(ctx, cl, g, claims); err != nil {
-		return Issued{}, err
-	}
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		return Issued{}, err
-	}
-	idToken, err := t.Keys.Sign(ctx, tx, g.RealmID, cl.IDTokenAlg, "JWT", payload)
-	if err != nil {
-		return Issued{}, err
+	// openid を含まない認可（OpenID4VCI のウォレット。ADR 0119）には ID トークンを出さない（OIDC Core 3.1.2.1）。
+	var idToken string
+	if slices.Contains(g.Scopes, ScopeOpenID) {
+		if idToken, err = t.idToken(ctx, tx, cl, g, nonce, now); err != nil {
+			return Issued{}, err
+		}
 	}
 	out := Issued{AccessToken: token, ExpiresIn: ttl, IDToken: idToken, Scopes: g.Scopes, Grant: g, Binding: b}
 	if !refresh {
@@ -225,6 +208,31 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 	}
 	out.RefreshToken = rt
 	return out, nil
+}
+
+// idToken は ID トークンを作る。
+func (t *Tokens) idToken(ctx context.Context, tx port.Tx, cl port.Client, g port.Grant, nonce string, now time.Time) (string, error) {
+	claims, err := t.userClaims(ctx, tx, g)
+	if err != nil {
+		return "", err
+	}
+	claims["iss"], claims["aud"], claims["azp"] = t.Issuer, cl.PublicID, cl.PublicID
+	claims["iat"], claims["exp"] = now.Unix(), now.Add(ttlOr(t.IDTokenTTL, DefaultIDTokenTTL)).Unix()
+	claims["auth_time"], claims["amr"], claims["sid"] = g.AuthTime.Unix(), g.AuthMethods, g.SID
+	if t.ACR && g.ACR != "" {
+		claims["acr"] = g.ACR
+	}
+	if nonce != "" {
+		claims["nonce"] = nonce
+	}
+	if err := t.hookClaims(ctx, cl, g, claims); err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	return t.Keys.Sign(ctx, tx, g.RealmID, cl.IDTokenAlg, "JWT", payload)
 }
 
 // SubjectClaims は、ID トークン以外で本人を連携先に渡すとき（WS-Federation。ADR 0110）のクレーム。中身は ID トークンと同じ

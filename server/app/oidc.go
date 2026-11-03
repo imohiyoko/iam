@@ -19,6 +19,7 @@ import (
 	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
+	"github.com/imohiyoko/iam/authn/vci"
 	"github.com/imohiyoko/iam/shared/acr"
 	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/feature"
@@ -62,7 +63,8 @@ const (
 
 // isOIDC は OIDC Provider のパスかを返す。
 func isOIDC(path string) bool {
-	return path == oidc.DiscoveryEndpoint || path == wellKnownAS || path == wellKnownResource || strings.HasPrefix(path, "/oauth2/")
+	return path == oidc.DiscoveryEndpoint || path == wellKnownAS || path == wellKnownResource || strings.HasPrefix(path, "/oauth2/") ||
+		path == wellKnownCredentialIssuer || path == wellKnownJWTVCIssuer
 }
 
 // newOIDCHandler は OIDC Provider のハンドラを返す。issuer（server.public_url）が無ければ nil。
@@ -87,13 +89,18 @@ func newOIDCHandler(a *App) http.Handler {
 	mux.Handle(oidc.DiscoveryEndpoint, ops)
 	mux.Handle(oidcKeys, ops)
 	// DPoP の nonce（ADR 0113）は token エンドポイントと UserInfo の応答に付ける。
+	token := http.Handler(ops)
 	if a.ciba != nil {
 		// CIBA の grant は op.Server の前で受ける（ADR 0114）。
-		mux.Handle(oidcToken, a.withDPoPNonce(srv.withCIBAToken(ops)))
+		token = srv.withCIBAToken(token)
 		mux.HandleFunc(oidcBackchannel, srv.backchannelAuthorize)
-	} else {
-		mux.Handle(oidcToken, a.withDPoPNonce(ops))
 	}
+	if a.vci != nil {
+		// OpenID4VCI の Pre-Authorized Code の grant も op.Server の前で受ける（ADR 0119）。
+		token = srv.withPreAuthorizedToken(token)
+		srv.registerVCI(mux)
+	}
+	mux.Handle(oidcToken, a.withDPoPNonce(token))
 	mux.Handle(oidcIntrospect, ops)
 	mux.Handle(oidcRevoke, ops)
 	// 認可要求とその続きはブラウザのセッションを見る。
@@ -130,7 +137,8 @@ func newOIDCHandler(a *App) http.Handler {
 // CORS を付けない。プリフライトに答えたら true。
 func (s *oidcServer) cors(w http.ResponseWriter, r *http.Request) bool {
 	origin := r.Header.Get("Origin")
-	public := r.URL.Path == oidc.DiscoveryEndpoint || r.URL.Path == oidcKeys || r.URL.Path == wellKnownAS || r.URL.Path == wellKnownResource
+	public := r.URL.Path == oidc.DiscoveryEndpoint || r.URL.Path == oidcKeys || r.URL.Path == wellKnownAS || r.URL.Path == wellKnownResource ||
+		(s.a.vci != nil && isVCIPath(r.URL.Path))
 	browser := r.URL.Path == oidcToken || r.URL.Path == oidcUserinfo || r.URL.Path == oidcRevoke || r.URL.Path == oidcPAR
 	if origin == "" || !public && !browser {
 		return false
@@ -276,6 +284,8 @@ type discovery struct {
 	RequirePushedAuthorizationRequests bool   `json:"require_pushed_authorization_requests,omitempty"`
 	// 認可応答の iss（RFC 9207 3。ADR 0117）。
 	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported"`
+	// OpenID4VCI の Pre-Authorized Code（OpenID4VCI 12.3。フィーチャー openid4vci）。
+	PreAuthorizedGrantAnonymousAccessSupported bool `json:"pre-authorized_grant_anonymous_access_supported,omitempty"`
 }
 
 func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Response, error) {
@@ -338,6 +348,10 @@ func (s *oidcServer) metadata() discovery {
 	s.senderConstraintDiscovery(&d)
 	d.AuthorizationResponseIssParameterSupported = true
 	s.fapi2Discovery(&d)
+	if s.a.vci != nil {
+		d.GrantTypesSupported = append(slices.Clone(d.GrantTypesSupported), oidc.GrantType(vci.GrantTypePreAuthorized))
+		d.PreAuthorizedGrantAnonymousAccessSupported = true
+	}
 	return d
 }
 
@@ -366,6 +380,8 @@ type opClient struct {
 	// invalid_target（Authorize が戻り先に返す。ADR 0112）。
 	resource    *port.OAuthResource
 	resourceErr error
+	// credentialScopes は OpenID4VCI の定義のスコープ（ADR 0119。フィーチャー openid4vci）。
+	credentialScopes []string
 }
 
 func (s *oidcServer) opClient(c port.Client) opClient {
@@ -427,7 +443,7 @@ func (opClient) RestrictAdditionalAccessTokenScopes() func([]string) []string {
 // IsScopeAllowed は op に、標準でないスコープ（attributes と、resource のリソースのスコープ）を残させる。使えるかは
 // authorize が決める。
 func (c opClient) IsScopeAllowed(sc string) bool {
-	return sc == provider.ScopeAttributes || (c.resource != nil && slices.Contains(c.resource.Scopes, sc))
+	return sc == provider.ScopeAttributes || (c.resource != nil && slices.Contains(c.resource.Scopes, sc)) || slices.Contains(c.credentialScopes, sc)
 }
 func (opClient) IDTokenUserinfoClaimsAssertion() bool { return false }
 func (opClient) ClockSkew() time.Duration             { return 0 }
@@ -476,6 +492,11 @@ func (s *oidcServer) VerifyAuthRequest(ctx context.Context, r *op.Request[oidc.A
 // （フィーチャー resource_indicators がオフなら resource は見ない）。
 func (s *oidcServer) clientRequest(ctx context.Context, r *op.Request[oidc.AuthRequest], cl port.Client) (*op.ClientRequest[oidc.AuthRequest], error) {
 	oc := s.opClient(cl)
+	scopes, err := s.credentialScopes(ctx)
+	if err != nil {
+		return nil, s.fail(ctx, err)
+	}
+	oc.credentialScopes = scopes
 	if res := r.Form["resource"]; s.a.resources != nil && len(res) > 0 {
 		x, err := s.resource(ctx, res, cl.PublicID)
 		switch {
@@ -544,7 +565,10 @@ func (s *oidcServer) Authorize(ctx context.Context, r *op.ClientRequest[oidc.Aut
 // provider.AuthRequest にする。ログインの状態は見ない（PAR の受け付けでも使う）。
 func (s *oidcServer) authRequest(r *op.ClientRequest[oidc.AuthRequest]) (provider.AuthRequest, error) {
 	d := r.Data
-	if !slices.Contains(d.Scopes, provider.ScopeOpenID) {
+	oc, _ := r.Client.(opClient)
+	// OpenID4VCI のウォレットは openid を送らない。定義のスコープを含む認可要求は openid 無しでも受ける（ADR 0119）。
+	credential := slices.ContainsFunc(d.Scopes, func(sc string) bool { return slices.Contains(oc.credentialScopes, sc) })
+	if !slices.Contains(d.Scopes, provider.ScopeOpenID) && !credential {
 		return provider.AuthRequest{}, oidc.ErrInvalidScope().WithDescription("the openid scope is required")
 	}
 	if d.ResponseMode != "" && d.ResponseMode != oidc.ResponseModeQuery {
@@ -554,7 +578,6 @@ func (s *oidcServer) authRequest(r *op.ClientRequest[oidc.AuthRequest]) (provide
 	if d.CodeChallengeMethod != oidc.CodeChallengeMethodS256 || !provider.ValidPKCEValue(d.CodeChallenge) {
 		return provider.AuthRequest{}, oidc.ErrInvalidRequest().WithDescription("code_challenge with S256 is required")
 	}
-	oc, _ := r.Client.(opClient)
 	if oc.resourceErr != nil {
 		return provider.AuthRequest{}, oc.resourceErr
 	}
@@ -565,6 +588,7 @@ func (s *oidcServer) authRequest(r *op.ClientRequest[oidc.AuthRequest]) (provide
 		// 自前の API に向けた認可（RFC 8707、ADR 0112）。リソースのスコープも選べ、アクセストークンの aud はリソースの URI。
 		req.Resource, allowed = oc.resource.URI, append(slices.Clone(allowed), oc.resource.Scopes...)
 	}
+	allowed = append(slices.Clone(allowed), oc.credentialScopes...)
 	for _, sc := range d.Scopes {
 		if slices.Contains(allowed, sc) && !slices.Contains(req.Scopes, sc) {
 			req.Scopes = append(req.Scopes, sc)

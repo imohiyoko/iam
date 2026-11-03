@@ -125,6 +125,9 @@ const (
 	// WorkloadIdentityProvider と WorkloadIdentityBinding は Workload Identity Federation の発行者と結び付け（ADR 0116）。
 	WorkloadIdentityProvider Prefix = "wip"
 	WorkloadIdentityBinding  Prefix = "wib"
+	// VCIConfiguration と VCICredential は OpenID4VCI の資格情報の定義と発行の記録（ADR 0119）。
+	VCIConfiguration Prefix = "vcc"
+	VCICredential    Prefix = "vcr"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。

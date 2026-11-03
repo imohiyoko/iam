@@ -75,6 +75,8 @@ const (
 	FAPI2 = "fapi2"
 	// WorkloadIdentity は Workload Identity Federation（外部の JWT をサービスアカウントのトークンに替える。ADR 0116）。
 	WorkloadIdentity = "workload_identity"
+	// OpenID4VCI は OpenID for Verifiable Credential Issuance 1.0 の発行者（ADR 0119）。
+	OpenID4VCI = "openid4vci"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

@@ -277,6 +277,12 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.WorkloadIdentity().Purge(ctx, limit)
 		}},
+	// 資格情報の定義と発行の記録を消す（ADR 0119）。申し出・アクセストークンは EphemeralStore にあり、期限で消える。
+	// status list も出なくなるので、発行済みの資格情報は検証者に確かめられなくなる（fail-closed）。
+	feature.OpenID4VCI: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.VCI().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return tx.VCI().Purge(ctx, limit)
+		}},
 }
 
 // eachRealmFlag は realm の設定の真偽値の項目 key（require_pushed_authorization_requests など）が真の realm を数える。
