@@ -81,7 +81,8 @@ func (f *fixture) leaf(t *testing.T, o leafOpts) *x509.Certificate {
 
 func (f *fixture) method(t *testing.T, edit func(*RealmConfig)) *Method {
 	t.Helper()
-	rc := RealmConfig{TrustAnchors: []string{pemOf(f.root.cert)}}
+	// テストの OCSP・CRL は 127.0.0.1 にある。
+	rc := RealmConfig{TrustAnchors: []string{pemOf(f.root.cert)}, Revocation: Revocation{AllowPrivateNetworks: true}}
 	if edit != nil {
 		edit(&rc)
 	}
@@ -516,4 +517,24 @@ func codeOf(err error) string {
 		return e.Code
 	}
 	return ""
+}
+
+// 証明書の AIA・CRL 配布点がプライベートのアドレスを指すときは、既定では問い合わせない（SSRF を防ぐ）。
+// 運営者の設定した ocsp_url はプライベートでも問い合わせる。
+func TestRevocationPrivateAddresses(t *testing.T) {
+	f := newFixture(t)
+	good := f.leaf(t, leafOpts{})
+	guarded := f.method(t, func(rc *RealmConfig) {
+		rc.Revocation = Revocation{Mode: RevocationOCSP, LeafOnly: true}
+	})
+	n := f.resp.requests
+	if err := preflight(guarded, chainOf(good, f.inter.cert)); !failed(err) || f.resp.requests != n {
+		t.Fatalf("private AIA = %v (requests %d -> %d)", err, n, f.resp.requests)
+	}
+	configured := f.method(t, func(rc *RealmConfig) {
+		rc.Revocation = Revocation{Mode: RevocationOCSP, LeafOnly: true, OCSPURL: f.url + "/ocsp"}
+	})
+	if err := preflight(configured, chainOf(good, f.inter.cert)); err != nil {
+		t.Fatalf("configured private responder = %v", err)
+	}
 }

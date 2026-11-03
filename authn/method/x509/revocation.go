@@ -10,12 +10,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"slices"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ocsp"
+
+	"github.com/imohiyoko/iam/authn/oauth"
 )
 
 // 失効の確認（OCSP（RFC 6960）と CRL（RFC 5280））。ネットワークを使うので、コアは Storage のトランザクションの外
@@ -50,6 +55,8 @@ type crlEntry struct {
 type revoker struct {
 	p      revocationPolicy
 	client *http.Client
+	// certClient は証明書の AIA・CRL 配布点が指す URL に使う。既定では公開のアドレスにだけつなぐ。
+	certClient *http.Client
 
 	mu   sync.Mutex
 	ocsp map[string]ocspEntry
@@ -57,14 +64,45 @@ type revoker struct {
 }
 
 func newRevoker(p revocationPolicy, client *http.Client) *revoker {
+	certClient := client
 	if client == nil {
 		client = &http.Client{}
+		certClient = client
+		if !p.allowPrivate {
+			certClient = publicOnlyClient(p.timeout)
+		}
 	}
+	return &revoker{p: p, client: noRedirect(client, p.timeout), certClient: noRedirect(certClient, p.timeout),
+		ocsp: map[string]ocspEntry{}, crl: map[string]crlEntry{}}
+}
+
+// noRedirect は client の写しに打ち切りを付け、リダイレクトを追わない（証明書が指す先から別の場所へ連れて行かれない）。
+func noRedirect(client *http.Client, timeout time.Duration) *http.Client {
 	c := *client
-	c.Timeout = p.timeout
-	// リダイレクトは追わない（証明書が指す先から別の場所へ連れて行かれない）。
+	c.Timeout = timeout
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &revoker{p: p, client: &c, ocsp: map[string]ocspEntry{}, crl: map[string]crlEntry{}}
+	return &c
+}
+
+var errNotPublic = errors.New("not a public address")
+
+// publicOnlyClient は、名前の解決の後に実際につなぐアドレスが公開のアドレスでなければ断るクライアント
+// （解決とつなぐ間に向き先を変えられても通らない）。プロキシは使わない。
+func publicOnlyClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: timeout, Control: func(_, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return errNotPublic
+		}
+		a, err := netip.ParseAddr(host)
+		if err != nil || !oauth.PublicAddr(a) {
+			return fmt.Errorf("%w: %s", errNotPublic, host)
+		}
+		return nil
+	}}
+	t := &http.Transport{Proxy: nil, DialContext: dialer.DialContext, TLSHandshakeTimeout: timeout, ResponseHeaderTimeout: timeout,
+		MaxIdleConns: 10, IdleConnTimeout: 30 * time.Second}
+	return &http.Client{Transport: t}
 }
 
 // checkChain は連鎖（先頭が本人、末尾がトラストアンカー）の失効を確かめる。トラストアンカーは確かめない。
@@ -286,7 +324,12 @@ func (r *revoker) fetch(ctx context.Context, method, u string, body []byte, limi
 	if body != nil {
 		req.Header.Set("Content-Type", "application/ocsp-request")
 	}
-	resp, err := r.client.Do(req) // #nosec G704 -- 連鎖を確かめた証明書（か運営者の設定）が指す OCSP・CRL の URL
+	// 運営者が設定した URL はそのまま、証明書が指す URL は公開のアドレスにだけつなぐ（allow_private_networks でなければ）。
+	client := r.certClient
+	if u == r.p.ocspURL || slices.Contains(r.p.crlURLs, u) {
+		client = r.client
+	}
+	resp, err := client.Do(req) // #nosec G704 -- 連鎖を確かめた証明書（か運営者の設定）が指す OCSP・CRL の URL
 	if err != nil {
 		return nil, err
 	}

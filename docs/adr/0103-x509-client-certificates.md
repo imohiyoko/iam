@@ -65,6 +65,8 @@ X.509 をその上に載せるには、次を決める必要がある。
   - CRL は証明書の配布点と設定の `crl_urls`。発行者の名前と署名が合うものだけを使い、`nextUpdate` の無い・過ぎたものは使わない
   - 結果は `nextUpdate` と `cache_max`（既定 1 時間）の早い方まで、プロセスの中に持つ（数に上限）。取得は 5 秒まで、リダイレクトを
     追わない、大きさに上限（OCSP 64 KiB、CRL 16 MiB）
+  - 証明書の AIA・配布点が指す先は、既定では公開のアドレスにだけつなぐ（解決後の接続先で確かめる。SSRF を防ぐ）。社内の PKI は、
+    運営者が `ocsp_url`・`crl_urls` で指す（設定の URL は確かめない）か、`allow_private_networks: true` にする
   - **分からないときは拒む**（fail-closed）。`fail_open: true` なら通すが、失効と分かれば常に拒む
 - 利用者との結び付け（`mapping`）：`fingerprint`（既定。証明書の SHA-256）・`san_upn`（SAN の otherName の UPN。1 つだけ）・
   `san_email`（SAN のメール。1 つだけ）・`subject_dn`（主体の DN）。値は規則の名前を前に付けて、汎用の認証情報の検索キー
