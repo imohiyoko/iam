@@ -114,6 +114,13 @@ type state struct {
 	// vciConfigs と vciCreds は OpenID4VCI の資格情報の定義と発行の記録（ADR 0119）。キーは realm_id + ID。
 	vciConfigs map[string]port.VCICredentialConfiguration
 	vciCreds   map[string]port.VCIIssuedCredential
+	// ssfStreams・ssfSubjects・ssfPoll・ssfTransmitters・devicePostures は SSF（ADR 0118）。キーは realm_id + ID、
+	// stream_id + subject、stream_id + jti、realm_id + ID、realm_id + user_id + device_id。
+	ssfStreams      map[string]port.SSFStream
+	ssfSubjects     map[string]ssfSubject
+	ssfPoll         map[string]port.SSFPollEvent
+	ssfTransmitters map[string]port.SSFTransmitter
+	devicePostures  map[string]port.DevicePosture
 }
 
 // Storage はインメモリの Storage。
@@ -146,6 +153,8 @@ func New(clk clock.Clock) *Storage {
 		pats: map[string]port.PersonalAccessToken{}, patPolicies: map[string]port.PersonalAccessTokenPolicy{},
 		samlSPs: map[string]port.SAMLServiceProvider{}, samlCerts: map[string]port.SAMLIdPCertificate{},
 		vciConfigs: map[string]port.VCICredentialConfiguration{}, vciCreds: map[string]port.VCIIssuedCredential{},
+		ssfStreams: map[string]port.SSFStream{}, ssfSubjects: map[string]ssfSubject{}, ssfPoll: map[string]port.SSFPollEvent{},
+		ssfTransmitters: map[string]port.SSFTransmitter{}, devicePostures: map[string]port.DevicePosture{},
 		oauthResources: map[string]port.OAuthResource{},
 		wiProviders:    map[string]port.WorkloadIdentityProvider{}, wiBindings: map[string]port.WorkloadIdentityBinding{},
 	}}
@@ -230,6 +239,11 @@ func (t *tx) OAuthResources() port.OAuthResourceRepo { return oauthResources{t} 
 
 // WorkloadIdentity は Workload Identity Federation の発行者と結び付け（ADR 0116）。
 func (t *tx) WorkloadIdentity() port.WorkloadIdentityRepo { return workloadIdentity{t} }
+
+// SSFStreams・SSFTransmitters・DevicePostures は OpenID Shared Signals Framework の送信側と受信側（ADR 0118）。
+func (t *tx) SSFStreams() port.SSFStreamRepo           { return ssfStreams{t} }
+func (t *tx) SSFTransmitters() port.SSFTransmitterRepo { return ssfTransmitters{t} }
+func (t *tx) DevicePostures() port.DevicePostureRepo   { return devicePostures{t} }
 
 // PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t} }

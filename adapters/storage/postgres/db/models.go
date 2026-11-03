@@ -78,6 +78,16 @@ type AuthnCredential struct {
 	ReserveLookup  int64
 }
 
+type AuthnDevicePosture struct {
+	RealmID   string
+	UserID    string
+	DeviceID  string
+	Status    string
+	Source    string
+	EventAt   string
+	UpdatedAt string
+}
+
 type AuthnDirectoryGroup struct {
 	RealmID      string
 	ConnectionID string
@@ -284,6 +294,55 @@ type AuthnSigningKey struct {
 	PrivateKey []byte
 	CreatedAt  string
 	RetiredAt  sql.NullString
+}
+
+type AuthnSsfPollEvent struct {
+	StreamID  string
+	RealmID   string
+	Jti       string
+	Seq       int64
+	SetJwt    string
+	CreatedAt string
+}
+
+type AuthnSsfStream struct {
+	ID                      string
+	RealmID                 string
+	ServiceAccountID        string
+	DeliveryMethod          string
+	EndpointUrl             string
+	AuthorizationCiphertext []byte
+	EventsRequested         string
+	EventsDelivered         string
+	Description             string
+	Status                  string
+	StatusReason            string
+	CreatedAt               string
+	UpdatedAt               string
+	CursorSeq               int64
+	Failures                int64
+	NextAttemptAt           sql.NullString
+	LastError               string
+	LastDeliveredAt         sql.NullString
+}
+
+type AuthnSsfStreamSubject struct {
+	StreamID  string
+	RealmID   string
+	Subject   string
+	CreatedAt string
+}
+
+type AuthnSsfTransmitter struct {
+	ID            string
+	RealmID       string
+	Name          string
+	Issuer        string
+	Config        []byte
+	PushTokenHash []byte
+	Enabled       int64
+	CreatedAt     string
+	UpdatedAt     string
 }
 
 type AuthnSuspension struct {

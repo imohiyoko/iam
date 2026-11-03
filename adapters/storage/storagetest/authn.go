@@ -83,6 +83,8 @@ var authnTests = []struct {
 	{"OAuthResources", testOAuthResources},
 	{"WorkloadIdentity", testWorkloadIdentity},
 	{"VCI", testVCI},
+	{"SSFStreams", testSSFStreams},
+	{"SSFReceiver", testSSFReceiver},
 }
 
 func notFound(what string, err error) error {

@@ -159,6 +159,10 @@ func (s *Service) purge(ctx context.Context, tx port.Tx, u port.User, actor audi
 	if err := tx.VCI().RevokeCredentialsByUser(ctx, u.RealmID, u.ID, s.Clock.Now()); err != nil {
 		return err
 	}
+	// 端末の準拠状態（SSF の受信側。ADR 0118）も消す。SSF のストリームの対象は、account-purged を送った後に送信側が外す。
+	if _, err := tx.DevicePostures().DeleteByUser(ctx, u.RealmID, u.ID); err != nil {
+		return err
+	}
 	return tx.DataKeys().Delete(ctx, u.ID)
 }
 

@@ -57,6 +57,8 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 	federation := newWSFedHandler(a)
 	// SAML の IdP（ADR 0115）も別のオリジンの SP からのトップレベルの遷移（GET と自動の POST）で届く。
 	samlIdP := newSAMLIdPHandler(a)
+	// SSF（ADR 0118）は受信側・送信側のサーバーから Bearer のトークン（または push の Authorization）で届く。
+	signals := newSSFHandler(a)
 	endpoints := a.withLoginGuard(http.HandlerFunc(a.methodEndpoint))
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSAMLACS(r) {
@@ -69,6 +71,10 @@ func newPublicHandler(a *App, login http.Handler) http.Handler {
 		}
 		if samlIdP != nil && isSAMLIdP(r.URL.Path) {
 			samlIdP.ServeHTTP(w, r)
+			return
+		}
+		if signals != nil && isSSF(r.URL.Path) {
+			signals.ServeHTTP(w, r)
 			return
 		}
 		// 方式のエンドポイント（ADR 0108）はウォレットなど、ブラウザでない相手から別オリジンで届く。

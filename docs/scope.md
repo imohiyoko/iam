@@ -51,7 +51,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | 新しい端末・異常な場所の検知 | P | ✅ | フィーチャー `device_recognition`・`login_risk`（ADR 0105）。通知 `new_device_login`、警告 `new_device`、端末の一覧と削除。GeoIP の mmdb のアダプタは後続 |
 | ブルートフォース対策・ロックアウト | P C | ✅ | レートリミットと、フィーチャー `account_lockout`（ADR 0105）の接続元を問わない待ち時間とロック、運営者の解除 |
 | ボット対策（CAPTCHA など） | P | △ | フィーチャー `bot_protection`（ADR 0105）。siteverify の検証のポート。ホスト型の画面のウィジェットは後続 |
-| Shared Signals（CAEP、RISC） | S | ❌ | |
+| Shared Signals（CAEP、RISC） | S | ✅ | フィーチャー `ssf_transmitter`・`ssf_receiver`（ADR 0118）。SSF 1.0 の送信側（push・poll）と受信側（許した動作だけ）。端末の準拠状態は入力として置くだけ |
 
 ## 3. アカウントとセルフサービス
 

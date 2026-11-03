@@ -77,6 +77,9 @@ const (
 	WorkloadIdentity = "workload_identity"
 	// OpenID4VCI は OpenID for Verifiable Credential Issuance 1.0 の発行者（ADR 0119）。
 	OpenID4VCI = "openid4vci"
+	// SSFTransmitter と SSFReceiver は OpenID Shared Signals Framework（CAEP・RISC）の送信側と受信側（ADR 0118）。
+	SSFTransmitter = "ssf_transmitter"
+	SSFReceiver    = "ssf_receiver"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

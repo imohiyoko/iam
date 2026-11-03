@@ -243,16 +243,16 @@ func (e ClientTrustLevel) Valid() bool {
 
 // Defines values for ClientInputBackchannelTokenDeliveryMode.
 const (
-	Ping ClientInputBackchannelTokenDeliveryMode = "ping"
-	Poll ClientInputBackchannelTokenDeliveryMode = "poll"
+	ClientInputBackchannelTokenDeliveryModePing ClientInputBackchannelTokenDeliveryMode = "ping"
+	ClientInputBackchannelTokenDeliveryModePoll ClientInputBackchannelTokenDeliveryMode = "poll"
 )
 
 // Valid indicates whether the value is a known member of the ClientInputBackchannelTokenDeliveryMode enum.
 func (e ClientInputBackchannelTokenDeliveryMode) Valid() bool {
 	switch e {
-	case Ping:
+	case ClientInputBackchannelTokenDeliveryModePing:
 		return true
-	case Poll:
+	case ClientInputBackchannelTokenDeliveryModePoll:
 		return true
 	default:
 		return false
@@ -736,6 +736,69 @@ func (e RealmSettingsVerifiedVia) Valid() bool {
 	case RealmSettingsVerifiedViaOauthProvider:
 		return true
 	case RealmSettingsVerifiedViaSso:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SSFStreamDeliveryMethod.
+const (
+	SSFStreamDeliveryMethodPoll SSFStreamDeliveryMethod = "poll"
+	SSFStreamDeliveryMethodPush SSFStreamDeliveryMethod = "push"
+)
+
+// Valid indicates whether the value is a known member of the SSFStreamDeliveryMethod enum.
+func (e SSFStreamDeliveryMethod) Valid() bool {
+	switch e {
+	case SSFStreamDeliveryMethodPoll:
+		return true
+	case SSFStreamDeliveryMethodPush:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SSFStreamStatus.
+const (
+	Disabled SSFStreamStatus = "disabled"
+	Enabled  SSFStreamStatus = "enabled"
+	Paused   SSFStreamStatus = "paused"
+)
+
+// Valid indicates whether the value is a known member of the SSFStreamStatus enum.
+func (e SSFStreamStatus) Valid() bool {
+	switch e {
+	case Disabled:
+		return true
+	case Enabled:
+		return true
+	case Paused:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SSFTransmitterInputAllowedActions.
+const (
+	RecordDevicePosture SSFTransmitterInputAllowedActions = "record_device_posture"
+	RevokePassword      SSFTransmitterInputAllowedActions = "revoke_password"
+	RevokeSessions      SSFTransmitterInputAllowedActions = "revoke_sessions"
+	SuspendUser         SSFTransmitterInputAllowedActions = "suspend_user"
+)
+
+// Valid indicates whether the value is a known member of the SSFTransmitterInputAllowedActions enum.
+func (e SSFTransmitterInputAllowedActions) Valid() bool {
+	switch e {
+	case RecordDevicePosture:
+		return true
+	case RevokePassword:
+		return true
+	case RevokeSessions:
+		return true
+	case SuspendUser:
 		return true
 	default:
 		return false
@@ -2431,6 +2494,93 @@ type SAMLServiceProviders struct {
 	ServiceProviders []SAMLServiceProvider `json:"service_providers"`
 }
 
+// SSFStream defines model for SSFStream.
+type SSFStream struct {
+	CreatedAt time.Time `json:"created_at"`
+	Delivery  struct {
+		CursorSeq       int64      `json:"cursor_seq"`
+		Failures        int        `json:"failures"`
+		LastDeliveredAt *time.Time `json:"last_delivered_at,omitempty"`
+		LastError       *string    `json:"last_error,omitempty"`
+		NextAttemptAt   *time.Time `json:"next_attempt_at,omitempty"`
+	} `json:"delivery"`
+	DeliveryMethod   SSFStreamDeliveryMethod `json:"delivery_method"`
+	Description      *string                 `json:"description,omitempty"`
+	EndpointHost     *string                 `json:"endpoint_host,omitempty"`
+	EventsDelivered  []string                `json:"events_delivered"`
+	Id               string                  `json:"id"`
+	ServiceAccountId string                  `json:"service_account_id"`
+	Status           SSFStreamStatus         `json:"status"`
+	StatusReason     *string                 `json:"status_reason,omitempty"`
+	UpdatedAt        time.Time               `json:"updated_at"`
+}
+
+// SSFStreamDeliveryMethod defines model for SSFStream.DeliveryMethod.
+type SSFStreamDeliveryMethod string
+
+// SSFStreamStatus defines model for SSFStream.Status.
+type SSFStreamStatus string
+
+// SSFStreams defines model for SSFStreams.
+type SSFStreams struct {
+	Streams []SSFStream `json:"streams"`
+}
+
+// SSFTransmitter defines model for SSFTransmitter.
+type SSFTransmitter struct {
+	AllowedActions []string                `json:"allowed_actions"`
+	Audience       []string                `json:"audience"`
+	CreatedAt      time.Time               `json:"created_at"`
+	Enabled        bool                    `json:"enabled"`
+	Id             string                  `json:"id"`
+	Issuer         string                  `json:"issuer"`
+	Jwks           *map[string]interface{} `json:"jwks,omitempty"`
+	JwksUri        *string                 `json:"jwks_uri,omitempty"`
+	Name           string                  `json:"name"`
+
+	// PushEndpoint 送信側が SET を POST する URL
+	PushEndpoint string `json:"push_endpoint"`
+
+	// PushToken 送信側が付ける Bearer の値（作成と作り直しの応答だけ）
+	PushToken         *string   `json:"push_token,omitempty"`
+	SubjectConnection *string   `json:"subject_connection,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+// SSFTransmitterInput defines model for SSFTransmitterInput.
+type SSFTransmitterInput struct {
+	// AllowedActions 許す動作。無ければ何もしない
+	AllowedActions *[]SSFTransmitterInputAllowedActions `json:"allowed_actions,omitempty"`
+
+	// Audience 受ける aud
+	Audience []string `json:"audience"`
+	Enabled  *bool    `json:"enabled,omitempty"`
+
+	// Issuer SET の iss（完全一致）
+	Issuer string `json:"issuer"`
+
+	// Jwks 送信側の公開鍵の JWK Set（jwks_uri とどちらか1つ）
+	Jwks *map[string]interface{} `json:"jwks,omitempty"`
+
+	// JwksUri 送信側の JWKS の URL（jwks とどちらか1つ）
+	JwksUri *string `json:"jwks_uri,omitempty"`
+	Name    string  `json:"name"`
+
+	// RotatePushToken 置き換えのとき、push_token を作り直す
+	RotatePushToken *bool `json:"rotate_push_token,omitempty"`
+
+	// SubjectConnection iss_sub の対象を外部 ID で引く connection の slug
+	SubjectConnection *string `json:"subject_connection,omitempty"`
+}
+
+// SSFTransmitterInputAllowedActions defines model for SSFTransmitterInput.AllowedActions.
+type SSFTransmitterInputAllowedActions string
+
+// SSFTransmitters defines model for SSFTransmitters.
+type SSFTransmitters struct {
+	Transmitters []SSFTransmitter `json:"transmitters"`
+}
+
 // ServiceAccount defines model for ServiceAccount.
 type ServiceAccount struct {
 	CreatedAt time.Time  `json:"created_at"`
@@ -3235,6 +3385,12 @@ type SetSessionRiskJSONRequestBody = RiskUpdate
 // RotateSigningKeyJSONRequestBody defines body for RotateSigningKey for application/json ContentType.
 type RotateSigningKeyJSONRequestBody RotateSigningKeyJSONBody
 
+// CreateSSFTransmitterJSONRequestBody defines body for CreateSSFTransmitter for application/json ContentType.
+type CreateSSFTransmitterJSONRequestBody = SSFTransmitterInput
+
+// UpdateSSFTransmitterJSONRequestBody defines body for UpdateSSFTransmitter for application/json ContentType.
+type UpdateSSFTransmitterJSONRequestBody = SSFTransmitterInput
+
 // LiftSuspensionJSONRequestBody defines body for LiftSuspension for application/json ContentType.
 type LiftSuspensionJSONRequestBody = LiftRequest
 
@@ -3618,6 +3774,27 @@ type ServerInterface interface {
 	// RotateSigningKey ID トークンの署名鍵を新しくする（9.3）
 	// (POST /v1/admin/signing-keys:rotate)
 	RotateSigningKey(w http.ResponseWriter, r *http.Request)
+	// ListSSFStreams SSF の送信側のストリームの一覧（ADR 0118）
+	// (GET /v1/admin/ssf/streams)
+	ListSSFStreams(w http.ResponseWriter, r *http.Request)
+	// DeleteSSFStream SSF の送信側のストリームを消す
+	// (POST /v1/admin/ssf/streams/{id}:delete)
+	DeleteSSFStream(w http.ResponseWriter, r *http.Request, id string)
+	// ListSSFTransmitters SSF の受信側が信頼する送信側の一覧（ADR 0118）
+	// (GET /v1/admin/ssf/transmitters)
+	ListSSFTransmitters(w http.ResponseWriter, r *http.Request)
+	// CreateSSFTransmitter SSF の送信側を登録する（ADR 0118）
+	// (POST /v1/admin/ssf/transmitters)
+	CreateSSFTransmitter(w http.ResponseWriter, r *http.Request)
+	// GetSSFTransmitter SSF の送信側を返す
+	// (GET /v1/admin/ssf/transmitters/{id})
+	GetSSFTransmitter(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateSSFTransmitter SSF の送信側の登録を置き換える
+	// (PUT /v1/admin/ssf/transmitters/{id})
+	UpdateSSFTransmitter(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteSSFTransmitter SSF の送信側の登録を消す
+	// (POST /v1/admin/ssf/transmitters/{id}:delete)
+	DeleteSSFTransmitter(w http.ResponseWriter, r *http.Request, id string)
 	// LiftSuspension 停止を解除する
 	// (POST /v1/admin/suspensions/{id}:lift)
 	LiftSuspension(w http.ResponseWriter, r *http.Request, id string)
@@ -6541,6 +6718,152 @@ func (siw *ServerInterfaceWrapper) RotateSigningKey(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListSSFStreams operation middleware
+func (siw *ServerInterfaceWrapper) ListSSFStreams(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSSFStreams(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSSFStream operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSSFStream(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSSFStream(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSSFTransmitters operation middleware
+func (siw *ServerInterfaceWrapper) ListSSFTransmitters(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSSFTransmitters(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSSFTransmitter operation middleware
+func (siw *ServerInterfaceWrapper) CreateSSFTransmitter(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSSFTransmitter(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSSFTransmitter operation middleware
+func (siw *ServerInterfaceWrapper) GetSSFTransmitter(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSSFTransmitter(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateSSFTransmitter operation middleware
+func (siw *ServerInterfaceWrapper) UpdateSSFTransmitter(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateSSFTransmitter(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSSFTransmitter operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSSFTransmitter(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSSFTransmitter(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // LiftSuspension operation middleware
 func (siw *ServerInterfaceWrapper) LiftSuspension(w http.ResponseWriter, r *http.Request) {
 
@@ -8302,6 +8625,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/vci/credential-configurations/{id}:delete", wrapper.DeleteVCICredentialConfiguration)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/vci/credentials", wrapper.ListVCICredentials)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/vci/credentials/{id}:revoke", wrapper.RevokeVCICredential)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/ssf/transmitters", wrapper.ListSSFTransmitters)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/ssf/transmitters", wrapper.CreateSSFTransmitter)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/ssf/transmitters/{id}", wrapper.GetSSFTransmitter)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/ssf/transmitters/{id}", wrapper.UpdateSSFTransmitter)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/ssf/transmitters/{id}:delete", wrapper.DeleteSSFTransmitter)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/ssf/streams", wrapper.ListSSFStreams)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/ssf/streams/{id}:delete", wrapper.DeleteSSFStream)
 
 	return m
 }
@@ -16456,6 +16786,497 @@ func (response RotateSigningKey403JSONResponse) VisitRotateSigningKeyResponse(w 
 	return err
 }
 
+type ListSSFStreamsRequestObject struct {
+}
+
+type ListSSFStreamsResponseObject interface {
+	VisitListSSFStreamsResponse(w http.ResponseWriter) error
+}
+
+type ListSSFStreams200JSONResponse SSFStreams
+
+func (response ListSSFStreams200JSONResponse) VisitListSSFStreamsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSSFStreams401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListSSFStreams401JSONResponse) VisitListSSFStreamsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSSFStreams403JSONResponse Error
+
+func (response ListSSFStreams403JSONResponse) VisitListSSFStreamsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSSFStreams404JSONResponse Error
+
+func (response ListSSFStreams404JSONResponse) VisitListSSFStreamsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSSFStreamRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteSSFStreamResponseObject interface {
+	VisitDeleteSSFStreamResponse(w http.ResponseWriter) error
+}
+
+type DeleteSSFStream204Response struct {
+}
+
+func (response DeleteSSFStream204Response) VisitDeleteSSFStreamResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteSSFStream401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteSSFStream401JSONResponse) VisitDeleteSSFStreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSSFStream403JSONResponse Error
+
+func (response DeleteSSFStream403JSONResponse) VisitDeleteSSFStreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSSFStream404JSONResponse Error
+
+func (response DeleteSSFStream404JSONResponse) VisitDeleteSSFStreamResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSSFTransmittersRequestObject struct {
+}
+
+type ListSSFTransmittersResponseObject interface {
+	VisitListSSFTransmittersResponse(w http.ResponseWriter) error
+}
+
+type ListSSFTransmitters200JSONResponse SSFTransmitters
+
+func (response ListSSFTransmitters200JSONResponse) VisitListSSFTransmittersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSSFTransmitters401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListSSFTransmitters401JSONResponse) VisitListSSFTransmittersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSSFTransmitters403JSONResponse Error
+
+func (response ListSSFTransmitters403JSONResponse) VisitListSSFTransmittersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSSFTransmitters404JSONResponse Error
+
+func (response ListSSFTransmitters404JSONResponse) VisitListSSFTransmittersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSSFTransmitterRequestObject struct {
+	Body *CreateSSFTransmitterJSONRequestBody
+}
+
+type CreateSSFTransmitterResponseObject interface {
+	VisitCreateSSFTransmitterResponse(w http.ResponseWriter) error
+}
+
+type CreateSSFTransmitter201JSONResponse SSFTransmitter
+
+func (response CreateSSFTransmitter201JSONResponse) VisitCreateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSSFTransmitter400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateSSFTransmitter400JSONResponse) VisitCreateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSSFTransmitter401JSONResponse Error
+
+func (response CreateSSFTransmitter401JSONResponse) VisitCreateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSSFTransmitter403JSONResponse Error
+
+func (response CreateSSFTransmitter403JSONResponse) VisitCreateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSSFTransmitter404JSONResponse Error
+
+func (response CreateSSFTransmitter404JSONResponse) VisitCreateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSSFTransmitter409JSONResponse Error
+
+func (response CreateSSFTransmitter409JSONResponse) VisitCreateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSSFTransmitterRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetSSFTransmitterResponseObject interface {
+	VisitGetSSFTransmitterResponse(w http.ResponseWriter) error
+}
+
+type GetSSFTransmitter200JSONResponse SSFTransmitter
+
+func (response GetSSFTransmitter200JSONResponse) VisitGetSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSSFTransmitter401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetSSFTransmitter401JSONResponse) VisitGetSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSSFTransmitter403JSONResponse Error
+
+func (response GetSSFTransmitter403JSONResponse) VisitGetSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSSFTransmitter404JSONResponse Error
+
+func (response GetSSFTransmitter404JSONResponse) VisitGetSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSSFTransmitterRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateSSFTransmitterJSONRequestBody
+}
+
+type UpdateSSFTransmitterResponseObject interface {
+	VisitUpdateSSFTransmitterResponse(w http.ResponseWriter) error
+}
+
+type UpdateSSFTransmitter200JSONResponse SSFTransmitter
+
+func (response UpdateSSFTransmitter200JSONResponse) VisitUpdateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSSFTransmitter400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateSSFTransmitter400JSONResponse) VisitUpdateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSSFTransmitter401JSONResponse Error
+
+func (response UpdateSSFTransmitter401JSONResponse) VisitUpdateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSSFTransmitter403JSONResponse Error
+
+func (response UpdateSSFTransmitter403JSONResponse) VisitUpdateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSSFTransmitter404JSONResponse Error
+
+func (response UpdateSSFTransmitter404JSONResponse) VisitUpdateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSSFTransmitter409JSONResponse Error
+
+func (response UpdateSSFTransmitter409JSONResponse) VisitUpdateSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSSFTransmitterRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteSSFTransmitterResponseObject interface {
+	VisitDeleteSSFTransmitterResponse(w http.ResponseWriter) error
+}
+
+type DeleteSSFTransmitter204Response struct {
+}
+
+func (response DeleteSSFTransmitter204Response) VisitDeleteSSFTransmitterResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteSSFTransmitter401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteSSFTransmitter401JSONResponse) VisitDeleteSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSSFTransmitter403JSONResponse Error
+
+func (response DeleteSSFTransmitter403JSONResponse) VisitDeleteSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSSFTransmitter404JSONResponse Error
+
+func (response DeleteSSFTransmitter404JSONResponse) VisitDeleteSSFTransmitterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type LiftSuspensionRequestObject struct {
 	Id   string `json:"id"`
 	Body *LiftSuspensionJSONRequestBody
@@ -20556,6 +21377,27 @@ type StrictServerInterface interface {
 	// RotateSigningKey ID トークンの署名鍵を新しくする（9.3）
 	// (POST /v1/admin/signing-keys:rotate)
 	RotateSigningKey(ctx context.Context, request RotateSigningKeyRequestObject) (RotateSigningKeyResponseObject, error)
+	// ListSSFStreams SSF の送信側のストリームの一覧（ADR 0118）
+	// (GET /v1/admin/ssf/streams)
+	ListSSFStreams(ctx context.Context, request ListSSFStreamsRequestObject) (ListSSFStreamsResponseObject, error)
+	// DeleteSSFStream SSF の送信側のストリームを消す
+	// (POST /v1/admin/ssf/streams/{id}:delete)
+	DeleteSSFStream(ctx context.Context, request DeleteSSFStreamRequestObject) (DeleteSSFStreamResponseObject, error)
+	// ListSSFTransmitters SSF の受信側が信頼する送信側の一覧（ADR 0118）
+	// (GET /v1/admin/ssf/transmitters)
+	ListSSFTransmitters(ctx context.Context, request ListSSFTransmittersRequestObject) (ListSSFTransmittersResponseObject, error)
+	// CreateSSFTransmitter SSF の送信側を登録する（ADR 0118）
+	// (POST /v1/admin/ssf/transmitters)
+	CreateSSFTransmitter(ctx context.Context, request CreateSSFTransmitterRequestObject) (CreateSSFTransmitterResponseObject, error)
+	// GetSSFTransmitter SSF の送信側を返す
+	// (GET /v1/admin/ssf/transmitters/{id})
+	GetSSFTransmitter(ctx context.Context, request GetSSFTransmitterRequestObject) (GetSSFTransmitterResponseObject, error)
+	// UpdateSSFTransmitter SSF の送信側の登録を置き換える
+	// (PUT /v1/admin/ssf/transmitters/{id})
+	UpdateSSFTransmitter(ctx context.Context, request UpdateSSFTransmitterRequestObject) (UpdateSSFTransmitterResponseObject, error)
+	// DeleteSSFTransmitter SSF の送信側の登録を消す
+	// (POST /v1/admin/ssf/transmitters/{id}:delete)
+	DeleteSSFTransmitter(ctx context.Context, request DeleteSSFTransmitterRequestObject) (DeleteSSFTransmitterResponseObject, error)
 	// LiftSuspension 停止を解除する
 	// (POST /v1/admin/suspensions/{id}:lift)
 	LiftSuspension(ctx context.Context, request LiftSuspensionRequestObject) (LiftSuspensionResponseObject, error)
@@ -23842,6 +24684,196 @@ func (sh *strictHandler) RotateSigningKey(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RotateSigningKeyResponseObject); ok {
 		if err := validResponse.VisitRotateSigningKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSSFStreams operation middleware
+func (sh *strictHandler) ListSSFStreams(w http.ResponseWriter, r *http.Request) {
+	var request ListSSFStreamsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSSFStreams(ctx, request.(ListSSFStreamsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSSFStreams")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSSFStreamsResponseObject); ok {
+		if err := validResponse.VisitListSSFStreamsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteSSFStream operation middleware
+func (sh *strictHandler) DeleteSSFStream(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteSSFStreamRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSSFStream(ctx, request.(DeleteSSFStreamRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSSFStream")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteSSFStreamResponseObject); ok {
+		if err := validResponse.VisitDeleteSSFStreamResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSSFTransmitters operation middleware
+func (sh *strictHandler) ListSSFTransmitters(w http.ResponseWriter, r *http.Request) {
+	var request ListSSFTransmittersRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSSFTransmitters(ctx, request.(ListSSFTransmittersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSSFTransmitters")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSSFTransmittersResponseObject); ok {
+		if err := validResponse.VisitListSSFTransmittersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSSFTransmitter operation middleware
+func (sh *strictHandler) CreateSSFTransmitter(w http.ResponseWriter, r *http.Request) {
+	var request CreateSSFTransmitterRequestObject
+
+	var body CreateSSFTransmitterJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSSFTransmitter(ctx, request.(CreateSSFTransmitterRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSSFTransmitter")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSSFTransmitterResponseObject); ok {
+		if err := validResponse.VisitCreateSSFTransmitterResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSSFTransmitter operation middleware
+func (sh *strictHandler) GetSSFTransmitter(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetSSFTransmitterRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSSFTransmitter(ctx, request.(GetSSFTransmitterRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSSFTransmitter")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSSFTransmitterResponseObject); ok {
+		if err := validResponse.VisitGetSSFTransmitterResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateSSFTransmitter operation middleware
+func (sh *strictHandler) UpdateSSFTransmitter(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateSSFTransmitterRequestObject
+
+	request.Id = id
+
+	var body UpdateSSFTransmitterJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateSSFTransmitter(ctx, request.(UpdateSSFTransmitterRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateSSFTransmitter")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateSSFTransmitterResponseObject); ok {
+		if err := validResponse.VisitUpdateSSFTransmitterResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteSSFTransmitter operation middleware
+func (sh *strictHandler) DeleteSSFTransmitter(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteSSFTransmitterRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSSFTransmitter(ctx, request.(DeleteSSFTransmitterRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSSFTransmitter")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteSSFTransmitterResponseObject); ok {
+		if err := validResponse.VisitDeleteSSFTransmitterResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

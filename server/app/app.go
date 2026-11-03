@@ -50,6 +50,7 @@ import (
 	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/ssf"
 	"github.com/imohiyoko/iam/authn/vci"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authn/workloadidentity"
@@ -216,6 +217,12 @@ type App struct {
 	oauthMTLS *provider.MTLS
 	// vci は OpenID4VCI の発行者（ADR 0119）。フィーチャー openid4vci が動いていないか、issuer（server.public_url）が無ければ nil。
 	vci *vci.Service
+	// ssfTx と ssfRx は OpenID Shared Signals Framework の送信側と受信側（ADR 0118）。フィーチャー ssf_transmitter・ssf_receiver が
+	// 動いていなければ nil。ssfVerifyLimit は検証のイベントの回数の上限、ssfDelivery は push の配送（全 realm で1つ。root だけが持つ）。
+	ssfTx          *ssf.Transmitter
+	ssfRx          *ssf.Receiver
+	ssfVerifyLimit *ratelimit.Limiter
+	ssfDelivery    *ssf.Deliverer
 }
 
 // New は起動前の検査を行い、App を組み立てる。binary はこのバイナリに含まれるフィーチャー。
@@ -347,6 +354,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if a.eventSubs != nil {
 		a.subDelivery = &eventsub.Deliverer{Storage: d.Storage, Service: a.eventSubs, Clock: d.Clock, Interval: cfg.Outbox.Interval.D(),
 			Batch: cfg.Outbox.Batch, Log: d.Logger}
+	}
+	if a.ssfTx != nil {
+		a.ssfDelivery = &ssf.Deliverer{Storage: d.Storage, Transmitter: a.ssfTx, Issuer: a.issuerOf, Clock: d.Clock,
+			Interval: cfg.Outbox.Interval.D(), Log: d.Logger}
 	}
 	if a.orgs != nil && plan.IsActive(feature.OrgManagedUsers) && cfg.OrgDomains.Recheck.D() > 0 {
 		a.domainRecheck = &org.DomainRechecker{Storage: d.Storage, Clock: d.Clock, Service: a.orgs, Every: cfg.OrgDomains.Recheck.D(),
@@ -516,6 +527,16 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		// 公開でないアドレスへの送信は開発ビルドだけ許す（ADR 0100）。
 		a.eventSubs = &eventsub.Service{Crypter: a.pii, Clock: d.Clock, Dev: cfg.Dev, AllowPrivateNetworks: cfg.Dev}
 		a.eventSubTests = &ratelimit.Limiter{Cache: d.Ephemeral, Clock: d.Clock, Window: time.Minute, Limit: 5}
+	}
+	// SSF（ADR 0118）。送り先と JWKS の取得は公開のアドレスに限る（開発ビルドだけ許す。イベントの Webhook と同じ）。
+	a.ssfTx, a.ssfRx = nil, nil
+	if plan.IsActive(feature.SSFTransmitter) {
+		a.ssfTx = &ssf.Transmitter{Crypter: a.pii, Clock: d.Clock, Keys: a.keys, Directory: a.accounts, Dev: cfg.Dev, AllowPrivateNetworks: cfg.Dev}
+		a.ssfVerifyLimit = &ratelimit.Limiter{Cache: d.Ephemeral, Clock: d.Clock, Window: time.Minute, Limit: 5}
+	}
+	if plan.IsActive(feature.SSFReceiver) {
+		a.ssfRx = &ssf.Receiver{Storage: d.Storage, Replay: d.Ephemeral, Clock: d.Clock, Directory: a.accounts, Effects: ssfEffects{a},
+			Dev: cfg.Dev, AllowPrivateNetworks: cfg.Dev, Log: d.Logger}
 	}
 	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Attributes: a.attributes, Issuer: a.issuer,
 		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D(),
@@ -838,6 +859,12 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener, mtlsL ...net.L
 	} else {
 		close(subDone)
 	}
+	ssfDone := make(chan struct{})
+	if a.ssfDelivery != nil {
+		go func() { a.ssfDelivery.Run(ctx); close(ssfDone) }()
+	} else {
+		close(ssfDone)
+	}
 	ldapDone := make(chan struct{})
 	if a.plan.IsActive(feature.LDAP) {
 		// ディレクトリの同期（ADR 0102）。connection ごとの間隔は EphemeralStore の印で決め、ここは見回りの間隔。
@@ -883,6 +910,7 @@ func (a *App) Serve(ctx context.Context, pubL, admL net.Listener, mtlsL ...net.L
 	<-schedDone
 	<-retDone
 	<-subDone
+	<-ssfDone
 	<-recheckDone
 	<-ldapDone
 	// 止める前に残りを送る（届かなければ次の起動で送る）。

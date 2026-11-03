@@ -38,6 +38,7 @@ import (
 	"github.com/imohiyoko/iam/authn/saml"
 	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
+	"github.com/imohiyoko/iam/authn/ssf"
 	"github.com/imohiyoko/iam/authn/vci"
 	"github.com/imohiyoko/iam/authn/warning"
 	"github.com/imohiyoko/iam/authn/workloadidentity"
@@ -110,6 +111,9 @@ var featureCatalog = map[string]struct {
 	feature.WorkloadIdentity: {workloadidentity.Feature, module + "/features/workloadidentity"},
 	// ADR 0119。
 	feature.OpenID4VCI: {vci.Feature, module + "/features/openid4vci"},
+	// ADR 0118。
+	feature.SSFTransmitter: {ssf.TransmitterFeature, module + "/features/ssftransmitter"},
+	feature.SSFReceiver:    {ssf.ReceiverFeature, module + "/features/ssfreceiver"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

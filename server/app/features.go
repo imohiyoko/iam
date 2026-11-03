@@ -14,6 +14,7 @@ import (
 	"github.com/imohiyoko/iam/authn/method/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/saml"
+	"github.com/imohiyoko/iam/authn/ssf"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/eventlog"
 	"github.com/imohiyoko/iam/shared/feature"
@@ -282,6 +283,16 @@ var cleaners = map[string]cleaner{
 	feature.OpenID4VCI: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.VCI().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.VCI().Purge(ctx, limit)
+		}},
+	// SSF の送信側のストリーム（対象・poll の待ち・push の Authorization の鍵とともに）を消す（ADR 0118）。
+	feature.SSFTransmitter: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.SSFStreams().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return ssf.Purge(ctx, tx, limit)
+		}},
+	// SSF の受信側の送信側の登録と、端末の準拠状態（device posture input）を消す（ADR 0118）。
+	feature.SSFReceiver: {Count: ssf.CountReceiver,
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return ssf.PurgeReceiver(ctx, tx, limit)
 		}},
 }
 

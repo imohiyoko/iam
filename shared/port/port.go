@@ -86,6 +86,12 @@ type Tx interface {
 	WorkloadIdentity() WorkloadIdentityRepo
 	// VCI は OpenID4VCI の資格情報の定義と発行の記録（フィーチャー openid4vci。ADR 0119）。
 	VCI() VCIRepo
+	// SSFStreams は SSF の送信側のストリーム（フィーチャー ssf_transmitter。ADR 0118）。
+	SSFStreams() SSFStreamRepo
+	// SSFTransmitters は SSF の受信側が信頼する送信側（フィーチャー ssf_receiver。ADR 0118）。
+	SSFTransmitters() SSFTransmitterRepo
+	// DevicePostures は端末の準拠状態（device posture input。フィーチャー ssf_receiver。ADR 0118）。
+	DevicePostures() DevicePostureRepo
 }
 
 // Realm はユーザー集合の単位（design.md 3.1）。

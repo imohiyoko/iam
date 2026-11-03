@@ -128,6 +128,9 @@ const (
 	// VCIConfiguration と VCICredential は OpenID4VCI の資格情報の定義と発行の記録（ADR 0119）。
 	VCIConfiguration Prefix = "vcc"
 	VCICredential    Prefix = "vcr"
+	// SSFStream は SSF の送信側のストリーム、SSFTransmitter は受信側が信頼する送信側（ADR 0118）。
+	SSFStream      Prefix = "sst"
+	SSFTransmitter Prefix = "stx"
 )
 
 // ErrInvalid は ID の形式が正しくないことを表す。
