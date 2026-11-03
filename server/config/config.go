@@ -399,6 +399,9 @@ type Realm struct {
 	// RequirePushedAuthorizationRequests は既定の realm のすべての連携先に PAR（RFC 9126）を求める（フィーチャー par。
 	// ADR 0112）。新しい realm の既定値にもなる。
 	RequirePushedAuthorizationRequests bool `yaml:"require_pushed_authorization_requests"`
+	// FAPI2SecurityProfile は既定の realm のすべての連携先に FAPI 2.0 Security Profile を強いる（フィーチャー fapi2。ADR 0117）。
+	// 新しい realm の既定値にもなる。
+	FAPI2SecurityProfile bool `yaml:"fapi2_security_profile"`
 }
 
 // KnownEmailStorage は realm.email_storage の値。

@@ -103,6 +103,8 @@ var featureCatalog = map[string]struct {
 	// ADR 0112。
 	feature.PAR:                {provider.PARFeature, module + "/features/par"},
 	feature.ResourceIndicators: {provider.ResourceFeature, module + "/features/resourceindicators"},
+	// ADR 0117。
+	feature.FAPI2: {provider.FAPI2Feature, module + "/features/fapi2"},
 	// ADR 0119。
 	feature.OpenID4VCI: {vci.Feature, module + "/features/openid4vci"},
 }

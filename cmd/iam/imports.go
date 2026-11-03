@@ -15,6 +15,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/devicerecognition"
 	_ "github.com/imohiyoko/iam/features/dpop"
 	_ "github.com/imohiyoko/iam/features/eventsubscriptions"
+	_ "github.com/imohiyoko/iam/features/fapi2"
 	_ "github.com/imohiyoko/iam/features/flowhooks"
 	_ "github.com/imohiyoko/iam/features/hotp"
 	_ "github.com/imohiyoko/iam/features/impersonation"

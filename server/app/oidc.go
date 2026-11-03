@@ -83,7 +83,8 @@ func newOIDCHandler(a *App) http.Handler {
 	if a.device != nil {
 		endpoints.DeviceAuthorization = op.NewEndpoint(oidcDeviceAuth)
 	}
-	ops := op.RegisterServer(srv, endpoints, op.WithServerCORSOptions(nil))
+	// 認可応答には iss を付ける（RFC 9207。fapi2.go）。
+	ops := op.RegisterServer(srv, endpoints, op.WithServerCORSOptions(nil), op.WithEncoder(srv.responseEncoder()))
 	mux := http.NewServeMux()
 	mux.Handle(oidc.DiscoveryEndpoint, ops)
 	mux.Handle(oidcKeys, ops)
@@ -281,6 +282,8 @@ type discovery struct {
 	// PAR（RFC 9126 5。フィーチャー par）。
 	PushedAuthorizationRequestEndpoint string `json:"pushed_authorization_request_endpoint,omitempty"`
 	RequirePushedAuthorizationRequests bool   `json:"require_pushed_authorization_requests,omitempty"`
+	// 認可応答の iss（RFC 9207 3。ADR 0117）。
+	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported"`
 	// OpenID4VCI の Pre-Authorized Code（OpenID4VCI 12.3。フィーチャー openid4vci）。
 	PreAuthorizedGrantAnonymousAccessSupported bool `json:"pre-authorized_grant_anonymous_access_supported,omitempty"`
 }
@@ -343,6 +346,8 @@ func (s *oidcServer) metadata() discovery {
 		d.RequirePushedAuthorizationRequests = s.a.settings.RequirePushedAuthorizationRequests
 	}
 	s.senderConstraintDiscovery(&d)
+	d.AuthorizationResponseIssParameterSupported = true
+	s.fapi2Discovery(&d)
 	if s.a.vci != nil {
 		d.GrantTypesSupported = append(slices.Clone(d.GrantTypesSupported), oidc.GrantType(vci.GrantTypePreAuthorized))
 		d.PreAuthorizedGrantAnonymousAccessSupported = true
@@ -577,7 +582,7 @@ func (s *oidcServer) authRequest(r *op.ClientRequest[oidc.AuthRequest]) (provide
 		return provider.AuthRequest{}, oc.resourceErr
 	}
 	req := provider.AuthRequest{RealmID: s.a.realm.ID, ClientID: d.ClientID, RedirectURI: d.RedirectURI, State: d.State, Nonce: d.Nonce,
-		CodeChallenge: d.CodeChallenge, ResponseMode: string(d.ResponseMode), MaxAge: d.MaxAge}
+		CodeChallenge: d.CodeChallenge, ResponseMode: string(d.ResponseMode), MaxAge: d.MaxAge, FAPI2: s.fapi2(oc.c)}
 	allowed := s.scopes()
 	if oc.resource != nil {
 		// 自前の API に向けた認可（RFC 8707、ADR 0112）。リソースのスコープも選べ、アクセストークンの aud はリソースの URI。
@@ -630,7 +635,7 @@ func (s *oidcServer) complete(ctx context.Context, req provider.AuthRequest, au 
 		return nil, s.fail(ctx, err)
 	}
 	u, err := op.AuthResponseURL(req.RedirectURI, oidc.ResponseTypeCode, oidc.ResponseMode(req.ResponseMode),
-		&op.CodeResponseType{Code: code, State: req.State}, oidc.NewEncoder())
+		&op.CodeResponseType{Code: code, State: req.State}, s.responseEncoder())
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
@@ -678,7 +683,7 @@ func errUnmetAuthentication() *oidc.Error {
 
 func (s *oidcServer) errorRedirect(ctx context.Context, req provider.AuthRequest, e *oidc.Error) (*op.Redirect, error) {
 	e.State = req.State
-	u, err := op.AuthResponseURL(req.RedirectURI, oidc.ResponseTypeCode, oidc.ResponseMode(req.ResponseMode), e, oidc.NewEncoder())
+	u, err := op.AuthResponseURL(req.RedirectURI, oidc.ResponseTypeCode, oidc.ResponseMode(req.ResponseMode), e, s.responseEncoder())
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
@@ -781,6 +786,10 @@ func (s *oidcServer) authenticate(ctx context.Context, cc *op.ClientCredentials,
 	if err != nil {
 		return port.Client{}, s.fail(ctx, err)
 	}
+	// FAPI 2.0 の連携先は、認証方式・送信者制約・client assertion の alg も確かめる（ADR 0117）。
+	if err := s.checkFAPI2Client(ctx, cl, cc.ClientAssertion); err != nil {
+		return port.Client{}, err
+	}
 	return cl, nil
 }
 
@@ -843,7 +852,8 @@ func (s *oidcServer) RefreshToken(ctx context.Context, r *op.ClientRequest[oidc.
 	var out provider.Refreshed
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		out, err = s.a.tokens.Refresh(ctx, tx, cl, r.Data.RefreshToken, b, s.tokenResources(r.Form), requestID(ctx))
+		// FAPI 2.0 の連携先のリフレッシュトークンはローテーションしない（ADR 0117）。
+		out, err = s.a.tokens.Refresh(ctx, tx, cl, r.Data.RefreshToken, b, s.tokenResources(r.Form), !s.fapi2(cl), requestID(ctx))
 		return err
 	})
 	if errors.Is(err, provider.ErrInvalidGrant) || (err == nil && out.Reused) {

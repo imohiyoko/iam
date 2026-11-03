@@ -137,6 +137,9 @@ type App struct {
 	samlIdP *samlidp.Service
 	// par は Pushed Authorization Requests（RFC 9126。ADR 0112）が動いているか（フィーチャー par）。
 	par bool
+	// fapi2 は FAPI 2.0 Security Profile（ADR 0117）が動いているか（フィーチャー fapi2）。偽なら realm の設定の
+	// fapi2_security_profile は見ない（連携先の設定は無効化で外れるまで強いる。fail-closed）。
+	fapi2 bool
 	// resources は自前の API（リソースサーバー）の登録（RFC 8707。ADR 0112）。フィーチャー resource_indicators が
 	// 動いていなければ nil。
 	resources *provider.Resources
@@ -463,6 +466,8 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
 	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout),
 		CIBA: plan.IsActive(feature.CIBA), PAR: plan.IsActive(feature.PAR), DPoP: plan.IsActive(feature.DPoP), MTLS: plan.IsActive(feature.MTLSClientAuth)}
+	a.fapi2 = plan.IsActive(feature.FAPI2)
+	a.clients.FAPI2, a.clients.RealmFAPI2 = a.fapi2, a.fapi2 && rs.FAPI2SecurityProfile
 	if err := a.setupSenderConstraint(); err != nil {
 		return err
 	}

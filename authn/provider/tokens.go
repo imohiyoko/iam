@@ -141,7 +141,7 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 	if err := tx.Grants().Create(ctx, g); err != nil {
 		return Issued{}, err
 	}
-	out, err := t.issue(ctx, tx, cl, g, c.Nonce, b, now)
+	out, err := t.issue(ctx, tx, cl, g, c.Nonce, b, now, true)
 	if err != nil {
 		return Issued{}, err
 	}
@@ -175,8 +175,8 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 	return out, err
 }
 
-// issue はアクセストークンと ID トークンを発行する。
-func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.Grant, nonce string, b Binding, now time.Time) (Issued, error) {
+// issue はアクセストークンと ID トークンを発行する。refresh なら新しいリフレッシュトークンも発行する。
+func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.Grant, nonce string, b Binding, now time.Time, refresh bool) (Issued, error) {
 	ttl := ttlOr(t.AccessTokenTTL, DefaultAccessTokenTTL)
 	tid, token, hash, err := newOpaque(id.AccessToken)
 	if err != nil {
@@ -193,7 +193,11 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 			return Issued{}, err
 		}
 	}
-	rid, refresh, rhash, err := newOpaque(id.RefreshToken)
+	out := Issued{AccessToken: token, ExpiresIn: ttl, IDToken: idToken, Scopes: g.Scopes, Grant: g, Binding: b}
+	if !refresh {
+		return out, nil
+	}
+	rid, rt, rhash, err := newOpaque(id.RefreshToken)
 	if err != nil {
 		return Issued{}, err
 	}
@@ -202,7 +206,8 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 		CreatedAt: now, ExpiresAt: g.ExpiresAt, JKT: rb.JKT, X5T: rb.X5T}); err != nil {
 		return Issued{}, err
 	}
-	return Issued{AccessToken: token, RefreshToken: refresh, ExpiresIn: ttl, IDToken: idToken, Scopes: g.Scopes, Grant: g, Binding: b}, nil
+	out.RefreshToken = rt
+	return out, nil
 }
 
 // idToken は ID トークンを作る。
@@ -486,7 +491,10 @@ func revoked(g port.Grant, now time.Time) bool {
 // （合わなければ使用済みにせずに ErrInvalidGrant。ADR 0113）、新しいトークンに結び付ける。
 // resources は要求の resource（RFC 8707。フィーチャー resource_indicators が動いているときだけ渡す）。認可のリソースと
 // 同じ 1 つでなければ、リフレッシュトークンを使わずに ErrInvalidTarget（ADR 0112）。
-func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refreshToken string, b Binding, resources []string, requestID string) (Refreshed, error) {
+// rotate が偽（FAPI 2.0 の連携先。ADR 0117）なら、リフレッシュトークンを使用済みにせず、新しいものも出さない（同じトークンを
+// 認可の期限まで使え、使い回しの検知はしない）。
+func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refreshToken string, b Binding, resources []string, rotate bool,
+	requestID string) (Refreshed, error) {
 	now := t.Clock.Now()
 	tok, g, err := t.token(ctx, tx, cl.RealmID, refreshToken, port.TokenRefresh)
 	if errors.Is(err, ErrInvalidToken) {
@@ -501,15 +509,21 @@ func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refres
 	if len(resources) > 0 && !SameResource(g, resources) {
 		return Refreshed{}, ErrInvalidTarget
 	}
-	fresh, err := tx.OIDCTokens().Use(ctx, cl.RealmID, tok.ID, now)
-	if err != nil {
-		return Refreshed{}, err
+	if !rotate && tok.UsedAt != nil {
+		// ローテーションしない連携先（FAPI 2.0）でも、ローテーションで使用済みにしたトークン（設定を変える前のもの）は使えない。
+		return Refreshed{}, ErrInvalidGrant
 	}
-	if !fresh {
-		if err := t.revoke(ctx, tx, cl, g, RevokeReasonRefreshReuse, requestID, now); err != nil {
+	if rotate {
+		fresh, err := tx.OIDCTokens().Use(ctx, cl.RealmID, tok.ID, now)
+		if err != nil {
 			return Refreshed{}, err
 		}
-		return Refreshed{Reused: true}, nil
+		if !fresh {
+			if err := t.revoke(ctx, tx, cl, g, RevokeReasonRefreshReuse, requestID, now); err != nil {
+				return Refreshed{}, err
+			}
+			return Refreshed{Reused: true}, nil
+		}
 	}
 	s, _, err := t.Sessions.CheckLineage(ctx, tx, g.RealmID, g.SID, now)
 	if errors.Is(err, session.ErrInvalid) {
@@ -533,7 +547,7 @@ func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refres
 	if err := tx.Sessions().Touch(ctx, g.RealmID, s.ID, now); err != nil {
 		return Refreshed{}, err
 	}
-	out, err := t.issue(ctx, tx, cl, g, "", b, now)
+	out, err := t.issue(ctx, tx, cl, g, "", b, now, rotate)
 	return Refreshed{Issued: out}, err
 }
 
