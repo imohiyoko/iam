@@ -82,6 +82,8 @@ type Tx interface {
 	SAMLIdP() SAMLIdPRepo
 	// OAuthResources は自前の API（リソースサーバー）の登録（フィーチャー resource_indicators。ADR 0112）。
 	OAuthResources() OAuthResourceRepo
+	// WorkloadIdentity は Workload Identity Federation の発行者と結び付け（フィーチャー workload_identity。ADR 0116）。
+	WorkloadIdentity() WorkloadIdentityRepo
 	// VCI は OpenID4VCI の資格情報の定義と発行の記録（フィーチャー openid4vci。ADR 0119）。
 	VCI() VCIRepo
 }

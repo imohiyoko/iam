@@ -73,6 +73,8 @@ const (
 	ResourceIndicators = "resource_indicators"
 	// FAPI2 は FAPI 2.0 Security Profile を連携先・realm の単位で強いる（ADR 0117）。
 	FAPI2 = "fapi2"
+	// WorkloadIdentity は Workload Identity Federation（外部の JWT をサービスアカウントのトークンに替える。ADR 0116）。
+	WorkloadIdentity = "workload_identity"
 	// OpenID4VCI は OpenID for Verifiable Credential Issuance 1.0 の発行者（ADR 0119）。
 	OpenID4VCI = "openid4vci"
 )

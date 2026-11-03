@@ -81,6 +81,7 @@ var authnTests = []struct {
 	{"WSFed", testWSFed},
 	{"SAMLIdP", testSAMLIdP},
 	{"OAuthResources", testOAuthResources},
+	{"WorkloadIdentity", testWorkloadIdentity},
 	{"VCI", testVCI},
 }
 

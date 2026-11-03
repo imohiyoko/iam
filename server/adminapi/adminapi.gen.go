@@ -847,6 +847,48 @@ func (e WSFedRelyingPartyInputTokenType) Valid() bool {
 	}
 }
 
+// Defines values for WorkloadIdentityProviderInputAlgorithms.
+const (
+	WorkloadIdentityProviderInputAlgorithmsES256 WorkloadIdentityProviderInputAlgorithms = "ES256"
+	WorkloadIdentityProviderInputAlgorithmsES384 WorkloadIdentityProviderInputAlgorithms = "ES384"
+	WorkloadIdentityProviderInputAlgorithmsES512 WorkloadIdentityProviderInputAlgorithms = "ES512"
+	WorkloadIdentityProviderInputAlgorithmsEdDSA WorkloadIdentityProviderInputAlgorithms = "EdDSA"
+	WorkloadIdentityProviderInputAlgorithmsPS256 WorkloadIdentityProviderInputAlgorithms = "PS256"
+	WorkloadIdentityProviderInputAlgorithmsPS384 WorkloadIdentityProviderInputAlgorithms = "PS384"
+	WorkloadIdentityProviderInputAlgorithmsPS512 WorkloadIdentityProviderInputAlgorithms = "PS512"
+	WorkloadIdentityProviderInputAlgorithmsRS256 WorkloadIdentityProviderInputAlgorithms = "RS256"
+	WorkloadIdentityProviderInputAlgorithmsRS384 WorkloadIdentityProviderInputAlgorithms = "RS384"
+	WorkloadIdentityProviderInputAlgorithmsRS512 WorkloadIdentityProviderInputAlgorithms = "RS512"
+)
+
+// Valid indicates whether the value is a known member of the WorkloadIdentityProviderInputAlgorithms enum.
+func (e WorkloadIdentityProviderInputAlgorithms) Valid() bool {
+	switch e {
+	case WorkloadIdentityProviderInputAlgorithmsES256:
+		return true
+	case WorkloadIdentityProviderInputAlgorithmsES384:
+		return true
+	case WorkloadIdentityProviderInputAlgorithmsES512:
+		return true
+	case WorkloadIdentityProviderInputAlgorithmsEdDSA:
+		return true
+	case WorkloadIdentityProviderInputAlgorithmsPS256:
+		return true
+	case WorkloadIdentityProviderInputAlgorithmsPS384:
+		return true
+	case WorkloadIdentityProviderInputAlgorithmsPS512:
+		return true
+	case WorkloadIdentityProviderInputAlgorithmsRS256:
+		return true
+	case WorkloadIdentityProviderInputAlgorithmsRS384:
+		return true
+	case WorkloadIdentityProviderInputAlgorithmsRS512:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListAuditEventsParamsResult.
 const (
 	Failure ListAuditEventsParamsResult = "failure"
@@ -2742,6 +2784,78 @@ type WSFedRelyingPartyInput struct {
 // WSFedRelyingPartyInputTokenType 既定は saml11
 type WSFedRelyingPartyInputTokenType string
 
+// WorkloadIdentityBinding defines model for WorkloadIdentityBinding.
+type WorkloadIdentityBinding struct {
+	Conditions       []WorkloadIdentityCondition `json:"conditions"`
+	CreatedAt        time.Time                   `json:"created_at"`
+	Id               string                      `json:"id"`
+	ProviderId       string                      `json:"provider_id"`
+	ServiceAccountId string                      `json:"service_account_id"`
+}
+
+// WorkloadIdentityBindingInput defines model for WorkloadIdentityBindingInput.
+type WorkloadIdentityBindingInput struct {
+	Conditions       []WorkloadIdentityCondition `json:"conditions"`
+	ServiceAccountId string                      `json:"service_account_id"`
+}
+
+// WorkloadIdentityBindings defines model for WorkloadIdentityBindings.
+type WorkloadIdentityBindings struct {
+	Bindings []WorkloadIdentityBinding `json:"bindings"`
+}
+
+// WorkloadIdentityCondition defines model for WorkloadIdentityCondition.
+type WorkloadIdentityCondition struct {
+	// Claim JSON Pointer（RFC 6901）
+	Claim  string    `json:"claim"`
+	Equals *string   `json:"equals,omitempty"`
+	In     *[]string `json:"in,omitempty"`
+	Prefix *string   `json:"prefix,omitempty"`
+}
+
+// WorkloadIdentityProvider defines model for WorkloadIdentityProvider.
+type WorkloadIdentityProvider struct {
+	Algorithms       []string                `json:"algorithms"`
+	Audiences        []string                `json:"audiences"`
+	CreatedAt        time.Time               `json:"created_at"`
+	Disabled         bool                    `json:"disabled"`
+	Id               string                  `json:"id"`
+	Issuer           string                  `json:"issuer"`
+	Jwks             *map[string]interface{} `json:"jwks,omitempty"`
+	JwksUri          *string                 `json:"jwks_uri,omitempty"`
+	MaxTokenLifetime int                     `json:"max_token_lifetime"`
+	Name             string                  `json:"name"`
+	UpdatedAt        time.Time               `json:"updated_at"`
+}
+
+// WorkloadIdentityProviderInput defines model for WorkloadIdentityProviderInput.
+type WorkloadIdentityProviderInput struct {
+	Algorithms *[]WorkloadIdentityProviderInputAlgorithms `json:"algorithms,omitempty"`
+	Audiences  []string                                   `json:"audiences"`
+	Disabled   *bool                                      `json:"disabled,omitempty"`
+
+	// Issuer JWT の `iss`（https。完全一致）
+	Issuer string `json:"issuer"`
+
+	// Jwks 固定の JWKS（公開鍵だけ。ネットワークに出ない。`jwks_uri` とは併せない）
+	Jwks *map[string]interface{} `json:"jwks,omitempty"`
+
+	// JwksUri 鍵の URL（https。Discovery を飛ばす。`jwks` とは併せない）
+	JwksUri *string `json:"jwks_uri,omitempty"`
+
+	// MaxTokenLifetime 秒。既定 3600
+	MaxTokenLifetime *int   `json:"max_token_lifetime,omitempty"`
+	Name             string `json:"name"`
+}
+
+// WorkloadIdentityProviderInputAlgorithms defines model for WorkloadIdentityProviderInput.Algorithms.
+type WorkloadIdentityProviderInputAlgorithms string
+
+// WorkloadIdentityProviders defines model for WorkloadIdentityProviders.
+type WorkloadIdentityProviders struct {
+	Providers []WorkloadIdentityProvider `json:"providers"`
+}
+
 // ListAuditEventsParams defines parameters for ListAuditEvents.
 type ListAuditEventsParams struct {
 	Limit             *int                         `form:"limit,omitempty" json:"limit,omitempty"`
@@ -2886,17 +3000,25 @@ type RotateSigningKeyJSONBodyAlg string
 
 // IssueServiceAccountTokenFormdataBody defines parameters for IssueServiceAccountToken.
 type IssueServiceAccountTokenFormdataBody struct {
-	ClientAssertion     *string `form:"client_assertion,omitempty" json:"client_assertion,omitempty"`
-	ClientAssertionType *string `form:"client_assertion_type,omitempty" json:"client_assertion_type,omitempty"`
-	ClientId            *string `form:"client_id,omitempty" json:"client_id,omitempty"`
-	ClientSecret        *string `form:"client_secret,omitempty" json:"client_secret,omitempty"`
-	GrantType           string  `form:"grant_type" json:"grant_type"`
+	ActorToken          *string   `form:"actor_token,omitempty" json:"actor_token,omitempty"`
+	ActorTokenType      *string   `form:"actor_token_type,omitempty" json:"actor_token_type,omitempty"`
+	Audience            *[]string `form:"audience,omitempty" json:"audience,omitempty"`
+	ClientAssertion     *string   `form:"client_assertion,omitempty" json:"client_assertion,omitempty"`
+	ClientAssertionType *string   `form:"client_assertion_type,omitempty" json:"client_assertion_type,omitempty"`
+	ClientId            *string   `form:"client_id,omitempty" json:"client_id,omitempty"`
+	ClientSecret        *string   `form:"client_secret,omitempty" json:"client_secret,omitempty"`
+	GrantType           string    `form:"grant_type" json:"grant_type"`
+	RequestedTokenType  *string   `form:"requested_token_type,omitempty" json:"requested_token_type,omitempty"`
 
 	// Resource 自前の API の URI（RFC 8707。1 つだけ。フィーチャー `resource_indicators`）
 	Resource *[]string `form:"resource,omitempty" json:"resource,omitempty"`
 
 	// Scope `resource` を付けたときだけ使う（空白区切り）。管理 API 向けのトークンでは使わない（権限はロールの付与で決まる）
 	Scope *string `form:"scope,omitempty" json:"scope,omitempty"`
+
+	// SubjectToken 交換する外部の JWT（RFC 8693。フィーチャー `workload_identity`）
+	SubjectToken     *string `form:"subject_token,omitempty" json:"subject_token,omitempty"`
+	SubjectTokenType *string `form:"subject_token_type,omitempty" json:"subject_token_type,omitempty"`
 }
 
 // IssueServiceAccountTokenParams defines parameters for IssueServiceAccountToken.
@@ -3154,6 +3276,15 @@ type CreateVCICredentialConfigurationJSONRequestBody = VCICredentialConfiguratio
 
 // UpdateVCICredentialConfigurationJSONRequestBody defines body for UpdateVCICredentialConfiguration for application/json ContentType.
 type UpdateVCICredentialConfigurationJSONRequestBody = VCICredentialConfigurationInput
+
+// CreateWorkloadIdentityProviderJSONRequestBody defines body for CreateWorkloadIdentityProvider for application/json ContentType.
+type CreateWorkloadIdentityProviderJSONRequestBody = WorkloadIdentityProviderInput
+
+// UpdateWorkloadIdentityProviderJSONRequestBody defines body for UpdateWorkloadIdentityProvider for application/json ContentType.
+type UpdateWorkloadIdentityProviderJSONRequestBody = WorkloadIdentityProviderInput
+
+// CreateWorkloadIdentityBindingJSONRequestBody defines body for CreateWorkloadIdentityBinding for application/json ContentType.
+type CreateWorkloadIdentityBindingJSONRequestBody = WorkloadIdentityBindingInput
 
 // CreateWSFedRelyingPartyJSONRequestBody defines body for CreateWSFedRelyingParty for application/json ContentType.
 type CreateWSFedRelyingPartyJSONRequestBody = WSFedRelyingPartyInput
@@ -3604,6 +3735,30 @@ type ServerInterface interface {
 	// RevokeVCICredential 発行した Verifiable Credential を失効させる（Token Status List）
 	// (POST /v1/admin/vci/credentials/{id}:revoke)
 	RevokeVCICredential(w http.ResponseWriter, r *http.Request, id string)
+	// ListWorkloadIdentityProviders Workload Identity Federation の発行者の一覧（ADR 0116）
+	// (GET /v1/admin/workload-identity/providers)
+	ListWorkloadIdentityProviders(w http.ResponseWriter, r *http.Request)
+	// CreateWorkloadIdentityProvider 外部の JWT の発行者を登録する
+	// (POST /v1/admin/workload-identity/providers)
+	CreateWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request)
+	// GetWorkloadIdentityProvider 発行者を返す
+	// (GET /v1/admin/workload-identity/providers/{id})
+	GetWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateWorkloadIdentityProvider 発行者を置き換える
+	// (PUT /v1/admin/workload-identity/providers/{id})
+	UpdateWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request, id string)
+	// ListWorkloadIdentityBindings 発行者の結び付けの一覧
+	// (GET /v1/admin/workload-identity/providers/{id}/bindings)
+	ListWorkloadIdentityBindings(w http.ResponseWriter, r *http.Request, id string)
+	// CreateWorkloadIdentityBinding 条件を満たす外部の主体をサービスアカウントに結び付ける
+	// (POST /v1/admin/workload-identity/providers/{id}/bindings)
+	CreateWorkloadIdentityBinding(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteWorkloadIdentityBinding 結び付けを消す
+	// (POST /v1/admin/workload-identity/providers/{id}/bindings/{binding_id}:delete)
+	DeleteWorkloadIdentityBinding(w http.ResponseWriter, r *http.Request, id string, bindingId string)
+	// DeleteWorkloadIdentityProvider 発行者を消す
+	// (POST /v1/admin/workload-identity/providers/{id}:delete)
+	DeleteWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request, id string)
 	// ListWSFedRelyingParties WS-Federation の RP の一覧（ADR 0110）
 	// (GET /v1/admin/wsfed/relying-parties)
 	ListWSFedRelyingParties(w http.ResponseWriter, r *http.Request)
@@ -7568,6 +7723,199 @@ func (siw *ServerInterfaceWrapper) RevokeVCICredential(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// ListWorkloadIdentityProviders operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkloadIdentityProviders(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkloadIdentityProviders(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWorkloadIdentityProvider operation middleware
+func (siw *ServerInterfaceWrapper) CreateWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWorkloadIdentityProvider(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWorkloadIdentityProvider operation middleware
+func (siw *ServerInterfaceWrapper) GetWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWorkloadIdentityProvider(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateWorkloadIdentityProvider operation middleware
+func (siw *ServerInterfaceWrapper) UpdateWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateWorkloadIdentityProvider(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWorkloadIdentityBindings operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkloadIdentityBindings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkloadIdentityBindings(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWorkloadIdentityBinding operation middleware
+func (siw *ServerInterfaceWrapper) CreateWorkloadIdentityBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWorkloadIdentityBinding(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWorkloadIdentityBinding operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWorkloadIdentityBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding_id" -------------
+	var bindingId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding_id", r.PathValue("binding_id"), &bindingId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWorkloadIdentityBinding(w, r, id, bindingId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWorkloadIdentityProvider operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWorkloadIdentityProvider(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListWSFedRelyingParties operation middleware
 func (siw *ServerInterfaceWrapper) ListWSFedRelyingParties(w http.ResponseWriter, r *http.Request) {
 
@@ -7939,6 +8287,14 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}", wrapper.GetOAuthResource)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}", wrapper.UpdateOAuthResource)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}:delete", wrapper.DeleteOAuthResource)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/workload-identity/providers", wrapper.ListWorkloadIdentityProviders)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/workload-identity/providers", wrapper.CreateWorkloadIdentityProvider)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/workload-identity/providers/{id}", wrapper.GetWorkloadIdentityProvider)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/workload-identity/providers/{id}", wrapper.UpdateWorkloadIdentityProvider)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/workload-identity/providers/{id}:delete", wrapper.DeleteWorkloadIdentityProvider)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/workload-identity/providers/{id}/bindings", wrapper.ListWorkloadIdentityBindings)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/workload-identity/providers/{id}/bindings", wrapper.CreateWorkloadIdentityBinding)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/workload-identity/providers/{id}/bindings/{binding_id}:delete", wrapper.DeleteWorkloadIdentityBinding)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/vci/credential-configurations", wrapper.ListVCICredentialConfigurations)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/vci/credential-configurations", wrapper.CreateVCICredentialConfiguration)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/vci/credential-configurations/{id}", wrapper.GetVCICredentialConfiguration)
@@ -16197,6 +16553,9 @@ type IssueServiceAccountToken200JSONResponse struct {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
 
+		// IssuedTokenType 交換（RFC 8693）のとき `urn:ietf:params:oauth:token-type:access_token`
+		IssuedTokenType *string `json:"issued_token_type,omitempty"`
+
 		// Scope `resource` を付けたときの、許したスコープ（空白区切り）
 		Scope     *string                                              `json:"scope,omitempty"`
 		TokenType IssueServiceAccountToken200JSONResponseBodyTokenType `json:"token_type"`
@@ -18915,6 +19274,592 @@ func (response RevokeVCICredential404JSONResponse) VisitRevokeVCICredentialRespo
 	return err
 }
 
+type ListWorkloadIdentityProvidersRequestObject struct {
+}
+
+type ListWorkloadIdentityProvidersResponseObject interface {
+	VisitListWorkloadIdentityProvidersResponse(w http.ResponseWriter) error
+}
+
+type ListWorkloadIdentityProviders200JSONResponse WorkloadIdentityProviders
+
+func (response ListWorkloadIdentityProviders200JSONResponse) VisitListWorkloadIdentityProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadIdentityProviders401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListWorkloadIdentityProviders401JSONResponse) VisitListWorkloadIdentityProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadIdentityProviders403JSONResponse Error
+
+func (response ListWorkloadIdentityProviders403JSONResponse) VisitListWorkloadIdentityProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadIdentityProviders404JSONResponse Error
+
+func (response ListWorkloadIdentityProviders404JSONResponse) VisitListWorkloadIdentityProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityProviderRequestObject struct {
+	Body *CreateWorkloadIdentityProviderJSONRequestBody
+}
+
+type CreateWorkloadIdentityProviderResponseObject interface {
+	VisitCreateWorkloadIdentityProviderResponse(w http.ResponseWriter) error
+}
+
+type CreateWorkloadIdentityProvider201JSONResponse WorkloadIdentityProvider
+
+func (response CreateWorkloadIdentityProvider201JSONResponse) VisitCreateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityProvider400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateWorkloadIdentityProvider400JSONResponse) VisitCreateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityProvider401JSONResponse Error
+
+func (response CreateWorkloadIdentityProvider401JSONResponse) VisitCreateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityProvider403JSONResponse Error
+
+func (response CreateWorkloadIdentityProvider403JSONResponse) VisitCreateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityProvider404JSONResponse Error
+
+func (response CreateWorkloadIdentityProvider404JSONResponse) VisitCreateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityProvider409JSONResponse Error
+
+func (response CreateWorkloadIdentityProvider409JSONResponse) VisitCreateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadIdentityProviderRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetWorkloadIdentityProviderResponseObject interface {
+	VisitGetWorkloadIdentityProviderResponse(w http.ResponseWriter) error
+}
+
+type GetWorkloadIdentityProvider200JSONResponse WorkloadIdentityProvider
+
+func (response GetWorkloadIdentityProvider200JSONResponse) VisitGetWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadIdentityProvider401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetWorkloadIdentityProvider401JSONResponse) VisitGetWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadIdentityProvider403JSONResponse Error
+
+func (response GetWorkloadIdentityProvider403JSONResponse) VisitGetWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadIdentityProvider404JSONResponse Error
+
+func (response GetWorkloadIdentityProvider404JSONResponse) VisitGetWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkloadIdentityProviderRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateWorkloadIdentityProviderJSONRequestBody
+}
+
+type UpdateWorkloadIdentityProviderResponseObject interface {
+	VisitUpdateWorkloadIdentityProviderResponse(w http.ResponseWriter) error
+}
+
+type UpdateWorkloadIdentityProvider200JSONResponse WorkloadIdentityProvider
+
+func (response UpdateWorkloadIdentityProvider200JSONResponse) VisitUpdateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkloadIdentityProvider400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdateWorkloadIdentityProvider400JSONResponse) VisitUpdateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkloadIdentityProvider401JSONResponse Error
+
+func (response UpdateWorkloadIdentityProvider401JSONResponse) VisitUpdateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkloadIdentityProvider403JSONResponse Error
+
+func (response UpdateWorkloadIdentityProvider403JSONResponse) VisitUpdateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkloadIdentityProvider404JSONResponse Error
+
+func (response UpdateWorkloadIdentityProvider404JSONResponse) VisitUpdateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateWorkloadIdentityProvider409JSONResponse Error
+
+func (response UpdateWorkloadIdentityProvider409JSONResponse) VisitUpdateWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadIdentityBindingsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type ListWorkloadIdentityBindingsResponseObject interface {
+	VisitListWorkloadIdentityBindingsResponse(w http.ResponseWriter) error
+}
+
+type ListWorkloadIdentityBindings200JSONResponse WorkloadIdentityBindings
+
+func (response ListWorkloadIdentityBindings200JSONResponse) VisitListWorkloadIdentityBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadIdentityBindings401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListWorkloadIdentityBindings401JSONResponse) VisitListWorkloadIdentityBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadIdentityBindings403JSONResponse Error
+
+func (response ListWorkloadIdentityBindings403JSONResponse) VisitListWorkloadIdentityBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloadIdentityBindings404JSONResponse Error
+
+func (response ListWorkloadIdentityBindings404JSONResponse) VisitListWorkloadIdentityBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityBindingRequestObject struct {
+	Id   string `json:"id"`
+	Body *CreateWorkloadIdentityBindingJSONRequestBody
+}
+
+type CreateWorkloadIdentityBindingResponseObject interface {
+	VisitCreateWorkloadIdentityBindingResponse(w http.ResponseWriter) error
+}
+
+type CreateWorkloadIdentityBinding201JSONResponse WorkloadIdentityBinding
+
+func (response CreateWorkloadIdentityBinding201JSONResponse) VisitCreateWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityBinding400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreateWorkloadIdentityBinding400JSONResponse) VisitCreateWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityBinding401JSONResponse Error
+
+func (response CreateWorkloadIdentityBinding401JSONResponse) VisitCreateWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityBinding403JSONResponse Error
+
+func (response CreateWorkloadIdentityBinding403JSONResponse) VisitCreateWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityBinding404JSONResponse Error
+
+func (response CreateWorkloadIdentityBinding404JSONResponse) VisitCreateWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateWorkloadIdentityBinding409JSONResponse Error
+
+func (response CreateWorkloadIdentityBinding409JSONResponse) VisitCreateWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadIdentityBindingRequestObject struct {
+	Id        string `json:"id"`
+	BindingId string `json:"binding_id"`
+}
+
+type DeleteWorkloadIdentityBindingResponseObject interface {
+	VisitDeleteWorkloadIdentityBindingResponse(w http.ResponseWriter) error
+}
+
+type DeleteWorkloadIdentityBinding204Response struct {
+}
+
+func (response DeleteWorkloadIdentityBinding204Response) VisitDeleteWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteWorkloadIdentityBinding401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteWorkloadIdentityBinding401JSONResponse) VisitDeleteWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadIdentityBinding403JSONResponse Error
+
+func (response DeleteWorkloadIdentityBinding403JSONResponse) VisitDeleteWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadIdentityBinding404JSONResponse Error
+
+func (response DeleteWorkloadIdentityBinding404JSONResponse) VisitDeleteWorkloadIdentityBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadIdentityProviderRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeleteWorkloadIdentityProviderResponseObject interface {
+	VisitDeleteWorkloadIdentityProviderResponse(w http.ResponseWriter) error
+}
+
+type DeleteWorkloadIdentityProvider204Response struct {
+}
+
+func (response DeleteWorkloadIdentityProvider204Response) VisitDeleteWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteWorkloadIdentityProvider401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeleteWorkloadIdentityProvider401JSONResponse) VisitDeleteWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadIdentityProvider403JSONResponse Error
+
+func (response DeleteWorkloadIdentityProvider403JSONResponse) VisitDeleteWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkloadIdentityProvider404JSONResponse Error
+
+func (response DeleteWorkloadIdentityProvider404JSONResponse) VisitDeleteWorkloadIdentityProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListWSFedRelyingPartiesRequestObject struct {
 }
 
@@ -19728,6 +20673,30 @@ type StrictServerInterface interface {
 	// RevokeVCICredential 発行した Verifiable Credential を失効させる（Token Status List）
 	// (POST /v1/admin/vci/credentials/{id}:revoke)
 	RevokeVCICredential(ctx context.Context, request RevokeVCICredentialRequestObject) (RevokeVCICredentialResponseObject, error)
+	// ListWorkloadIdentityProviders Workload Identity Federation の発行者の一覧（ADR 0116）
+	// (GET /v1/admin/workload-identity/providers)
+	ListWorkloadIdentityProviders(ctx context.Context, request ListWorkloadIdentityProvidersRequestObject) (ListWorkloadIdentityProvidersResponseObject, error)
+	// CreateWorkloadIdentityProvider 外部の JWT の発行者を登録する
+	// (POST /v1/admin/workload-identity/providers)
+	CreateWorkloadIdentityProvider(ctx context.Context, request CreateWorkloadIdentityProviderRequestObject) (CreateWorkloadIdentityProviderResponseObject, error)
+	// GetWorkloadIdentityProvider 発行者を返す
+	// (GET /v1/admin/workload-identity/providers/{id})
+	GetWorkloadIdentityProvider(ctx context.Context, request GetWorkloadIdentityProviderRequestObject) (GetWorkloadIdentityProviderResponseObject, error)
+	// UpdateWorkloadIdentityProvider 発行者を置き換える
+	// (PUT /v1/admin/workload-identity/providers/{id})
+	UpdateWorkloadIdentityProvider(ctx context.Context, request UpdateWorkloadIdentityProviderRequestObject) (UpdateWorkloadIdentityProviderResponseObject, error)
+	// ListWorkloadIdentityBindings 発行者の結び付けの一覧
+	// (GET /v1/admin/workload-identity/providers/{id}/bindings)
+	ListWorkloadIdentityBindings(ctx context.Context, request ListWorkloadIdentityBindingsRequestObject) (ListWorkloadIdentityBindingsResponseObject, error)
+	// CreateWorkloadIdentityBinding 条件を満たす外部の主体をサービスアカウントに結び付ける
+	// (POST /v1/admin/workload-identity/providers/{id}/bindings)
+	CreateWorkloadIdentityBinding(ctx context.Context, request CreateWorkloadIdentityBindingRequestObject) (CreateWorkloadIdentityBindingResponseObject, error)
+	// DeleteWorkloadIdentityBinding 結び付けを消す
+	// (POST /v1/admin/workload-identity/providers/{id}/bindings/{binding_id}:delete)
+	DeleteWorkloadIdentityBinding(ctx context.Context, request DeleteWorkloadIdentityBindingRequestObject) (DeleteWorkloadIdentityBindingResponseObject, error)
+	// DeleteWorkloadIdentityProvider 発行者を消す
+	// (POST /v1/admin/workload-identity/providers/{id}:delete)
+	DeleteWorkloadIdentityProvider(ctx context.Context, request DeleteWorkloadIdentityProviderRequestObject) (DeleteWorkloadIdentityProviderResponseObject, error)
 	// ListWSFedRelyingParties WS-Federation の RP の一覧（ADR 0110）
 	// (GET /v1/admin/wsfed/relying-parties)
 	ListWSFedRelyingParties(ctx context.Context, request ListWSFedRelyingPartiesRequestObject) (ListWSFedRelyingPartiesResponseObject, error)
@@ -23994,6 +24963,232 @@ func (sh *strictHandler) RevokeVCICredential(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeVCICredentialResponseObject); ok {
 		if err := validResponse.VisitRevokeVCICredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkloadIdentityProviders operation middleware
+func (sh *strictHandler) ListWorkloadIdentityProviders(w http.ResponseWriter, r *http.Request) {
+	var request ListWorkloadIdentityProvidersRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkloadIdentityProviders(ctx, request.(ListWorkloadIdentityProvidersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkloadIdentityProviders")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkloadIdentityProvidersResponseObject); ok {
+		if err := validResponse.VisitListWorkloadIdentityProvidersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWorkloadIdentityProvider operation middleware
+func (sh *strictHandler) CreateWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request) {
+	var request CreateWorkloadIdentityProviderRequestObject
+
+	var body CreateWorkloadIdentityProviderJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWorkloadIdentityProvider(ctx, request.(CreateWorkloadIdentityProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWorkloadIdentityProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWorkloadIdentityProviderResponseObject); ok {
+		if err := validResponse.VisitCreateWorkloadIdentityProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWorkloadIdentityProvider operation middleware
+func (sh *strictHandler) GetWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetWorkloadIdentityProviderRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWorkloadIdentityProvider(ctx, request.(GetWorkloadIdentityProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWorkloadIdentityProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWorkloadIdentityProviderResponseObject); ok {
+		if err := validResponse.VisitGetWorkloadIdentityProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateWorkloadIdentityProvider operation middleware
+func (sh *strictHandler) UpdateWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateWorkloadIdentityProviderRequestObject
+
+	request.Id = id
+
+	var body UpdateWorkloadIdentityProviderJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateWorkloadIdentityProvider(ctx, request.(UpdateWorkloadIdentityProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateWorkloadIdentityProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateWorkloadIdentityProviderResponseObject); ok {
+		if err := validResponse.VisitUpdateWorkloadIdentityProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkloadIdentityBindings operation middleware
+func (sh *strictHandler) ListWorkloadIdentityBindings(w http.ResponseWriter, r *http.Request, id string) {
+	var request ListWorkloadIdentityBindingsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkloadIdentityBindings(ctx, request.(ListWorkloadIdentityBindingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkloadIdentityBindings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkloadIdentityBindingsResponseObject); ok {
+		if err := validResponse.VisitListWorkloadIdentityBindingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWorkloadIdentityBinding operation middleware
+func (sh *strictHandler) CreateWorkloadIdentityBinding(w http.ResponseWriter, r *http.Request, id string) {
+	var request CreateWorkloadIdentityBindingRequestObject
+
+	request.Id = id
+
+	var body CreateWorkloadIdentityBindingJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWorkloadIdentityBinding(ctx, request.(CreateWorkloadIdentityBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWorkloadIdentityBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWorkloadIdentityBindingResponseObject); ok {
+		if err := validResponse.VisitCreateWorkloadIdentityBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWorkloadIdentityBinding operation middleware
+func (sh *strictHandler) DeleteWorkloadIdentityBinding(w http.ResponseWriter, r *http.Request, id string, bindingId string) {
+	var request DeleteWorkloadIdentityBindingRequestObject
+
+	request.Id = id
+	request.BindingId = bindingId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWorkloadIdentityBinding(ctx, request.(DeleteWorkloadIdentityBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWorkloadIdentityBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteWorkloadIdentityBindingResponseObject); ok {
+		if err := validResponse.VisitDeleteWorkloadIdentityBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWorkloadIdentityProvider operation middleware
+func (sh *strictHandler) DeleteWorkloadIdentityProvider(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeleteWorkloadIdentityProviderRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWorkloadIdentityProvider(ctx, request.(DeleteWorkloadIdentityProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWorkloadIdentityProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteWorkloadIdentityProviderResponseObject); ok {
+		if err := validResponse.VisitDeleteWorkloadIdentityProviderResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

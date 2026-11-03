@@ -22,6 +22,8 @@ import (
 
 const (
 	GrantClientCredentials = "client_credentials"
+	// GrantTokenExchange は Workload Identity Federation の交換（RFC 8693。ADR 0116）。
+	GrantTokenExchange     = "urn:ietf:params:oauth:grant-type:token-exchange"        // #nosec G101 -- RFC 8693 の識別子で、秘密ではない
 	AssertionTypeJWTBearer = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" // #nosec G101 -- RFC 7523 の識別子で、秘密ではない
 	// MaxAssertionLifetime は client assertion の exp の上限（今からの長さ）。jti はこの間だけ覚える。
 	MaxAssertionLifetime = 5 * time.Minute
@@ -39,7 +41,18 @@ var (
 	ErrInvalidTarget = errs.WithCode(errs.KindInvalid, "invalid_target", "invalid resource")
 	// ErrInvalidScope は resource のスコープとして許されていないスコープ（RFC 6749 5.2）。
 	ErrInvalidScope = errs.WithCode(errs.KindInvalid, "invalid_scope", "invalid scope")
+	// ErrInvalidGrant は交換した外部の主体の結び付けかサービスアカウントが使えない（RFC 6749 5.2。ADR 0116）。理由は返さない。
+	ErrInvalidGrant = errs.WithCode(errs.KindInvalid, "invalid_grant", "invalid grant")
 )
+
+// Federated は Workload Identity Federation で確かめた外部の主体（ADR 0116）。呼び出し側が外部の JWT を確かめて渡す。
+type Federated struct {
+	ProviderID string
+	BindingID  string
+	AccountID  string
+	// Subject は外部の JWT の sub（監査ログ）。
+	Subject string
+}
 
 // maxScopeParam は scope の長さの上限。
 const maxScopeParam = 4096
@@ -61,6 +74,8 @@ type TokenRequest struct {
 	// Resources は resource（RFC 8707）。指定するなら 1 つだけ。Scope は resource のスコープ（空白区切り）。resource が無ければ使わない。
 	Resources []string
 	Scope     string
+	// Federated は GrantTokenExchange で交換する外部の主体（ADR 0116）。ClientSecret・Assertion とは併せない。
+	Federated *Federated
 }
 
 // Issued は発行したアクセストークン。Token は1回だけ返す。
@@ -74,8 +89,13 @@ type Issued struct {
 }
 
 // Token はクライアントを認証し、アクセストークンを発行する。認証の失敗は ErrInvalidClient、ストレージの障害はそれ以外のエラー。
+// GrantTokenExchange（ADR 0116）では、呼び出し側が確かめた外部の主体の結び付けとサービスアカウントが使えることを確かめ直す
+// （使えなければ ErrInvalidGrant）。
 func (s *Service) Token(ctx context.Context, tx port.Tx, realmID string, req TokenRequest, requestID string) (Issued, error) {
-	if req.GrantType != GrantClientCredentials {
+	if req.GrantType == GrantTokenExchange {
+		return s.exchange(ctx, tx, realmID, req, requestID)
+	}
+	if req.GrantType != GrantClientCredentials || req.Federated != nil {
 		return Issued{}, ErrUnsupportedGrant
 	}
 	if (req.ClientSecret == "") == (req.Assertion == "") || (req.Assertion != "" && req.AssertionType != AssertionTypeJWTBearer) {
@@ -102,6 +122,40 @@ func (s *Service) Token(ctx context.Context, tx port.Tx, realmID string, req Tok
 	if err := s.usable(ctx, tx, a, now); err != nil {
 		return Issued{}, clientErr(err)
 	}
+	return s.issue(ctx, tx, realmID, a, c.ID, req, requestID, map[string]any{"credential_id": c.ID})
+}
+
+// exchange は Workload Identity Federation の交換（ADR 0116）。
+func (s *Service) exchange(ctx context.Context, tx port.Tx, realmID string, req TokenRequest, requestID string) (Issued, error) {
+	f := req.Federated
+	if f == nil || s.Federation == nil {
+		return Issued{}, ErrUnsupportedGrant
+	}
+	if req.ClientSecret != "" || req.Assertion != "" || req.AssertionType != "" {
+		return Issued{}, ErrInvalidRequest
+	}
+	accountID, ok, err := s.Federation.BindingLive(ctx, tx, realmID, f.BindingID)
+	if err != nil {
+		return Issued{}, err
+	}
+	if !ok || accountID != f.AccountID {
+		return Issued{}, ErrInvalidGrant
+	}
+	a, err := tx.ServiceAccounts().Get(ctx, realmID, accountID)
+	if err != nil {
+		return Issued{}, grantErr(invalidOr(err))
+	}
+	if err := s.usable(ctx, tx, a, s.Clock.Now()); err != nil {
+		return Issued{}, grantErr(err)
+	}
+	return s.issue(ctx, tx, realmID, a, f.BindingID, req, requestID, map[string]any{"workload_identity_provider_id": f.ProviderID,
+		"workload_identity_binding_id": f.BindingID, "external_subject": f.Subject})
+}
+
+// issue はサービスアカウント a のアクセストークンを、認証情報（か結び付け）credentialID の発行として作り、監査ログに残す。
+func (s *Service) issue(ctx context.Context, tx port.Tx, realmID string, a port.ServiceAccount, credentialID string, req TokenRequest,
+	requestID string, details map[string]any) (Issued, error) {
+	now := s.Clock.Now()
 	audience, scopes, err := s.target(ctx, tx, realmID, a.ID, req)
 	if err != nil {
 		return Issued{}, err
@@ -110,14 +164,14 @@ func (s *Service) Token(ctx context.Context, tx port.Tx, realmID string, req Tok
 	if err != nil {
 		return Issued{}, err
 	}
-	t := port.ServiceAccountToken{ID: id.NewExternal(id.SAToken), RealmID: realmID, ServiceAccountID: a.ID, CredentialID: c.ID,
+	t := port.ServiceAccountToken{ID: id.NewExternal(id.SAToken), RealmID: realmID, ServiceAccountID: a.ID, CredentialID: credentialID,
 		Hash: h, CreatedAt: now, ExpiresAt: now.Add(s.TokenTTL), Audience: audience, Scopes: scopes,
 		JKT: req.JKT}
 	if err := tx.ServiceAccounts().CreateToken(ctx, t); err != nil {
 		return Issued{}, err
 	}
 	actor := audit.Actor{Type: "service_account", ID: a.ID}
-	details := map[string]any{"service_account_id": a.ID, "credential_id": c.ID, "token_id": t.ID}
+	details["service_account_id"], details["token_id"] = a.ID, t.ID
 	if t.JKT != "" {
 		details["dpop_jkt"] = t.JKT
 	}
@@ -160,6 +214,14 @@ func (s *Service) target(ctx context.Context, tx port.Tx, realmID, accountID str
 	}
 	slices.Sort(requested)
 	return x.URI, slices.Compact(requested), nil
+}
+
+// grantErr は使えないサービスアカウントを ErrInvalidGrant にする（ストレージの障害はそのまま）。
+func grantErr(err error) error {
+	if errors.Is(err, ErrInvalid) {
+		return ErrInvalidGrant
+	}
+	return err
 }
 
 // clientErr は認証の失敗を ErrInvalidClient にする（ストレージの障害はそのまま）。

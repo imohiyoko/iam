@@ -220,6 +220,9 @@ func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t.q} }
 // OAuthResources は自前の API（リソースサーバー）の登録（ADR 0112）。
 func (t *tx) OAuthResources() port.OAuthResourceRepo { return oauthResources{t.q} }
 
+// WorkloadIdentity は Workload Identity Federation の発行者と結び付け（ADR 0116）。
+func (t *tx) WorkloadIdentity() port.WorkloadIdentityRepo { return workloadIdentity{t.q} }
+
 // PersonalAccessTokens は本人の Personal Access Token（ADR 0109）。
 func (t *tx) PersonalAccessTokens() port.PersonalAccessTokenRepo { return pats{t.q} }
 

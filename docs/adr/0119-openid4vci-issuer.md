@@ -2,7 +2,7 @@
 
 - 状態: 承認
 - 日付: 2026-11-03
-- 関連: [design.md](../design.md) 5.13、9.3、11.0、[scope.md](../scope.md) 4 章、[0005](0005-crypto-no-rsa-pqc.md)、[0014](0014-pii-encryption-minimization.md)、
+- 関連: [design.md](../design.md) 5.14、9.3、11.0、[scope.md](../scope.md) 4 章、[0005](0005-crypto-no-rsa-pqc.md)、[0014](0014-pii-encryption-minimization.md)、
   [0022](0022-deny-reason-disclosure.md)、[0026](0026-first-party-clients.md)、[0066](0066-oidc-authorization-code-flow.md)、[0073](0073-build-and-feature-toggle.md)、
   [0080](0080-custom-attributes.md)、[0083](0083-multi-realm.md)、[0084](0084-auth-context-and-risk-in-authz.md)、[0089](0089-enterprise-full-scope.md)、
   [0108](0108-openid4vp-verifier.md)、[0112](0112-par-and-resource-indicators.md)、[0113](0113-sender-constrained-tokens.md)

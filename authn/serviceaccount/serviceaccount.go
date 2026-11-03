@@ -96,7 +96,23 @@ type Authenticator struct {
 	// errs.Invalid の invalid_target）。フィーチャー resource_indicators が動いていなければ nil で、resource は受け付けず、
 	// aud を持つトークンも使えない（ADR 0112）。
 	Resource func(ctx context.Context, tx port.Tx, realmID, uri, accountID string) (port.OAuthResource, error)
+	// Federation は Workload Identity Federation の結び付け（ADR 0116）。フィーチャー workload_identity が動いていなければ nil で、
+	// 結び付けで発行したトークンは使えない。
+	Federation Federation
 }
+
+// Federation は Workload Identity Federation の結び付けが今も使えるかを確かめる（authn/workloadidentity が実装する）。
+type Federation interface {
+	// BindingLive は結び付けが残っていて、その発行者が止まっていなければ、結び付けのサービスアカウントの ID と true を返す。
+	// error はストレージの障害だけ。
+	BindingLive(ctx context.Context, tx port.Tx, realmID, bindingID string) (string, bool, error)
+}
+
+// MethodWorkloadIdentity は Workload Identity Federation で発行したアクセストークンの認証の手段（amr。ADR 0116）。
+const MethodWorkloadIdentity = "workload_identity"
+
+// federatedPrefix は結び付けで発行したアクセストークンの CredentialID（結び付けの ID）の接頭辞。
+const federatedPrefix = string(id.WorkloadIdentityBinding) + "_"
 
 // Authenticated は確かめたサービスアカウントと、その認証の手段・時刻（認可の条件の文脈。ADR 0084）。
 type Authenticated struct {
@@ -121,7 +137,7 @@ func (au Authenticator) Authenticate(ctx context.Context, tx port.Tx, realmID, b
 	var out Authenticated
 	var accountID string
 	if strings.HasPrefix(bearer, tokenPrefix) {
-		t, method, err := checkToken(ctx, tx, realmID, bearer, now)
+		t, method, err := au.checkToken(ctx, tx, realmID, bearer, now)
 		if err != nil {
 			return Authenticated{}, err
 		}
@@ -155,7 +171,7 @@ func (au Authenticator) ResourceToken(ctx context.Context, tx port.Tx, realmID, 
 	if au.Resource == nil || !strings.HasPrefix(bearer, tokenPrefix) {
 		return port.ServiceAccountToken{}, port.ServiceAccount{}, ErrInvalid
 	}
-	t, _, err := checkToken(ctx, tx, realmID, bearer, now)
+	t, _, err := au.checkToken(ctx, tx, realmID, bearer, now)
 	if err != nil {
 		return port.ServiceAccountToken{}, port.ServiceAccount{}, err
 	}
@@ -243,7 +259,8 @@ func checkSecret(ctx context.Context, tx port.Tx, realmID, key, typ string, now 
 }
 
 // checkToken はアクセストークンを確かめ、発行に使った認証情報の種類も返す。発行に使った認証情報を無効化すれば、トークンも使えない。
-func checkToken(ctx context.Context, tx port.Tx, realmID, token string, now time.Time) (port.ServiceAccountToken, string, error) {
+// Workload Identity Federation で発行したもの（ADR 0116）は、結び付けと発行者が今も使えることを確かめる。
+func (au Authenticator) checkToken(ctx context.Context, tx port.Tx, realmID, token string, now time.Time) (port.ServiceAccountToken, string, error) {
 	tid, secret, ok := strings.Cut(token, ".")
 	if !ok || !id.Valid(id.SAToken, tid) || len(secret) != secretLength {
 		return port.ServiceAccountToken{}, "", ErrInvalid
@@ -255,6 +272,19 @@ func checkToken(ctx context.Context, tx port.Tx, realmID, token string, now time
 	h := sha256.Sum256([]byte(secret))
 	if subtle.ConstantTimeCompare(t.Hash, h[:]) != 1 || !now.Before(t.ExpiresAt) {
 		return port.ServiceAccountToken{}, "", ErrInvalid
+	}
+	if strings.HasPrefix(t.CredentialID, federatedPrefix) {
+		if au.Federation == nil {
+			return port.ServiceAccountToken{}, "", ErrInvalid
+		}
+		accountID, ok, err := au.Federation.BindingLive(ctx, tx, realmID, t.CredentialID)
+		if err != nil {
+			return port.ServiceAccountToken{}, "", errs.Wrap(errs.KindUnavailable, err, "service account: authenticate")
+		}
+		if !ok || accountID != t.ServiceAccountID {
+			return port.ServiceAccountToken{}, "", ErrInvalid
+		}
+		return t, MethodWorkloadIdentity, nil
 	}
 	c, err := tx.ServiceAccounts().GetCredential(ctx, realmID, t.CredentialID)
 	if err != nil {

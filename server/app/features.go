@@ -271,6 +271,12 @@ var cleaners = map[string]cleaner{
 		r, err := eachRealmFlag(ctx, tx, "fapi2_security_profile", limit-n, now)
 		return n + r, err
 	}},
+	// Workload Identity Federation の発行者・結び付けと、結び付けで発行したアクセストークンを消す（ADR 0116）。
+	// 取得した JWKS と jti は EphemeralStore にあり、期限で消える。
+	feature.WorkloadIdentity: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.WorkloadIdentity().Count(ctx) },
+		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+			return tx.WorkloadIdentity().Purge(ctx, limit)
+		}},
 	// 資格情報の定義と発行の記録を消す（ADR 0119）。申し出・アクセストークンは EphemeralStore にあり、期限で消える。
 	// status list も出なくなるので、発行済みの資格情報は検証者に確かめられなくなる（fail-closed）。
 	feature.OpenID4VCI: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.VCI().Count(ctx) },
