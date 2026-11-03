@@ -231,7 +231,7 @@ saml_idp_certificates  realm_id, key_id, der, PK (realm_id, key_id)。SAML の I
 oauth_resources      id, realm_id, uri（resource の値で aud になる）, name, scopes, clients, service_accounts
                      UNIQUE (realm_id, uri)。自前の API（RFC 8707。5.10、ADR 0112）
 workload_identity_providers  id, realm_id, issuer, name, config（aud・鍵・alg・寿命の上限。JSON）, disabled
-                     UNIQUE (realm_id, issuer)。Workload Identity Federation の発行者（5.12、ADR 0116）
+                     UNIQUE (realm_id, issuer)。Workload Identity Federation の発行者（5.13、ADR 0116）
 workload_identity_bindings  id, realm_id, provider_id, service_account_id, conditions（JSON）。発行者の結び付け
 
 user_attributes      user_id, key, value, PK (user_id, key)（11.7 の汎用形。アダプタが別の持ち方を選んでもよい）
@@ -706,7 +706,20 @@ ADR 0112。
 - iam の資源：UserInfo と管理 API（DPoP に結び付けたサービスアカウントのアクセストークン）は、結び付けたトークンに同じ鍵の
   `Authorization: DPoP` と証明（`ath` 付き）、同じクライアント証明書を求める。フィーチャーが止まっていれば結び付けたトークンは通さない
 
-### 5.12 Workload Identity Federation
+### 5.12 FAPI 2.0 Security Profile
+
+フィーチャー `fapi2`（既定オフ。ADR 0117）。連携先の `fapi2_security_profile` か realm の設定（既定の realm は
+`realm.fapi2_security_profile`）で有効にした連携先に、FAPI 2.0 Security Profile を強いる。前提は `par` と、`dpop` か `mtls_client_auth`。
+
+- 連携先の条件（登録で `invalid_client_metadata`、後から崩れたら認証で `invalid_client`）：`private_key_jwt`・`tls_client_auth`・
+  `self_signed_tls_client_auth` だけ、`dpop_bound_access_tokens` か `tls_client_certificate_bound_access_tokens`、ES256 の ID トークン、
+  https の戻り先、Device Authorization Grant なし、JWKS の鍵は PS256（RSA 2048 bit 以上）・ES256（P-256）・EdDSA（Ed25519）
+- 実行：PAR の必須（5.10）、client assertion と DPoP の証明の `alg` は PS256・ES256・EdDSA、送信者制約の無いトークンを出さない（5.11）、
+  認可コードは 60 秒以下、リフレッシュトークンはローテーションしない（同じものを認可の期限まで使え、応答に新しいものを入れない）
+- 認可応答（成功とエラー）には、どの連携先にも `iss`（RFC 9207）を付け、Discovery に `authorization_response_iss_parameter_supported`。
+  realm で有効なら、Discovery の認証方式・アルゴリズムは強いるものだけ
+- Message Signing（JAR・JARM・HTTP Message Signatures）は持たない
+### 5.13 Workload Identity Federation
 
 フィーチャー `workload_identity`（既定オフ。`service_accounts` に依存。ADR 0116）。CI・Kubernetes・クラウドのワークロードが、基盤の署名した
 JWT をサービスアカウントのアクセストークン（11.2）に替える。秘密をワークロードに置かない。
@@ -928,7 +941,8 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | SAML 2.0 の IdP（5.9、ADR 0115） | オフ | ― | `/saml/idp/*` は 404、SP の管理 API は `404 saml_idp_disabled`。無効化は SP の登録と署名の証明書を消して完了 |
 | PAR（5.10、ADR 0112） | オフ | ― | `/oauth2/par` は 404、`request_uri` は `request_uri_not_supported`、PAR の必須は効かず新しく置けない。無効化で連携先と realm の必須を外して完了 |
 | 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
-| Workload Identity Federation（5.12、ADR 0116） | オフ | サービスアカウント | `/v1/admin/token` の交換は `unsupported_grant_type`、管理 API は `404 workload_identity_disabled`。結び付けで発行したトークンは通らない。無効化で発行者・結び付け・発行したトークンを消して完了 |
+| FAPI 2.0 Security Profile（5.12、ADR 0117） | オフ | ― | 連携先と realm の `fapi2_security_profile` を新しく置けず、realm の設定は効かない（連携先の設定は外れるまで強いる）。前提の `par` と `dpop` か `mtls_client_auth` は登録で確かめる。無効化で連携先と realm の設定を外して完了 |
+| Workload Identity Federation（5.13、ADR 0116） | オフ | サービスアカウント | `/v1/admin/token` の交換は `unsupported_grant_type`、管理 API は `404 workload_identity_disabled`。結び付けで発行したトークンは通らない。無効化で発行者・結び付け・発行したトークンを消して完了 |
 
 ### 11.1 複数 realm
 
@@ -954,7 +968,7 @@ Org に属する機械の主体。ロール付与・Group 所属はユーザー�
 - 管理 API の `/v1/admin/service-accounts` で作る（権限 `service_accounts:manage`）。realm か Org（`org_id`）に属し、有効期間・停止（4.7）・論理削除を持つ。Org が削除・停止・有効期間の外なら使えない
 - `POST /v1/admin/token`（管理 API）が client credentials で不透明なアクセストークン（`sat_…`、既定 10 分）を発行する。検証のたびに状態を確かめるので、停止・削除・認証情報の無効化は次の要求から効く
 - `resource`（と `scope`）を付ければ、管理 API ではなく登録した自前の API に向けたトークンになる（フィーチャー `resource_indicators`。5.10、ADR 0112）
-- 外部の基盤の JWT を RFC 8693 で同じエンドポイントでアクセストークンに替えられる（フィーチャー `workload_identity`。5.12、ADR 0116）
+- 外部の基盤の JWT を RFC 8693 で同じエンドポイントでアクセストークンに替えられる（フィーチャー `workload_identity`。5.13、ADR 0116）
 - 配信用（2.4）は `iam service-account create` で作る。フィーチャーがオフでも作れ、認証できるのは配信用だけ
 - Org の管理者が公開 API で扱う口は後に回す
 

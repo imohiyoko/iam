@@ -60,6 +60,9 @@ type Clients struct {
 	CIBA bool
 	// PAR はフィーチャー par が動いているか（require_pushed_authorization_requests を受け付けるか。ADR 0112）。
 	PAR bool
+	// FAPI2 はフィーチャー fapi2 が動いているか（fapi2_security_profile を受け付けるか）。RealmFAPI2 は realm の設定で
+	// FAPI 2.0 Security Profile を強いるか（この realm の連携先はすべて条件を満たさなければならない。ADR 0117）。
+	FAPI2, RealmFAPI2 bool
 }
 
 // ClientInput は登録・変更の内容。
@@ -88,6 +91,8 @@ type ClientInput struct {
 	CIBANotificationEndpoint string
 	// RequirePAR は認可要求を PAR で送らせる（フィーチャー par。ADR 0112）。
 	RequirePAR bool
+	// FAPI2 は FAPI 2.0 Security Profile を強いる（フィーチャー fapi2。ADR 0117）。
+	FAPI2 bool
 }
 
 // ValidRedirectURI は連携先の URI に使えるか（絶対 URL、https か loopback の http、フラグメントと userinfo なし）を返す。
@@ -290,6 +295,9 @@ func (c *Clients) record(ctx context.Context, tx port.Tx, realmID string, actor 
 	if cl.RequirePAR {
 		details["require_pushed_authorization_requests"] = true
 	}
+	if cl.FAPI2 {
+		details["fapi2_security_profile"] = true
+	}
 	_, err := eventlog.Record(ctx, tx, c.Clock, audit.Event{Type: typ, Result: audit.ResultSuccess, RealmID: realmID, Actor: actor,
 		RequestID: requestID, Details: details})
 	return err
@@ -333,6 +341,26 @@ func (c *Clients) checkPAR(in ClientInput, prev port.Client) error {
 	return invalidClient("require_pushed_authorization_requests: the par feature is not enabled")
 }
 
+// checkFAPI2 は FAPI 2.0 Security Profile の連携先（連携先の設定か realm の設定）の条件を確かめる（ADR 0117）。
+// 連携先に新しく入れるときは、フィーチャー fapi2・par と、dpop か mtls_client_auth が動いていなければ拒む（今の値のままの変更と
+// 外すのは受ける）。cl は保存する内容。
+func (c *Clients) checkFAPI2(cl port.Client, prev port.Client) error {
+	if cl.FAPI2 && !prev.FAPI2 {
+		switch {
+		case !c.FAPI2:
+			return invalidClient("fapi2_security_profile: the fapi2 feature is not enabled")
+		case !c.PAR:
+			return invalidClient("fapi2_security_profile: the par feature is not enabled")
+		case !c.DPoP && !c.MTLS:
+			return invalidClient("fapi2_security_profile: neither the dpop nor the mtls_client_auth feature is enabled")
+		}
+	}
+	if !cl.FAPI2 && !c.RealmFAPI2 {
+		return nil
+	}
+	return CheckFAPI2(cl)
+}
+
 // Create は連携先を登録する。client_secret なら秘密を1度だけ返す（保存するのはハッシュだけ）。
 func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
 	in, err := in.normalize(c.DeviceFlow, c.CIBA)
@@ -355,7 +383,10 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 		FrontchannelLogoutURI: in.FrontchannelLogoutURI, FrontchannelLogoutSessionRequired: in.FrontchannelLogoutSessionRequired,
 		DPoPBoundAccessTokens: in.DPoPBoundAccessTokens, TLSBoundAccessTokens: in.TLSBoundAccessTokens, TLSAuthField: in.TLSAuthField,
 		TLSAuthValue: in.TLSAuthValue, CIBAMode: in.CIBAMode, CIBANotificationEndpoint: in.CIBANotificationEndpoint,
-		RequirePAR: in.RequirePAR, CreatedAt: now, UpdatedAt: now}
+		RequirePAR: in.RequirePAR, FAPI2: in.FAPI2, CreatedAt: now, UpdatedAt: now}
+	if err := c.checkFAPI2(cl, port.Client{}); err != nil {
+		return port.Client{}, "", err
+	}
 	var secret string
 	if cl.AuthMethod == port.ClientAuthSecret {
 		if secret, cl.SecretHash, err = newSecret(); err != nil {
@@ -383,6 +414,7 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	if err := c.checkPAR(in, cl); err != nil {
 		return port.Client{}, "", err
 	}
+	prev := cl
 	var secret string
 	if in.AuthMethod != port.ClientAuthSecret {
 		cl.SecretHash = nil
@@ -397,10 +429,13 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	cl.CIBAMode, cl.CIBANotificationEndpoint = in.CIBAMode, in.CIBANotificationEndpoint
 	cl.FrontchannelLogoutURI, cl.FrontchannelLogoutSessionRequired = in.FrontchannelLogoutURI, in.FrontchannelLogoutSessionRequired
 	cl.DPoPBoundAccessTokens, cl.TLSBoundAccessTokens = in.DPoPBoundAccessTokens, in.TLSBoundAccessTokens
-	cl.TLSAuthField, cl.TLSAuthValue = in.TLSAuthField, in.TLSAuthValue
+	cl.TLSAuthField, cl.TLSAuthValue, cl.FAPI2 = in.TLSAuthField, in.TLSAuthValue, in.FAPI2
 	if cl.AuthMethod == port.ClientAuthNone {
 		// 公開クライアントには交換を許さない（ADR 0099）。
 		cl.TokenExchange = nil
+	}
+	if err := c.checkFAPI2(cl, prev); err != nil {
+		return port.Client{}, "", err
 	}
 	if err := tx.Clients().Update(ctx, cl); err != nil {
 		return port.Client{}, "", err

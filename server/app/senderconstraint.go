@@ -154,6 +154,10 @@ func (s *oidcServer) tokenBinding(ctx context.Context, method, path string, h ht
 		case err != nil:
 			return b, s.fail(ctx, err)
 		}
+		if s.fapi2(cl) && !fapi2DPoPAlg(p.Alg) {
+			// FAPI 2.0 の連携先の証明は PS256・ES256・EdDSA だけ（ADR 0117）。
+			return b, errInvalidDPoPProof()
+		}
 		b.JKT = p.JKT
 	case cl.DPoPBoundAccessTokens:
 		// フィーチャーが止まっていても、DPoP を求める連携先に Bearer は出さない。
@@ -165,6 +169,10 @@ func (s *oidcServer) tokenBinding(ctx context.Context, method, path string, h ht
 			return b, oidc.ErrInvalidRequest().WithDescription("a client certificate is required")
 		}
 		b.X5T = provider.CertThumbprint(chain[0])
+	}
+	if s.fapi2(cl) && b.JKT == "" && b.X5T == "" {
+		// FAPI 2.0 の連携先には送信者制約の無いトークンを出さない（ADR 0117）。
+		return b, errSenderConstraintRequired()
 	}
 	return b, nil
 }

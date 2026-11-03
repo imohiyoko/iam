@@ -1370,6 +1370,9 @@ type Client struct {
 	// DpopBoundAccessTokens フィーチャー `dpop` が動いているときだけ返す
 	DpopBoundAccessTokens *bool `json:"dpop_bound_access_tokens,omitempty"`
 
+	// Fapi2SecurityProfile FAPI 2.0 Security Profile を強いる連携先だけ true を返す（強いないなら省く）
+	Fapi2SecurityProfile *bool `json:"fapi2_security_profile,omitempty"`
+
 	// FrontchannelLogoutSessionRequired `frontchannel_logout_uri` があるときだけ
 	FrontchannelLogoutSessionRequired *bool                   `json:"frontchannel_logout_session_required,omitempty"`
 	FrontchannelLogoutUri             *string                 `json:"frontchannel_logout_uri,omitempty"`
@@ -1412,6 +1415,12 @@ type ClientInput struct {
 
 	// DpopBoundAccessTokens token エンドポイントで常に DPoP の証明を求める（RFC 9449 5.2。フィーチャー `dpop` が動いているときだけ true にできる）
 	DpopBoundAccessTokens *bool `json:"dpop_bound_access_tokens,omitempty"`
+
+	// Fapi2SecurityProfile FAPI 2.0 Security Profile を強いる（ADR 0117）。フィーチャー `fapi2`・`par` と、`dpop` か `mtls_client_auth` が動いているときだけ
+	// true にできる。true なら private_key_jwt か mTLS の認証、`dpop_bound_access_tokens` か `tls_client_certificate_bound_access_tokens`、
+	// ES256 の ID トークン、https の戻り先が要り、Device Authorization Grant は使えない。PAR を求め、リフレッシュトークンは
+	// ローテーションしない。省けば false
+	Fapi2SecurityProfile *bool `json:"fapi2_security_profile,omitempty"`
 
 	// FrontchannelLogoutSessionRequired `frontchannel_logout_uri` に `iss` と `sid` を付けるか（既定 false）
 	FrontchannelLogoutSessionRequired *bool `json:"frontchannel_logout_session_required,omitempty"`
@@ -2119,6 +2128,7 @@ type Realm struct {
 		DeclaredContextClients  []string  `json:"declared_context_clients"`
 		DisabledMethods         *[]string `json:"disabled_methods,omitempty"`
 		EmailStorage            string    `json:"email_storage"`
+		Fapi2SecurityProfile    *bool     `json:"fapi2_security_profile,omitempty"`
 		OrgCreation             string    `json:"org_creation"`
 		OrgDeletionGraceSeconds int64     `json:"org_deletion_grace_seconds"`
 
@@ -2156,10 +2166,14 @@ type RealmSettings struct {
 	DeclaredContextClients *[]string `json:"declared_context_clients,omitempty"`
 
 	// DisabledMethods この realm で止める認証方式のプラグインの名前（`sms` など。ADR 0104）。止めた方式はこの realm で 404 になる。 登録済みの認証情報は残る
-	DisabledMethods         *[]string                  `json:"disabled_methods,omitempty"`
-	EmailStorage            *RealmSettingsEmailStorage `json:"email_storage,omitempty"`
-	OrgCreation             *RealmSettingsOrgCreation  `json:"org_creation,omitempty"`
-	OrgDeletionGraceSeconds *int64                     `json:"org_deletion_grace_seconds,omitempty"`
+	DisabledMethods *[]string                  `json:"disabled_methods,omitempty"`
+	EmailStorage    *RealmSettingsEmailStorage `json:"email_storage,omitempty"`
+
+	// Fapi2SecurityProfile この realm のすべての連携先に FAPI 2.0 Security Profile を強いる（フィーチャー `fapi2`。ADR 0117）。条件を満たさない連携先は
+	// 登録できず、既にあるものは認証できなくなる。Discovery は強いるものだけを出す
+	Fapi2SecurityProfile    *bool                     `json:"fapi2_security_profile,omitempty"`
+	OrgCreation             *RealmSettingsOrgCreation `json:"org_creation,omitempty"`
+	OrgDeletionGraceSeconds *int64                    `json:"org_deletion_grace_seconds,omitempty"`
 
 	// PasskeyPolicy realm の段の認証器のポリシー（フィーチャー passkey_attestation。ADR 0096）。空のオブジェクトで外す
 	PasskeyPolicy *PasskeyPolicy `json:"passkey_policy,omitempty"`

@@ -90,7 +90,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | OAuth AS メタデータ（RFC 8414）、Protected Resource Metadata（RFC 9728） | S | ✅ | ADR 0112。9728 は IAM 自身の API（UserInfo）の分 |
 | Device Authorization Grant（RFC 8628） | S P | ✅ | フィーチャー `device_flow`（ADR 0095） |
 | CIBA（poll・ping） | S | ✅ | フィーチャー `ciba`（ADR 0114）。手がかりは `login_hint`・`id_token_hint`。承認はプッシュの端末か本人の API。push モードと `login_hint_token` はなし |
-| FAPI 2.0 | S C | ❌ | |
+| FAPI 2.0 | S C | △ | フィーチャー `fapi2`（ADR 0117）。Security Profile を連携先か realm の単位で強いる。Message Signing（JAR・JARM）はなし |
 | OpenID4VCI | S | ❌ | |
 
 ## 5. M2M と API の保護
