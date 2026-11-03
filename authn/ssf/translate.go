@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/imohiyoko/iam/shared/acr"
@@ -178,7 +179,7 @@ func assurance(ctx context.Context, tx port.Tx, e audit.Event, user string) ([]i
 	return []item{{Event: EventAssuranceLevelChange, User: user, Payload: p}}, nil
 }
 
-func nistAAL(n int) string { return "nist-aal" + string(rune('0'+n)) }
+func nistAAL(n int) string { return "nist-aal" + strconv.Itoa(n) }
 
 // initiator は CAEP の initiating_entity（本人・運営者・システム）。
 func initiator(a audit.Actor, user string) string {

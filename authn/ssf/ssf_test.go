@@ -316,10 +316,10 @@ func TestReceiveOutcomes(t *testing.T) {
 		return e.receive(t, e.key.sign(t, ssf.SETType, c))
 	}
 	for name, sub := range map[string]any{
-		"unknown email":    map[string]any{"format": "email", "email": "nobody@example.com"},
-		"unverified email": map[string]any{"format": "email", "email": "bob@example.com"},
+		"unknown email":              map[string]any{"format": "email", "email": "nobody@example.com"},
+		"unverified email":           map[string]any{"format": "email", "email": "bob@example.com"},
 		"iss_sub without connection": map[string]any{"format": "iss_sub", "iss": txIss, "sub": e.user.PublicID},
-		"opaque":           map[string]any{"format": "opaque", "id": e.user.PublicID},
+		"opaque":                     map[string]any{"format": "opaque", "id": e.user.PublicID},
 	} {
 		got, err := send(ssf.EventSessionRevoked, sub, ev)
 		if err != nil || got.Outcome != ssf.OutcomeUnknownSubject {

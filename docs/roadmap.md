@@ -609,6 +609,26 @@ realm ごとの規則で iam のユーザーに結び付く。
 - RSA-SHA256 の署名（RS256 のフィーチャーの後）、ほかの SP への SLO の伝播と IdP から始める SLO、HTTP-Artifact、SP のメタデータからの登録、
   `pre_token` フックでの属性、Scoping（IdP のプロキシ）
 
+#### Shared Signals Framework（CAEP・RISC。ADR 0118）
+
+**ゴール**：連携先が iam のセッションの失効・停止・認証情報の変化を SET ですぐに知れ、外の IdP・EDR の知らせで、運営者が許した範囲だけ iam のセッションを止められる。
+
+- [x] フィーチャー `ssf_transmitter`（前提は `resource_indicators`・`service_accounts`。止まっていれば API はトークンを受けない）と `ssf_receiver`（どちらも既定オフ）。オフならエンドポイントは 404、
+  管理 API は `404 ssf_transmitter_disabled`・`ssf_receiver_disabled`
+- [x] `/.well-known/ssf-configuration`、ストリームの作成・取得・変更・置き換え・削除、状態、対象の追加と削除、検証のイベント。受信側は `<issuer>/ssf` に
+  向けたスコープ `ssf` のサービスアカウントのトークンだけで呼べ、ほかの受信側のストリームは見えないテストがある
+- [x] 監査ログを outbox にして、CAEP の session-revoked・credential-change・assurance-level-change・device-compliance-change と、RISC の
+  account-disabled・account-purged・credential-compromise・sessions-revoked を、対象と求めたイベントで絞って realm の鍵で署名した SET で送る
+- [x] push（RFC 8935。公開のアドレスだけ、400 は送り直さない、ほかは倍々で送り直し同じ jti）と poll（RFC 8936。ack・setErrs・maxEvents）。
+  paused・disabled の扱いのテストがある
+- [x] 受信側：送信側の登録（JWKS か jwks_uri、aud、許す動作）と push の受け口。署名の違い・aud の違い・iss の違い・古い iat・同じ jti・
+  知らない対象・alg none・Bearer の違いを拒むか動かさないテストがある
+- [x] 許した動作だけ（セッションの失効・パスワードの無効化・停止・端末の準拠状態の記録）を行い、受けた SET をすべて監査ログに残す
+- [x] 端末の準拠状態をユーザーと端末ごとに置き、古い知らせで上書きしない
+- [x] SET の読み取りのファジング、memory・SQLite・PostgreSQL の契約テスト、無効化でストリーム・送信側の登録・端末の状態を消す
+- 長いポーリング、`account-enabled`、端末の準拠状態をログインの判定（条件・risk）に使う、iam から外の送信側にストリームを作る、
+  受け口の `jwks_uri` の鍵の事前の取得
+
 ### M10 エンタープライズの運用
 
 - [x] 管理 API の一覧・取得・検索（ユーザー、Org、セッション、付与と所属の逆引き、connections、署名鍵）、管理者によるメールの操作（ADR 0097）
@@ -631,7 +651,7 @@ realm ごとの規則で iam のユーザーに結び付く。
 - サードパーティの連携先、同意画面、動的クライアント登録、本人による許可の一覧と取り消し
 - SAML 2.0 IdP、Token Exchange、CIBA（M9 で poll・ping。ADR 0114）、DPoP、mTLS、FAPI 2.0、RFC 8414・9728
 - サービスアカウントの自前の API 向けトークン（RFC 8707）、Workload Identity Federation
-- ロール・Group のクレーム、Shared Signals（CAEP・RISC）
+- ロール・Group のクレーム、Shared Signals（CAEP・RISC。M9 で送信側と受信側。ADR 0118）
 - SCIM 2.0（サーバーとクライアント）
 
 #### Token Exchange・なりすまし（ADR 0099）

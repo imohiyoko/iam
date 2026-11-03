@@ -15,6 +15,7 @@ import (
 	"github.com/imohiyoko/iam/authn/ssf"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/port"
 	"github.com/imohiyoko/iam/shared/ratelimit"
 )
@@ -97,6 +98,12 @@ func (a *App) ssfCall(next ssfHandler) http.HandlerFunc {
 		bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || bearer == "" {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="ssf"`)
+			writeError(w, http.StatusUnauthorized, "invalid_token")
+			return
+		}
+		// 前提（自前の API に向けたトークンとサービスアカウント）が動いていなければ、どのトークンも受けない（fail-closed）。
+		if a.resources == nil || !a.plan.IsActive(feature.ServiceAccounts) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="ssf", error="invalid_token"`)
 			writeError(w, http.StatusUnauthorized, "invalid_token")
 			return
 		}

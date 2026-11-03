@@ -12,10 +12,10 @@ import (
 	"github.com/imohiyoko/iam/shared/feature"
 )
 
-// TransmitterFeature は SSF の送信側。受信側はサービスアカウントで、自前の API に向けたトークン（RFC 8707）で認証するので、
-// resource_indicators（とサービスアカウント）に依存する。
-var TransmitterFeature = feature.Feature{Name: feature.SSFTransmitter, DataVersion: 1,
-	Requires: []string{feature.ResourceIndicators, feature.ServiceAccounts}}
+// TransmitterFeature は SSF の送信側。受信側はサービスアカウントの、自前の API に向けたトークン（RFC 8707）で認証する。
+// resource_indicators とサービスアカウントは前提だが、バイナリの依存（Requires）にはしない（前提を先に無効化できるように）。
+// 前提が動いていなければ、送信側の API はどのトークンも受けない。
+var TransmitterFeature = feature.Feature{Name: feature.SSFTransmitter, DataVersion: 1}
 
 // ReceiverFeature は SSF の受信側。データは送信側の登録と端末の準拠状態。
 var ReceiverFeature = feature.Feature{Name: feature.SSFReceiver, DataVersion: 1}

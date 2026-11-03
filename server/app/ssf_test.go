@@ -65,6 +65,14 @@ func TestSSFOff(t *testing.T) {
 	if code, out := l.adminDo(t, "GET", owner, "/v1/admin/ssf/streams", nil); code != 404 || out["error"] != "ssf_transmitter_disabled" {
 		t.Fatalf("streams while off: %d %v", code, out)
 	}
+	// 前提（resource_indicators・service_accounts）が動いていなければ、送信側の API はどのトークンも受けない。
+	l = featureEnv(t, nil, feature.SSFTransmitter)
+	if code, _ := l.ssfDo(t, "GET", wellKnownSSF, "", nil); code != 200 {
+		t.Fatalf("configuration: %d", code)
+	}
+	if code, _ := l.ssfDo(t, "GET", ssfStreamsPath, "sat_anything", nil); code != 401 {
+		t.Fatalf("streams without prerequisites: %d", code)
+	}
 }
 
 func TestSSFTransmitter(t *testing.T) {

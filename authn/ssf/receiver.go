@@ -309,7 +309,9 @@ type ReceiveError struct {
 
 func (e *ReceiveError) Error() string { return "ssf: " + e.Code + ": " + e.Desc }
 
-func reject(status int, code, desc string) error { return &ReceiveError{Status: status, Code: code, Desc: desc} }
+func reject(status int, code, desc string) error {
+	return &ReceiveError{Status: status, Code: code, Desc: desc}
+}
 
 // Received は受けた SET の結末。
 type Received struct {

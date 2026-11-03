@@ -127,3 +127,4 @@
 | [0114](0114-ciba.md) | CIBA は状態を EphemeralStore に置き、本人の承認はプッシュの端末と本人の API で受ける | 承認 |
 | [0115](0115-saml-idp.md) | SAML 2.0 の IdP を持ち、要求は登録した SP の完全一致と署名で確かめ、応答は realm の ES256 の鍵で XML 署名する | 承認 |
 | [0117](0117-fapi2-security-profile.md) | FAPI 2.0 Security Profile は連携先と realm の単位のプロファイルにし、PAR・送信者制約・認証方式・アルゴリズムを登録と実行の両方で強いる | 承認 |
+| [0118](0118-shared-signals-framework.md) | Shared Signals Framework は監査ログを outbox にした送信側と、許した動作だけを行う受信側の 2 つのフィーチャーにする | 承認 |

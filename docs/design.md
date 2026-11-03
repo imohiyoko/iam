@@ -230,6 +230,12 @@ saml_service_providers  id, realm_id, entity_id, name, config（ACS・SLO・証�
 saml_idp_certificates  realm_id, key_id, der, PK (realm_id, key_id)。SAML の IdP の署名鍵の自己署名の証明書
 oauth_resources      id, realm_id, uri（resource の値で aud になる）, name, scopes, clients, service_accounts
                      UNIQUE (realm_id, uri)。自前の API（RFC 8707。5.10、ADR 0112）
+ssf_streams          id, realm_id, service_account_id, delivery_method（push / poll）, endpoint_url, authorization_ciphertext, events_requested
+                     events_delivered, status, cursor_seq, next_attempt_at, failures。SSF の送信側のストリーム（5.13、ADR 0118）
+ssf_stream_subjects  stream_id, realm_id, subject（ユーザーの公開 ID）, PK (stream_id, subject)
+ssf_poll_events      stream_id, realm_id, jti, seq, set_jwt, PK (stream_id, jti)。poll の待ちの SET
+ssf_transmitters     id, realm_id, name, issuer, config（JWKS・aud・許す動作）, push_token_hash, enabled, UNIQUE (realm_id, issuer)
+device_postures      realm_id, user_id, device_id, status, source, event_at, PK (realm_id, user_id, device_id)。端末の準拠状態
 
 user_attributes      user_id, key, value, PK (user_id, key)（11.7 の汎用形。アダプタが別の持ち方を選んでもよい）
 
@@ -717,6 +723,20 @@ ADR 0112。
   realm で有効なら、Discovery の認証方式・アルゴリズムは強いるものだけ
 - Message Signing（JAR・JARM・HTTP Message Signatures）は持たない
 
+### 5.13 Shared Signals Framework（CAEP・RISC）
+
+フィーチャー `ssf_transmitter`（前提は `resource_indicators` と `service_accounts`）と `ssf_receiver`。どちらも既定オフ（ADR 0118）。
+
+- 送信側：`/.well-known/ssf-configuration` と、ストリーム・状態・対象・検証の API（SSF 1.0）。受信側はサービスアカウントの、`<issuer>/ssf` に
+  向けたスコープ `ssf` のトークン（5.10）で呼ぶ。対象は確認済みのメールか自分の issuer の `iss_sub`（ユーザーの公開 ID）
+- 監査ログを outbox にし（6.7 と同じ）、セッションの失効・認証情報の変化・AAL の変化・利用停止と有効期間の終わり・削除・端末の準拠状態を
+  CAEP・RISC のイベントにして、realm の ES256 の鍵で署名した SET（RFC 8417）で送る。push（RFC 8935。公開のアドレスだけ、400 は飛ばし
+  ほかは倍々で送り直す）と poll（RFC 8936。ack・setErrs、長いポーリングなし）。`jti` は送り直しても同じ
+- 受信側：運営者が送信側（issuer・JWKS・aud・許す動作）を登録し、送信側は `POST /ssf/receiver/{id}` に Bearer の値を付けて push する。
+  非対称の署名・`typ`・`iss`・`aud`・`iat`・`jti`（1 度だけ）を確かめ、許した動作（セッションの失効・パスワードの無効化・`security_risk` の
+  停止・端末の準拠状態の記録）だけを行う。受けた SET はすべて `ssf.signal_received` に残す
+- 端末の準拠状態はユーザーと端末ごとの最新の値として置く入力で、ログインの判定にはまだ使わない
+
 ## 6. 監査ログとイベント出力
 
 ### 6.1 記録するもの
@@ -922,6 +942,8 @@ ADR 0112。
 | PAR（5.10、ADR 0112） | オフ | ― | `/oauth2/par` は 404、`request_uri` は `request_uri_not_supported`、PAR の必須は効かず新しく置けない。無効化で連携先と realm の必須を外して完了 |
 | 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
 | FAPI 2.0 Security Profile（5.12、ADR 0117） | オフ | ― | 連携先と realm の `fapi2_security_profile` を新しく置けず、realm の設定は効かない（連携先の設定は外れるまで強いる）。前提の `par` と `dpop` か `mtls_client_auth` は登録で確かめる。無効化で連携先と realm の設定を外して完了 |
+| SSF の送信側（5.13、ADR 0118） | オフ | ― | `/.well-known/ssf-configuration` と `/ssf/*` の送信側の API は 404、ストリームの管理 API は `404 ssf_transmitter_disabled`。SET を送らない。無効化でストリーム（対象・poll の待ち・Authorization の鍵）を消して完了 |
+| SSF の受信側（5.13、ADR 0118） | オフ | ― | `/ssf/receiver/*` は 404、送信側の管理 API は `404 ssf_receiver_disabled`。無効化で送信側の登録と端末の準拠状態を消して完了 |
 
 ### 11.1 複数 realm
 
