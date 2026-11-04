@@ -101,7 +101,7 @@ func publicOnlyClient(timeout time.Duration) *http.Client {
 		return nil
 	}}
 	t := &http.Transport{Proxy: nil, DialContext: dialer.DialContext, TLSHandshakeTimeout: timeout, ResponseHeaderTimeout: timeout,
-		MaxIdleConns: 10, IdleConnTimeout: 30 * time.Second}
+		MaxIdleConns: 10, IdleConnTimeout: 30 * time.Second, ForceAttemptHTTP2: true}
 	return &http.Client{Transport: t}
 }
 

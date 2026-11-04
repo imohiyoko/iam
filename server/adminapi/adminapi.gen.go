@@ -2470,7 +2470,7 @@ type SAMLServiceProviderInput struct {
 	// NameIdFormat NameID の形式の URN（persistent（既定）・emailAddress・unspecified・transient）
 	NameIdFormat *string `json:"name_id_format,omitempty"`
 
-	// NameIdSource NameID の値の出どころ（`user_id`・`email`・`attribute:<キー>`）。既定は emailAddress なら `email`、ほかは `user_id`。transient では使わない。本人が書ける属性（`user_editable`）は使えない（`400`。後で書けるようにしたら、その SP には `InvalidNameIDPolicy` を返す）
+	// NameIdSource NameID の値の出どころ（`user_id`・`email`・`attribute:<キー>`）。既定は emailAddress なら `email`、ほかは `user_id`。transient では使わない。本人が書ける属性（`user_editable`）は使えない（`400`。後で書けるようにしたら、その SP には `InvalidNameIDPolicy` を返す）。書けないように戻した属性の既存の値は保証されないので、使う前に運営者が書き直す
 	NameIdSource *string `json:"name_id_source,omitempty"`
 
 	// RequireSignedRequests 署名の無い AuthnRequest を受けない（既定 false。署名があればいつも確かめる）
