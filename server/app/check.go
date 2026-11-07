@@ -70,9 +70,41 @@ func (s adminServer) CheckAuthz(ctx context.Context, req adminapi.CheckAuthzRequ
 		(b.PrincipalType != nil && !sa && *b.PrincipalType != adminapi.CheckRequestPrincipalTypeUser) {
 		return adminapi.CheckAuthz400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", ""))}, nil
 	}
+	r, reasons, err := s.checkSubject(ctx, p, sa, b, orgID)
+	switch {
+	case errors.Is(err, errs.NotFound):
+		return adminapi.CheckAuthz404JSONResponse(adminError("not_found", "")), nil
+	case err != nil:
+		return nil, err
+	case reasons != nil:
+		return adminapi.CheckAuthz200JSONResponse{Allowed: false, Reasons: &reasons}, nil
+	}
+	r.Action, r.Resource = b.Action, res
+	dec, err := s.a.authz.Decide(ctx, s.a.realm.ID, r)
+	if err != nil {
+		return nil, err
+	}
+	return adminapi.CheckAuthz200JSONResponse(s.checkResult(dec)), nil
+}
+
+// checkResult は判定を API の形にする。条件だけで拒んだときは満たさなかった条件と step-up を付ける。
+func (s adminServer) checkResult(dec check.Decision) adminapi.CheckResult {
+	out := adminapi.CheckResult{Allowed: dec.Allow}
+	if len(dec.Unmet) > 0 {
+		out.Unmet = &dec.Unmet
+		if v, m, ok := stepUpValues(dec.StepUp); ok && s.a.acrActive() {
+			out.StepUp = &adminapi.StepUp{AcrValues: v, MaxAge: m}
+		}
+	}
+	return out
+}
+
+// checkSubject は判定の主体・認証の文脈・Org（公開 ID の orgID）を 1 つのトランザクションで決め、Action と Resource の無い
+// 判定の問いを返す。主体が使えなければ理由のコード（nil でない）。主体か Org が無ければ errs.NotFound。
+func (s adminServer) checkSubject(ctx context.Context, caller adminPrincipal, sa bool, b *adminapi.CheckRequest, orgID *string) (check.Request, []string, error) {
 	var r check.Request
 	var reasons []string
-	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var principal check.Principal
 		var err error
 		if sa {
@@ -83,11 +115,11 @@ func (s adminServer) CheckAuthz(ctx context.Context, req adminapi.CheckAuthzRequ
 		if err != nil || reasons != nil {
 			return err
 		}
-		r = check.Request{Principal: principal, Action: b.Action, Resource: res}
+		r = check.Request{Principal: principal}
 		if sa {
 			r.Context, err = s.serviceAccountCheckContext(ctx, tx, principal.ID, b)
 		} else {
-			r.Context, err = s.checkContext(ctx, tx, p, principal.ID, b)
+			r.Context, err = s.checkContext(ctx, tx, caller, principal.ID, b)
 		}
 		if err != nil {
 			return err
@@ -101,24 +133,70 @@ func (s adminServer) CheckAuthz(ctx context.Context, req adminapi.CheckAuthzRequ
 		}
 		return nil
 	})
+	return r, reasons, err
+}
+
+func (s adminServer) BatchCheckAuthz(ctx context.Context, req adminapi.BatchCheckAuthzRequestObject) (adminapi.BatchCheckAuthzResponseObject, error) {
+	bad := adminapi.BatchCheckAuthz400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", ""))}
+	p, d, err := s.a.authorizeWith(ctx, role.PermAuthzCheck, true)
 	switch {
-	case errors.Is(err, errs.NotFound):
-		return adminapi.CheckAuthz404JSONResponse(adminError("not_found", "")), nil
 	case err != nil:
 		return nil, err
-	case reasons != nil:
-		return adminapi.CheckAuthz200JSONResponse{Allowed: false, Reasons: &reasons}, nil
+	case d != nil && d.Status == http.StatusUnauthorized:
+		return adminapi.BatchCheckAuthz401JSONResponse(d.Body), nil
+	case d != nil:
+		return adminapi.BatchCheckAuthz403JSONResponse(d.Body), nil
+	case req.Body == nil:
+		return bad, nil
 	}
-	dec, err := s.a.authz.Decide(ctx, s.a.realm.ID, r)
+	b := req.Body
+	if len(b.Checks) == 0 || len(b.Checks) > s.a.cfg.Authz.BatchCheckMax {
+		return bad, nil
+	}
+	items := make([]check.Item, len(b.Checks))
+	for i, c := range b.Checks {
+		res, ok := checkResource(c.ResourceType, c.ResourceId)
+		// 判定の Org は org_id で共通に決めるので、Org を対象にする判定は受けない（付与の材料を 1 回で読むため）。
+		if !ok || res.Type == check.ResourceOrg || !role.ValidPermission(c.Action) {
+			return bad, nil
+		}
+		items[i] = check.Item{Action: c.Action, Resource: res}
+	}
+	one := &adminapi.CheckRequest{PrincipalId: b.PrincipalId, OrgId: b.OrgId, Sid: b.Sid, AccessToken: b.AccessToken, Context: b.Context}
+	sa := false
+	if b.PrincipalType != nil {
+		switch *b.PrincipalType {
+		case adminapi.BatchCheckRequestPrincipalTypeUser:
+		case adminapi.BatchCheckRequestPrincipalTypeServiceAccount:
+			sa = true
+		default:
+			return bad, nil
+		}
+	}
+	if sa && !s.a.plan.IsActive(feature.ServiceAccounts) {
+		return bad, nil
+	}
+	r, reasons, err := s.checkSubject(ctx, p, sa, one, b.OrgId)
+	switch {
+	case errors.Is(err, errs.NotFound):
+		return adminapi.BatchCheckAuthz404JSONResponse(adminError("not_found", "")), nil
+	case err != nil:
+		return nil, err
+	}
+	out := adminapi.BatchCheckAuthz200JSONResponse{Results: make([]adminapi.CheckResult, len(items))}
+	if reasons != nil {
+		for i := range out.Results {
+			rs := slices.Clone(reasons)
+			out.Results[i] = adminapi.CheckResult{Allowed: false, Reasons: &rs}
+		}
+		return out, nil
+	}
+	decs, err := s.a.authz.DecideMany(ctx, s.a.realm.ID, r, items)
 	if err != nil {
 		return nil, err
 	}
-	out := adminapi.CheckAuthz200JSONResponse{Allowed: dec.Allow}
-	if len(dec.Unmet) > 0 {
-		out.Unmet = &dec.Unmet
-		if v, m, ok := stepUpValues(dec.StepUp); ok && s.a.acrActive() {
-			out.StepUp = &adminapi.StepUp{AcrValues: v, MaxAge: m}
-		}
+	for i, dec := range decs {
+		out.Results[i] = s.checkResult(dec)
 	}
 	return out, nil
 }

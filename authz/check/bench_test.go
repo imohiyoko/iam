@@ -33,3 +33,31 @@ func BenchmarkCheckHit(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkDecideManyHit は、キャッシュの当たった主体の 100 件の一括判定（authz:batch-check）。
+func BenchmarkDecideManyHit(b *testing.B) {
+	k := testkit.New(b)
+	user := check.Principal{Type: port.PrincipalUser, ID: "u_bench"}
+	k.Tx(b, func(ctx context.Context, tx port.Tx) error {
+		return role.Grant(ctx, tx, k.RealmID, role.RealmAdmin, user.Type, user.ID, k.Clock.Now())
+	})
+	c := &check.Checker{Storage: k.Storage, Clock: k.Clock, TTL: time.Hour}
+	ctx := context.Background()
+	items := make([]check.Item, 100)
+	for i := range items {
+		items[i] = check.Item{Action: role.PermUsersRecover}
+		if i%2 == 1 {
+			items[i].Action = role.PermClientsManage
+		}
+	}
+	base := check.Request{Principal: user}
+	if _, err := c.DecideMany(ctx, k.RealmID, base, items); err != nil {
+		b.Fatal(err)
+	}
+	for b.Loop() {
+		ds, err := c.DecideMany(ctx, k.RealmID, base, items)
+		if err != nil || len(ds) != len(items) {
+			b.Fatal(len(ds), err)
+		}
+	}
+}

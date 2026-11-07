@@ -80,6 +80,9 @@ type Config struct {
 	// PersonalAccessTokens は本人の Personal Access Token（フィーチャー personal_access_tokens。ADR 0109）。
 	PersonalAccessTokens PersonalAccessTokens `yaml:"personal_access_tokens"`
 
+	// Authz は認可の判定の API（design.md 4.5）。
+	Authz Authz `yaml:"authz"`
+
 	// Hooks はフロー フック（フィーチャー flow_hooks。design.md 11.8、ADR 0081）。キーはフックの名前。
 	Hooks map[string]Hook `yaml:"hooks"`
 
@@ -125,6 +128,12 @@ type Hook struct {
 type ServiceAccounts struct {
 	// TokenTTL は client credentials で発行するアクセストークンの寿命（1 時間以下）。
 	TokenTTL Duration `yaml:"token_ttl"`
+}
+
+// Authz は認可の判定の API の設定。
+type Authz struct {
+	// BatchCheckMax は 1 回の batch check（/v1/admin/authz:batch-check）で受ける判定の数の上限（1〜1000）。
+	BatchCheckMax int `yaml:"batch_check_max"`
 }
 
 // PersonalAccessTokens は本人の Personal Access Token のホスト先の設定（ADR 0109）。
@@ -688,6 +697,7 @@ func Default() Config {
 			CIBATTL: Duration(5 * time.Minute), CIBAPollInterval: Duration(5 * time.Second), PARRequestURITTL: Duration(time.Minute)},
 		ServiceAccounts:      ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
 		PersonalAccessTokens: PersonalAccessTokens{MaxPerUser: 50},
+		Authz:                Authz{BatchCheckMax: 100},
 	}
 }
 
@@ -911,6 +921,9 @@ func (c Config) Validate() error {
 	}
 	if p := c.PersonalAccessTokens; p.MaxPerUser < 1 || p.MaxPerUser > 1000 || p.MaxLifetime < 0 {
 		problems = append(problems, "personal_access_tokens: max_per_user must be between 1 and 1000 and max_lifetime must not be negative")
+	}
+	if m := c.Authz.BatchCheckMax; m < 1 || m > 1000 {
+		problems = append(problems, "authz.batch_check_max must be between 1 and 1000")
 	}
 	if !slices.Contains(KnownOrgCreation, c.Realm.OrgCreation) {
 		problems = append(problems, fmt.Sprintf("realm.org_creation: unknown %q (known: %v)", c.Realm.OrgCreation, KnownOrgCreation))
