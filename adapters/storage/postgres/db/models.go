@@ -108,15 +108,16 @@ type AuthnKnownDevice struct {
 }
 
 type AuthnOauthResource struct {
-	ID              string
-	RealmID         string
-	Uri             string
-	Name            string
-	Scopes          string
-	Clients         string
-	ServiceAccounts string
-	CreatedAt       string
-	UpdatedAt       string
+	ID                   string
+	RealmID              string
+	Uri                  string
+	Name                 string
+	Scopes               string
+	Clients              string
+	ServiceAccounts      string
+	CreatedAt            string
+	UpdatedAt            string
+	IntrospectionClients string
 }
 
 type AuthnOidcGrant struct {

@@ -5282,9 +5282,14 @@ components:
           maxItems: 100
           items: { type: string }
           description: client credentials で `resource` に指定してよいサービスアカウントの ID
+        introspection_clients:
+          type: array
+          maxItems: 100
+          items: { type: string }
+          description: このリソースに向けたトークンをイントロスペクションしてよい連携先の client_id。空か省けばどの連携先でもよい（ADR 0120）
     OAuthResource:
       type: object
-      required: [id, uri, name, scopes, clients, service_accounts, created_at, updated_at]
+      required: [id, uri, name, scopes, clients, service_accounts, introspection_clients, created_at, updated_at]
       properties:
         id: { type: string }
         uri: { type: string }
@@ -5292,6 +5297,7 @@ components:
         scopes: { type: array, items: { type: string } }
         clients: { type: array, items: { type: string } }
         service_accounts: { type: array, items: { type: string } }
+        introspection_clients: { type: array, items: { type: string } }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     OAuthResources:

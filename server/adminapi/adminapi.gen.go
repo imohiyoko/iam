@@ -1958,22 +1958,26 @@ type MembershipStatus string
 
 // OAuthResource defines model for OAuthResource.
 type OAuthResource struct {
-	Clients         []string  `json:"clients"`
-	CreatedAt       time.Time `json:"created_at"`
-	Id              string    `json:"id"`
-	Name            string    `json:"name"`
-	Scopes          []string  `json:"scopes"`
-	ServiceAccounts []string  `json:"service_accounts"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	Uri             string    `json:"uri"`
+	Clients              []string  `json:"clients"`
+	CreatedAt            time.Time `json:"created_at"`
+	Id                   string    `json:"id"`
+	IntrospectionClients []string  `json:"introspection_clients"`
+	Name                 string    `json:"name"`
+	Scopes               []string  `json:"scopes"`
+	ServiceAccounts      []string  `json:"service_accounts"`
+	UpdatedAt            time.Time `json:"updated_at"`
+	Uri                  string    `json:"uri"`
 }
 
 // OAuthResourceInput defines model for OAuthResourceInput.
 type OAuthResourceInput struct {
 	// Clients 認可コードフローで `resource` に指定してよい連携先の client_id
 	Clients *[]string `json:"clients,omitempty"`
-	Name    string    `json:"name"`
-	Scopes  []string  `json:"scopes"`
+
+	// IntrospectionClients このリソースに向けたトークンをイントロスペクションしてよい連携先の client_id。空か省けばどの連携先でもよい（ADR 0120）
+	IntrospectionClients *[]string `json:"introspection_clients,omitempty"`
+	Name                 string    `json:"name"`
+	Scopes               []string  `json:"scopes"`
 
 	// ServiceAccounts client credentials で `resource` に指定してよいサービスアカウントの ID
 	ServiceAccounts *[]string `json:"service_accounts,omitempty"`

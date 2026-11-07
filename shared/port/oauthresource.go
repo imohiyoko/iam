@@ -21,8 +21,11 @@ type OAuthResource struct {
 	Clients []string
 	// ServiceAccounts は client credentials で resource に指定してよいサービスアカウント（ID）。
 	ServiceAccounts []string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// IntrospectionClients は aud にこのリソースを含むトークンをイントロスペクションしてよい連携先（client_id）。空ならどの連携先でも
+	// よい（ADR 0120）。
+	IntrospectionClients []string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // OAuthResourceRepo は authn_oauth_resources の Repository。

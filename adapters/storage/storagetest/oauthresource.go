@@ -19,10 +19,11 @@ func testOAuthResources(t *testing.T, h Harness) {
 	mk := func(realm, uri string, at time.Time) port.OAuthResource {
 		return port.OAuthResource{ID: id.NewExternal(id.OAuthResource), RealmID: realm, URI: uri, Name: "API " + uri,
 			Scopes: []string{"orders:read", "orders:write"}, Clients: []string{"cli_a"}, ServiceAccounts: []string{"sva_a", "sva_b"},
-			CreatedAt: at, UpdatedAt: at}
+			IntrospectionClients: []string{"cli_rs"},
+			CreatedAt:            at, UpdatedAt: at}
 	}
 	a, b := mk(r, "https://b.example.com/", T0.Add(time.Second)), mk(r, "https://a.example.com/", T0)
-	b.Clients, b.ServiceAccounts = []string{}, []string{}
+	b.Clients, b.ServiceAccounts, b.IntrospectionClients = []string{}, []string{}, []string{}
 	o := mk(other, "https://a.example.com/", T0)
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.OAuthResources()

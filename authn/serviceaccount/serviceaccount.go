@@ -27,6 +27,10 @@ import (
 // Feature はフィーチャー service_accounts の宣言（features/serviceaccounts が登録する）。
 var Feature = feature.Feature{Name: feature.ServiceAccounts, DataVersion: 1}
 
+// IntrospectionFeature はリソースサーバーがイントロスペクション（RFC 7662）で API キーを確かめられるようにする（ADR 0120）。
+// 持つデータは無い。
+var IntrospectionFeature = feature.Feature{Name: feature.APIKeyIntrospection, DataVersion: 1, Requires: []string{feature.ServiceAccounts}}
+
 // 認証情報の種類。
 const (
 	TypeAPIKey         = "api_key"
@@ -182,25 +186,45 @@ func (au Authenticator) CheckAccessToken(ctx context.Context, tx port.Tx, realmI
 	return Authenticated{Account: a, Method: method, AuthTime: t.CreatedAt, JKT: t.JKT}, nil
 }
 
-// ResourceToken は自前の API に向けたアクセストークン（RFC 8707。ADR 0112）を確かめ、トークンとサービスアカウントを返す
-// （イントロスペクション）。管理 API 向けのトークン、使えないサービスアカウント、消えたリソース・許可から外れたサービスアカウント、
-// フィーチャーが止まっているときは ErrInvalid。
-func (au Authenticator) ResourceToken(ctx context.Context, tx port.Tx, realmID, bearer string, now time.Time) (port.ServiceAccountToken, port.ServiceAccount, error) {
+// ResourceToken は自前の API に向けたアクセストークン（RFC 8707。ADR 0112）を確かめ、トークンと、サービスアカウントと発行に
+// 使った認証の手段を返す（イントロスペクション）。管理 API 向けのトークン、使えないサービスアカウント、消えたリソース・許可から
+// 外れたサービスアカウント、フィーチャーが止まっているときは ErrInvalid。
+func (au Authenticator) ResourceToken(ctx context.Context, tx port.Tx, realmID, bearer string, now time.Time) (port.ServiceAccountToken, Authenticated, error) {
 	if au.Resource == nil || !strings.HasPrefix(bearer, tokenPrefix) {
-		return port.ServiceAccountToken{}, port.ServiceAccount{}, ErrInvalid
+		return port.ServiceAccountToken{}, Authenticated{}, ErrInvalid
 	}
-	t, _, err := au.checkToken(ctx, tx, realmID, bearer, now)
+	t, method, err := au.checkToken(ctx, tx, realmID, bearer, now)
 	if err != nil {
-		return port.ServiceAccountToken{}, port.ServiceAccount{}, err
+		return port.ServiceAccountToken{}, Authenticated{}, err
 	}
 	if t.Audience == "" {
-		return port.ServiceAccountToken{}, port.ServiceAccount{}, ErrInvalid
+		return port.ServiceAccountToken{}, Authenticated{}, ErrInvalid
 	}
 	a, err := au.tokenAccount(ctx, tx, realmID, t, now)
 	if err != nil {
-		return port.ServiceAccountToken{}, port.ServiceAccount{}, err
+		return port.ServiceAccountToken{}, Authenticated{}, err
 	}
-	return t, a, nil
+	return t, Authenticated{Account: a, Method: method, AuthTime: t.CreatedAt, JKT: t.JKT}, nil
+}
+
+// LooksLikeAPIKey は s が API キー（"<sac_…>.<秘密>"）の形かを返す。
+func LooksLikeAPIKey(s string) bool { return strings.HasPrefix(s, credentialIDPrefix) }
+
+// APIKey は API キーを確かめ、その認証情報と使えるサービスアカウントを返す（イントロスペクション。ADR 0120）。停止・削除・
+// 有効期間・認証情報の無効化・Org の状態は Authenticate と同じく毎回確かめる。使えないものは ErrInvalid。
+func (au Authenticator) APIKey(ctx context.Context, tx port.Tx, realmID, key string, now time.Time) (port.ServiceAccountCredential, port.ServiceAccount, error) {
+	c, err := checkSecret(ctx, tx, realmID, key, TypeAPIKey, now)
+	if err != nil {
+		return port.ServiceAccountCredential{}, port.ServiceAccount{}, err
+	}
+	a, err := tx.ServiceAccounts().Get(ctx, realmID, c.ServiceAccountID)
+	if err != nil {
+		return port.ServiceAccountCredential{}, port.ServiceAccount{}, invalidOr(err)
+	}
+	if err := au.usable(ctx, tx, a, now); err != nil {
+		return port.ServiceAccountCredential{}, port.ServiceAccount{}, err
+	}
+	return c, a, nil
 }
 
 // tokenAccount は確かめたアクセストークン t のサービスアカウントが今使えるかを確かめて返す。自前の API に向けたトークン

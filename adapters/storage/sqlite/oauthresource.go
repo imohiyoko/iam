@@ -20,7 +20,7 @@ func toOAuthResource(r db.AuthnOauthResource) (port.OAuthResource, error) {
 	for _, f := range []struct {
 		raw string
 		dst *[]string
-	}{{r.Scopes, &out.Scopes}, {r.Clients, &out.Clients}, {r.ServiceAccounts, &out.ServiceAccounts}} {
+	}{{r.Scopes, &out.Scopes}, {r.Clients, &out.Clients}, {r.ServiceAccounts, &out.ServiceAccounts}, {r.IntrospectionClients, &out.IntrospectionClients}} {
 		if err := json.Unmarshal([]byte(f.raw), f.dst); err != nil {
 			return port.OAuthResource{}, err
 		}
@@ -30,7 +30,7 @@ func toOAuthResource(r db.AuthnOauthResource) (port.OAuthResource, error) {
 
 func (r oauthResources) Create(ctx context.Context, x port.OAuthResource) error {
 	return mapErr(r.q.CreateOAuthResource(ctx, db.CreateOAuthResourceParams{ID: x.ID, RealmID: x.RealmID, Uri: x.URI, Name: x.Name,
-		Scopes: jsonList(x.Scopes), Clients: jsonList(x.Clients), ServiceAccounts: jsonList(x.ServiceAccounts),
+		Scopes: jsonList(x.Scopes), Clients: jsonList(x.Clients), ServiceAccounts: jsonList(x.ServiceAccounts), IntrospectionClients: jsonList(x.IntrospectionClients),
 		CreatedAt: formatTime(x.CreatedAt), UpdatedAt: formatTime(x.UpdatedAt)}))
 }
 
@@ -51,7 +51,7 @@ func (r oauthResources) List(ctx context.Context, realmID string) ([]port.OAuthR
 
 func (r oauthResources) Update(ctx context.Context, x port.OAuthResource) error {
 	n, err := r.q.UpdateOAuthResource(ctx, db.UpdateOAuthResourceParams{Uri: x.URI, Name: x.Name, Scopes: jsonList(x.Scopes),
-		Clients: jsonList(x.Clients), ServiceAccounts: jsonList(x.ServiceAccounts), UpdatedAt: formatTime(x.UpdatedAt), RealmID: x.RealmID, ID: x.ID})
+		Clients: jsonList(x.Clients), ServiceAccounts: jsonList(x.ServiceAccounts), IntrospectionClients: jsonList(x.IntrospectionClients), UpdatedAt: formatTime(x.UpdatedAt), RealmID: x.RealmID, ID: x.ID})
 	return affected(n, err, "oauth resource")
 }
 

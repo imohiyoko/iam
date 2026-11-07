@@ -58,7 +58,7 @@ func (a *App) patIntrospection(ctx context.Context, tx port.Tx, token string) (p
 		return provider.Introspection{}, err
 	}
 	out := provider.Introspection{Active: true, Scope: strings.Join(au.Scopes, " "), TokenType: pat.TokenType, Iat: au.Token.CreatedAt.Unix(),
-		Sub: au.User.PublicID, Iss: a.issuer, AuthTime: au.Token.CreatedAt.Unix(), AMR: []string{pat.AMR}}
+		Sub: au.User.PublicID, PrincipalType: port.PrincipalUser, Iss: a.issuer, AuthTime: au.Token.CreatedAt.Unix(), AMR: []string{pat.AMR}}
 	if au.ExpiresAt != nil {
 		out.Exp = au.ExpiresAt.Unix()
 	}

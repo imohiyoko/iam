@@ -869,24 +869,35 @@ func (s *oidcServer) RefreshToken(ctx context.Context, r *op.ClientRequest[oidc.
 }
 
 // Introspect はイントロスペクション（RFC 7662）。呼べるのは client_secret か private_key_jwt で認証した連携先（リソースサーバー）だけ。
+// aud のリソースがイントロスペクションしてよい連携先を限っていれば、それ以外の連携先には active: false を返す（ADR 0120）。
 func (s *oidcServer) Introspect(ctx context.Context, r *op.Request[op.IntrospectionRequest]) (*op.Response, error) {
-	if _, err := s.authenticate(ctx, r.Data.ClientCredentials, []string{s.endpoint(oidcIntrospect), s.a.issuer}, true); err != nil {
+	caller, err := s.authenticate(ctx, r.Data.ClientCredentials, []string{s.endpoint(oidcIntrospect), s.a.issuer}, true)
+	if err != nil {
 		return nil, err
 	}
 	var out provider.Introspection
-	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
-		if serviceaccount.IsAccessToken(r.Data.Token) {
+		switch {
+		case serviceaccount.IsAccessToken(r.Data.Token):
 			// サービスアカウントの、自前の API に向けたトークン（RFC 8707、ADR 0112）。管理 API 向けのものは active: false。
 			out, err = s.a.resourceTokenIntrospection(ctx, tx, r.Data.Token)
-			return err
-		}
-		if pat.Looks(r.Data.Token) {
+		case serviceaccount.LooksLikeAPIKey(r.Data.Token):
+			// サービスアカウントの API キー（ADR 0120）。フィーチャー api_key_introspection が動いていなければ active: false。
+			out, err = s.a.apiKeyIntrospection(ctx, tx, r.Data.Token)
+		case pat.Looks(r.Data.Token):
 			// 本人の Personal Access Token（ADR 0109）。フィーチャーが動いていなければ active: false。
 			out, err = s.a.patIntrospection(ctx, tx, r.Data.Token)
+		default:
+			out, err = s.a.tokens.Introspect(ctx, tx, s.a.realm.ID, r.Data.Token)
+		}
+		if err != nil || !out.Active {
 			return err
 		}
-		out, err = s.a.tokens.Introspect(ctx, tx, s.a.realm.ID, r.Data.Token)
+		ok, err := s.a.introspectionCallerAllowed(ctx, tx, out.Aud, caller.PublicID)
+		if err == nil && !ok {
+			out = provider.Introspection{}
+		}
 		return err
 	})
 	if err != nil {

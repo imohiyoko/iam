@@ -590,19 +590,21 @@ func (t *Tokens) Revoke(ctx context.Context, tx port.Tx, cl port.Client, token, 
 
 // Introspection はイントロスペクションの結果（RFC 7662 2.2）。Active が false なら他は空。
 type Introspection struct {
-	Active    bool     `json:"active"`
-	Scope     string   `json:"scope,omitempty"`
-	ClientID  string   `json:"client_id,omitempty"`
-	TokenType string   `json:"token_type,omitempty"`
-	Exp       int64    `json:"exp,omitempty"`
-	Iat       int64    `json:"iat,omitempty"`
-	Sub       string   `json:"sub,omitempty"`
-	Aud       []string `json:"aud,omitempty"`
-	Iss       string   `json:"iss,omitempty"`
-	SID       string   `json:"sid,omitempty"`
-	OrgID     string   `json:"org_id,omitempty"`
-	AuthTime  int64    `json:"auth_time,omitempty"`
-	AMR       []string `json:"amr,omitempty"`
+	Active    bool   `json:"active"`
+	Scope     string `json:"scope,omitempty"`
+	ClientID  string `json:"client_id,omitempty"`
+	TokenType string `json:"token_type,omitempty"`
+	Exp       int64  `json:"exp,omitempty"`
+	Iat       int64  `json:"iat,omitempty"`
+	Sub       string `json:"sub,omitempty"`
+	// PrincipalType は sub の主体の種類（user か service_account。ADR 0120）。
+	PrincipalType port.PrincipalType `json:"principal_type,omitempty"`
+	Aud           []string           `json:"aud,omitempty"`
+	Iss           string             `json:"iss,omitempty"`
+	SID           string             `json:"sid,omitempty"`
+	OrgID         string             `json:"org_id,omitempty"`
+	AuthTime      int64              `json:"auth_time,omitempty"`
+	AMR           []string           `json:"amr,omitempty"`
 	// ACR は認可の acr（フィーチャー acr。RFC 9470 6、ADR 0093）。
 	ACR string `json:"acr,omitempty"`
 	// Risk はログインの系列の今のセッションのリスクの点数（種類 → 点数。ADR 0084）。毎回セッションから求める。
@@ -663,7 +665,7 @@ func (t *Tokens) Introspect(ctx context.Context, tx port.Tx, realmID, token stri
 		acrValue = g.ACR
 	}
 	out := Introspection{Active: true, Scope: strings.Join(g.Scopes, " "), ClientID: cl.PublicID, TokenType: typ, Exp: tok.ExpiresAt.Unix(),
-		Iat: tok.CreatedAt.Unix(), Sub: u.PublicID, Aud: []string{cl.PublicID}, Iss: t.Issuer, SID: g.SID, OrgID: orgPublicID,
+		Iat: tok.CreatedAt.Unix(), Sub: u.PublicID, PrincipalType: port.PrincipalUser, Aud: []string{cl.PublicID}, Iss: t.Issuer, SID: g.SID, OrgID: orgPublicID,
 		AuthTime: g.AuthTime.Unix(), AMR: g.AuthMethods, ACR: acrValue, Risk: risk, Cnf: confirmation(tok)}
 	if g.Exchange == "" && len(g.Audiences) > 0 {
 		// 自前の API に向けた認可の aud はリソースの URI（RFC 8707、ADR 0112）。

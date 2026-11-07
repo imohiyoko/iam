@@ -21,20 +21,21 @@ func (q *Queries) CountOAuthResources(ctx context.Context) (int64, error) {
 }
 
 const createOAuthResource = `-- name: CreateOAuthResource :exec
-INSERT INTO authn_oauth_resources (id, realm_id, uri, name, scopes, clients, service_accounts, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_oauth_resources (id, realm_id, uri, name, scopes, clients, service_accounts, introspection_clients, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateOAuthResourceParams struct {
-	ID              string
-	RealmID         string
-	Uri             string
-	Name            string
-	Scopes          string
-	Clients         string
-	ServiceAccounts string
-	CreatedAt       string
-	UpdatedAt       string
+	ID                   string
+	RealmID              string
+	Uri                  string
+	Name                 string
+	Scopes               string
+	Clients              string
+	ServiceAccounts      string
+	IntrospectionClients string
+	CreatedAt            string
+	UpdatedAt            string
 }
 
 func (q *Queries) CreateOAuthResource(ctx context.Context, arg CreateOAuthResourceParams) error {
@@ -46,6 +47,7 @@ func (q *Queries) CreateOAuthResource(ctx context.Context, arg CreateOAuthResour
 		arg.Scopes,
 		arg.Clients,
 		arg.ServiceAccounts,
+		arg.IntrospectionClients,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -70,7 +72,7 @@ func (q *Queries) DeleteOAuthResource(ctx context.Context, arg DeleteOAuthResour
 }
 
 const getOAuthResource = `-- name: GetOAuthResource :one
-SELECT id, realm_id, uri, name, scopes, clients, service_accounts, created_at, updated_at FROM authn_oauth_resources WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, uri, name, scopes, clients, service_accounts, created_at, updated_at, introspection_clients FROM authn_oauth_resources WHERE realm_id = ? AND id = ?
 `
 
 type GetOAuthResourceParams struct {
@@ -91,12 +93,13 @@ func (q *Queries) GetOAuthResource(ctx context.Context, arg GetOAuthResourcePara
 		&i.ServiceAccounts,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IntrospectionClients,
 	)
 	return i, err
 }
 
 const getOAuthResourceByURI = `-- name: GetOAuthResourceByURI :one
-SELECT id, realm_id, uri, name, scopes, clients, service_accounts, created_at, updated_at FROM authn_oauth_resources WHERE realm_id = ? AND uri = ?
+SELECT id, realm_id, uri, name, scopes, clients, service_accounts, created_at, updated_at, introspection_clients FROM authn_oauth_resources WHERE realm_id = ? AND uri = ?
 `
 
 type GetOAuthResourceByURIParams struct {
@@ -117,12 +120,13 @@ func (q *Queries) GetOAuthResourceByURI(ctx context.Context, arg GetOAuthResourc
 		&i.ServiceAccounts,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IntrospectionClients,
 	)
 	return i, err
 }
 
 const listOAuthResources = `-- name: ListOAuthResources :many
-SELECT id, realm_id, uri, name, scopes, clients, service_accounts, created_at, updated_at FROM authn_oauth_resources WHERE realm_id = ? ORDER BY created_at, id
+SELECT id, realm_id, uri, name, scopes, clients, service_accounts, created_at, updated_at, introspection_clients FROM authn_oauth_resources WHERE realm_id = ? ORDER BY created_at, id
 `
 
 func (q *Queries) ListOAuthResources(ctx context.Context, realmID string) ([]AuthnOauthResource, error) {
@@ -144,6 +148,7 @@ func (q *Queries) ListOAuthResources(ctx context.Context, realmID string) ([]Aut
 			&i.ServiceAccounts,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IntrospectionClients,
 		); err != nil {
 			return nil, err
 		}
@@ -171,19 +176,20 @@ func (q *Queries) PurgeOAuthResources(ctx context.Context, lim int64) (int64, er
 }
 
 const updateOAuthResource = `-- name: UpdateOAuthResource :execrows
-UPDATE authn_oauth_resources SET uri = ?, name = ?, scopes = ?, clients = ?, service_accounts = ?, updated_at = ?
+UPDATE authn_oauth_resources SET uri = ?, name = ?, scopes = ?, clients = ?, service_accounts = ?, introspection_clients = ?, updated_at = ?
 WHERE realm_id = ? AND id = ?
 `
 
 type UpdateOAuthResourceParams struct {
-	Uri             string
-	Name            string
-	Scopes          string
-	Clients         string
-	ServiceAccounts string
-	UpdatedAt       string
-	RealmID         string
-	ID              string
+	Uri                  string
+	Name                 string
+	Scopes               string
+	Clients              string
+	ServiceAccounts      string
+	IntrospectionClients string
+	UpdatedAt            string
+	RealmID              string
+	ID                   string
 }
 
 func (q *Queries) UpdateOAuthResource(ctx context.Context, arg UpdateOAuthResourceParams) (int64, error) {
@@ -193,6 +199,7 @@ func (q *Queries) UpdateOAuthResource(ctx context.Context, arg UpdateOAuthResour
 		arg.Scopes,
 		arg.Clients,
 		arg.ServiceAccounts,
+		arg.IntrospectionClients,
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.ID,
