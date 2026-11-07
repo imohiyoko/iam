@@ -578,6 +578,9 @@ GET    /v1/admin/signing-keys
 - ID トークンのクレーム：`sub`、`org_id`（Org オンのみ）、`amr`、`sid`、`email`（4.4）、`acr`（フィーチャー acr。11.15）。Group / Role は載せない
 - リフレッシュトークンはローテーションし、再利用を検知したらファミリーごと失効
 - 本人の Personal Access Token（`iampat_…`）も不透明で、イントロスペクションで確かめる（連携先に結び付かない。11.18）
+- イントロスペクションは主体の種類（`principal_type`：`user` か `service_account`）を返す。サービスアカウントのトークンは
+  認証の方式（`amr`）と時刻（`auth_time`）も返す。サービスアカウントの API キーは、フィーチャー `api_key_introspection`（既定オフ、
+  前提は `service_accounts`）が動いているときだけ確かめられる（`token_type: api_key`。`aud`・`scope` は無い。ADR 0120）
 
 ### 5.2 セッション ID
 
@@ -701,6 +704,8 @@ ADR 0112。
   リソースのスコープから選ぶ。token エンドポイントの `resource` は認可で選んだものだけ。違えば `invalid_target`
 - リソースに向けたトークンは UserInfo と管理 API では使えない。イントロスペクションは `aud` とスコープを返す。Org に属するサービスアカウントのトークンは Org の公開 ID（`org_id`）も返す（Org が使えなければ `active: false`）。リソースの削除・
   許可の取り消し・フィーチャーの無効化は、発行済みのトークンにも次の検証から効く
+- リソースの `introspection_clients`（連携先の client_id）を置くと、`aud` にそのリソースを含むトークンは、載せた連携先の
+  イントロスペクションにだけ `active: true` を返す。空なら認証した連携先ならどれでもよい（ADR 0120）
 
 ### 5.11 送信者制約トークン
 
@@ -987,6 +992,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | SAML 2.0 の IdP（5.9、ADR 0115） | オフ | ― | `/saml/idp/*` は 404、SP の管理 API は `404 saml_idp_disabled`。無効化は SP の登録と署名の証明書を消して完了 |
 | PAR（5.10、ADR 0112） | オフ | ― | `/oauth2/par` は 404、`request_uri` は `request_uri_not_supported`、PAR の必須は効かず新しく置けない。無効化で連携先と realm の必須を外して完了 |
 | 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
+| API キーのイントロスペクション（5.1、ADR 0120） | オフ | サービスアカウント | API キーのイントロスペクションは `active: false`。持つデータは無い |
 | FAPI 2.0 Security Profile（5.12、ADR 0117） | オフ | ― | 連携先と realm の `fapi2_security_profile` を新しく置けず、realm の設定は効かない（連携先の設定は外れるまで強いる）。前提の `par` と `dpop` か `mtls_client_auth` は登録で確かめる。無効化で連携先と realm の設定を外して完了 |
 | Workload Identity Federation（5.13、ADR 0116） | オフ | サービスアカウント | `/v1/admin/token` の交換は `unsupported_grant_type`、管理 API は `404 workload_identity_disabled`。結び付けで発行したトークンは通らない。無効化で発行者・結び付け・発行したトークンを消して完了 |
 | OpenID4VCI の発行者（5.14、ADR 0119） | オフ | ― | 発行者のメタデータ・nonce・credential・申し出・status list は 404、Pre-Authorized Code の grant は `unsupported_grant_type`、定義のスコープは認可要求で選べない。管理 API は `404 openid4vci_disabled`。無効化は定義と発行の記録を消して完了（status list も出なくなる） |

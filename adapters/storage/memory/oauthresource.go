@@ -17,6 +17,7 @@ func oauthResourceKey(realmID, id string) string { return realmID + "\x00" + id 
 
 func cloneOAuthResource(r port.OAuthResource) port.OAuthResource {
 	r.Scopes, r.Clients, r.ServiceAccounts = nonNilList(r.Scopes), nonNilList(r.Clients), nonNilList(r.ServiceAccounts)
+	r.IntrospectionClients = nonNilList(r.IntrospectionClients)
 	return r
 }
 

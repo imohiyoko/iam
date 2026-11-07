@@ -699,6 +699,8 @@ realm ごとの規則で iam のユーザーに結び付く。
   許していない連携先・知らないリソース・2 つ以上は `invalid_target`
 - [x] サービスアカウントの `POST /v1/admin/token` の `resource` と `scope`。そのトークンは管理 API では使えず、イントロスペクションで `aud` とスコープを返す
 - [x] リソースの削除・許可の取り消し・無効化が発行済みのトークンにも次の検証から効く。memory・SQLite・PostgreSQL の契約テスト
+- [x] イントロスペクションの `principal_type` とサービスアカウントの `amr`・`auth_time`、フィーチャー `api_key_introspection`（既定オフ）、
+  リソースの `introspection_clients`（ADR 0120）
 - Device Authorization Grant の `resource`、1 つの認可で複数のリソース、主体ごとのスコープの絞り込み、`/oauth2/token` での client credentials
 
 #### 送信者制約トークン（ADR 0113）

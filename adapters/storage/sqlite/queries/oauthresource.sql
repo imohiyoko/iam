@@ -1,6 +1,6 @@
 -- name: CreateOAuthResource :exec
-INSERT INTO authn_oauth_resources (id, realm_id, uri, name, scopes, clients, service_accounts, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_oauth_resources (id, realm_id, uri, name, scopes, clients, service_accounts, introspection_clients, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetOAuthResource :one
 SELECT * FROM authn_oauth_resources WHERE realm_id = ? AND id = ?;
@@ -12,7 +12,7 @@ SELECT * FROM authn_oauth_resources WHERE realm_id = ? AND uri = ?;
 SELECT * FROM authn_oauth_resources WHERE realm_id = ? ORDER BY created_at, id;
 
 -- name: UpdateOAuthResource :execrows
-UPDATE authn_oauth_resources SET uri = ?, name = ?, scopes = ?, clients = ?, service_accounts = ?, updated_at = ?
+UPDATE authn_oauth_resources SET uri = ?, name = ?, scopes = ?, clients = ?, service_accounts = ?, introspection_clients = ?, updated_at = ?
 WHERE realm_id = ? AND id = ?;
 
 -- name: DeleteOAuthResource :execrows

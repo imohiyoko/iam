@@ -114,6 +114,8 @@ var featureCatalog = map[string]struct {
 	// ADR 0118。
 	feature.SSFTransmitter: {ssf.TransmitterFeature, module + "/features/ssftransmitter"},
 	feature.SSFReceiver:    {ssf.ReceiverFeature, module + "/features/ssfreceiver"},
+	// ADR 0120。
+	feature.APIKeyIntrospection: {serviceaccount.IntrospectionFeature, module + "/features/apikeyintrospection"},
 }
 
 // adapterCatalog はバイナリに含められるアダプタのパッケージ。

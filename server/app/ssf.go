@@ -110,7 +110,7 @@ func (a *App) ssfCall(next ssfHandler) http.HandlerFunc {
 		var c ssf.Caller
 		var scoped bool
 		err := a.deps.Storage.Tx(r.Context(), func(ctx context.Context, tx port.Tx) error {
-			t, sa, err := a.serviceAccounts.ResourceToken(ctx, tx, a.realm.ID, bearer, a.deps.Clock.Now())
+			t, au, err := a.serviceAccounts.ResourceToken(ctx, tx, a.realm.ID, bearer, a.deps.Clock.Now())
 			if err != nil {
 				return err
 			}
@@ -118,7 +118,7 @@ func (a *App) ssfCall(next ssfHandler) http.HandlerFunc {
 				return serviceaccount.ErrInvalid
 			}
 			scoped = slices.Contains(t.Scopes, SSFScope)
-			c = ssf.Caller{AccountID: sa.ID, RequestID: requestID(ctx)}
+			c = ssf.Caller{AccountID: au.Account.ID, RequestID: requestID(ctx)}
 			return nil
 		})
 		switch {

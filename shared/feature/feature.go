@@ -80,6 +80,8 @@ const (
 	// SSFTransmitter と SSFReceiver は OpenID Shared Signals Framework（CAEP・RISC）の送信側と受信側（ADR 0118）。
 	SSFTransmitter = "ssf_transmitter"
 	SSFReceiver    = "ssf_receiver"
+	// APIKeyIntrospection はサービスアカウントの API キーをイントロスペクション（RFC 7662）で確かめられるようにする（ADR 0120）。
+	APIKeyIntrospection = "api_key_introspection" // #nosec G101 -- フィーチャーの名前で、秘密ではない
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

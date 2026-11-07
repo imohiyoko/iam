@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/zitadel/oidc/v3/pkg/oidc"
@@ -15,6 +16,7 @@ import (
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -229,22 +231,51 @@ func (s *oidcServer) protectedResourceMetadata(w http.ResponseWriter, r *http.Re
 // resourceTokenIntrospection はサービスアカウントの、自前の API に向けたアクセストークン（RFC 8707、ADR 0112）の
 // イントロスペクション。管理 API 向けのトークンやフィーチャーが止まっているときは active: false。
 func (a *App) resourceTokenIntrospection(ctx context.Context, tx port.Tx, token string) (provider.Introspection, error) {
-	t, sa, err := a.serviceAccounts.ResourceToken(ctx, tx, a.realm.ID, token, a.deps.Clock.Now())
+	t, au, err := a.serviceAccounts.ResourceToken(ctx, tx, a.realm.ID, token, a.deps.Clock.Now())
 	if errors.Is(err, serviceaccount.ErrInvalid) {
 		return provider.Introspection{}, nil
 	}
 	if err != nil {
 		return provider.Introspection{}, err
 	}
+	sa := au.Account
 	out := provider.Introspection{Active: true, Scope: strings.Join(t.Scopes, " "), ClientID: sa.ID, TokenType: "access_token", Exp: t.ExpiresAt.Unix(),
-		Iat: t.CreatedAt.Unix(), Sub: sa.ID, Aud: []string{t.Audience}, Iss: a.issuer}
+		Iat: t.CreatedAt.Unix(), Sub: sa.ID, PrincipalType: port.PrincipalServiceAccount, Aud: []string{t.Audience}, Iss: a.issuer,
+		AuthTime: au.AuthTime.Unix(), AMR: []string{au.Method}}
 	if t.JKT != "" {
 		// DPoP に結び付けたトークン（ADR 0113）。リソースサーバーが同じ鍵の証明を求める。
 		out.Cnf = &provider.Confirmation{JKT: t.JKT}
 	}
+	return a.withServiceAccountOrg(ctx, tx, sa, out)
+}
+
+// apiKeyIntrospection はサービスアカウントの API キーのイントロスペクション（フィーチャー api_key_introspection。ADR 0120）。
+// フィーチャーが止まっているときや使えない API キーは active: false。API キーは向け先を持たないので aud と scope は無い。
+func (a *App) apiKeyIntrospection(ctx context.Context, tx port.Tx, key string) (provider.Introspection, error) {
+	if !a.plan.IsActive(feature.APIKeyIntrospection) || !a.plan.IsActive(feature.ServiceAccounts) {
+		return provider.Introspection{}, nil
+	}
+	now := a.deps.Clock.Now()
+	c, sa, err := a.serviceAccounts.APIKey(ctx, tx, a.realm.ID, key, now)
+	if errors.Is(err, serviceaccount.ErrInvalid) {
+		return provider.Introspection{}, nil
+	}
+	if err != nil {
+		return provider.Introspection{}, err
+	}
+	out := provider.Introspection{Active: true, TokenType: serviceaccount.TypeAPIKey, Iat: c.CreatedAt.Unix(), Sub: sa.ID,
+		PrincipalType: port.PrincipalServiceAccount, Iss: a.issuer, AuthTime: now.Unix(), AMR: []string{serviceaccount.MethodAPIKey}}
+	if c.ExpiresAt != nil {
+		out.Exp = c.ExpiresAt.Unix()
+	}
+	return a.withServiceAccountOrg(ctx, tx, sa, out)
+}
+
+// withServiceAccountOrg は、サービスアカウントが Org に属していれば応答に Org の公開 ID を載せる。
+func (a *App) withServiceAccountOrg(ctx context.Context, tx port.Tx, sa port.ServiceAccount, out provider.Introspection) (provider.Introspection, error) {
 	if sa.OrgID != "" {
 		// Org に属するサービスアカウント（ADR 0074）なら、リソースサーバーが Org ごとに扱えるよう Org の公開 ID を載せる（#190）。
-		// Org が使えなければ ResourceToken がもう拒んでいる。
+		// Org が使えなければ、サービスアカウントの確かめ（ResourceToken・APIKey）がもう拒んでいる。
 		o, err := tx.Orgs().Get(ctx, a.realm.ID, sa.OrgID)
 		if errors.Is(err, errs.NotFound) {
 			return provider.Introspection{}, nil
@@ -255,4 +286,28 @@ func (a *App) resourceTokenIntrospection(ctx context.Context, tx port.Tx, token 
 		out.OrgID = o.PublicID
 	}
 	return out, nil
+}
+
+// introspectionCallerAllowed は、aud のうち登録したリソース（RFC 8707、ADR 0112）がイントロスペクションしてよい連携先を限っていれば、
+// 呼び出した連携先 clientID がそのすべてに載っているかを返す（ADR 0120）。限っていなければ true。
+func (a *App) introspectionCallerAllowed(ctx context.Context, tx port.Tx, aud []string, clientID string) (bool, error) {
+	if a.resources == nil {
+		return true, nil
+	}
+	for _, uri := range aud {
+		if !provider.ValidResourceURI(uri) {
+			continue
+		}
+		x, err := tx.OAuthResources().GetByURI(ctx, a.realm.ID, uri)
+		if errors.Is(err, errs.NotFound) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if len(x.IntrospectionClients) > 0 && !slices.Contains(x.IntrospectionClients, clientID) {
+			return false, nil
+		}
+	}
+	return true, nil
 }

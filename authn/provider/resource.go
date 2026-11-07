@@ -87,13 +87,15 @@ type Resources struct {
 	Clock clock.Clock
 }
 
-// ResourceInput は登録・変更の内容。Clients は連携先の client_id、ServiceAccounts はサービスアカウントの ID。
+// ResourceInput は登録・変更の内容。Clients と IntrospectionClients は連携先の client_id、ServiceAccounts はサービスアカウントの ID。
 type ResourceInput struct {
 	URI             string
 	Name            string
 	Scopes          []string
 	Clients         []string
 	ServiceAccounts []string
+	// IntrospectionClients はこのリソースに向けたトークンをイントロスペクションしてよい連携先。空ならどれでもよい（ADR 0120）。
+	IntrospectionClients []string
 }
 
 func uniq(v []string) []string {
@@ -118,11 +120,12 @@ func (in ResourceInput) normalize(ctx context.Context, tx port.Tx, realmID strin
 	if len(in.Scopes) > MaxResourceScopes || slices.ContainsFunc(in.Scopes, func(s string) bool { return !ValidScopeToken(s) }) {
 		return in, invalidResource("scopes")
 	}
-	if len(in.Clients) > MaxResourcePrincipals || len(in.ServiceAccounts) > MaxResourcePrincipals {
+	if len(in.Clients) > MaxResourcePrincipals || len(in.ServiceAccounts) > MaxResourcePrincipals || len(in.IntrospectionClients) > MaxResourcePrincipals {
 		return in, invalidResource("too many clients or service accounts")
 	}
 	in.Scopes, in.Clients, in.ServiceAccounts = uniq(in.Scopes), uniq(in.Clients), uniq(in.ServiceAccounts)
-	for _, c := range in.Clients {
+	in.IntrospectionClients = uniq(in.IntrospectionClients)
+	for _, c := range slices.Concat(in.Clients, in.IntrospectionClients) {
 		_, err := tx.Clients().GetByPublicID(ctx, realmID, c)
 		if errors.Is(err, errs.NotFound) {
 			return in, invalidResource("unknown client " + c)
@@ -149,7 +152,7 @@ func (in ResourceInput) normalize(ctx context.Context, tx port.Tx, realmID strin
 func (r *Resources) record(ctx context.Context, tx port.Tx, typ string, x port.OAuthResource, actor audit.Actor, requestID string) error {
 	_, err := eventlog.Record(ctx, tx, r.Clock, audit.Event{Type: typ, Result: audit.ResultSuccess, RealmID: x.RealmID, Actor: actor,
 		RequestID: requestID, Details: map[string]any{"resource_id": x.ID, "uri": x.URI, "scopes": x.Scopes, "clients": x.Clients,
-			"service_accounts": x.ServiceAccounts}})
+			"service_accounts": x.ServiceAccounts, "introspection_clients": x.IntrospectionClients}})
 	return err
 }
 
@@ -161,7 +164,7 @@ func (r *Resources) Create(ctx context.Context, tx port.Tx, realmID string, in R
 	}
 	now := r.Clock.Now()
 	x := port.OAuthResource{ID: id.NewExternal(id.OAuthResource), RealmID: realmID, URI: in.URI, Name: in.Name, Scopes: in.Scopes,
-		Clients: in.Clients, ServiceAccounts: in.ServiceAccounts, CreatedAt: now, UpdatedAt: now}
+		Clients: in.Clients, ServiceAccounts: in.ServiceAccounts, IntrospectionClients: in.IntrospectionClients, CreatedAt: now, UpdatedAt: now}
 	if err := tx.OAuthResources().Create(ctx, x); err != nil {
 		if errors.Is(err, errs.Conflict) {
 			return port.OAuthResource{}, ErrResourceExists
@@ -178,6 +181,7 @@ func (r *Resources) Update(ctx context.Context, tx port.Tx, x port.OAuthResource
 		return port.OAuthResource{}, err
 	}
 	x.URI, x.Name, x.Scopes, x.Clients, x.ServiceAccounts, x.UpdatedAt = in.URI, in.Name, in.Scopes, in.Clients, in.ServiceAccounts, r.Clock.Now()
+	x.IntrospectionClients = in.IntrospectionClients
 	if err := tx.OAuthResources().Update(ctx, x); err != nil {
 		if errors.Is(err, errs.Conflict) {
 			return port.OAuthResource{}, ErrResourceExists

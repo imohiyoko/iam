@@ -17,7 +17,7 @@ import (
 
 func oauthResourceOut(x port.OAuthResource) adminapi.OAuthResource {
 	return adminapi.OAuthResource{Id: x.ID, Uri: x.URI, Name: x.Name, Scopes: nonNilStrings(x.Scopes), Clients: nonNilStrings(x.Clients),
-		ServiceAccounts: nonNilStrings(x.ServiceAccounts), CreatedAt: x.CreatedAt, UpdatedAt: x.UpdatedAt}
+		ServiceAccounts: nonNilStrings(x.ServiceAccounts), IntrospectionClients: nonNilStrings(x.IntrospectionClients), CreatedAt: x.CreatedAt, UpdatedAt: x.UpdatedAt}
 }
 
 func nonNilStrings(v []string) []string {
@@ -34,6 +34,9 @@ func oauthResourceIn(b *adminapi.OAuthResourceInput) provider.ResourceInput {
 	}
 	if b.ServiceAccounts != nil {
 		in.ServiceAccounts = *b.ServiceAccounts
+	}
+	if b.IntrospectionClients != nil {
+		in.IntrospectionClients = *b.IntrospectionClients
 	}
 	return in
 }
