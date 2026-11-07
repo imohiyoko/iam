@@ -14,6 +14,7 @@ import (
 	"github.com/imohiyoko/iam/authn/dpop"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
+	"github.com/imohiyoko/iam/shared/errs"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -240,6 +241,18 @@ func (a *App) resourceTokenIntrospection(ctx context.Context, tx port.Tx, token 
 	if t.JKT != "" {
 		// DPoP に結び付けたトークン（ADR 0113）。リソースサーバーが同じ鍵の証明を求める。
 		out.Cnf = &provider.Confirmation{JKT: t.JKT}
+	}
+	if sa.OrgID != "" {
+		// Org に属するサービスアカウント（ADR 0074）なら、リソースサーバーが Org ごとに扱えるよう Org の公開 ID を載せる（#190）。
+		// Org が使えなければ ResourceToken がもう拒んでいる。
+		o, err := tx.Orgs().Get(ctx, a.realm.ID, sa.OrgID)
+		if errors.Is(err, errs.NotFound) {
+			return provider.Introspection{}, nil
+		}
+		if err != nil {
+			return provider.Introspection{}, err
+		}
+		out.OrgID = o.PublicID
 	}
 	return out, nil
 }
