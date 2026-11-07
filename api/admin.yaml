@@ -1677,7 +1677,11 @@ paths:
       summary: 主体が操作をできるかを判定する（4.5、check）
       description: |
         権限 `authz:check`（連携先・サービスアカウント向け）。`check(principal, action, resource, context)` の API。
-        主体はユーザーの公開 ID。削除・停止中・有効期間の外のユーザーは `allowed: false`（`reasons` に理由のコード）。
+        主体はユーザーかサービスアカウント（`principal_type`）の公開 ID。削除・停止中・有効期間の外の主体と、所属の Org が
+        使えないサービスアカウントは `allowed: false`（`reasons` に理由のコード。削除は `inactive`）。
+        Group の所属・Org の範囲・リソースの範囲の扱いはユーザーとサービスアカウントで同じ。
+        サービスアカウントの認証の文脈は、そのアクセストークン（管理 API 向けか自前の API 向け）を `access_token` に渡せば
+        その認証から組み立てる（`attested`。API キーは受けない）。`sid` と `context` はユーザーのときだけ使う。
         `org_id` を渡せば、その Org の範囲で判定する（Org の範囲の付与と org_role は、その Org の使える所属がある間だけ効く）。
         Org がオフの構成では `org_id` を無視して realm の範囲で判定する。`resource_type`・`resource_id` を渡せば、そのリソースを限った付与も効く。
         判定の材料は `session.validity_max_delay` の間キャッシュする（ロール・所属の変更の反映の遅れの上限）。
@@ -4619,8 +4623,12 @@ components:
       type: object
       required: [principal_id, action]
       properties:
-        principal_type: { type: string, enum: [user], default: user }
-        principal_id: { type: string, description: 主体の公開 ID }
+        principal_type:
+          type: string
+          enum: [user, service_account]
+          default: user
+          description: "`service_account` はフィーチャー `service_accounts` が動いているときだけ（止まっていれば `400`）"
+        principal_id: { type: string, description: 主体の公開 ID（サービスアカウントは `sva_…`） }
         action: { type: string, minLength: 1, maxLength: 130, description: "`<リソース>:<操作>`" }
         org_id: { type: string, description: 判定の文脈の Org の公開 ID }
         resource_type: { type: string, maxLength: 64, description: "`org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`" }

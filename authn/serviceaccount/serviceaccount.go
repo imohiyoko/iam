@@ -164,6 +164,33 @@ func (au Authenticator) Authenticate(ctx context.Context, tx port.Tx, realmID, b
 	return out, nil
 }
 
+// CheckAccessToken はアクセストークン（管理 API 向けか自前の API 向け）を確かめ、使えるサービスアカウントとその認証の手段・時刻を返す
+// （認可の判定の文脈。ADR 0084）。API キーは受けない。自前の API 向けのトークンは ResourceToken と同じく、リソースと許可が
+// 残っているときだけ。使えないものは ErrInvalid。
+func (au Authenticator) CheckAccessToken(ctx context.Context, tx port.Tx, realmID, bearer string, now time.Time) (Authenticated, error) {
+	if !IsAccessToken(bearer) {
+		return Authenticated{}, ErrInvalid
+	}
+	t, method, err := au.checkToken(ctx, tx, realmID, bearer, now)
+	if err != nil {
+		return Authenticated{}, err
+	}
+	var a port.ServiceAccount
+	if t.Audience != "" {
+		if _, a, err = au.ResourceToken(ctx, tx, realmID, bearer, now); err != nil {
+			return Authenticated{}, err
+		}
+	} else {
+		if a, err = tx.ServiceAccounts().Get(ctx, realmID, t.ServiceAccountID); err != nil {
+			return Authenticated{}, invalidOr(err)
+		}
+		if err := au.usable(ctx, tx, a, now); err != nil {
+			return Authenticated{}, err
+		}
+	}
+	return Authenticated{Account: a, Method: method, AuthTime: t.CreatedAt, JKT: t.JKT}, nil
+}
+
 // ResourceToken は自前の API に向けたアクセストークン（RFC 8707。ADR 0112）を確かめ、トークンとサービスアカウントを返す
 // （イントロスペクション）。管理 API 向けのトークン、使えないサービスアカウント、消えたリソース・許可から外れたサービスアカウント、
 // フィーチャーが止まっているときは ErrInvalid。
