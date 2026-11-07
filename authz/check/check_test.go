@@ -552,3 +552,45 @@ func TestScopedContext(t *testing.T) {
 		return nil
 	})
 }
+
+// TestDecideMany は、一括の判定が 1 件ずつの Decide と同じ結果を同じ順で返すこと（リソースを限った付与と Org を含む）。
+func TestDecideMany(t *testing.T) {
+	e := newEnv(t, members{"u_alice": {"org_a": port.OrgMember}})
+	reader := e.role("", "doc:read")
+	writer := e.role("", "doc:write")
+	e.bind(reader.ID, alice, "", "", "")
+	e.bind(writer.ID, alice, "", "doc", "d1")
+	items := []check.Item{
+		{Action: "doc:read"},
+		{Action: "doc:write", Resource: check.Resource{Type: "doc", ID: "d1"}},
+		{Action: "doc:write", Resource: check.Resource{Type: "doc", ID: "d2"}},
+		{Action: "doc:delete"},
+	}
+	for _, orgID := range []string{"", "org_a"} {
+		base := check.Request{Principal: alice, OrgID: orgID}
+		got, err := e.c.DecideMany(context.Background(), realm, base, items)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(items) {
+			t.Fatalf("len = %d", len(got))
+		}
+		for i, it := range items {
+			r := base
+			r.Action, r.Resource = it.Action, it.Resource
+			want, err := e.c.Decide(context.Background(), realm, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got[i], want) {
+				t.Errorf("org %q item %d: got %+v, want %+v", orgID, i, got[i], want)
+			}
+		}
+		if !got[0].Allow || !got[1].Allow || got[2].Allow || got[3].Allow {
+			t.Errorf("org %q: %+v", orgID, got)
+		}
+	}
+	if got, err := e.c.DecideMany(context.Background(), realm, check.Request{Principal: alice}, nil); err != nil || len(got) != 0 {
+		t.Fatalf("empty: %v %v", got, err)
+	}
+}

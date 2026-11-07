@@ -145,6 +145,45 @@ func (c *Checker) Decide(ctx context.Context, realmID string, r Request) (Decisi
 	return c.decide(gs, r, c.source(ctx, realmID, r))
 }
 
+// Item は DecideMany の 1 件：操作とリソース。主体・Org・文脈は共通。
+type Item struct {
+	Action   string
+	Resource Resource
+}
+
+// DecideMany は主体・Org・文脈が同じ判定をまとめて行い、items と同じ順に結果を返す（batch check）。判定の材料（付与・所属）は
+// 1 回だけ読む（キャッシュは Decide と同じ）。要件は名前空間ごとにキャッシュから読む。base の Action と Resource は使わない。
+// items に Org を対象にするリソースは渡さない（判定の Org は base.OrgID で決める）。
+func (c *Checker) DecideMany(ctx context.Context, realmID string, base Request, items []Item) ([]Decision, error) {
+	base = normalize(base)
+	gs, err := c.cached(ctx, realmID, base.Principal, base.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	// realm のリスクの境界は条件付きの付与に当たったときだけ、まとめて 1 回読む。
+	var bands Bands
+	var bandsErr error
+	bandsRead := false
+	out := make([]Decision, len(items))
+	for i, it := range items {
+		r := base
+		r.Action, r.Resource = it.Action, it.Resource
+		src := c.source(ctx, realmID, r)
+		realmBands := src.bands
+		src.bands = func() (Bands, error) {
+			if !bandsRead {
+				bands, bandsErr = realmBands()
+				bandsRead = true
+			}
+			return bands, bandsErr
+		}
+		if out[i], err = c.decide(gs, r, src); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // Require は操作の要件（名前空間と Org の要件。ADR 0084）だけを評価する。付与を問わない操作（本人の重要な操作など）に使う。
 func (c *Checker) Require(ctx context.Context, realmID string, r Request) (Decision, error) {
 	r = normalize(r)

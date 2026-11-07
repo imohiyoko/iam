@@ -211,6 +211,24 @@ func (e AuditChainVerificationBrokenReason) Valid() bool {
 	}
 }
 
+// Defines values for BatchCheckRequestPrincipalType.
+const (
+	BatchCheckRequestPrincipalTypeServiceAccount BatchCheckRequestPrincipalType = "service_account"
+	BatchCheckRequestPrincipalTypeUser           BatchCheckRequestPrincipalType = "user"
+)
+
+// Valid indicates whether the value is a known member of the BatchCheckRequestPrincipalType enum.
+func (e BatchCheckRequestPrincipalType) Valid() bool {
+	switch e {
+	case BatchCheckRequestPrincipalTypeServiceAccount:
+		return true
+	case BatchCheckRequestPrincipalTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CheckRequestPrincipalType.
 const (
 	CheckRequestPrincipalTypeServiceAccount CheckRequestPrincipalType = "service_account"
@@ -1353,6 +1371,48 @@ type AuditEvent struct {
 
 	// UserAgent ブラウザと OS の大分類
 	UserAgent *string `json:"user_agent,omitempty"`
+}
+
+// BatchCheckItem defines model for BatchCheckItem.
+type BatchCheckItem struct {
+	// Action `<リソース>:<操作>`
+	Action     string  `json:"action"`
+	ResourceId *string `json:"resource_id,omitempty"`
+
+	// ResourceType `org` は使えない
+	ResourceType *string `json:"resource_type,omitempty"`
+}
+
+// BatchCheckRequest defines model for BatchCheckRequest.
+type BatchCheckRequest struct {
+	// AccessToken `/v1/admin/authz:check` と同じ
+	AccessToken *string          `json:"access_token,omitempty"`
+	Checks      []BatchCheckItem `json:"checks"`
+
+	// Context 連携先が申告する認証の文脈（ADR 0084）。realm の設定 `declared_context_clients` に載せた呼び出し元のときだけ使い、
+	// それ以外は捨てる。`sid` か `access_token` があれば捨てる。申告の文脈は `attested` でなく、付与の条件の `attested` と、
+	// 名前空間・Org の要件を満たさない。リスクは一覧で有効な種類・範囲内の値だけを使う
+	Context *DeclaredContext `json:"context,omitempty"`
+
+	// OrgId 判定の文脈の Org の公開 ID（すべての判定で共通）
+	OrgId *string `json:"org_id,omitempty"`
+
+	// PrincipalId 主体の公開 ID
+	PrincipalId string `json:"principal_id"`
+
+	// PrincipalType `/v1/admin/authz:check` と同じ
+	PrincipalType *BatchCheckRequestPrincipalType `json:"principal_type,omitempty"`
+
+	// Sid `/v1/admin/authz:check` と同じ
+	Sid *string `json:"sid,omitempty"`
+}
+
+// BatchCheckRequestPrincipalType `/v1/admin/authz:check` と同じ
+type BatchCheckRequestPrincipalType string
+
+// BatchCheckResult defines model for BatchCheckResult.
+type BatchCheckResult struct {
+	Results []CheckResult `json:"results"`
 }
 
 // CheckRequest defines model for CheckRequest.
@@ -3258,6 +3318,9 @@ type UpdateAttributeDefJSONRequestBody = AttributeDefUpdate
 // VerifyAuditChainJSONRequestBody defines body for VerifyAuditChain for application/json ContentType.
 type VerifyAuditChainJSONRequestBody VerifyAuditChainJSONBody
 
+// BatchCheckAuthzJSONRequestBody defines body for BatchCheckAuthz for application/json ContentType.
+type BatchCheckAuthzJSONRequestBody = BatchCheckRequest
+
 // CheckAuthzJSONRequestBody defines body for CheckAuthz for application/json ContentType.
 type CheckAuthzJSONRequestBody = CheckRequest
 
@@ -3485,6 +3548,9 @@ type ServerInterface interface {
 	// VerifyAuditChain 監査ログのハッシュチェーンを、seq の範囲を指定して検証する（ADR 0100）
 	// (POST /v1/admin/audit-events:verify)
 	VerifyAuditChain(w http.ResponseWriter, r *http.Request)
+	// BatchCheckAuthz 同じ主体の判定をまとめて行う（4.5、batch check）
+	// (POST /v1/admin/authz:batch-check)
+	BatchCheckAuthz(w http.ResponseWriter, r *http.Request)
 	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
 	// (POST /v1/admin/authz:check)
 	CheckAuthz(w http.ResponseWriter, r *http.Request)
@@ -4336,6 +4402,20 @@ func (siw *ServerInterfaceWrapper) VerifyAuditChain(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.VerifyAuditChain(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BatchCheckAuthz operation middleware
+func (siw *ServerInterfaceWrapper) BatchCheckAuthz(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BatchCheckAuthz(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8542,6 +8622,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/groups/{group_id}/members", wrapper.AddGroupMember)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/groups/{group_id}/members:remove", wrapper.RemoveGroupMember)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/authz:check", wrapper.CheckAuthz)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/authz:batch-check", wrapper.BatchCheckAuthz)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/clients", wrapper.ListClients)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/clients", wrapper.CreateClient)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/clients/{id}", wrapper.GetClient)
@@ -9337,6 +9418,84 @@ func (response VerifyAuditChain409JSONResponse) VisitVerifyAuditChainResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BatchCheckAuthzRequestObject struct {
+	Body *BatchCheckAuthzJSONRequestBody
+}
+
+type BatchCheckAuthzResponseObject interface {
+	VisitBatchCheckAuthzResponse(w http.ResponseWriter) error
+}
+
+type BatchCheckAuthz200JSONResponse BatchCheckResult
+
+func (response BatchCheckAuthz200JSONResponse) VisitBatchCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BatchCheckAuthz400JSONResponse struct{ ErrorJSONResponse }
+
+func (response BatchCheckAuthz400JSONResponse) VisitBatchCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BatchCheckAuthz401JSONResponse Error
+
+func (response BatchCheckAuthz401JSONResponse) VisitBatchCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BatchCheckAuthz403JSONResponse Error
+
+func (response BatchCheckAuthz403JSONResponse) VisitBatchCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BatchCheckAuthz404JSONResponse Error
+
+func (response BatchCheckAuthz404JSONResponse) VisitBatchCheckAuthzResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -21088,6 +21247,9 @@ type StrictServerInterface interface {
 	// VerifyAuditChain 監査ログのハッシュチェーンを、seq の範囲を指定して検証する（ADR 0100）
 	// (POST /v1/admin/audit-events:verify)
 	VerifyAuditChain(ctx context.Context, request VerifyAuditChainRequestObject) (VerifyAuditChainResponseObject, error)
+	// BatchCheckAuthz 同じ主体の判定をまとめて行う（4.5、batch check）
+	// (POST /v1/admin/authz:batch-check)
+	BatchCheckAuthz(ctx context.Context, request BatchCheckAuthzRequestObject) (BatchCheckAuthzResponseObject, error)
 	// CheckAuthz 主体が操作をできるかを判定する（4.5、check）
 	// (POST /v1/admin/authz:check)
 	CheckAuthz(ctx context.Context, request CheckAuthzRequestObject) (CheckAuthzResponseObject, error)
@@ -21877,6 +22039,37 @@ func (sh *strictHandler) VerifyAuditChain(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(VerifyAuditChainResponseObject); ok {
 		if err := validResponse.VisitVerifyAuditChainResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// BatchCheckAuthz operation middleware
+func (sh *strictHandler) BatchCheckAuthz(w http.ResponseWriter, r *http.Request) {
+	var request BatchCheckAuthzRequestObject
+
+	var body BatchCheckAuthzJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.BatchCheckAuthz(ctx, request.(BatchCheckAuthzRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BatchCheckAuthz")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(BatchCheckAuthzResponseObject); ok {
+		if err := validResponse.VisitBatchCheckAuthzResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
