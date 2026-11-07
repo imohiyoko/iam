@@ -69,6 +69,10 @@ type Revocation struct {
 	CacheMax string `yaml:"cache_max"`
 	// MaxCRLBytes は CRL の大きさの上限（既定 16 MiB）。
 	MaxCRLBytes int64 `yaml:"max_crl_bytes"`
+	// AllowPrivateNetworks は、証明書の AIA・CRL 配布点が指すプライベートのアドレスにも問い合わせるか。既定は false
+	// （公開のアドレスにだけつなぐ。SSRF を防ぐ）。社内の PKI なら ocsp_url・crl_urls で運営者が指すか、これを true にする。
+	// ocsp_url・crl_urls は運営者の設定なので、この設定に関わらず問い合わせる。
+	AllowPrivateNetworks bool `yaml:"allow_private_networks"`
 }
 
 // マッピングの規則。
@@ -123,12 +127,14 @@ type hardwareIssuer struct {
 type revocationPolicy struct {
 	mode     string
 	failOpen bool
-	ocspURL  string
-	crlURLs  []string
-	leafOnly bool
-	timeout  time.Duration
-	cacheMax time.Duration
-	maxCRL   int64
+	// allowPrivate は証明書が指す URL でもプライベートのアドレスにつなぐか。
+	allowPrivate bool
+	ocspURL      string
+	crlURLs      []string
+	leafOnly     bool
+	timeout      time.Duration
+	cacheMax     time.Duration
+	maxCRL       int64
 }
 
 // loadCerts は PEM のファイルのパスか PEM そのものから証明書を読む（1つ以上）。
@@ -247,7 +253,8 @@ func newPolicy(rc RealmConfig) (*policy, error) {
 		return nil, errors.New("max_credentials must be between 1 and 100")
 	}
 	r := rc.Revocation
-	p.revocation = revocationPolicy{mode: r.Mode, failOpen: r.FailOpen, ocspURL: r.OCSPURL, crlURLs: r.CRLURLs, leafOnly: r.LeafOnly, maxCRL: r.MaxCRLBytes}
+	p.revocation = revocationPolicy{mode: r.Mode, failOpen: r.FailOpen, ocspURL: r.OCSPURL, crlURLs: r.CRLURLs, leafOnly: r.LeafOnly, maxCRL: r.MaxCRLBytes,
+		allowPrivate: r.AllowPrivateNetworks}
 	switch p.revocation.mode {
 	case "":
 		p.revocation.mode = RevocationOCSPCRL

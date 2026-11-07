@@ -519,6 +519,8 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	if plan.IsActive(feature.CIBA) {
 		a.ciba = &provider.Backchannel{Cache: d.Ephemeral, Crypter: a.pii, Clock: d.Clock, TTL: cfg.OIDC.CIBATTL.D(),
 			Interval: cfg.OIDC.CIBAPollInterval.D()}
+		// ping の通知先は連携先の登録した URL。公開のアドレスにだけつなぐ（SSRF を防ぐ。back-channel の配信と同じ）。
+		a.cibaHTTP = eventsub.PublicClient(cfg.Dev)
 	}
 	if plan.IsActive(feature.CustomAttributes) {
 		a.attributes = &attribute.Service{Clock: d.Clock, Crypter: a.pii}

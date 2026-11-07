@@ -18,6 +18,7 @@ import (
 
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/credential"
+	"github.com/imohiyoko/iam/authn/eventsub"
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/server/publicapi"
@@ -536,9 +537,9 @@ func (a *App) notifyBackchannel(ctx context.Context, req provider.BackchannelReq
 	hr.Header.Set("Authorization", "Bearer "+req.NotificationToken)
 	hc := a.cibaHTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: cibaNotifyTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		hc = eventsub.PublicClient(false)
 	}
-	resp, err := hc.Do(hr) // #nosec G704 -- 送り先は運営者が登録した backchannel_client_notification_endpoint
+	resp, err := hc.Do(hr) // #nosec G704 -- 送り先は運営者が登録した backchannel_client_notification_endpoint。公開のアドレスにだけつなぐ（eventsub.PublicClient）
 	if err != nil {
 		a.deps.Logger.InfoContext(ctx, "ciba: notification failed", "client_id", req.ClientID, "error", err)
 		return

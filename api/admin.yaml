@@ -3435,7 +3435,8 @@ paths:
       operationId: updateWorkloadIdentityProvider
       summary: 発行者を置き換える
       description: |
-        権限 `service_accounts:manage`。省いた項目は既定に戻る。`disabled` にすると交換を受けず、この発行者で発行したトークンも
+        権限 `service_accounts:manage` と、結び付け先のサービスアカウントすべてのロールの権限を持つこと（足りなければ 403）。
+        省いた項目は既定に戻る。`disabled` にすると交換を受けず、この発行者で発行したトークンも
         次の検証から使えない。`workload_identity.provider.updated` を監査ログに残す。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -3461,7 +3462,8 @@ paths:
       operationId: deleteWorkloadIdentityProvider
       summary: 発行者を消す
       description: |
-        権限 `service_accounts:manage`。結び付けも消え、発行済みのトークンは次の検証から使えない。
+        権限 `service_accounts:manage` と、結び付け先のサービスアカウントすべてのロールの権限を持つこと（足りなければ 403）。
+        結び付けも消え、発行済みのトークンは次の検証から使えない。
         `workload_identity.provider.deleted` を監査ログに残す。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -3521,7 +3523,8 @@ paths:
       operationId: deleteWorkloadIdentityBinding
       summary: 結び付けを消す
       description: |
-        権限 `service_accounts:manage`。この結び付けで発行したトークンは次の検証から使えない。
+        権限 `service_accounts:manage` と、結び付け先のサービスアカウントのロールの権限をすべて持つこと（足りなければ 403）。
+        この結び付けで発行したトークンは次の検証から使えない。
         `workload_identity.binding.deleted` を監査ログに残す。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
@@ -5147,7 +5150,7 @@ components:
           description: NameID の形式の URN（persistent（既定）・emailAddress・unspecified・transient）
         name_id_source:
           type: string
-          description: NameID の値の出どころ（`user_id`・`email`・`attribute:<キー>`）。既定は emailAddress なら `email`、ほかは `user_id`。transient では使わない
+          description: NameID の値の出どころ（`user_id`・`email`・`attribute:<キー>`）。既定は emailAddress なら `email`、ほかは `user_id`。transient では使わない。本人が書ける属性（`user_editable`）は使えない（`400`。後で書けるようにしたら、その SP には `InvalidNameIDPolicy` を返す）。書けないように戻した属性の既存の値は保証されないので、使う前に運営者が書き直す
         attributes:
           type: array
           maxItems: 32
