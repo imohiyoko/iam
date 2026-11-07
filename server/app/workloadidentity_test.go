@@ -367,15 +367,15 @@ func TestWorkloadIdentityResource(t *testing.T) {
 		t.Fatalf("create binding: %d %v", code, out)
 	}
 	if code, out := l.admin(t, "/v1/admin/oauth/resources", owner, map[string]any{"uri": ordersAPI, "name": "Orders",
-		"scopes": []string{"app.orders:read", "app.orders:write"}, "service_accounts": []string{sa}}); code != 201 {
+		"scopes": []string{"orders:read", "orders:write"}, "service_accounts": []string{sa}}); code != 201 {
 		t.Fatalf("create resource: %d %v", code, out)
 	}
 	now := l.a.deps.Clock.Now()
 	f := wifForm(plat.token(t, now, nil))
 	f.Set("resource", ordersAPI)
-	f.Set("scope", "app.orders:read")
+	f.Set("scope", "orders:read")
 	code, out = l.token(t, f, "")
-	if code != 200 || out["scope"] != "app.orders:read" {
+	if code != 200 || out["scope"] != "orders:read" {
 		t.Fatalf("exchange with resource: %d %v", code, out)
 	}
 	// 自前の API に向けたトークンは管理 API では使えない。
@@ -389,7 +389,7 @@ func TestWorkloadIdentityResource(t *testing.T) {
 	}
 	f = wifForm(plat.token(t, now, nil))
 	f.Set("resource", ordersAPI)
-	f.Set("scope", "app.orders:admin")
+	f.Set("scope", "orders:admin")
 	if code, out := l.token(t, f, ""); code != 400 || out["error"] != "invalid_scope" {
 		t.Fatalf("scope: %d %v", code, out)
 	}

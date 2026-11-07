@@ -173,4 +173,15 @@ func TestCheckLimitedToCallerCatalog(t *testing.T) {
 	if code := batch("app.doc:read", "other.doc:read"); code != 403 {
 		t.Fatalf("batch mixed: %d", code)
 	}
+	// 件数の上限は、カタログごとの確かめより先に見る（上限を超えれば、受け持たないカタログを含んでも 400）。
+	var many []string
+	for range l.a.cfg.Authz.BatchCheckMax {
+		many = append(many, "app.doc:read")
+	}
+	if code := batch(append(many, "other.doc:read")...); code != 400 {
+		t.Fatalf("batch over the limit: %d", code)
+	}
+	if code := batch(); code != 400 {
+		t.Fatalf("batch empty: %d", code)
+	}
 }

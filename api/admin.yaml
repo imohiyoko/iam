@@ -3368,8 +3368,8 @@ paths:
       operationId: updatePermissionCatalog
       summary: 連携先の権限のカタログを置き換える
       description: |
-        権限 `permission_catalogs:manage`。独自のロール・リソースのスコープ・要件が使っている権限を外すことはできない
-        （`409 catalog_in_use`。使っている所を返す）。`permission_catalog.updated` を監査ログに残す。
+        権限 `permission_catalogs:manage`。独自のロール（realm 共通と Org のもの）が使っている権限を外すことはできない
+        （`409 catalog_in_use`。使っているロールを返す）。`permission_catalog.updated` を監査ログに残す。
       parameters:
         - { name: prefix, in: path, required: true, schema: { type: string, maxLength: 32 } }
       requestBody:
@@ -3394,7 +3394,7 @@ paths:
       operationId: deletePermissionCatalog
       summary: 連携先の権限のカタログを消す
       description: |
-        権限 `permission_catalogs:manage`。独自のロール・リソースのスコープ・要件がこのカタログの権限を使っていれば消せない
+        権限 `permission_catalogs:manage`。独自のロール（realm 共通と Org のもの）がこのカタログの権限を使っていれば消せない
         （`409 catalog_in_use`）。`permission_catalog.deleted` を監査ログに残す。
       parameters:
         - { name: prefix, in: path, required: true, schema: { type: string, maxLength: 32 } }
@@ -5411,7 +5411,7 @@ components:
         scopes:
           type: array
           maxItems: 50
-          items: { type: string, maxLength: 162 }
+          items: { type: string, maxLength: 128 }
         clients:
           type: array
           maxItems: 100

@@ -97,7 +97,7 @@ func TestCheckServiceAccount(t *testing.T) {
 	}
 	// 自前の API 向けのトークン（リソースサーバーが受けたもの）でも組み立てる。
 	if code, out := l.admin(t, "/v1/admin/oauth/resources", owner, map[string]any{"uri": ordersAPI, "name": "Orders",
-		"scopes": []string{"app.orders:read"}, "service_accounts": []string{sa, other}}); code != 201 {
+		"scopes": []string{"orders:read"}, "service_accounts": []string{sa, other}}); code != 201 {
 		t.Fatalf("resource: %d %v", code, out)
 	}
 	resTok := token(url.Values{"grant_type": {"client_credentials"}, "resource": {ordersAPI}}, sa+":"+secret)

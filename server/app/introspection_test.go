@@ -19,11 +19,11 @@ func TestIntrospectionCallers(t *testing.T) {
 	other := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
 	sa, secret := l.serviceAccountSecret(t, owner, "worker")
 
-	if code, out := l.admin(t, "/v1/admin/oauth/resources", owner, map[string]any{"uri": ordersAPI, "name": "Orders", "scopes": []string{"app.orders:read"},
+	if code, out := l.admin(t, "/v1/admin/oauth/resources", owner, map[string]any{"uri": ordersAPI, "name": "Orders", "scopes": []string{"orders:read"},
 		"introspection_clients": []string{"cli_00000000000000000000000000"}}); code != 400 || out["error"] != "invalid_resource" {
 		t.Fatalf("unknown introspection client: %d %v", code, out)
 	}
-	body := map[string]any{"uri": ordersAPI, "name": "Orders", "scopes": []string{"app.orders:read"}, "clients": []string{p.clientID},
+	body := map[string]any{"uri": ordersAPI, "name": "Orders", "scopes": []string{"orders:read"}, "clients": []string{p.clientID},
 		"service_accounts": []string{sa}, "introspection_clients": []string{rs.clientID, rs.clientID}}
 	code, res := l.admin(t, "/v1/admin/oauth/resources", owner, body)
 	if code != 201 || !reflect.DeepEqual(res["introspection_clients"], []any{rs.clientID}) {
