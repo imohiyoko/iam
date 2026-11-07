@@ -108,20 +108,30 @@ func Covered(granted []string, want string) bool {
 
 // realmResources は IAM 自身の、realm の範囲の管理の権限のリソース。Org の範囲のロールには入れられない
 // （Org の範囲の付与は realm の範囲の判定に効かないため、入れても意味が無く、誤解のもとになる）。
-// 組み込みのロールに権限を足すときは、そのリソースをここにも足す（漏れると、持たない権限を独自のロールで自分に渡せる）。
-// permission_test.go の TestBuiltinPermissionsAreIAM が漏れを見つける。
-var realmResources = []string{"users", "orgs", "sessions", "credentials", "suspensions", "connections", "pii", "notifications", "roles", "groups", "authz", "clients", "signing_keys", "attributes", "risk", "risk_types", "requirements", "personal_access_tokens",
-	"realms", "service_accounts", "audit", "event_subscriptions", "ssf"}
+// 手書きの一覧にせず、組み込みのロール（role.go の builtin）の権限から導く。一覧から漏れると、管理の操作の「渡すには
+// 自分が持っていなければならない」の確認から外れ、持たない権限を独自のロールで自分に渡せてしまうため。
+// 新しい権限は、どれかの組み込みのロールに入れれば IAM 自身の権限になる（permission_test.go が、role.go の Perm の定数が
+// すべてそうなっていることを確かめる）。
+var realmResources = func() map[string]bool {
+	m := map[string]bool{}
+	for _, ps := range builtin {
+		for _, p := range ps {
+			res, _, _ := strings.Cut(p, ":")
+			m[res] = true
+		}
+	}
+	return m
+}()
 
 // IAM は IAM 自身の権限（realm の管理の権限と、Org の操作の `org:`）かを返す。管理の操作では、これを渡すには自分が持って
 // いなければならない（権限の引き上げを防ぐ）。それ以外は連携先の権限で、範囲の管理者が自由に渡せる。
 func IAM(p string) bool {
 	res, _, _ := strings.Cut(p, ":")
-	return res == "org" || slices.Contains(realmResources, res)
+	return res == "org" || realmResources[res]
 }
 
 // RealmOnly は realm の範囲でしか意味の無い（IAM 自身の管理の）権限かを返す。
 func RealmOnly(p string) bool {
 	res, _, _ := strings.Cut(p, ":")
-	return slices.Contains(realmResources, res)
+	return realmResources[res]
 }
