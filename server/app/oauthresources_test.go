@@ -216,3 +216,56 @@ func TestDisableResourceIndicatorsWithData(t *testing.T) {
 	}
 	disableWithData(t, l, feature.ResourceIndicators, 1)
 }
+
+// Org に属するサービスアカウントのリソース向けトークンは、イントロスペクションに Org の公開 ID を載せる（#190）。
+// Org が停止されれば active: false。Org に属さなければ org_id は無い。
+func TestResourceTokenOrgID(t *testing.T) {
+	l := featureEnv(t, nil, feature.ServiceAccounts, feature.ResourceIndicators)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	code, out := l.admin(t, "/v1/admin/users", owner, map[string]any{"email": "boss@acme.example"})
+	if code != 201 {
+		t.Fatalf("user: %d %v", code, out)
+	}
+	code, out = l.admin(t, "/v1/admin/orgs", owner, map[string]any{"name": "Acme", "owner_id": out["user_id"]})
+	if code != 201 {
+		t.Fatalf("org: %d %v", code, out)
+	}
+	acme := out["id"].(string)
+	code, out = l.admin(t, "/v1/admin/service-accounts", owner, map[string]any{"name": "acme-bot", "org_id": acme})
+	if code != 201 {
+		t.Fatalf("org service account: %d %v", code, out)
+	}
+	orgSA := out["id"].(string)
+	code, out = l.admin(t, "/v1/admin/service-accounts/"+orgSA+"/credentials", owner, map[string]any{"type": "client_secret"})
+	if code != 201 {
+		t.Fatalf("client secret: %d %v", code, out)
+	}
+	orgSecret := out["secret"].(string)
+	realmSA, realmSecret := l.serviceAccountSecret(t, owner, "worker")
+	if code, out := l.admin(t, "/v1/admin/oauth/resources", owner, map[string]any{"uri": ordersAPI, "name": "Orders",
+		"scopes": []string{"orders:read"}, "service_accounts": []string{orgSA, realmSA}}); code != 201 {
+		t.Fatalf("resource: %d %v", code, out)
+	}
+	issue := func(basic string) string {
+		t.Helper()
+		code, out := l.token(t, url.Values{"grant_type": {"client_credentials"}, "resource": {ordersAPI}}, basic)
+		if code != 200 {
+			t.Fatalf("sa token: %d %v", code, out)
+		}
+		return out["access_token"].(string)
+	}
+	orgTok, realmTok := issue(orgSA+":"+orgSecret), issue(realmSA+":"+realmSecret)
+	if in := p.introspect(t, orgTok); in["active"] != true || in["org_id"] != acme || in["sub"] != orgSA {
+		t.Fatalf("introspect org sa token: %v", in)
+	}
+	if in := p.introspect(t, realmTok); in["active"] != true || in["org_id"] != nil {
+		t.Fatalf("introspect realm sa token: %v", in)
+	}
+	if code, out := l.admin(t, "/v1/admin/orgs/"+acme+"/suspensions", owner, map[string]any{"category": "billing", "reason": "unpaid"}); code != 201 {
+		t.Fatalf("suspend org: %d %v", code, out)
+	}
+	if in := p.introspect(t, orgTok); in["active"] != false || len(in) != 1 {
+		t.Fatalf("introspect after the org was suspended: %v", in)
+	}
+}
