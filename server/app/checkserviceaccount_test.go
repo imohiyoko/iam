@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/imohiyoko/iam/authn/dpop/dpoptest"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/shared/feature"
 )
@@ -118,6 +119,16 @@ func TestCheckServiceAccount(t *testing.T) {
 		}
 	}
 
+	// リソースを消すと、そのリソースに向けたトークンは文脈にならない。
+	_, res := l.adminDo(t, "GET", owner, "/v1/admin/oauth/resources", nil)
+	rid := res["resources"].([]any)[0].(map[string]any)["id"].(string)
+	if code, _ := l.admin(t, "/v1/admin/oauth/resources/"+rid+":delete", owner, nil); code != 204 {
+		t.Fatalf("delete resource: %d", code)
+	}
+	if out := check(map[string]any{"principal_id": sa, "action": "payment:approve", "access_token": resTok}); out["allowed"] != false {
+		t.Fatalf("resource token after the resource was deleted: %v", out)
+	}
+
 	// 停止中・削除済みは allowed: false と理由のコード。
 	if code, out := l.admin(t, "/v1/admin/service-accounts/"+sa+"/suspensions", owner, map[string]any{"category": "security_risk", "reason": "leaked"}); code != 201 {
 		t.Fatalf("suspend: %d %v", code, out)
@@ -200,5 +211,46 @@ func TestCheckServiceAccountFeatureOff(t *testing.T) {
 	if code, out := l.admin(t, "/v1/admin/authz:check", checker, map[string]any{"principal_type": "service_account", "principal_id": "sva_00000000000000000000000000",
 		"action": "doc:read"}); code != 400 || out["error"] != "invalid_request" {
 		t.Fatalf("feature off: %d %v", code, out)
+	}
+}
+
+// DPoP に結び付けたトークンは、鍵の証明を確かめられないので判定の文脈にしない（ADR 0113）。
+func TestCheckServiceAccountDPoPToken(t *testing.T) {
+	l := senderEnv(t, nil, feature.DPoP, feature.ServiceAccounts)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	_, checker := l.operator(t, "app@example.com", role.RealmAdmin)
+	sa, secret := l.serviceAccountSecret(t, owner, "partner-bot")
+	code, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "approver", "permissions": []string{"payment:approve"}})
+	if code != 201 {
+		t.Fatalf("role: %d %v", code, out)
+	}
+	if code, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": out["id"], "principal_type": "service_account", "principal_id": sa,
+		"condition": map[string]any{"amr_has": []string{"client_secret"}}}); code != 201 {
+		t.Fatalf("bind: %d %v", code, out)
+	}
+	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {sa}, "client_secret": {secret}}
+	check := func(token string) bool {
+		t.Helper()
+		code, out := l.admin(t, "/v1/admin/authz:check", checker, map[string]any{"principal_type": "service_account", "principal_id": sa,
+			"action": "payment:approve", "access_token": token})
+		if code != 200 {
+			t.Fatalf("check: %d %v", code, out)
+		}
+		return out["allowed"] == true
+	}
+	w, tok := l.form(t, l.a.AdminHandler(), "POST", adminTokenPath, form, nil)
+	if w.Code != 200 || tok["token_type"] != "Bearer" {
+		t.Fatalf("bearer token: %d %v", w.Code, tok)
+	}
+	if !check(tok["access_token"].(string)) {
+		t.Fatal("bearer token should give the context")
+	}
+	k := dpoptest.NewKey(t)
+	w, tok = l.form(t, l.a.AdminHandler(), "POST", adminTokenPath, form, nil, "DPoP", l.proof(t, k, "POST", testAdminURL+adminTokenPath, "", ""))
+	if w.Code != 200 || tok["token_type"] != "DPoP" {
+		t.Fatalf("dpop token: %d %v", w.Code, tok)
+	}
+	if check(tok["access_token"].(string)) {
+		t.Fatal("a DPoP-bound token without a proof gave the context")
 	}
 }

@@ -175,18 +175,9 @@ func (au Authenticator) CheckAccessToken(ctx context.Context, tx port.Tx, realmI
 	if err != nil {
 		return Authenticated{}, err
 	}
-	var a port.ServiceAccount
-	if t.Audience != "" {
-		if _, a, err = au.ResourceToken(ctx, tx, realmID, bearer, now); err != nil {
-			return Authenticated{}, err
-		}
-	} else {
-		if a, err = tx.ServiceAccounts().Get(ctx, realmID, t.ServiceAccountID); err != nil {
-			return Authenticated{}, invalidOr(err)
-		}
-		if err := au.usable(ctx, tx, a, now); err != nil {
-			return Authenticated{}, err
-		}
+	a, err := au.tokenAccount(ctx, tx, realmID, t, now)
+	if err != nil {
+		return Authenticated{}, err
 	}
 	return Authenticated{Account: a, Method: method, AuthTime: t.CreatedAt, JKT: t.JKT}, nil
 }
@@ -205,20 +196,36 @@ func (au Authenticator) ResourceToken(ctx context.Context, tx port.Tx, realmID, 
 	if t.Audience == "" {
 		return port.ServiceAccountToken{}, port.ServiceAccount{}, ErrInvalid
 	}
-	a, err := tx.ServiceAccounts().Get(ctx, realmID, t.ServiceAccountID)
+	a, err := au.tokenAccount(ctx, tx, realmID, t, now)
 	if err != nil {
-		return port.ServiceAccountToken{}, port.ServiceAccount{}, invalidOr(err)
-	}
-	if err := au.usable(ctx, tx, a, now); err != nil {
-		return port.ServiceAccountToken{}, port.ServiceAccount{}, err
-	}
-	if _, err := au.Resource(ctx, tx, realmID, t.Audience, a.ID); err != nil {
-		if errors.Is(err, errs.Invalid) {
-			return port.ServiceAccountToken{}, port.ServiceAccount{}, ErrInvalid
-		}
 		return port.ServiceAccountToken{}, port.ServiceAccount{}, err
 	}
 	return t, a, nil
+}
+
+// tokenAccount は確かめたアクセストークン t のサービスアカウントが今使えるかを確かめて返す。自前の API に向けたトークン
+// （Audience あり）は、リソースと許可が残っていて、フィーチャーが動いているときだけ。使えなければ ErrInvalid。
+func (au Authenticator) tokenAccount(ctx context.Context, tx port.Tx, realmID string, t port.ServiceAccountToken, now time.Time) (port.ServiceAccount, error) {
+	if t.Audience != "" && au.Resource == nil {
+		return port.ServiceAccount{}, ErrInvalid
+	}
+	a, err := tx.ServiceAccounts().Get(ctx, realmID, t.ServiceAccountID)
+	if err != nil {
+		return port.ServiceAccount{}, invalidOr(err)
+	}
+	if err := au.usable(ctx, tx, a, now); err != nil {
+		return port.ServiceAccount{}, err
+	}
+	if t.Audience == "" {
+		return a, nil
+	}
+	if _, err := au.Resource(ctx, tx, realmID, t.Audience, a.ID); err != nil {
+		if errors.Is(err, errs.Invalid) {
+			return port.ServiceAccount{}, ErrInvalid
+		}
+		return port.ServiceAccount{}, err
+	}
+	return a, nil
 }
 
 // usable はサービスアカウントが now に使えるか（削除・有効期間・停止・Org・フィーチャー）を確かめる。

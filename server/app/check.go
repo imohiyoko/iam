@@ -228,13 +228,15 @@ func (s adminServer) checkServiceAccount(ctx context.Context, tx port.Tx, accoun
 
 // serviceAccountCheckContext はサービスアカウントの判定の文脈（ADR 0084）。主体のアクセストークン（管理 API 向けか自前の API
 // 向け）を渡せば、その認証から組み立てる（attested）。API キーは受けない（秘密そのものを判定の問いに載せさせない）。
-// トークンが使えないか主体のものでなければ文脈なし。sid と申告の文脈はユーザーのためのものなので使わない。
+// トークンが使えないか、主体のものでないか、DPoP に結び付いていれば文脈なし。sid と申告の文脈はユーザーのためのものなので使わない。
 func (s adminServer) serviceAccountCheckContext(ctx context.Context, tx port.Tx, accountID string, b *adminapi.CheckRequest) (*check.AuthContext, error) {
 	if b.AccessToken == nil || !serviceaccount.IsAccessToken(*b.AccessToken) {
 		return nil, nil
 	}
 	au, err := s.a.serviceAccounts.CheckAccessToken(ctx, tx, s.a.realm.ID, *b.AccessToken, s.a.deps.Clock.Now())
-	if errors.Is(err, serviceaccount.ErrInvalid) || (err == nil && au.Account.ID != accountID) {
+	// DPoP に結び付けたトークン（ADR 0113）は、ここでは鍵の証明を確かめられないので文脈にしない（盗んだトークンの文字列だけで
+	// attested の条件を満たさせない）。
+	if errors.Is(err, serviceaccount.ErrInvalid) || (err == nil && (au.Account.ID != accountID || au.JKT != "")) {
 		return nil, nil
 	}
 	if err != nil {
