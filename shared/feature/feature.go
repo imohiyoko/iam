@@ -81,7 +81,7 @@ const (
 	SSFTransmitter = "ssf_transmitter"
 	SSFReceiver    = "ssf_receiver"
 	// APIKeyIntrospection はサービスアカウントの API キーをイントロスペクション（RFC 7662）で確かめられるようにする（ADR 0120）。
-	APIKeyIntrospection = "api_key_introspection"
+	APIKeyIntrospection = "api_key_introspection" // #nosec G101 -- フィーチャーの名前で、秘密ではない
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。
