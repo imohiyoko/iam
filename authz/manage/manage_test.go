@@ -448,3 +448,38 @@ func TestNestedGroups(t *testing.T) {
 	e.s.NestedGroups = false
 	wantCode(t, nest("owner", "a", "b"), "invalid_principal")
 }
+
+// roles:manage だけの主体は、持たない IAM 自身の管理の権限を独自のロールに入れられない（権限の引き上げ）。
+func TestRolesManageCannotEscalateToIAMAdmin(t *testing.T) {
+	e := newEnv(t, nil)
+	e.grant(role.RealmOwner, "owner")
+	var rm port.Role
+	if err := e.run(func(ctx context.Context, tx port.Tx) error {
+		var err error
+		rm, err = e.s.CreateRole(ctx, tx, e.realm(), actor("owner"), "role-admin", []string{role.PermRolesManage})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.grant(rm.ID, "delegate")
+	for _, p := range []string{role.PermAuditRead, role.PermAuditReadClientData, role.PermRealmsManage, role.PermServiceAccountsManage,
+		role.PermEventSubscriptionsManage, role.PermSSFManage, role.PermUsersDelete} {
+		err := e.run(func(ctx context.Context, tx port.Tx) error {
+			_, err := e.s.CreateRole(ctx, tx, e.realm(), actor("delegate"), "esc", []string{p})
+			return err
+		})
+		if !errors.Is(err, manage.ErrNotHeld) {
+			t.Errorf("CreateRole with %s by roles:manage only: err = %v, want ErrNotHeld", p, err)
+		}
+		// Org の範囲のロールにも入れられない。
+		_, err = manage.NormalizePermissions([]string{p}, "org1")
+		wantCode(t, err, "invalid_permission")
+	}
+	// 連携先の権限は渡せる。
+	if err := e.run(func(ctx context.Context, tx port.Tx) error {
+		_, err := e.s.CreateRole(ctx, tx, e.realm(), actor("delegate"), "app", []string{"project:read"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
