@@ -61,6 +61,7 @@ var authnTests = []struct {
 	{"Attributes", testAttributes},
 	{"RiskTypes", testRiskTypes},
 	{"ActionNamespaces", testActionNamespaces},
+	{"PermissionCatalogs", testPermissionCatalogs},
 	{"Orgs", testOrgs},
 	{"PersonalOrgUniqueConcurrent", testPersonalOrgUniqueConcurrent},
 	{"Memberships", testMemberships},

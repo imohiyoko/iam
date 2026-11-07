@@ -14,12 +14,12 @@ func TestBindingConditions(t *testing.T) {
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	_, alice := l.login(t, "alice@example.com")
 	aliceID := l.userID(t, "alice@example.com")
-	code, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "payment-approver", "permissions": []string{"payment:approve"}})
+	code, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "payment-approver", "permissions": []string{"app.payment:approve"}})
 	if code != 201 {
 		t.Fatalf("create role: %d %v", code, out)
 	}
 	approver := out["id"].(string)
-	code, out = l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "payment-reader", "permissions": []string{"payment:read"}})
+	code, out = l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "payment-reader", "permissions": []string{"app.payment:read"}})
 	if code != 201 {
 		t.Fatalf("create role: %d %v", code, out)
 	}
@@ -77,17 +77,17 @@ func TestBindingConditions(t *testing.T) {
 		}
 		return out
 	}
-	if out := meCheck("payment:approve"); out["allowed"] != false || !reflect.DeepEqual(out["unmet"], []any{"condition.amr"}) {
+	if out := meCheck("app.payment:approve"); out["allowed"] != false || !reflect.DeepEqual(out["unmet"], []any{"condition.amr"}) {
 		t.Fatalf("approve: %v", out)
 	}
-	if out := meCheck("payment:read"); out["allowed"] != true || out["unmet"] != nil {
+	if out := meCheck("app.payment:read"); out["allowed"] != true || out["unmet"] != nil {
 		t.Fatalf("read: %v", out)
 	}
-	if out := meCheck("payment:send"); out["allowed"] != false || out["unmet"] != nil {
+	if out := meCheck("app.payment:send"); out["allowed"] != false || out["unmet"] != nil {
 		t.Fatalf("send: %v", out)
 	}
 	// 管理 API の判定は主体だけでは文脈が無いので、条件付きの付与は満たさない。
-	code, out = l.admin(t, "/v1/admin/authz:check", owner, map[string]any{"principal_id": aliceID, "action": "payment:read"})
+	code, out = l.admin(t, "/v1/admin/authz:check", owner, map[string]any{"principal_id": aliceID, "action": "app.payment:read"})
 	if code != 200 || out["allowed"] != false || !reflect.DeepEqual(out["unmet"], []any{"condition.auth_age", "condition.factors"}) {
 		t.Fatalf("admin check: %d %v", code, out)
 	}

@@ -17,7 +17,7 @@ func TestBatchCheck(t *testing.T) {
 	_, checker := l.operator(t, "app@example.com", role.RealmAdmin)
 	_, _ = l.login(t, "pat@example.com")
 	pat := l.userID(t, "pat@example.com")
-	code, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "reader", "permissions": []string{"doc:read"}})
+	code, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "reader", "permissions": []string{"app.doc:read"}})
 	if code != 201 {
 		t.Fatalf("role: %d %v", code, out)
 	}
@@ -25,11 +25,11 @@ func TestBatchCheck(t *testing.T) {
 	if code, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": reader, "principal_type": "user", "principal_id": pat}); code != 201 {
 		t.Fatalf("bind: %d %v", code, out)
 	}
-	if code, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": roleWithPerms(t, l, owner, "writer", "doc:write"),
+	if code, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": roleWithPerms(t, l, owner, "writer", "app.doc:write"),
 		"principal_type": "user", "principal_id": pat, "resource_type": "doc", "resource_id": "d1"}); code != 201 {
 		t.Fatalf("bind resource: %d %v", code, out)
 	}
-	if code, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": roleWithPerms(t, l, owner, "approver", "payment:approve"),
+	if code, out := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": roleWithPerms(t, l, owner, "approver", "app.payment:approve"),
 		"principal_type": "user", "principal_id": pat, "condition": map[string]any{"amr_has": []string{"hwk"}}}); code != 201 {
 		t.Fatalf("bind conditional: %d %v", code, out)
 	}
@@ -38,10 +38,10 @@ func TestBatchCheck(t *testing.T) {
 		return l.admin(t, "/v1/admin/authz:batch-check", checker, body)
 	}
 	checks := []map[string]any{
-		{"action": "doc:read"},
-		{"action": "doc:write", "resource_type": "doc", "resource_id": "d1"},
-		{"action": "doc:write", "resource_type": "doc", "resource_id": "d2"},
-		{"action": "payment:approve"},
+		{"action": "app.doc:read"},
+		{"action": "app.doc:write", "resource_type": "doc", "resource_id": "d1"},
+		{"action": "app.doc:write", "resource_type": "doc", "resource_id": "d2"},
+		{"action": "app.payment:approve"},
 	}
 	code, out = batch(map[string]any{"principal_id": pat, "checks": checks})
 	if code != 200 {
@@ -76,10 +76,10 @@ func TestBatchCheck(t *testing.T) {
 
 	// 上限・空・Org を対象にする判定・知らない操作は 400。
 	for name, body := range map[string]map[string]any{
-		"too many": {"principal_id": pat, "checks": append(append([]map[string]any{}, checks...), map[string]any{"action": "doc:read"})},
+		"too many": {"principal_id": pat, "checks": append(append([]map[string]any{}, checks...), map[string]any{"action": "app.doc:read"})},
 		"empty":    {"principal_id": pat, "checks": []map[string]any{}},
-		"org":      {"principal_id": pat, "checks": []map[string]any{{"action": "doc:read", "resource_type": "org", "resource_id": "org_x"}}},
-		"half":     {"principal_id": pat, "checks": []map[string]any{{"action": "doc:read", "resource_type": "doc"}}},
+		"org":      {"principal_id": pat, "checks": []map[string]any{{"action": "app.doc:read", "resource_type": "org", "resource_id": "org_x"}}},
+		"half":     {"principal_id": pat, "checks": []map[string]any{{"action": "app.doc:read", "resource_type": "doc"}}},
 		"bad":      {"principal_id": pat, "checks": []map[string]any{{"action": "no colon"}}},
 		"type":     {"principal_type": "group", "principal_id": pat, "checks": checks[:1]},
 	} {

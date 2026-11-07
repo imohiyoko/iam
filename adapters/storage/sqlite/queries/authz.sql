@@ -153,3 +153,18 @@ SELECT * FROM authz_action_namespaces WHERE realm_id = ? ORDER BY name;
 -- name: PutActionNamespace :exec
 INSERT INTO authz_action_namespaces (realm_id, name, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (realm_id, name) DO UPDATE SET settings = excluded.settings, updated_at = excluded.updated_at;
+
+-- name: GetPermissionCatalog :one
+SELECT * FROM authz_permission_catalogs WHERE realm_id = ? AND prefix = ?;
+
+-- name: ListPermissionCatalogs :many
+SELECT * FROM authz_permission_catalogs WHERE realm_id = ? ORDER BY prefix;
+
+-- name: CreatePermissionCatalog :exec
+INSERT INTO authz_permission_catalogs (realm_id, prefix, display_name, permissions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);
+
+-- name: UpdatePermissionCatalog :execrows
+UPDATE authz_permission_catalogs SET display_name = ?, permissions = ?, updated_at = ? WHERE realm_id = ? AND prefix = ?;
+
+-- name: DeletePermissionCatalog :execrows
+DELETE FROM authz_permission_catalogs WHERE realm_id = ? AND prefix = ?;

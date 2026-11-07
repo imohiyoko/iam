@@ -262,7 +262,7 @@ func TestCheckContext(t *testing.T) {
 	l.login(t, "bob@example.com")
 	bobID := l.userID(t, "bob@example.com")
 
-	code2, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "payment-approver", "permissions": []string{"payment:approve"}})
+	code2, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "payment-approver", "permissions": []string{"app.payment:approve"}})
 	if code2 != 201 {
 		t.Fatalf("create role: %d %v", code2, out)
 	}
@@ -286,7 +286,7 @@ func TestCheckContext(t *testing.T) {
 
 	chk := func(principal string, extra map[string]any) map[string]any {
 		t.Helper()
-		body := map[string]any{"principal_id": principal, "action": "payment:approve"}
+		body := map[string]any{"principal_id": principal, "action": "app.payment:approve"}
 		maps.Copy(body, extra)
 		code, out := l.admin(t, "/v1/admin/authz:check", key, body)
 		if code != 200 {

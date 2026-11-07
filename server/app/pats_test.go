@@ -172,12 +172,12 @@ func TestPersonalAccessTokenAdmin(t *testing.T) {
 		t.Fatalf("beyond host max: %d %v", code, out)
 	}
 	code, pol := l.adminDo(t, "PUT", owner, "/v1/admin/personal-access-token-policy",
-		map[string]any{"max_lifetime_seconds": 3600, "allowed_scopes": []string{"users:*", "docs:read"}, "require_expiry": true})
+		map[string]any{"max_lifetime_seconds": 3600, "allowed_scopes": []string{"users:*", "app.docs:read"}, "require_expiry": true})
 	if code != 200 || pol["effective_max_lifetime_seconds"] != float64(3600) || pol["host_max_lifetime_seconds"] != float64(90*86400) || pol["updated_at"] == nil {
 		t.Fatalf("put policy: %d %v", code, pol)
 	}
 	if code, my := l.bearerDo(t, "GET", ann, "/v1/me/personal-access-token-policy", nil); code != 200 || my["max_lifetime_seconds"] != float64(3600) ||
-		!slices.Equal(anyStrings(my["allowed_scopes"]), []string{"docs:read", "users:*"}) {
+		!slices.Equal(anyStrings(my["allowed_scopes"]), []string{"app.docs:read", "users:*"}) {
 		t.Fatalf("my policy: %d %v", code, my)
 	}
 	if code, out := l.bearerDo(t, "POST", ann, "/v1/me/personal-access-tokens", map[string]any{"name": "x", "scopes": []string{"credentials:revoke"}}); code != 400 || out["error"] != "scope_not_allowed" {

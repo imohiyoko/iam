@@ -41,6 +41,10 @@ type env struct {
 func newEnv(t *testing.T, m members) *env {
 	k := testkit.New(t)
 	c := &check.Checker{Storage: k.Storage, Clock: k.Clock, Members: m}
+	k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		return tx.PermissionCatalogs().Create(ctx, port.PermissionCatalog{RealmID: k.RealmID, Prefix: "app", DisplayName: "Test app",
+			Permissions: []port.PermissionDef{{Name: "app.project:read"}, {Name: "app.project:write"}}, CreatedAt: k.Clock.Now(), UpdatedAt: k.Clock.Now()})
+	})
 	return &env{t: t, k: k, s: &manage.Service{Checker: c, Clock: k.Clock}}
 }
 
@@ -120,7 +124,7 @@ func TestRealmRolesAndEscalation(t *testing.T) {
 	wantCode(t, err, "invalid_permission")
 	// 連携先の権限は自由に渡せる。IAM 自身の権限は、持たなければ渡せない（owner も users:* は持たない）。
 	if err := e.run(func(ctx context.Context, tx port.Tx) error {
-		_, err := e.s.CreateRole(ctx, tx, e.realm(), actor("owner"), "app", []string{"project:read"})
+		_, err := e.s.CreateRole(ctx, tx, e.realm(), actor("owner"), "app", []string{"app.project:read"})
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -477,7 +481,7 @@ func TestRolesManageCannotEscalateToIAMAdmin(t *testing.T) {
 	}
 	// 連携先の権限は渡せる。
 	if err := e.run(func(ctx context.Context, tx port.Tx) error {
-		_, err := e.s.CreateRole(ctx, tx, e.realm(), actor("delegate"), "app", []string{"project:read"})
+		_, err := e.s.CreateRole(ctx, tx, e.realm(), actor("delegate"), "app", []string{"app.project:read"})
 		return err
 	}); err != nil {
 		t.Fatal(err)

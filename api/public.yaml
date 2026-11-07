@@ -2721,7 +2721,7 @@ paths:
       operationId: createMyOrgRole
       summary: 独自のロールを作る（4.11）
       description: |
-        権限 `org:roles`。渡す IAM 自身の権限（`org:`・`users:` など）はすべて自分がこの Org の範囲で持っていなければならない（`403 permission_denied`）。連携先の権限（`doc:read` など）は自由に入れられる。
+        権限 `org:roles`。渡す IAM 自身の権限（`org:`・`users:` など）はすべて自分がこの Org の範囲で持っていなければならない（`403 permission_denied`）。連携先の権限（`docs.doc:read` など）は、権限のカタログにあるもの（とカタログにあるリソースの `*`）だけを入れられ（`400 unknown_permission`）、持っていなくても渡せる。形がどちらの空間でもなければ `400 invalid_permission`（ADR 0121）。
         名前に組み込みの名前空間（`realm:`・`org:`・`system:`）は使えない（`400 invalid_name`）。権限の形は `<リソース>:<操作>`（`400 invalid_permission`）。
         IAM 自身の realm の管理の権限（`users:`・`orgs:` など）は Org のロールに入れられない。名前の重複は `409 role_exists`。`role.created` を監査ログに残す。
       security:
@@ -3603,7 +3603,7 @@ components:
         requirements:
           type: object
           description: >-
-            Org の要件（ADR 0084）。操作（ワイルドカード `payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。
+            Org の要件（ADR 0084）。操作（ワイルドカード `shop.payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。
             この Org を文脈にした判定で、どの付与で許されたかに関係なく求め、`attested` を暗黙に AND する（厳しくする方向だけ）。
             Org 階層がオンなら祖先の Org の要件も AND する。操作が外れれば invalid_requirement、条件が外れれば invalid_condition
           additionalProperties:
@@ -4054,7 +4054,7 @@ components:
       type: object
       required: [action]
       properties:
-        action: { type: string, minLength: 1, maxLength: 130, description: "`<リソース>:<操作>`" }
+        action: { type: string, minLength: 1, maxLength: 162, description: "`<リソース>:<操作>`" }
         org_id: { type: string, description: 判定の文脈の Org の公開 ID。省けば active な Org }
         resource_type: { type: string, maxLength: 64, description: "`org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`" }
         resource_id: { type: string, maxLength: 256 }
@@ -4093,7 +4093,7 @@ components:
           type: array
           minItems: 1
           maxItems: 20
-          items: { type: string, maxLength: 130 }
+          items: { type: string, maxLength: 162 }
           description: 権限の名前（`<リソース>:<操作>`、`x:*` も可）
         expires_at:
           type: string

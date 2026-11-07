@@ -87,10 +87,49 @@ func IsBuiltinName(name string) bool {
 	return strings.HasPrefix(name, "realm:") || strings.HasPrefix(name, "org:") || strings.HasPrefix(name, "system:")
 }
 
-var permRE = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}:(\*|[a-z0-9_.-]{1,64})$`)
+// 権限の名前の形（ADR 0121）。長さは部分ごとに数える（接頭辞を付けても連携先のリソースに使える長さは減らない）。
+var (
+	// iamPermRE は IAM 自身の権限の形（リソースに `.` を含まない）。
+	iamPermRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}:(\*|[a-z0-9_.-]{1,64})$`)
+	// connectedPermRE は連携先の権限の形：`<接頭辞>.<リソース>:<操作>`。
+	connectedPermRE = regexp.MustCompile(`^([a-z][a-z0-9-]{0,31})\.([a-z][a-z0-9_.-]{0,63}):(\*|[a-z0-9_.-]{1,64})$`)
+	// prefixRE は権限のカタログの接頭辞の形。
+	prefixRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+)
 
-// ValidPermission は権限の形（`<リソース>:<操作>`、操作の `*` はそのリソースのすべて）かを返す。
-func ValidPermission(p string) bool { return permRE.MatchString(p) }
+// ValidPermission は権限の名前として使えるかを返す（ADR 0121）。形は `<リソース>:<操作>`（操作の `*` はそのリソースのすべて）で、
+// 次のどちらかでなければならない。
+//
+//   - IAM 自身の権限：リソースに `.` を含まず、IAM の権限のリソース（IAM）
+//   - 連携先の権限：`<接頭辞>.<リソース>:<操作>`（`docs.doc:read`）。接頭辞は権限のカタログのもの（カタログにあるかは
+//     authz/catalog が確かめる）
+//
+// `.` を含まず IAM の権限でもないもの（`doc:read`）は使えない。連携先の権限が IAM の権限と字面で重ならず、IAM が後から
+// 組み込みの権限を足しても、連携先の権限の意味が変わらないようにするため。
+func ValidPermission(p string) bool {
+	if _, ok := CatalogPrefix(p); ok {
+		return true
+	}
+	return iamPermRE.MatchString(p) && IAM(p)
+}
+
+// CatalogPrefix は連携先の権限の形なら、その接頭辞（権限のカタログ）を返す。
+func CatalogPrefix(p string) (string, bool) {
+	m := connectedPermRE.FindStringSubmatch(p)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// ValidCatalogPrefix は権限のカタログの接頭辞の形かを返す。
+func ValidCatalogPrefix(p string) bool { return prefixRE.MatchString(p) }
+
+// SelfAction は本人の重要な操作の名前（名前空間 `me`。ActionMe…）の形かを返す。付与の対象ではなく、要件（ADR 0084）の
+// 操作にだけ使う。
+func SelfAction(p string) bool {
+	return strings.HasPrefix(p, "me:") && iamPermRE.MatchString(p)
+}
 
 // Matches は付与された権限 granted が、求める権限 want を満たすかを返す（`x:*` は `x:` のすべて）。
 func Matches(granted, want string) bool {

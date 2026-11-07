@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authz/role"
@@ -98,6 +99,9 @@ func newLoginEnvDeps(t *testing.T, edit func(*config.Config), binary []feature.F
 			return err
 		}
 		l.apiKey = c.APIKey
+		if err := seedTestCatalog(ctx, tx, a.realm.ID, a.deps.Clock.Now()); err != nil {
+			return err
+		}
 		return role.Grant(ctx, tx, a.realm.ID, role.NotificationDelivery, port.PrincipalServiceAccount, c.Account.ID, a.deps.Clock.Now())
 	})
 	if err != nil {
@@ -261,4 +265,16 @@ func TestInternalIDsNeverLeave(t *testing.T) {
 			t.Errorf("internal id %s leaked", v)
 		}
 	}
+}
+
+// testCatalogPermissions はテストの連携先 `app` の権限のカタログ（ADR 0121）。
+var testCatalogPermissions = []string{"app.billing:read", "app.doc:delete", "app.doc:read", "app.doc:write", "app.docs:read", "app.learning:view", "app.orders:admin", "app.orders:delete", "app.orders:read", "app.orders:write", "app.payment:approve", "app.payment:read", "app.payment:send", "app.project:admin", "app.project:read", "app.project:write", "app.report:read"}
+
+// seedTestCatalog は realm にテストの連携先 `app` のカタログを置く。
+func seedTestCatalog(ctx context.Context, tx port.Tx, realmID string, now time.Time) error {
+	c := port.PermissionCatalog{RealmID: realmID, Prefix: "app", DisplayName: "Test app", CreatedAt: now, UpdatedAt: now}
+	for _, p := range testCatalogPermissions {
+		c.Permissions = append(c.Permissions, port.PermissionDef{Name: p})
+	}
+	return tx.PermissionCatalogs().Create(ctx, c)
 }

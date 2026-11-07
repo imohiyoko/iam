@@ -187,7 +187,7 @@ func TestAdminActionsRespectOutranks(t *testing.T) {
 	admin2ID, admin2 := l.operator(t, "admin2@example.com", role.RealmAdmin)
 	_, _ = l.login(t, "carol@example.com")
 	carolID := l.userID(t, "carol@example.com")
-	status, out = l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "project-admin", "permissions": []string{"project:admin"}})
+	status, out = l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "project-admin", "permissions": []string{"app.project:admin"}})
 	if status != 201 {
 		t.Fatalf("create role: %d %v", status, out)
 	}

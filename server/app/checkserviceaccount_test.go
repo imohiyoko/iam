@@ -52,8 +52,8 @@ func TestCheckServiceAccount(t *testing.T) {
 	}
 
 	// 直接の付与。
-	bind(map[string]any{"role": roleWith("reader", "doc:read"), "principal_type": "service_account", "principal_id": sa})
-	if !allowed(sa, "doc:read") || allowed(sa, "doc:write") || allowed(other, "doc:read") {
+	bind(map[string]any{"role": roleWith("reader", "app.doc:read"), "principal_type": "service_account", "principal_id": sa})
+	if !allowed(sa, "app.doc:read") || allowed(sa, "app.doc:write") || allowed(other, "app.doc:read") {
 		t.Fatal("direct binding")
 	}
 	// Group の所属を通した付与。
@@ -65,22 +65,22 @@ func TestCheckServiceAccount(t *testing.T) {
 	if code, out := l.admin(t, "/v1/admin/groups/"+gid+"/members", owner, map[string]any{"principal_type": "service_account", "principal_id": sa}); code != 204 {
 		t.Fatalf("member: %d %v", code, out)
 	}
-	bind(map[string]any{"role": roleWith("writer", "doc:write"), "principal_type": "group", "principal_id": gid})
-	if !allowed(sa, "doc:write") || allowed(other, "doc:write") {
+	bind(map[string]any{"role": roleWith("writer", "app.doc:write"), "principal_type": "group", "principal_id": gid})
+	if !allowed(sa, "app.doc:write") || allowed(other, "app.doc:write") {
 		t.Fatal("group binding")
 	}
 	// リソースを限った付与。
-	bind(map[string]any{"role": roleWith("deleter", "doc:delete"), "principal_type": "service_account", "principal_id": sa, "resource_type": "doc", "resource_id": "d1"})
+	bind(map[string]any{"role": roleWith("deleter", "app.doc:delete"), "principal_type": "service_account", "principal_id": sa, "resource_type": "doc", "resource_id": "d1"})
 	for rid, want := range map[string]bool{"d1": true, "d2": false} {
-		if out := check(map[string]any{"principal_id": sa, "action": "doc:delete", "resource_type": "doc", "resource_id": rid}); out["allowed"] != want {
+		if out := check(map[string]any{"principal_id": sa, "action": "app.doc:delete", "resource_type": "doc", "resource_id": rid}); out["allowed"] != want {
 			t.Fatalf("resource %s: %v", rid, out)
 		}
 	}
 
 	// 条件付きの付与は、主体のアクセストークンから組み立てた文脈（attested）でだけ効く。
-	bind(map[string]any{"role": roleWith("approver", "payment:approve"), "principal_type": "service_account", "principal_id": sa,
+	bind(map[string]any{"role": roleWith("approver", "app.payment:approve"), "principal_type": "service_account", "principal_id": sa,
 		"condition": map[string]any{"amr_has": []string{"client_secret"}}})
-	if out := check(map[string]any{"principal_id": sa, "action": "payment:approve"}); out["allowed"] != false || out["unmet"] == nil {
+	if out := check(map[string]any{"principal_id": sa, "action": "app.payment:approve"}); out["allowed"] != false || out["unmet"] == nil {
 		t.Fatalf("without a token: %v", out)
 	}
 	token := func(form url.Values, basic string) string {
@@ -92,16 +92,16 @@ func TestCheckServiceAccount(t *testing.T) {
 		return out["access_token"].(string)
 	}
 	adminTok := token(url.Values{"grant_type": {"client_credentials"}}, sa+":"+secret)
-	if out := check(map[string]any{"principal_id": sa, "action": "payment:approve", "access_token": adminTok}); out["allowed"] != true {
+	if out := check(map[string]any{"principal_id": sa, "action": "app.payment:approve", "access_token": adminTok}); out["allowed"] != true {
 		t.Fatalf("with its admin token: %v", out)
 	}
 	// 自前の API 向けのトークン（リソースサーバーが受けたもの）でも組み立てる。
 	if code, out := l.admin(t, "/v1/admin/oauth/resources", owner, map[string]any{"uri": ordersAPI, "name": "Orders",
-		"scopes": []string{"orders:read"}, "service_accounts": []string{sa, other}}); code != 201 {
+		"scopes": []string{"app.orders:read"}, "service_accounts": []string{sa, other}}); code != 201 {
 		t.Fatalf("resource: %d %v", code, out)
 	}
 	resTok := token(url.Values{"grant_type": {"client_credentials"}, "resource": {ordersAPI}}, sa+":"+secret)
-	if out := check(map[string]any{"principal_id": sa, "action": "payment:approve", "access_token": resTok}); out["allowed"] != true {
+	if out := check(map[string]any{"principal_id": sa, "action": "app.payment:approve", "access_token": resTok}); out["allowed"] != true {
 		t.Fatalf("with its resource token: %v", out)
 	}
 	// ほかの主体のトークン、API キー、申告の文脈、ユーザーの sid は文脈にしない。
@@ -113,7 +113,7 @@ func TestCheckServiceAccount(t *testing.T) {
 		"declared":      {"context": map[string]any{"amr": []string{"client_secret"}}},
 		"sid":           {"sid": "ses_none"},
 	} {
-		body["principal_id"], body["action"] = sa, "payment:approve"
+		body["principal_id"], body["action"] = sa, "app.payment:approve"
 		if out := check(body); out["allowed"] != false {
 			t.Fatalf("%s: %v", name, out)
 		}
@@ -125,7 +125,7 @@ func TestCheckServiceAccount(t *testing.T) {
 	if code, _ := l.admin(t, "/v1/admin/oauth/resources/"+rid+":delete", owner, nil); code != 204 {
 		t.Fatalf("delete resource: %d", code)
 	}
-	if out := check(map[string]any{"principal_id": sa, "action": "payment:approve", "access_token": resTok}); out["allowed"] != false {
+	if out := check(map[string]any{"principal_id": sa, "action": "app.payment:approve", "access_token": resTok}); out["allowed"] != false {
 		t.Fatalf("resource token after the resource was deleted: %v", out)
 	}
 
@@ -133,22 +133,22 @@ func TestCheckServiceAccount(t *testing.T) {
 	if code, out := l.admin(t, "/v1/admin/service-accounts/"+sa+"/suspensions", owner, map[string]any{"category": "security_risk", "reason": "leaked"}); code != 201 {
 		t.Fatalf("suspend: %d %v", code, out)
 	}
-	if out := check(map[string]any{"principal_id": sa, "action": "doc:read"}); out["allowed"] != false || out["reasons"] == nil {
+	if out := check(map[string]any{"principal_id": sa, "action": "app.doc:read"}); out["allowed"] != false || out["reasons"] == nil {
 		t.Fatalf("suspended: %v", out)
 	}
 	if code, out := l.admin(t, "/v1/admin/service-accounts/"+other+":delete", owner, nil); code != 200 {
 		t.Fatalf("delete: %d %v", code, out)
 	}
-	if out := check(map[string]any{"principal_id": other, "action": "doc:read"}); out["allowed"] != false || !reflect.DeepEqual(out["reasons"], []any{"inactive"}) {
+	if out := check(map[string]any{"principal_id": other, "action": "app.doc:read"}); out["allowed"] != false || !reflect.DeepEqual(out["reasons"], []any{"inactive"}) {
 		t.Fatalf("deleted: %v", out)
 	}
 
 	// 無い主体は 404、知らない種類は 400。
 	if code, out := l.admin(t, "/v1/admin/authz:check", checker, map[string]any{"principal_type": "service_account", "principal_id": "sva_00000000000000000000000000",
-		"action": "doc:read"}); code != 404 {
+		"action": "app.doc:read"}); code != 404 {
 		t.Fatalf("unknown: %d %v", code, out)
 	}
-	if code, out := l.admin(t, "/v1/admin/authz:check", checker, map[string]any{"principal_type": "group", "principal_id": gid, "action": "doc:read"}); code != 400 {
+	if code, out := l.admin(t, "/v1/admin/authz:check", checker, map[string]any{"principal_type": "group", "principal_id": gid, "action": "app.doc:read"}); code != 400 {
 		t.Fatalf("group principal: %d %v", code, out)
 	}
 }
@@ -172,7 +172,7 @@ func TestCheckOrgServiceAccount(t *testing.T) {
 		t.Fatalf("service account: %d %v", code, out)
 	}
 	sa := out["id"].(string)
-	code, out = l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "reader", "permissions": []string{"doc:read"}})
+	code, out = l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "reader", "permissions": []string{"app.doc:read"}})
 	if code != 201 {
 		t.Fatalf("role: %d %v", code, out)
 	}
@@ -181,7 +181,7 @@ func TestCheckOrgServiceAccount(t *testing.T) {
 	}
 	check := func(org string) map[string]any {
 		t.Helper()
-		body := map[string]any{"principal_type": "service_account", "principal_id": sa, "action": "doc:read"}
+		body := map[string]any{"principal_type": "service_account", "principal_id": sa, "action": "app.doc:read"}
 		if org != "" {
 			body["org_id"] = org
 		}
@@ -209,7 +209,7 @@ func TestCheckServiceAccountFeatureOff(t *testing.T) {
 	l := featureEnv(t, nil)
 	_, checker := l.operator(t, "app@example.com", role.RealmAdmin)
 	if code, out := l.admin(t, "/v1/admin/authz:check", checker, map[string]any{"principal_type": "service_account", "principal_id": "sva_00000000000000000000000000",
-		"action": "doc:read"}); code != 400 || out["error"] != "invalid_request" {
+		"action": "app.doc:read"}); code != 400 || out["error"] != "invalid_request" {
 		t.Fatalf("feature off: %d %v", code, out)
 	}
 }
@@ -220,7 +220,7 @@ func TestCheckServiceAccountDPoPToken(t *testing.T) {
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	_, checker := l.operator(t, "app@example.com", role.RealmAdmin)
 	sa, secret := l.serviceAccountSecret(t, owner, "partner-bot")
-	code, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "approver", "permissions": []string{"payment:approve"}})
+	code, out := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "approver", "permissions": []string{"app.payment:approve"}})
 	if code != 201 {
 		t.Fatalf("role: %d %v", code, out)
 	}
@@ -232,7 +232,7 @@ func TestCheckServiceAccountDPoPToken(t *testing.T) {
 	check := func(token string) bool {
 		t.Helper()
 		code, out := l.admin(t, "/v1/admin/authz:check", checker, map[string]any{"principal_type": "service_account", "principal_id": sa,
-			"action": "payment:approve", "access_token": token})
+			"action": "app.payment:approve", "access_token": token})
 		if code != 200 {
 			t.Fatalf("check: %d %v", code, out)
 		}

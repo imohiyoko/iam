@@ -331,3 +331,61 @@ func (r actionNamespaces) Put(ctx context.Context, n port.ActionNamespace) error
 	return mapErr(r.q.PutActionNamespace(ctx, db.PutActionNamespaceParams{RealmID: n.RealmID, Name: n.Name, Settings: nonNil(n.Settings),
 		CreatedAt: formatTime(n.CreatedAt), UpdatedAt: formatTime(n.UpdatedAt)}))
 }
+
+// ---------------------------------------------------------------------------
+// 連携先の権限のカタログ（ADR 0121）
+
+type permissionCatalogs struct{ q *db.Queries }
+
+func toPermissionCatalog(r db.AuthzPermissionCatalog) (port.PermissionCatalog, error) {
+	var p times
+	c := port.PermissionCatalog{RealmID: r.RealmID, Prefix: r.Prefix, DisplayName: r.DisplayName, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+	if err := json.Unmarshal(r.Permissions, &c.Permissions); err != nil {
+		return port.PermissionCatalog{}, err
+	}
+	return c, p.err
+}
+
+func catalogPermissions(c port.PermissionCatalog) ([]byte, error) {
+	if c.Permissions == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(c.Permissions)
+}
+
+func (r permissionCatalogs) Get(ctx context.Context, realmID, prefix string) (port.PermissionCatalog, error) {
+	row, err := r.q.GetPermissionCatalog(ctx, db.GetPermissionCatalogParams{RealmID: realmID, Prefix: prefix})
+	if err != nil {
+		return port.PermissionCatalog{}, mapErr(err)
+	}
+	return toPermissionCatalog(row)
+}
+
+func (r permissionCatalogs) List(ctx context.Context, realmID string) ([]port.PermissionCatalog, error) {
+	rs, err := r.q.ListPermissionCatalogs(ctx, realmID)
+	return rows(rs, err, toPermissionCatalog)
+}
+
+func (r permissionCatalogs) Create(ctx context.Context, c port.PermissionCatalog) error {
+	ps, err := catalogPermissions(c)
+	if err != nil {
+		return err
+	}
+	return mapErr(r.q.CreatePermissionCatalog(ctx, db.CreatePermissionCatalogParams{RealmID: c.RealmID, Prefix: c.Prefix, DisplayName: c.DisplayName,
+		Permissions: ps, CreatedAt: formatTime(c.CreatedAt), UpdatedAt: formatTime(c.UpdatedAt)}))
+}
+
+func (r permissionCatalogs) Update(ctx context.Context, c port.PermissionCatalog) error {
+	ps, err := catalogPermissions(c)
+	if err != nil {
+		return err
+	}
+	n, err := r.q.UpdatePermissionCatalog(ctx, db.UpdatePermissionCatalogParams{DisplayName: c.DisplayName, Permissions: ps,
+		UpdatedAt: formatTime(c.UpdatedAt), RealmID: c.RealmID, Prefix: c.Prefix})
+	return affected(n, err, "permission catalog")
+}
+
+func (r permissionCatalogs) Delete(ctx context.Context, realmID, prefix string) error {
+	n, err := r.q.DeletePermissionCatalog(ctx, db.DeletePermissionCatalogParams{RealmID: realmID, Prefix: prefix})
+	return affected(n, err, "permission catalog")
+}

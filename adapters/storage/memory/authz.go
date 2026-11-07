@@ -487,3 +487,60 @@ func (r actionNamespaces) Put(_ context.Context, n port.ActionNamespace) error {
 	setKey(r.t, r.t.s.namespaces, k, n)
 	return nil
 }
+
+// 連携先の権限のカタログ（ADR 0121）
+
+type permissionCatalogs struct{ t *tx }
+
+func cloneCatalog(c port.PermissionCatalog) port.PermissionCatalog {
+	c.Permissions = slices.Clone(c.Permissions)
+	return c
+}
+
+func (r permissionCatalogs) Get(_ context.Context, realmID, prefix string) (port.PermissionCatalog, error) {
+	c, ok := r.t.s.catalogs[attrKey(realmID, prefix)]
+	if !ok {
+		return port.PermissionCatalog{}, errs.New(errs.KindNotFound, "permission catalog")
+	}
+	return cloneCatalog(c), nil
+}
+
+func (r permissionCatalogs) List(_ context.Context, realmID string) ([]port.PermissionCatalog, error) {
+	var out []port.PermissionCatalog
+	for _, c := range r.t.s.catalogs {
+		if c.RealmID == realmID {
+			out = append(out, cloneCatalog(c))
+		}
+	}
+	slices.SortFunc(out, func(a, b port.PermissionCatalog) int { return strings.Compare(a.Prefix, b.Prefix) })
+	return out, nil
+}
+
+func (r permissionCatalogs) Create(_ context.Context, c port.PermissionCatalog) error {
+	k := attrKey(c.RealmID, c.Prefix)
+	if _, ok := r.t.s.catalogs[k]; ok {
+		return errs.New(errs.KindConflict, "permission catalog")
+	}
+	setKey(r.t, r.t.s.catalogs, k, cloneCatalog(c))
+	return nil
+}
+
+func (r permissionCatalogs) Update(_ context.Context, c port.PermissionCatalog) error {
+	k := attrKey(c.RealmID, c.Prefix)
+	old, ok := r.t.s.catalogs[k]
+	if !ok {
+		return errs.New(errs.KindNotFound, "permission catalog")
+	}
+	old.DisplayName, old.Permissions, old.UpdatedAt = c.DisplayName, slices.Clone(c.Permissions), c.UpdatedAt
+	setKey(r.t, r.t.s.catalogs, k, old)
+	return nil
+}
+
+func (r permissionCatalogs) Delete(_ context.Context, realmID, prefix string) error {
+	k := attrKey(realmID, prefix)
+	if _, ok := r.t.s.catalogs[k]; !ok {
+		return errs.New(errs.KindNotFound, "permission catalog")
+	}
+	deleteKey(r.t, r.t.s.catalogs, k)
+	return nil
+}

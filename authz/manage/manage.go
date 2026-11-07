@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/imohiyoko/iam/authz/check"
+	"github.com/imohiyoko/iam/authz/permcatalog"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/clock"
@@ -158,6 +159,9 @@ func (s *Service) CreateRole(ctx context.Context, tx port.Tx, sc Scope, a Actor,
 	if err := s.authorize(ctx, tx, sc, a, role.PermRolesManage, role.PermOrgRoles, perms); err != nil {
 		return port.Role{}, err
 	}
+	if err := permcatalog.Require(ctx, tx, sc.RealmID, perms); err != nil {
+		return port.Role{}, err
+	}
 	now := s.Clock.Now()
 	r := port.Role{ID: id.New(id.Role), PublicID: id.NewExternal(id.Role), RealmID: sc.RealmID, OrgID: sc.OrgID, Name: name,
 		Permissions: perms, CreatedAt: now, UpdatedAt: now}
@@ -180,6 +184,9 @@ func (s *Service) UpdateRole(ctx context.Context, tx port.Tx, sc Scope, a Actor,
 		return port.Role{}, err
 	}
 	if err := s.authorize(ctx, tx, sc, a, role.PermRolesManage, role.PermOrgRoles, append(slices.Clone(r.Permissions), perms...)); err != nil {
+		return port.Role{}, err
+	}
+	if err := permcatalog.Require(ctx, tx, sc.RealmID, perms); err != nil {
 		return port.Role{}, err
 	}
 	before := r.Permissions

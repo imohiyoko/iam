@@ -25,7 +25,7 @@ func TestRequirements(t *testing.T) {
 	}
 
 	// 設定していない名前空間は空。
-	if code, out := get(op, "payment"); code != 200 || len(out["requirements"].(map[string]any)) != 0 || out["updated_at"] != nil {
+	if code, out := get(op, "app.payment"); code != 200 || len(out["requirements"].(map[string]any)) != 0 || out["updated_at"] != nil {
 		t.Fatalf("get empty: %d %v", code, out)
 	}
 	for _, c := range []struct {
@@ -34,36 +34,36 @@ func TestRequirements(t *testing.T) {
 		err  string
 	}{
 		{"Payment", map[string]any{}, "invalid_namespace"},
-		{"payment", map[string]any{"requirements": map[string]any{"doc:read": map[string]any{"auth_within": 300}}}, "invalid_requirement"},
-		{"payment", map[string]any{"requirements": map[string]any{"payment:send": map[string]any{}}}, "invalid_condition"},
-		{"payment", map[string]any{"requirements": map[string]any{"payment:send": map[string]any{"nope": 1}}}, "invalid_condition"},
-		{"payment", map[string]any{"bands": map[string]any{"account": map[string]any{"medium": 40, "high": 60}}}, "invalid_band"},
-		{"payment", map[string]any{"bands": map[string]any{"payment.fraud": map[string]any{"medium": 10, "high": 20}}}, "invalid_band"},
+		{"app.payment", map[string]any{"requirements": map[string]any{"app.doc:read": map[string]any{"auth_within": 300}}}, "invalid_requirement"},
+		{"app.payment", map[string]any{"requirements": map[string]any{"app.payment:send": map[string]any{}}}, "invalid_condition"},
+		{"app.payment", map[string]any{"requirements": map[string]any{"app.payment:send": map[string]any{"nope": 1}}}, "invalid_condition"},
+		{"app.payment", map[string]any{"bands": map[string]any{"account": map[string]any{"medium": 40, "high": 60}}}, "invalid_band"},
+		{"app.payment", map[string]any{"bands": map[string]any{"payment.fraud": map[string]any{"medium": 10, "high": 20}}}, "invalid_band"},
 	} {
 		if code, out := put(op, c.name, c.body); code != 400 || out["error"] != c.err {
 			t.Fatalf("put %s %v: %d %v", c.name, c.body, code, out)
 		}
 	}
-	reqs := map[string]any{"payment:send": map[string]any{"factors_at_least": float64(2)}, "payment:*": map[string]any{"auth_within": float64(3600)}}
+	reqs := map[string]any{"app.payment:send": map[string]any{"factors_at_least": float64(2)}, "app.payment:*": map[string]any{"auth_within": float64(3600)}}
 	bands := map[string]any{"account": map[string]any{"medium": float64(20), "high": float64(60)}}
-	code, out := put(op, "payment", map[string]any{"requirements": reqs, "bands": bands})
+	code, out := put(op, "app.payment", map[string]any{"requirements": reqs, "bands": bands})
 	if code != 200 || !reflect.DeepEqual(out["requirements"], reqs) || !reflect.DeepEqual(out["bands"], bands) || out["updated_at"] == nil {
 		t.Fatalf("put: %d %v", code, out)
 	}
-	if code, got := get(op, "payment"); code != 200 || !reflect.DeepEqual(got, out) {
+	if code, got := get(op, "app.payment"); code != 200 || !reflect.DeepEqual(got, out) {
 		t.Fatalf("get: %d %v, want %v", code, got, out)
 	}
 	ev := lastAudit(l.auditTypes(t), "authz.requirement_updated")
-	if ev == nil || ev.Details["namespace"] != "payment" || ev.Details["settings"] == nil || ev.Details["previous"] != nil {
+	if ev == nil || ev.Details["namespace"] != "app.payment" || ev.Details["settings"] == nil || ev.Details["previous"] != nil {
 		t.Fatalf("audit: %+v", ev)
 	}
 	n := countAudit(l.auditTypes(t), "authz.requirement_updated")
-	if code, _ := put(op, "payment", map[string]any{"requirements": reqs, "bands": bands}); code != 200 || countAudit(l.auditTypes(t), "authz.requirement_updated") != n {
+	if code, _ := put(op, "app.payment", map[string]any{"requirements": reqs, "bands": bands}); code != 200 || countAudit(l.auditTypes(t), "authz.requirement_updated") != n {
 		t.Fatalf("unchanged put: %d", code)
 	}
 
 	// 要件は付与で許した操作に求める（メールのコードの1要素では満たさない）。
-	code, out = l.admin(t, "/v1/admin/roles", op, map[string]any{"name": "payer", "permissions": []string{"payment:send", "payment:read", "doc:read"}})
+	code, out = l.admin(t, "/v1/admin/roles", op, map[string]any{"name": "payer", "permissions": []string{"app.payment:send", "app.payment:read", "app.doc:read"}})
 	if code != 201 {
 		t.Fatalf("create role: %d %v", code, out)
 	}
@@ -83,10 +83,10 @@ func TestRequirements(t *testing.T) {
 		}
 		return out
 	}
-	if out := meCheck(alice, "payment:send", nil); out["allowed"] != false || !reflect.DeepEqual(out["unmet"], []any{"condition.factors"}) {
+	if out := meCheck(alice, "app.payment:send", nil); out["allowed"] != false || !reflect.DeepEqual(out["unmet"], []any{"condition.factors"}) {
 		t.Fatalf("send: %v", out)
 	}
-	for _, a := range []string{"payment:read", "doc:read"} {
+	for _, a := range []string{"app.payment:read", "app.doc:read"} {
 		if out := meCheck(alice, a, nil); out["allowed"] != true {
 			t.Fatalf("%s: %v", a, out)
 		}
@@ -98,10 +98,10 @@ func TestRequirements(t *testing.T) {
 		t.Fatalf("create role: %d %v", code, out)
 	}
 	if code, out := l.admin(t, "/v1/admin/role-bindings", op, map[string]any{"role": out["id"], "principal_type": "user", "principal_id": supportID,
-		"resource_type": "action_namespace", "resource_id": "payment"}); code != 201 {
+		"resource_type": "action_namespace", "resource_id": "app.payment"}); code != 201 {
 		t.Fatalf("bind scoped: %d %v", code, out)
 	}
-	if code, out := get(support, "payment"); code != 200 {
+	if code, out := get(support, "app.payment"); code != 200 {
 		t.Fatalf("scoped get: %d %v", code, out)
 	}
 	for _, name := range []string{"doc", "requirements"} {
@@ -162,13 +162,13 @@ func TestRequirements(t *testing.T) {
 		t.Fatalf("put org risk requirement: %d %v", code, out)
 	}
 	code, out = l.adminDo(t, "PUT", op, "/v1/admin/risk-types/account", map[string]any{"enabled": false})
-	if msg, _ := out["message"].(string); code != 409 || out["error"] != "risk_type_in_use" || !strings.Contains(msg, "action namespaces payment") || !strings.Contains(msg, "requirements of 1 orgs") {
+	if msg, _ := out["message"].(string); code != 409 || out["error"] != "risk_type_in_use" || !strings.Contains(msg, "action namespaces app.payment") || !strings.Contains(msg, "requirements of 1 orgs") {
 		t.Fatalf("disable referenced: %d %v", code, out)
 	}
 	if code, out := l.adminDo(t, "PUT", op, "/v1/admin/risk-types/device", map[string]any{"enabled": false}); code != 200 {
 		t.Fatalf("disable unreferenced: %d %v", code, out)
 	}
-	if code, _ := put(op, "payment", map[string]any{}); code != 200 {
+	if code, _ := put(op, "app.payment", map[string]any{}); code != 200 {
 		t.Fatalf("clear namespace: %d", code)
 	}
 	if code, _ := l.putSettings(t, boss, acme, map[string]any{}); code != 200 {
@@ -178,7 +178,7 @@ func TestRequirements(t *testing.T) {
 		t.Fatalf("disable after clearing: %d %v", code, out)
 	}
 	// 条件を外したので、すぐに通る。
-	if out := meCheck(alice, "payment:send", nil); out["allowed"] != true {
+	if out := meCheck(alice, "app.payment:send", nil); out["allowed"] != true {
 		t.Fatalf("send after clearing: %v", out)
 	}
 }

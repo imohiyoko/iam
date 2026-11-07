@@ -51,7 +51,7 @@ func TestMyGroupsAndGroupScopedRead(t *testing.T) {
 		t.Fatalf("members without permission: %d", code)
 	}
 	// org:groups.read を Class A に限って付与すると、Class A の所属だけを読める。書けず、一覧も読めない。
-	code, body = l.meDo(t, "POST", owner, base+"/roles", map[string]any{"name": "instructor", "permissions": []string{role.PermOrgGroupsRead, "learning:view"}})
+	code, body = l.meDo(t, "POST", owner, base+"/roles", map[string]any{"name": "instructor", "permissions": []string{role.PermOrgGroupsRead, "app.learning:view"}})
 	if code != 201 {
 		t.Fatalf("create role: %d %v", code, body)
 	}
@@ -77,7 +77,7 @@ func TestMyGroupsAndGroupScopedRead(t *testing.T) {
 	// 連携先の権限も、その Group を対象にした判定でだけ効く。
 	check := func(cookie, gid string) any {
 		t.Helper()
-		code, body := l.meDo(t, "POST", cookie, "/v1/me:check", map[string]any{"action": "learning:view", "org_id": acme, "resource_type": "group", "resource_id": gid})
+		code, body := l.meDo(t, "POST", cookie, "/v1/me:check", map[string]any{"action": "app.learning:view", "org_id": acme, "resource_type": "group", "resource_id": gid})
 		if code != 200 {
 			t.Fatalf("check: %d %v", code, body)
 		}

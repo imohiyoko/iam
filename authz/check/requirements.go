@@ -32,13 +32,13 @@ var namespaceRE = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
 // ValidNamespace は名前空間の名前の形（権限の `<リソース>` と同じ）かを返す。
 func ValidNamespace(name string) bool { return namespaceRE.MatchString(name) }
 
-// NamespaceOf は操作の名前空間（`payment:send` なら `payment`）。
+// NamespaceOf は操作の名前空間（`shop.payment:send` なら `shop.payment`）。
 func NamespaceOf(action string) string {
 	ns, _, _ := strings.Cut(action, ":")
 	return ns
 }
 
-// Requirements は要件（操作 → 条件）。操作はワイルドカード（`payment:*`）でもよい。同じ操作に当たる要件はすべて AND する。
+// Requirements は要件（操作 → 条件）。操作はワイルドカード（`shop.payment:*`）でもよい。同じ操作に当たる要件はすべて AND する。
 type Requirements map[string]Condition
 
 // matching は action に当たる要件を、操作の順に返す。
@@ -62,6 +62,12 @@ func (rs Requirements) RiskTypes() []string {
 	return slices.Compact(out)
 }
 
+// validAction は要件の操作として使えるかを返す。付与できる権限（role.ValidPermission）と、付与の要らない本人の操作
+// （名前空間 `me`。role.ActionMe…）。
+func validAction(k string) bool {
+	return role.ValidPermission(k) || role.SelfAction(k)
+}
+
 // Validate は要件を保存の前に確かめる。namespace が空でなければ、操作はその名前空間のものだけ（Org の要件は空で、
 // どの名前空間でもよい）。外れていれば errs.KindInvalid（コード invalid_requirement か invalid_condition）。
 func (rs Requirements) Validate(namespace string, riskType func(string) bool) error {
@@ -69,7 +75,7 @@ func (rs Requirements) Validate(namespace string, riskType func(string) bool) er
 		return errs.WithCode(errs.KindInvalid, "invalid_requirement", fmt.Sprintf("at most %d requirements", MaxRequirements))
 	}
 	for _, k := range slices.Sorted(maps.Keys(rs)) {
-		if !role.ValidPermission(k) || (namespace != "" && NamespaceOf(k) != namespace) {
+		if !validAction(k) || (namespace != "" && NamespaceOf(k) != namespace) {
 			return errs.WithCode(errs.KindInvalid, "invalid_requirement", "invalid action "+k)
 		}
 		if err := rs[k].Validate(riskType); err != nil {

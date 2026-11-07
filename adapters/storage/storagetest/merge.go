@@ -53,7 +53,7 @@ func testAccountMerge(t *testing.T, h Harness) {
 		}
 		g := port.Group{ID: id.New(id.Group), PublicID: groupID, RealmID: r, OrgID: personal.ID, Name: "team", CreatedAt: T0, UpdatedAt: T0}
 		ro := port.Role{ID: id.New(id.Role), PublicID: id.NewExternal(id.Role), RealmID: r, OrgID: personal.ID, Name: "viewer",
-			Permissions: []string{"doc:read"}, CreatedAt: T0, UpdatedAt: T0}
+			Permissions: []string{"docs.doc:read"}, CreatedAt: T0, UpdatedAt: T0}
 		rb := port.RoleBinding{ID: id.New(id.RoleBinding), PublicID: id.NewExternal(id.RoleBinding), RealmID: r, Role: "org:admin",
 			PrincipalType: port.PrincipalUser, PrincipalID: a.ID, OrgID: personal.ID, CreatedAt: T0}
 		for _, err := range []error{tx.Groups().Create(ctx, g), tx.Roles().Create(ctx, ro), tx.RoleBindings().Create(ctx, rb),

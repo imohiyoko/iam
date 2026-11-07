@@ -613,7 +613,7 @@ func TestDPoPResourceIndicators(t *testing.T) {
 	rs := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
 	sa, secret := l.serviceAccountSecret(t, owner, "worker")
 	if code, out := l.admin(t, "/v1/admin/oauth/resources", owner, map[string]any{"uri": ordersAPI, "name": "Orders",
-		"scopes": []string{"orders:read"}, "clients": []string{pub.clientID}, "service_accounts": []string{sa}}); code != 201 {
+		"scopes": []string{"app.orders:read"}, "clients": []string{pub.clientID}, "service_accounts": []string{sa}}); code != 201 {
 		t.Fatalf("resource: %d %v", code, out)
 	}
 	k, other := dpoptest.NewKey(t), dpoptest.NewKey(t)
@@ -650,7 +650,7 @@ func TestDPoPResourceIndicators(t *testing.T) {
 	// サービスアカウントの resource のトークン。
 	sform := url.Values{"grant_type": {"client_credentials"}, "client_id": {sa}, "client_secret": {secret}, "resource": {ordersAPI}}
 	w, st := l.form(t, l.a.AdminHandler(), "POST", adminTokenPath, sform, nil, "DPoP", l.proof(t, k, "POST", testAdminURL+adminTokenPath, "", ""))
-	if w.Code != 200 || st["token_type"] != "DPoP" || st["scope"] != "orders:read" {
+	if w.Code != 200 || st["token_type"] != "DPoP" || st["scope"] != "app.orders:read" {
 		t.Fatalf("service account token: %d %v", w.Code, st)
 	}
 	in = rs.introspect(t, st["access_token"].(string))

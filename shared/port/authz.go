@@ -17,7 +17,7 @@ type Role struct {
 	RealmID  string
 	OrgID    string // 空なら realm 共通
 	Name     string // (realm, org) の中で一意
-	// Permissions は権限（"project:read" など）。並びは保存した順。
+	// Permissions は権限（"users:read"・"docs.doc:read" など）。並びは保存した順。
 	Permissions []string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -181,4 +181,35 @@ type ActionNamespaceRepo interface {
 	List(ctx context.Context, realmID string) ([]ActionNamespace, error)
 	// Put は行を置く（あれば Settings・UpdatedAt を置き換え、CreatedAt は保つ）。
 	Put(ctx context.Context, n ActionNamespace) error
+}
+
+// PermissionCatalog は authz_permission_catalogs の1行（連携先の権限のカタログ。ADR 0121）。連携先の権限は
+// `<Prefix>.<リソース>:<操作>` の形で、Permissions にあるものだけを独自のロールに入れられる。
+type PermissionCatalog struct {
+	RealmID     string
+	Prefix      string // 接頭辞（realm の中で一意。作成後は変えない）
+	DisplayName string
+	Permissions []PermissionDef // 名前の順
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// PermissionDef はカタログの権限の1つ。
+type PermissionDef struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// PermissionCatalogRepo は authz_permission_catalogs の Repository。
+type PermissionCatalogRepo interface {
+	// Get はカタログを返す。無ければ errs.NotFound。
+	Get(ctx context.Context, realmID, prefix string) (PermissionCatalog, error)
+	// List は realm のカタログを接頭辞の順に返す。
+	List(ctx context.Context, realmID string) ([]PermissionCatalog, error)
+	// Create はカタログを作る。同じ接頭辞があれば errs.Conflict。
+	Create(ctx context.Context, c PermissionCatalog) error
+	// Update は DisplayName・Permissions・UpdatedAt を置き換える。無ければ errs.NotFound。
+	Update(ctx context.Context, c PermissionCatalog) error
+	// Delete はカタログを消す。無ければ errs.NotFound。
+	Delete(ctx context.Context, realmID, prefix string) error
 }

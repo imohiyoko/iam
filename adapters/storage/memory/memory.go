@@ -83,7 +83,9 @@ type state struct {
 	// riskTypes のキーは realm_id + name。
 	riskTypes map[string]port.RiskType
 	// namespaces のキーは realm_id + name。
-	namespaces  map[string]port.ActionNamespace
+	namespaces map[string]port.ActionNamespace
+	// catalogs のキーは realm_id + prefix。
+	catalogs    map[string]port.PermissionCatalog
 	orgs        map[string]port.Org
 	memberships map[string]port.Membership
 	invitations map[string]port.Invitation
@@ -145,7 +147,7 @@ func New(clk clock.Clock) *Storage {
 		accounts: map[string]port.ServiceAccount{}, credentials: map[string]port.ServiceAccountCredential{},
 		saTokens:     map[string]port.ServiceAccountToken{},
 		roleBindings: map[string]port.RoleBinding{}, roles: map[string]port.Role{}, groups: map[string]port.Group{},
-		groupMembers: map[string]port.GroupMember{}, groupClosure: map[string]groupLink{}, attrDefs: map[string]port.AttributeDef{}, attrValues: map[string]port.UserAttribute{}, riskTypes: map[string]port.RiskType{}, namespaces: map[string]port.ActionNamespace{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
+		groupMembers: map[string]port.GroupMember{}, groupClosure: map[string]groupLink{}, attrDefs: map[string]port.AttributeDef{}, attrValues: map[string]port.UserAttribute{}, riskTypes: map[string]port.RiskType{}, namespaces: map[string]port.ActionNamespace{}, catalogs: map[string]port.PermissionCatalog{}, orgs: map[string]port.Org{}, memberships: map[string]port.Membership{},
 		invitations: map[string]port.Invitation{}, quotaGrants: map[string]port.QuotaGrant{}, orgDomains: map[string]port.OrgDomain{}, clients: map[string]port.Client{}, signingKeys: map[string]port.SigningKey{},
 		grants: map[string]port.Grant{}, oidcTokens: map[string]port.OIDCToken{}, eventSubs: map[string]port.EventSubscription{},
 		dirGroups: map[string]port.DirectoryGroup{},
@@ -205,34 +207,35 @@ func (t *tx) EventSubscriptions() port.EventSubscriptionRepo {
 	return eventSubs{t}
 }
 
-func (t *tx) Users() port.UserRepo                       { return users{t} }
-func (t *tx) Emails() port.EmailRepo                     { return emails{t} }
-func (t *tx) Identities() port.IdentityRepo              { return identities{t} }
-func (t *tx) DirectoryGroups() port.DirectoryGroupRepo   { return dirGroups{t} }
-func (t *tx) Credentials() port.CredentialRepo           { return authnCredentials{t} }
-func (t *tx) KnownDevices() port.KnownDeviceRepo         { return knownDevices{t} }
-func (t *tx) RecoveryCodes() port.RecoveryCodeRepo       { return recoveryCodes{t} }
-func (t *tx) Suspensions() port.SuspensionRepo           { return suspensions{t} }
-func (t *tx) ScheduledEvents() port.ScheduledEventRepo   { return scheduledEvents{t} }
-func (t *tx) Connections() port.ConnectionRepo           { return connections{t} }
-func (t *tx) Sessions() port.SessionRepo                 { return sessions{t} }
-func (t *tx) Orgs() port.OrgRepo                         { return orgs{t} }
-func (t *tx) Memberships() port.MembershipRepo           { return memberships{t} }
-func (t *tx) Invitations() port.InvitationRepo           { return invitations{t} }
-func (t *tx) QuotaGrants() port.QuotaGrantRepo           { return quotaGrants{t} }
-func (t *tx) OrgDomains() port.OrgDomainRepo             { return orgDomains{t} }
-func (t *tx) ServiceAccounts() port.ServiceAccountRepo   { return accounts{t} }
-func (t *tx) RoleBindings() port.RoleBindingRepo         { return roleBindings{t} }
-func (t *tx) Roles() port.RoleRepo                       { return roles{t} }
-func (t *tx) Groups() port.GroupRepo                     { return groups{t} }
-func (t *tx) Attributes() port.AttributeRepo             { return attributes{t} }
-func (t *tx) RiskTypes() port.RiskTypeRepo               { return riskTypes{t} }
-func (t *tx) ActionNamespaces() port.ActionNamespaceRepo { return actionNamespaces{t} }
-func (t *tx) Clients() port.ClientRepo                   { return clients{t} }
-func (t *tx) SigningKeys() port.SigningKeyRepo           { return signingKeys{t} }
-func (t *tx) Grants() port.GrantRepo                     { return grants{t} }
-func (t *tx) OIDCTokens() port.OIDCTokenRepo             { return oidcTokens{t} }
-func (t *tx) WSFed() port.WSFedRepo                      { return wsfed{t} }
+func (t *tx) Users() port.UserRepo                           { return users{t} }
+func (t *tx) Emails() port.EmailRepo                         { return emails{t} }
+func (t *tx) Identities() port.IdentityRepo                  { return identities{t} }
+func (t *tx) DirectoryGroups() port.DirectoryGroupRepo       { return dirGroups{t} }
+func (t *tx) Credentials() port.CredentialRepo               { return authnCredentials{t} }
+func (t *tx) KnownDevices() port.KnownDeviceRepo             { return knownDevices{t} }
+func (t *tx) RecoveryCodes() port.RecoveryCodeRepo           { return recoveryCodes{t} }
+func (t *tx) Suspensions() port.SuspensionRepo               { return suspensions{t} }
+func (t *tx) ScheduledEvents() port.ScheduledEventRepo       { return scheduledEvents{t} }
+func (t *tx) Connections() port.ConnectionRepo               { return connections{t} }
+func (t *tx) Sessions() port.SessionRepo                     { return sessions{t} }
+func (t *tx) Orgs() port.OrgRepo                             { return orgs{t} }
+func (t *tx) Memberships() port.MembershipRepo               { return memberships{t} }
+func (t *tx) Invitations() port.InvitationRepo               { return invitations{t} }
+func (t *tx) QuotaGrants() port.QuotaGrantRepo               { return quotaGrants{t} }
+func (t *tx) OrgDomains() port.OrgDomainRepo                 { return orgDomains{t} }
+func (t *tx) ServiceAccounts() port.ServiceAccountRepo       { return accounts{t} }
+func (t *tx) RoleBindings() port.RoleBindingRepo             { return roleBindings{t} }
+func (t *tx) Roles() port.RoleRepo                           { return roles{t} }
+func (t *tx) Groups() port.GroupRepo                         { return groups{t} }
+func (t *tx) Attributes() port.AttributeRepo                 { return attributes{t} }
+func (t *tx) RiskTypes() port.RiskTypeRepo                   { return riskTypes{t} }
+func (t *tx) ActionNamespaces() port.ActionNamespaceRepo     { return actionNamespaces{t} }
+func (t *tx) PermissionCatalogs() port.PermissionCatalogRepo { return permissionCatalogs{t} }
+func (t *tx) Clients() port.ClientRepo                       { return clients{t} }
+func (t *tx) SigningKeys() port.SigningKeyRepo               { return signingKeys{t} }
+func (t *tx) Grants() port.GrantRepo                         { return grants{t} }
+func (t *tx) OIDCTokens() port.OIDCTokenRepo                 { return oidcTokens{t} }
+func (t *tx) WSFed() port.WSFedRepo                          { return wsfed{t} }
 
 // OAuthResources は自前の API（リソースサーバー）の登録（ADR 0112）。
 func (t *tx) OAuthResources() port.OAuthResourceRepo { return oauthResources{t} }
