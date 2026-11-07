@@ -213,12 +213,15 @@ func (e AuditChainVerificationBrokenReason) Valid() bool {
 
 // Defines values for CheckRequestPrincipalType.
 const (
-	CheckRequestPrincipalTypeUser CheckRequestPrincipalType = "user"
+	CheckRequestPrincipalTypeServiceAccount CheckRequestPrincipalType = "service_account"
+	CheckRequestPrincipalTypeUser           CheckRequestPrincipalType = "user"
 )
 
 // Valid indicates whether the value is a known member of the CheckRequestPrincipalType enum.
 func (e CheckRequestPrincipalType) Valid() bool {
 	switch e {
+	case CheckRequestPrincipalTypeServiceAccount:
+		return true
 	case CheckRequestPrincipalTypeUser:
 		return true
 	default:
@@ -1368,8 +1371,10 @@ type CheckRequest struct {
 	// OrgId 判定の文脈の Org の公開 ID
 	OrgId *string `json:"org_id,omitempty"`
 
-	// PrincipalId 主体の公開 ID
-	PrincipalId   string                     `json:"principal_id"`
+	// PrincipalId 主体の公開 ID（サービスアカウントは `sva_…`）
+	PrincipalId string `json:"principal_id"`
+
+	// PrincipalType `service_account` はフィーチャー `service_accounts` が動いているときだけ（止まっていれば `400`）
 	PrincipalType *CheckRequestPrincipalType `json:"principal_type,omitempty"`
 	ResourceId    *string                    `json:"resource_id,omitempty"`
 
@@ -1381,7 +1386,7 @@ type CheckRequest struct {
 	Sid *string `json:"sid,omitempty"`
 }
 
-// CheckRequestPrincipalType defines model for CheckRequest.PrincipalType.
+// CheckRequestPrincipalType `service_account` はフィーチャー `service_accounts` が動いているときだけ（止まっていれば `400`）
 type CheckRequestPrincipalType string
 
 // CheckResult defines model for CheckResult.

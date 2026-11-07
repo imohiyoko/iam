@@ -9,12 +9,14 @@ import (
 	"github.com/imohiyoko/iam/authn/account"
 	"github.com/imohiyoko/iam/authn/pat"
 	"github.com/imohiyoko/iam/authn/provider"
+	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/check"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/server/publicapi"
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
@@ -62,31 +64,32 @@ func (s adminServer) CheckAuthz(ctx context.Context, req adminapi.CheckAuthzRequ
 	if ok {
 		orgID, res, ok = orgTarget(orgID, res)
 	}
-	if !ok || !role.ValidPermission(b.Action) || (b.PrincipalType != nil && *b.PrincipalType != adminapi.CheckRequestPrincipalTypeUser) {
+	sa := b.PrincipalType != nil && *b.PrincipalType == adminapi.CheckRequestPrincipalTypeServiceAccount
+	// サービスアカウントの判定（#152）は、フィーチャー service_accounts が動いているときだけ。
+	if !ok || !role.ValidPermission(b.Action) || (sa && !s.a.plan.IsActive(feature.ServiceAccounts)) ||
+		(b.PrincipalType != nil && !sa && *b.PrincipalType != adminapi.CheckRequestPrincipalTypeUser) {
 		return adminapi.CheckAuthz400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", ""))}, nil
 	}
 	var r check.Request
 	var reasons []string
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		u, err := tx.Users().GetByPublicID(ctx, s.a.realm.ID, b.PrincipalId)
+		var principal check.Principal
+		var err error
+		if sa {
+			principal, reasons, err = s.checkServiceAccount(ctx, tx, b.PrincipalId)
+		} else {
+			principal, reasons, err = s.checkUser(ctx, tx, b.PrincipalId)
+		}
+		if err != nil || reasons != nil {
+			return err
+		}
+		r = check.Request{Principal: principal, Action: b.Action, Resource: res}
+		if sa {
+			r.Context, err = s.serviceAccountCheckContext(ctx, tx, principal.ID, b)
+		} else {
+			r.Context, err = s.checkContext(ctx, tx, p, principal.ID, b)
+		}
 		if err != nil {
-			return err
-		}
-		// 使えないユーザーは何もできない（ログインと同じ規則。4.7、4.8）。
-		now := s.a.deps.Clock.Now()
-		if _, err := account.Check(ctx, tx, u, now, now); err != nil {
-			if ue, ok := errors.AsType[*account.UnavailableError](err); ok {
-				reasons = ue.Reasons()
-				return nil
-			}
-			if errors.Is(err, account.ErrInactive) {
-				reasons = []string{"inactive"}
-				return nil
-			}
-			return err
-		}
-		r = check.Request{Principal: check.Principal{Type: port.PrincipalUser, ID: u.ID}, Action: b.Action, Resource: res}
-		if r.Context, err = s.checkContext(ctx, tx, p, u.ID, b); err != nil {
 			return err
 		}
 		if orgID != nil && s.a.orgs != nil {
@@ -174,6 +177,72 @@ func (s publicServer) CheckMyAuthz(ctx context.Context, req publicapi.CheckMyAut
 		}
 	}
 	return out, nil
+}
+
+// checkUser は判定の主体のユーザー（公開 ID）。使えないユーザーは理由のコードを返す（ログインと同じ規則。4.7、4.8）。
+// 無ければ errs.NotFound。
+func (s adminServer) checkUser(ctx context.Context, tx port.Tx, publicID string) (check.Principal, []string, error) {
+	u, err := tx.Users().GetByPublicID(ctx, s.a.realm.ID, publicID)
+	if err != nil {
+		return check.Principal{}, nil, err
+	}
+	now := s.a.deps.Clock.Now()
+	if _, err := account.Check(ctx, tx, u, now, now); err != nil {
+		if ue, ok := errors.AsType[*account.UnavailableError](err); ok {
+			return check.Principal{}, unavailableReasons(ue), nil
+		}
+		if errors.Is(err, account.ErrInactive) {
+			return check.Principal{}, []string{"inactive"}, nil
+		}
+		return check.Principal{}, nil, err
+	}
+	return check.Principal{Type: port.PrincipalUser, ID: u.ID}, nil, nil
+}
+
+// unavailableReasons は使えない主体の理由のコード。空でも nil にしない（nil は「使える」の意味なので）。
+func unavailableReasons(ue *account.UnavailableError) []string {
+	if r := ue.Reasons(); r != nil {
+		return r
+	}
+	return []string{}
+}
+
+// checkServiceAccount は判定の主体のサービスアカウント（#152）。削除済みは inactive、停止・有効期間の外・所属の Org が
+// 使えないときはその理由のコード（ユーザーと同じ。4.7、4.8）。無ければ errs.NotFound。
+func (s adminServer) checkServiceAccount(ctx context.Context, tx port.Tx, accountID string) (check.Principal, []string, error) {
+	a, err := tx.ServiceAccounts().Get(ctx, s.a.realm.ID, accountID)
+	if err != nil {
+		return check.Principal{}, nil, err
+	}
+	if err := serviceaccount.Available(ctx, tx, a, s.a.deps.Clock.Now()); err != nil {
+		if ue, ok := errors.AsType[*account.UnavailableError](err); ok {
+			return check.Principal{}, unavailableReasons(ue), nil
+		}
+		if errors.Is(err, serviceaccount.ErrDeleted) {
+			return check.Principal{}, []string{"inactive"}, nil
+		}
+		return check.Principal{}, nil, err
+	}
+	return check.Principal{Type: port.PrincipalServiceAccount, ID: a.ID}, nil, nil
+}
+
+// serviceAccountCheckContext はサービスアカウントの判定の文脈（ADR 0084）。主体のアクセストークン（管理 API 向けか自前の API
+// 向け）を渡せば、その認証から組み立てる（attested）。API キーは受けない（秘密そのものを判定の問いに載せさせない）。
+// トークンが使えないか、主体のものでないか、DPoP に結び付いていれば文脈なし。sid と申告の文脈はユーザーのためのものなので使わない。
+func (s adminServer) serviceAccountCheckContext(ctx context.Context, tx port.Tx, accountID string, b *adminapi.CheckRequest) (*check.AuthContext, error) {
+	if b.AccessToken == nil || !serviceaccount.IsAccessToken(*b.AccessToken) {
+		return nil, nil
+	}
+	au, err := s.a.serviceAccounts.CheckAccessToken(ctx, tx, s.a.realm.ID, *b.AccessToken, s.a.deps.Clock.Now())
+	// DPoP に結び付けたトークン（ADR 0113）は、ここでは鍵の証明を確かめられないので文脈にしない（盗んだトークンの文字列だけで
+	// attested の条件を満たさせない）。
+	if errors.Is(err, serviceaccount.ErrInvalid) || (err == nil && (au.Account.ID != accountID || au.JKT != "")) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return serviceAccountContext(au.Method, au.AuthTime), nil
 }
 
 // checkContext は判定の問いの認証の文脈（ADR 0084）。アクセストークンか sid があれば IAM がそこから組み立て（attested）、申告は
