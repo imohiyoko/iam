@@ -101,7 +101,7 @@ func (s publicServer) CancelMyAccountDeletion(ctx context.Context, req publicapi
 	return publicapi.CancelMyAccountDeletion200JSONResponse(s.loginResult(ctx, is, au.PublicID, false, returnToken)), nil
 }
 
-// userChange は運営者による削除・取り消し・保留の共通部分。revoke なら同じトランザクションで全セッションを失効させる。
+// userChange は運営者による削除・取り消し・保留の共通部分。呼び出し側が対象のロールの権限をすべて持たなければ 403。revoke なら同じトランザクションで全セッションを失効させる。
 func (s adminServer) userChange(ctx context.Context, perm, publicID string, revoke bool, change func(ctx context.Context, tx port.Tx, u port.User, p adminPrincipal) (port.User, error)) (adminapi.AdminUser, outcome, error) {
 	p, d, err := s.a.authorize(ctx, perm)
 	if o, ok, err := outcomeOf(d, err); !ok {
@@ -112,6 +112,10 @@ func (s adminServer) userChange(ctx context.Context, perm, publicID string, revo
 	err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		var err error
 		if u, err = tx.Users().GetByPublicID(ctx, s.a.realm.ID, publicID); err != nil {
+			return err
+		}
+		// 上位のロールの運営者を、下位の運営者が消さない・消すのを取り消さない（ADR 0053。UpdateUser・停止と同じ）。
+		if err := s.a.outranks(ctx, tx, p, u.ID); err != nil {
 			return err
 		}
 		if revoke {
