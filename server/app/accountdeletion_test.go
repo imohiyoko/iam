@@ -150,22 +150,48 @@ func TestOperatorDeletesUserImmediately(t *testing.T) {
 	}
 }
 
+// 下位のロールの運営者は、上位のロールの運営者を削除できず、削除の取り消しもできない（ADR 0053）。
+func TestOperatorDeletionRespectsOutranks(t *testing.T) {
+	l := newLoginEnvWith(t, nil, nil)
+	ownerID, _ := l.operator(t, "owner@example.com", role.RealmOwner)
+	_, owner := l.operator(t, "owner2@example.com", role.RealmOwner) // owner が最後の owner にならないように
+	adminID, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
+	for _, body := range []any{map[string]bool{"immediate": true}, nil} {
+		if status, out := l.admin(t, "/v1/admin/users/"+ownerID+":delete", admin, body); status != 403 {
+			t.Fatalf("delete owner by admin %v: %d %v", body, status, out)
+		}
+	}
+	if u, hasKey := l.storedUser(t, ownerID); u.Status != port.UserActive || !hasKey {
+		t.Fatalf("owner changed: %+v, key %v", u, hasKey)
+	}
+	// 上位からは消せる。上位が予約した削除を、下位は取り消せない。
+	if status, out := l.admin(t, "/v1/admin/users/"+ownerID+":delete", owner, nil); status != 200 {
+		t.Fatalf("schedule owner deletion by owner: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/users/"+ownerID+":cancel-deletion", admin, nil); status != 403 {
+		t.Fatalf("cancel owner deletion by admin: %d %v", status, out)
+	}
+	if status, out := l.admin(t, "/v1/admin/users/"+adminID+":delete", owner, map[string]bool{"immediate": true}); status != 200 || out["status"] != "deleted" {
+		t.Fatalf("delete admin by owner: %d %v", status, out)
+	}
+}
+
 // realm の最後の realm:owner は削除できない。猶予の間に最後になったら、猶予が終わっても消さない（ADR 0064）。
 func TestLastRealmOwnerDeletion(t *testing.T) {
 	l := newLoginEnvWith(t, nil, nil)
-	rootID, _ := l.operator(t, "root@example.com", role.RealmOwner)
-	_, admin := l.operator(t, "admin@example.com", role.RealmAdmin)
+	// realm:owner を消せるのは realm:owner だけ（outranks）なので、owner 自身の操作で確かめる。
+	rootID, root := l.operator(t, "root@example.com", role.RealmOwner)
 	for _, body := range []any{map[string]bool{"immediate": true}, nil} {
-		if status, out := l.admin(t, "/v1/admin/users/"+rootID+":delete", admin, body); status != 409 || out["error"] != "last_owner" {
+		if status, out := l.admin(t, "/v1/admin/users/"+rootID+":delete", root, body); status != 409 || out["error"] != "last_owner" {
 			t.Fatalf("delete last owner %v: %d %v", body, status, out)
 		}
 	}
-	root2ID, _ := l.operator(t, "root2@example.com", role.RealmOwner)
-	if status, out := l.admin(t, "/v1/admin/users/"+rootID+":delete", admin, nil); status != 200 {
+	root2ID, root2 := l.operator(t, "root2@example.com", role.RealmOwner)
+	if status, out := l.admin(t, "/v1/admin/users/"+rootID+":delete", root2, nil); status != 200 {
 		t.Fatalf("schedule owner deletion: %d %v", status, out)
 	}
 	// 削除の予約中の owner は数えない：root2 が最後の使える owner になる。
-	if status, out := l.admin(t, "/v1/admin/users/"+root2ID+":delete", admin, map[string]bool{"immediate": true}); status != 409 || out["error"] != "last_owner" {
+	if status, out := l.admin(t, "/v1/admin/users/"+root2ID+":delete", root2, map[string]bool{"immediate": true}); status != 409 || out["error"] != "last_owner" {
 		t.Fatalf("delete the last available owner: %d %v", status, out)
 	}
 	// 猶予の間に別の owner の付与が消えると、root が最後の owner になる。
