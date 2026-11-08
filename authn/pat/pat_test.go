@@ -140,11 +140,11 @@ func FuzzParse(f *testing.F) {
 func TestCreateAndAuthenticate(t *testing.T) {
 	f := newFixture(t, pat.Config{MaxPerUser: 10})
 	exp := f.k.Clock.Now().Add(24 * time.Hour)
-	c, err := f.create(t, pat.CreateInput{Scopes: []string{"users:read", "docs:*", "users:read"}, ExpiresAt: &exp})
+	c, err := f.create(t, pat.CreateInput{Scopes: []string{"users:read", "app.docs:*", "users:read"}, ExpiresAt: &exp})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(c.PAT.Scopes, []string{"docs:*", "users:read"}) {
+	if !slices.Equal(c.PAT.Scopes, []string{"app.docs:*", "users:read"}) {
 		t.Fatalf("scopes = %v", c.PAT.Scopes)
 	}
 	a, err := f.auth(c.Token)
@@ -254,21 +254,21 @@ func TestPolicy(t *testing.T) {
 	}
 	// 期限なしのトークン（ホスト先の上限が無い構成）。
 	g := newFixture(t, pat.Config{MaxPerUser: 10})
-	forever, err := g.create(t, pat.CreateInput{Scopes: []string{"docs:read", "users:read"}})
+	forever, err := g.create(t, pat.CreateInput{Scopes: []string{"app.docs:read", "users:read"}})
 	if err != nil || forever.PAT.ExpiresAt != nil {
 		t.Fatalf("forever = %+v, %v", forever.PAT.ExpiresAt, err)
 	}
-	if err := g.setPolicy(t, pat.Policy{RequireExpiry: true, AllowedScopes: []string{"docs:*"}}); err != nil {
+	if err := g.setPolicy(t, pat.Policy{RequireExpiry: true, AllowedScopes: []string{"app.docs:*"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.create(t, pat.CreateInput{Scopes: []string{"docs:read"}}); code(err) != "expiry_required" {
+	if _, err := g.create(t, pat.CreateInput{Scopes: []string{"app.docs:read"}}); code(err) != "expiry_required" {
 		t.Fatalf("require expiry: %v", err)
 	}
 	exp := g.k.Clock.Now().Add(time.Hour)
 	if _, err := g.create(t, pat.CreateInput{Scopes: []string{"users:read"}, ExpiresAt: &exp}); code(err) != "scope_not_allowed" {
 		t.Fatalf("scope not allowed: %v", err)
 	}
-	if _, err := g.create(t, pat.CreateInput{Scopes: []string{"docs:read"}, ExpiresAt: &exp}); err != nil {
+	if _, err := g.create(t, pat.CreateInput{Scopes: []string{"app.docs:read"}, ExpiresAt: &exp}); err != nil {
 		t.Fatal(err)
 	}
 	// 厳しくしたポリシーは既存のトークンにも効く：期限の無いトークンは使えない。
@@ -276,11 +276,11 @@ func TestPolicy(t *testing.T) {
 		t.Fatalf("forever token under require_expiry: %v", err)
 	}
 	// 寿命の上限を置けば期限なしのトークンも作成から上限までで、スコープは許すものだけが効く。
-	if err := g.setPolicy(t, pat.Policy{MaxLifetime: 48 * time.Hour, AllowedScopes: []string{"docs:*"}}); err != nil {
+	if err := g.setPolicy(t, pat.Policy{MaxLifetime: 48 * time.Hour, AllowedScopes: []string{"app.docs:*"}}); err != nil {
 		t.Fatal(err)
 	}
 	a, err := g.auth(forever.Token)
-	if err != nil || !slices.Equal(a.Scopes, []string{"docs:read"}) || a.ExpiresAt == nil || !a.ExpiresAt.Equal(forever.PAT.CreatedAt.Add(48*time.Hour)) {
+	if err != nil || !slices.Equal(a.Scopes, []string{"app.docs:read"}) || a.ExpiresAt == nil || !a.ExpiresAt.Equal(forever.PAT.CreatedAt.Add(48*time.Hour)) {
 		t.Fatalf("narrowed = %+v, %v", a, err)
 	}
 	g.k.Clock.Advance(48 * time.Hour)
@@ -293,7 +293,7 @@ func TestPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.setPolicy(t, pat.Policy{AllowedScopes: []string{"docs:read"}}); err != nil {
+	if err := h.setPolicy(t, pat.Policy{AllowedScopes: []string{"app.docs:read"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.auth(only.Token); !errors.Is(err, pat.ErrInvalid) {

@@ -15,7 +15,7 @@ import (
 // 本人の Personal Access Token と realm のポリシー（ADR 0109）の契約。
 
 func newPAT(realmID, userID string, at time.Time) port.PersonalAccessToken {
-	return port.PersonalAccessToken{ID: id.NewExternal(id.PAT), RealmID: realmID, UserID: userID, Name: "ci", Scopes: []string{"docs:read", "users:read"},
+	return port.PersonalAccessToken{ID: id.NewExternal(id.PAT), RealmID: realmID, UserID: userID, Name: "ci", Scopes: []string{"docs.doc:read", "users:read"},
 		Hash: []byte("hash-of-secret"), CreatedAt: at}
 }
 
@@ -108,7 +108,7 @@ func testPersonalAccessTokenPolicies(t *testing.T, h Harness) {
 		if _, err := repo.GetPolicy(ctx, r); notFound("missing policy", err) != nil {
 			return notFound("missing policy", err)
 		}
-		p := port.PersonalAccessTokenPolicy{RealmID: r, MaxLifetimeSeconds: 86400, AllowedScopes: []string{"docs:*"}, RequireExpiry: true, UpdatedAt: T0}
+		p := port.PersonalAccessTokenPolicy{RealmID: r, MaxLifetimeSeconds: 86400, AllowedScopes: []string{"docs.doc:*"}, RequireExpiry: true, UpdatedAt: T0}
 		if err := repo.PutPolicy(ctx, p); err != nil {
 			return err
 		}

@@ -35,8 +35,8 @@ func TestIAMAdminResources(t *testing.T) {
 			t.Errorf("%q: IAM=%v RealmOnly=%v, want both true", p, role.IAM(p), role.RealmOnly(p))
 		}
 	}
-	if role.IAM("project:read") {
-		t.Error(`IAM("project:read") = true`)
+	if role.IAM("app.project:read") {
+		t.Error(`IAM("app.project:read") = true`)
 	}
 }
 
@@ -79,5 +79,31 @@ func TestPermConstantsAreIAM(t *testing.T) {
 	}
 	if n < 50 {
 		t.Fatalf("found only %d Perm constants; the parser no longer sees them", n)
+	}
+}
+
+// 権限の名前の 2 つの空間（ADR 0121）。
+func TestValidPermissionNamespaces(t *testing.T) {
+	long := strings.Repeat("p", 32) + "." + strings.Repeat("r", 64) + ":" + strings.Repeat("a", 64)
+	for p, want := range map[string]bool{
+		"users:read": true, "users:*": true, "org:groups.read": true, "audit:read_client_data": true,
+		"docs.doc:read": true, "docs.doc:*": true, "docs.doc.page:read": true, "my-app.orders:refund": true, long: true,
+		"doc:read": false, "project:*": false, // `.` を含まず IAM の権限でもない
+		"Docs.doc:read": false, "docs.:read": false, ".doc:read": false, "docs.doc:": false, "docs.doc:a:b": false,
+		strings.Repeat("p", 33) + ".r:a": false, "p." + strings.Repeat("r", 65) + ":a": false, "p.r:" + strings.Repeat("a", 65): false,
+		"me:password": false, // 本人の操作は付与の対象ではない
+	} {
+		if got := role.ValidPermission(p); got != want {
+			t.Errorf("ValidPermission(%q) = %v, want %v", p, got, want)
+		}
+	}
+	if prefix, ok := role.CatalogPrefix("docs.doc:read"); !ok || prefix != "docs" {
+		t.Errorf("CatalogPrefix = %q, %v", prefix, ok)
+	}
+	if _, ok := role.CatalogPrefix("users:read"); ok {
+		t.Error("CatalogPrefix(users:read) is ok")
+	}
+	if !role.SelfAction("me:password") || role.SelfAction("users:read") {
+		t.Error("SelfAction")
 	}
 }

@@ -107,8 +107,8 @@ func TestACRFeatureOff(t *testing.T) {
 	}
 
 	// aal_at_least と min_aal は保存できない。
-	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/action-namespaces/payment", map[string]any{"requirements": map[string]any{
-		"payment:send": map[string]any{"aal_at_least": 2}}}); code != 400 || out["error"] != "invalid_condition" {
+	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/action-namespaces/app.payment", map[string]any{"requirements": map[string]any{
+		"app.payment:send": map[string]any{"aal_at_least": 2}}}); code != 400 || out["error"] != "invalid_condition" {
 		t.Fatalf("aal requirement without acr: %d %v", code, out)
 	}
 	_, boss := l.login(t, "boss@acme.example")

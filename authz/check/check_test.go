@@ -109,16 +109,16 @@ var (
 func TestRealmRoles(t *testing.T) {
 	e := newEnv(t, nil)
 	e.bind(role.RealmSupport, alice, "", "", "")
-	r := e.role("", "project:read", "doc:*")
+	r := e.role("", "app.project:read", "app.doc:*")
 	e.bind(r.ID, robot, "", "", "")
 
 	e.check(true, check.Request{Principal: alice, Action: role.PermOrgsRead})
 	e.check(false, check.Request{Principal: alice, Action: role.PermOrgsUpdate})
 	e.check(false, check.Request{Principal: alice})
-	e.check(true, check.Request{Principal: robot, Action: "project:read"})
-	e.check(true, check.Request{Principal: robot, Action: "doc:write"})
-	e.check(false, check.Request{Principal: robot, Action: "project:write"})
-	e.check(false, check.Request{Principal: bob, Action: "project:read"})
+	e.check(true, check.Request{Principal: robot, Action: "app.project:read"})
+	e.check(true, check.Request{Principal: robot, Action: "app.doc:write"})
+	e.check(false, check.Request{Principal: robot, Action: "app.project:write"})
+	e.check(false, check.Request{Principal: bob, Action: "app.project:read"})
 	// 組み込みの Org のロールとシステムのロール以外の、知らないロールは権限を持たない（fail-closed）。
 	e.bind("no-such-role", bob, "", "", "")
 	e.bind(role.OrgOwner, bob, "", "", "")
@@ -127,15 +127,15 @@ func TestRealmRoles(t *testing.T) {
 
 func TestResourceScope(t *testing.T) {
 	e := newEnv(t, nil)
-	r := e.role("", "project:read", "project:write")
+	r := e.role("", "app.project:read", "app.project:write")
 	e.bind(r.ID, alice, "", "project", "p1")
 
-	e.check(true, check.Request{Principal: alice, Action: "project:write", Resource: check.Resource{Type: "project", ID: "p1"}})
-	e.check(false, check.Request{Principal: alice, Action: "project:write", Resource: check.Resource{Type: "project", ID: "p2"}})
-	e.check(false, check.Request{Principal: alice, Action: "project:write"})
+	e.check(true, check.Request{Principal: alice, Action: "app.project:write", Resource: check.Resource{Type: "project", ID: "p1"}})
+	e.check(false, check.Request{Principal: alice, Action: "app.project:write", Resource: check.Resource{Type: "project", ID: "p2"}})
+	e.check(false, check.Request{Principal: alice, Action: "app.project:write"})
 	// リソースを限った付与は Holds（範囲全体の権限）には数えない。
 	e.tx(func(ctx context.Context, tx port.Tx) error {
-		ok, err := e.c.Holds(ctx, tx, realm, alice, "", []string{"project:read"}, nil)
+		ok, err := e.c.Holds(ctx, tx, realm, alice, "", []string{"app.project:read"}, nil)
 		if err != nil || ok {
 			t.Errorf("Holds = %v, %v", ok, err)
 		}
@@ -146,9 +146,9 @@ func TestResourceScope(t *testing.T) {
 func TestOrgScope(t *testing.T) {
 	m := members{alice.ID: {"o1": port.OrgAdmin}, bob.ID: {"o1": port.OrgMember}}
 	e := newEnv(t, m)
-	custom := e.role("o1", "project:read")
-	other := e.role("o2", "project:write")
-	shared := e.role("", "report:read")
+	custom := e.role("o1", "app.project:read")
+	other := e.role("o2", "app.project:write")
+	shared := e.role("", "app.report:read")
 	e.bind(custom.ID, bob, "o1", "", "")
 	e.bind(other.ID, bob, "o1", "", "") // 別の Org のロールは効かない
 	e.bind(shared.ID, bob, "o1", "", "")
@@ -161,66 +161,66 @@ func TestOrgScope(t *testing.T) {
 	e.check(false, check.Request{Principal: alice, Action: role.PermOrgRead, OrgID: "o2"})
 	e.check(false, check.Request{Principal: alice, Action: role.PermOrgRead})
 	// Org の範囲の付与。
-	e.check(true, check.Request{Principal: bob, Action: "project:read", OrgID: "o1"})
-	e.check(true, check.Request{Principal: bob, Action: "report:read", OrgID: "o1"})
-	e.check(false, check.Request{Principal: bob, Action: "project:write", OrgID: "o1"})
+	e.check(true, check.Request{Principal: bob, Action: "app.project:read", OrgID: "o1"})
+	e.check(true, check.Request{Principal: bob, Action: "app.report:read", OrgID: "o1"})
+	e.check(false, check.Request{Principal: bob, Action: "app.project:write", OrgID: "o1"})
 	e.check(false, check.Request{Principal: bob, Action: role.PermOrgsRead, OrgID: "o1"})
-	e.check(false, check.Request{Principal: bob, Action: "project:read"})
+	e.check(false, check.Request{Principal: bob, Action: "app.project:read"})
 
 	// 所属が使えなくなれば Org の範囲の付与は効かない（TTL の後）。
 	delete(m, bob.ID)
-	e.check(true, check.Request{Principal: bob, Action: "project:read", OrgID: "o1"})
+	e.check(true, check.Request{Principal: bob, Action: "app.project:read", OrgID: "o1"})
 	e.clk.Advance(time.Minute)
-	e.check(false, check.Request{Principal: bob, Action: "project:read", OrgID: "o1"})
+	e.check(false, check.Request{Principal: bob, Action: "app.project:read", OrgID: "o1"})
 }
 
 func TestOrgOff(t *testing.T) {
 	e := newEnv(t, nil)
-	r := e.role("", "project:read")
+	r := e.role("", "app.project:read")
 	e.bind(r.ID, alice, "o1", "", "")
 	e.bind(role.RealmSupport, alice, "", "", "")
 	// Org がオフなら、Org の範囲の付与と org_role は効かず、realm の範囲で判定する。
-	e.check(false, check.Request{Principal: alice, Action: "project:read", OrgID: "o1"})
+	e.check(false, check.Request{Principal: alice, Action: "app.project:read", OrgID: "o1"})
 	e.check(true, check.Request{Principal: alice, Action: role.PermOrgsRead, OrgID: "o1"})
 }
 
 func TestGroups(t *testing.T) {
 	m := members{alice.ID: {"o1": port.OrgMember}, robot.ID: {"o1": port.OrgMember}}
 	e := newEnv(t, m)
-	r := e.role("", "project:read")
+	r := e.role("", "app.project:read")
 	g := e.group("", alice, robot)
 	e.bind(r.ID, check.Principal{Type: port.PrincipalGroup, ID: g.ID}, "", "", "")
 	og := e.group("o1", alice, bob)
-	w := e.role("o1", "project:write")
+	w := e.role("o1", "app.project:write")
 	e.bind(w.ID, check.Principal{Type: port.PrincipalGroup, ID: og.ID}, "o1", "", "")
 
-	e.check(true, check.Request{Principal: alice, Action: "project:read"})
-	e.check(true, check.Request{Principal: robot, Action: "project:read"})
-	e.check(false, check.Request{Principal: bob, Action: "project:read"})
-	e.check(true, check.Request{Principal: alice, Action: "project:write", OrgID: "o1"})
+	e.check(true, check.Request{Principal: alice, Action: "app.project:read"})
+	e.check(true, check.Request{Principal: robot, Action: "app.project:read"})
+	e.check(false, check.Request{Principal: bob, Action: "app.project:read"})
+	e.check(true, check.Request{Principal: alice, Action: "app.project:write", OrgID: "o1"})
 	// Org の Group は、その Org の使える所属を持つ間だけ効く。
-	e.check(false, check.Request{Principal: bob, Action: "project:write", OrgID: "o1"})
-	e.check(false, check.Request{Principal: alice, Action: "project:write"})
+	e.check(false, check.Request{Principal: bob, Action: "app.project:write", OrgID: "o1"})
+	e.check(false, check.Request{Principal: alice, Action: "app.project:write"})
 }
 
 func TestCacheInvalidate(t *testing.T) {
 	e := newEnv(t, nil)
-	r := e.role("", "project:read")
-	e.check(false, check.Request{Principal: alice, Action: "project:read"})
+	r := e.role("", "app.project:read")
+	e.check(false, check.Request{Principal: alice, Action: "app.project:read"})
 	b := e.bind(r.ID, alice, "", "", "")
 	// キャッシュの間は古い判定。Invalidate ですぐに反映する。
-	e.check(false, check.Request{Principal: alice, Action: "project:read"})
+	e.check(false, check.Request{Principal: alice, Action: "app.project:read"})
 	e.c.Invalidate(realm)
-	e.check(true, check.Request{Principal: alice, Action: "project:read"})
+	e.check(true, check.Request{Principal: alice, Action: "app.project:read"})
 	e.tx(func(ctx context.Context, tx port.Tx) error { return tx.RoleBindings().Delete(ctx, realm, b.ID) })
-	e.check(true, check.Request{Principal: alice, Action: "project:read"})
+	e.check(true, check.Request{Principal: alice, Action: "app.project:read"})
 	// TTL を過ぎれば反映する。
 	e.clk.Advance(time.Minute)
-	e.check(false, check.Request{Principal: alice, Action: "project:read"})
+	e.check(false, check.Request{Principal: alice, Action: "app.project:read"})
 	// CheckTx はキャッシュを使わない。
 	e.bind(r.ID, alice, "", "", "")
 	e.tx(func(ctx context.Context, tx port.Tx) error {
-		ok, err := e.c.CheckTx(ctx, tx, realm, check.Request{Principal: alice, Action: "project:read"})
+		ok, err := e.c.CheckTx(ctx, tx, realm, check.Request{Principal: alice, Action: "app.project:read"})
 		if err != nil || !ok {
 			t.Errorf("CheckTx = %v, %v", ok, err)
 		}
@@ -244,7 +244,7 @@ func TestPermissionMatching(t *testing.T) {
 			t.Errorf("Matches(%q, %q) = %v", c.granted, c.want, got)
 		}
 	}
-	for p, ok := range map[string]bool{"project:read": true, "project:*": true, "Project:read": false, "project": false, "project:": false, ":read": false, "a:b:c": false} {
+	for p, ok := range map[string]bool{"app.project:read": true, "app.project:*": true, "Project:read": false, "project": false, "app.project:": false, ":read": false, "a:b:c": false} {
 		if role.ValidPermission(p) != ok {
 			t.Errorf("ValidPermission(%q) != %v", p, ok)
 		}
@@ -268,7 +268,7 @@ func TestOrgHierarchy(t *testing.T) {
 		}
 		return tx.Orgs().SetParent(ctx, realm, "o_leaf", "o_mid", e.clk.Now())
 	})
-	r := e.role("o_mid", "doc:write")
+	r := e.role("o_mid", "app.doc:write")
 	e.bind(r.ID, bob, "o_mid", "", "")
 
 	// 根の admin は子孫で admin の権限を持つ。関係の無い Org では持たない。
@@ -276,15 +276,15 @@ func TestOrgHierarchy(t *testing.T) {
 	e.check(true, check.Request{Principal: alice, Action: role.PermOrgInvite, OrgID: "o_mid"})
 	e.check(false, check.Request{Principal: alice, Action: role.PermOrgInvite, OrgID: "o_other"})
 	// 中間の Org の付与は子に効き、親には効かない。
-	e.check(true, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_leaf"})
-	e.check(false, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_root"})
+	e.check(true, check.Request{Principal: bob, Action: "app.doc:write", OrgID: "o_leaf"})
+	e.check(false, check.Request{Principal: bob, Action: "app.doc:write", OrgID: "o_root"})
 	e.check(false, check.Request{Principal: bob, Action: role.PermOrgInvite, OrgID: "o_leaf"})
 
 	// 子の Org が使えなければ、祖先からは効かない。
 	m[unusable] = map[string]port.OrgRole{"o_leaf": ""}
 	e.c.Invalidate(realm)
 	e.check(false, check.Request{Principal: alice, Action: role.PermOrgInvite, OrgID: "o_leaf"})
-	e.check(false, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_leaf"})
+	e.check(false, check.Request{Principal: bob, Action: "app.doc:write", OrgID: "o_leaf"})
 	delete(m, unusable)
 	// 祖先の所属が使えなければ効かない。
 	delete(m[alice.ID], "o_root")
@@ -293,8 +293,8 @@ func TestOrgHierarchy(t *testing.T) {
 	// 階層がオフなら祖先の付与は効かない。
 	e.c.Hierarchy = false
 	e.c.Invalidate(realm)
-	e.check(false, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_leaf"})
-	e.check(true, check.Request{Principal: bob, Action: "doc:write", OrgID: "o_mid"})
+	e.check(false, check.Request{Principal: bob, Action: "app.doc:write", OrgID: "o_leaf"})
+	e.check(true, check.Request{Principal: bob, Action: "app.doc:write", OrgID: "o_mid"})
 }
 
 // bindIf は条件付きの付与を作る。
@@ -325,11 +325,11 @@ func (e *env) decide(r check.Request) check.Decision {
 // 付与の条件（ADR 0084）：条件を満たすときだけ効き、条件だけで拒んだときは理由を返す。
 func TestConditionalGrants(t *testing.T) {
 	e := newEnv(t, nil)
-	approver := e.role("", "payment:approve", "payment:read")
+	approver := e.role("", "app.payment:approve", "app.payment:read")
 	e.bindIf(approver.ID, alice, `{"all":[{"amr_has":["hwk"]},{"risk_at_most":{"type":"account","level":"low"}}]}`)
-	reader := e.role("", "payment:read")
+	reader := e.role("", "app.payment:read")
 	e.bindIf(reader.ID, bob, `{"factors_at_least":2}`)
-	e.bind(e.role("", "payment:read").ID, bob, "", "", "") // 条件なしの付与があれば、条件付きの付与は見ない
+	e.bind(e.role("", "app.payment:read").ID, bob, "", "", "") // 条件なしの付与があれば、条件付きの付与は見ない
 	e.bindIf(approver.ID, robot, `not json`)
 
 	now := e.clk.Now()
@@ -341,17 +341,17 @@ func TestConditionalGrants(t *testing.T) {
 		r    check.Request
 		want check.Decision
 	}{
-		{"no context", check.Request{Principal: alice, Action: "payment:approve"}, check.Decision{Unmet: []string{"condition.amr", "condition.risk.account"}}},
-		{"password", check.Request{Principal: alice, Action: "payment:approve", Context: pwd}, check.Decision{Unmet: []string{"condition.amr", "condition.risk.account"}}},
-		{"passkey", check.Request{Principal: alice, Action: "payment:approve", Context: hwk}, check.Decision{Allow: true}},
-		{"risky", check.Request{Principal: alice, Action: "payment:approve", Context: risky}, check.Decision{Unmet: []string{"condition.risk.account"}}},
+		{"no context", check.Request{Principal: alice, Action: "app.payment:approve"}, check.Decision{Unmet: []string{"condition.amr", "condition.risk.account"}}},
+		{"password", check.Request{Principal: alice, Action: "app.payment:approve", Context: pwd}, check.Decision{Unmet: []string{"condition.amr", "condition.risk.account"}}},
+		{"passkey", check.Request{Principal: alice, Action: "app.payment:approve", Context: hwk}, check.Decision{Allow: true}},
+		{"risky", check.Request{Principal: alice, Action: "app.payment:approve", Context: risky}, check.Decision{Unmet: []string{"condition.risk.account"}}},
 		// 境界を厳しくしなければ（既定の low < 30）通る。明示の境界は realm の一覧の境界に代わる。
-		{"bands", check.Request{Principal: alice, Action: "payment:approve", Context: risky, Bands: check.Bands{"account": {Medium: 50, High: 80}}}, check.Decision{Allow: true}},
+		{"bands", check.Request{Principal: alice, Action: "app.payment:approve", Context: risky, Bands: check.Bands{"account": {Medium: 50, High: 80}}}, check.Decision{Allow: true}},
 		// 付与の無い操作の拒否は理由なし。
-		{"no grant", check.Request{Principal: alice, Action: "payment:send", Context: pwd}, check.Decision{}},
-		{"unconditional", check.Request{Principal: bob, Action: "payment:read"}, check.Decision{Allow: true}},
+		{"no grant", check.Request{Principal: alice, Action: "app.payment:send", Context: pwd}, check.Decision{}},
+		{"unconditional", check.Request{Principal: bob, Action: "app.payment:read"}, check.Decision{Allow: true}},
 		// 読めない条件の付与は効かない（理由も返さない）。
-		{"broken", check.Request{Principal: robot, Action: "payment:approve", Context: hwk}, check.Decision{}},
+		{"broken", check.Request{Principal: robot, Action: "app.payment:approve", Context: hwk}, check.Decision{}},
 	} {
 		if got := e.decide(c.r); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: Decide = %+v, want %+v", c.name, got, c.want)
@@ -361,7 +361,7 @@ func TestConditionalGrants(t *testing.T) {
 	e.tx(func(ctx context.Context, tx port.Tx) error {
 		return tx.RiskTypes().Put(ctx, port.RiskType{RealmID: realm, Name: "account", Enabled: true, BandMedium: 50, BandHigh: 80, CreatedAt: now, UpdatedAt: now})
 	})
-	if got := e.decide(check.Request{Principal: alice, Action: "payment:approve", Context: risky}); !got.Allow {
+	if got := e.decide(check.Request{Principal: alice, Action: "app.payment:approve", Context: risky}); !got.Allow {
 		t.Errorf("realm bands: %+v", got)
 	}
 	// Holds は今の文脈で条件を満たす付与だけを数える。
@@ -370,7 +370,7 @@ func TestConditionalGrants(t *testing.T) {
 			ac   *check.AuthContext
 			want bool
 		}{{nil, false}, {pwd, false}, {hwk, true}} {
-			if ok, err := e.c.Holds(ctx, tx, realm, alice, "", []string{"payment:approve"}, c.ac); err != nil || ok != c.want {
+			if ok, err := e.c.Holds(ctx, tx, realm, alice, "", []string{"app.payment:approve"}, c.ac); err != nil || ok != c.want {
 				t.Errorf("Holds(%+v) = %v, %v", c.ac, ok, err)
 			}
 		}
@@ -393,13 +393,13 @@ func TestRequirements(t *testing.T) {
 		if err := tx.Orgs().SetParent(ctx, realm, "o_leaf", "o_root", now); err != nil {
 			return err
 		}
-		if err := tx.Orgs().SetSettings(ctx, realm, "o_root", []byte(`{"requirements":{"payment:send":{"factors_at_least":2}}}`), now); err != nil {
+		if err := tx.Orgs().SetSettings(ctx, realm, "o_root", []byte(`{"requirements":{"app.payment:send":{"factors_at_least":2}}}`), now); err != nil {
 			return err
 		}
-		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: realm, Name: "payment", CreatedAt: now, UpdatedAt: now,
-			Settings: []byte(`{"requirements":{"payment:*":{"auth_within":300},"payment:send":{"risk_at_most":{"type":"account","level":"low"}}},"bands":{"account":{"medium":20,"high":60}}}`)})
+		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: realm, Name: "app.payment", CreatedAt: now, UpdatedAt: now,
+			Settings: []byte(`{"requirements":{"app.payment:*":{"auth_within":300},"app.payment:send":{"risk_at_most":{"type":"account","level":"low"}}},"bands":{"account":{"medium":20,"high":60}}}`)})
 	})
-	payer := e.role("", "payment:send", "payment:read", "doc:read")
+	payer := e.role("", "app.payment:send", "app.payment:read", "app.doc:read")
 	e.bind(payer.ID, alice, "", "", "")
 	e.bind(payer.ID, bob, "", "", "")
 
@@ -413,20 +413,20 @@ func TestRequirements(t *testing.T) {
 		r    check.Request
 		want check.Decision
 	}{
-		{"fresh", check.Request{Principal: alice, Action: "payment:send", Context: fresh}, check.Decision{Allow: true}},
+		{"fresh", check.Request{Principal: alice, Action: "app.payment:send", Context: fresh}, check.Decision{Allow: true}},
 		// 同じ操作に当たる要件（`payment:*` と `payment:send`）はすべて AND する。
-		{"old", check.Request{Principal: alice, Action: "payment:read", Context: old}, check.Decision{Unmet: []string{"condition.auth_age"}, StepUp: check.StepUp{MaxAge: 300}}},
-		{"no context", check.Request{Principal: alice, Action: "payment:send"}, check.Decision{Unmet: []string{"condition.attested", "condition.auth_age", "condition.risk.account"}, StepUp: check.StepUp{MaxAge: 300}}},
-		{"namespace bands", check.Request{Principal: alice, Action: "payment:send", Context: risky}, check.Decision{Unmet: []string{"condition.risk.account"}}},
+		{"old", check.Request{Principal: alice, Action: "app.payment:read", Context: old}, check.Decision{Unmet: []string{"condition.auth_age"}, StepUp: check.StepUp{MaxAge: 300}}},
+		{"no context", check.Request{Principal: alice, Action: "app.payment:send"}, check.Decision{Unmet: []string{"condition.attested", "condition.auth_age", "condition.risk.account"}, StepUp: check.StepUp{MaxAge: 300}}},
+		{"namespace bands", check.Request{Principal: alice, Action: "app.payment:send", Context: risky}, check.Decision{Unmet: []string{"condition.risk.account"}}},
 		// 要件は attested() を暗黙に AND する。
-		{"declared", check.Request{Principal: alice, Action: "payment:read", Context: declared}, check.Decision{Unmet: []string{"condition.attested"}}},
+		{"declared", check.Request{Principal: alice, Action: "app.payment:read", Context: declared}, check.Decision{Unmet: []string{"condition.attested"}}},
 		// 別の名前空間の操作には効かない。付与の無い操作は理由なし。
-		{"other namespace", check.Request{Principal: alice, Action: "doc:read", Context: old}, check.Decision{Allow: true}},
-		{"no grant", check.Request{Principal: alice, Action: "payment:approve", Context: old}, check.Decision{}},
+		{"other namespace", check.Request{Principal: alice, Action: "app.doc:read", Context: old}, check.Decision{Allow: true}},
+		{"no grant", check.Request{Principal: alice, Action: "app.payment:approve", Context: old}, check.Decision{}},
 		// Org の要件は判定の Org と祖先のもの。
-		{"org leaf", check.Request{Principal: alice, Action: "payment:send", OrgID: "o_leaf", Context: &check.AuthContext{AMR: []string{"pwd"}, Factors: 1, AuthTime: now, Attested: true, Risk: map[string]int{"account": 1}}},
+		{"org leaf", check.Request{Principal: alice, Action: "app.payment:send", OrgID: "o_leaf", Context: &check.AuthContext{AMR: []string{"pwd"}, Factors: 1, AuthTime: now, Attested: true, Risk: map[string]int{"account": 1}}},
 			check.Decision{Unmet: []string{"condition.factors"}}},
-		{"org fresh", check.Request{Principal: alice, Action: "payment:send", OrgID: "o_leaf", Context: fresh}, check.Decision{Allow: true}},
+		{"org fresh", check.Request{Principal: alice, Action: "app.payment:send", OrgID: "o_leaf", Context: fresh}, check.Decision{Allow: true}},
 	} {
 		if got := e.decide(c.r); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: Decide = %+v, want %+v", c.name, got, c.want)
@@ -434,24 +434,24 @@ func TestRequirements(t *testing.T) {
 	}
 	// 変更は Invalidate ですぐ効く（キャッシュした要件を捨てる）。
 	e.tx(func(ctx context.Context, tx port.Tx) error {
-		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: realm, Name: "payment", Settings: []byte(`{}`), CreatedAt: now, UpdatedAt: now})
+		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: realm, Name: "app.payment", Settings: []byte(`{}`), CreatedAt: now, UpdatedAt: now})
 	})
 	e.c.Invalidate(realm)
-	if got := e.decide(check.Request{Principal: alice, Action: "payment:read", Context: old}); !got.Allow {
+	if got := e.decide(check.Request{Principal: alice, Action: "app.payment:read", Context: old}); !got.Allow {
 		t.Errorf("after clearing: %+v", got)
 	}
 	// 階層がオフなら祖先の要件は効かない。
 	e.c.Hierarchy = false
 	e.c.Invalidate(realm)
-	if got := e.decide(check.Request{Principal: alice, Action: "payment:send", OrgID: "o_leaf", Context: old}); !got.Allow {
+	if got := e.decide(check.Request{Principal: alice, Action: "app.payment:send", OrgID: "o_leaf", Context: old}); !got.Allow {
 		t.Errorf("hierarchy off: %+v", got)
 	}
 }
 
 func TestRequirementsValidate(t *testing.T) {
 	cat := risk.CatalogOf([]port.RiskType{{Name: "device", Enabled: false}})
-	ok := check.Namespace{Requirements: check.Requirements{"payment:*": {AuthWithin: 300}}, Bands: map[string]risk.Band{"account": {Medium: 20, High: 60}}}
-	if err := ok.Validate("payment", cat); err != nil {
+	ok := check.Namespace{Requirements: check.Requirements{"app.payment:*": {AuthWithin: 300}}, Bands: map[string]risk.Band{"account": {Medium: 20, High: 60}}}
+	if err := ok.Validate("app.payment", cat); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
@@ -460,13 +460,13 @@ func TestRequirementsValidate(t *testing.T) {
 		code string
 	}{
 		{"Payment", check.Namespace{}, "invalid_namespace"},
-		{"payment", check.Namespace{Requirements: check.Requirements{"doc:read": {AuthWithin: 300}}}, "invalid_requirement"},
-		{"payment", check.Namespace{Requirements: check.Requirements{"payment": {AuthWithin: 300}}}, "invalid_requirement"},
-		{"payment", check.Namespace{Requirements: check.Requirements{"payment:send": {}}}, "invalid_condition"},
-		{"payment", check.Namespace{Requirements: check.Requirements{"payment:send": {RiskBelow: &check.RiskScore{Type: "device", Score: 10}}}}, "invalid_condition"},
-		{"payment", check.Namespace{Bands: map[string]risk.Band{"device": {Medium: 10, High: 20}}}, "invalid_band"},
-		{"payment", check.Namespace{Bands: map[string]risk.Band{"account": {Medium: 40, High: 60}}}, "invalid_band"},
-		{"payment", check.Namespace{Bands: map[string]risk.Band{"account": {Medium: 20, High: 20}}}, "invalid_band"},
+		{"app.payment", check.Namespace{Requirements: check.Requirements{"app.doc:read": {AuthWithin: 300}}}, "invalid_requirement"},
+		{"app.payment", check.Namespace{Requirements: check.Requirements{"app.payment": {AuthWithin: 300}}}, "invalid_requirement"},
+		{"app.payment", check.Namespace{Requirements: check.Requirements{"app.payment:send": {}}}, "invalid_condition"},
+		{"app.payment", check.Namespace{Requirements: check.Requirements{"app.payment:send": {RiskBelow: &check.RiskScore{Type: "device", Score: 10}}}}, "invalid_condition"},
+		{"app.payment", check.Namespace{Bands: map[string]risk.Band{"device": {Medium: 10, High: 20}}}, "invalid_band"},
+		{"app.payment", check.Namespace{Bands: map[string]risk.Band{"account": {Medium: 40, High: 60}}}, "invalid_band"},
+		{"app.payment", check.Namespace{Bands: map[string]risk.Band{"account": {Medium: 20, High: 20}}}, "invalid_band"},
 	} {
 		if err := c.ns.Validate(c.name, cat); errs.KindOf(err) != errs.KindInvalid || !errors.Is(err, errs.WithCode(errs.KindInvalid, c.code, "")) {
 			t.Errorf("%s %+v: %v, want %s", c.name, c.ns, err, c.code)
@@ -479,12 +479,12 @@ func TestStepUp(t *testing.T) {
 	e := newEnv(t, nil)
 	now := e.clk.Now()
 	e.tx(func(ctx context.Context, tx port.Tx) error {
-		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: realm, Name: "payment", CreatedAt: now, UpdatedAt: now,
-			Settings: []byte(`{"requirements":{"payment:*":{"auth_within":600},"payment:send":{"all":[{"aal_at_least":2},{"auth_within":300}]}}}`)})
+		return tx.ActionNamespaces().Put(ctx, port.ActionNamespace{RealmID: realm, Name: "app.payment", CreatedAt: now, UpdatedAt: now,
+			Settings: []byte(`{"requirements":{"app.payment:*":{"auth_within":600},"app.payment:send":{"all":[{"aal_at_least":2},{"auth_within":300}]}}}`)})
 	})
-	payer := e.role("", "payment:send", "payment:read")
+	payer := e.role("", "app.payment:send", "app.payment:read")
 	e.bind(payer.ID, alice, "", "", "")
-	approver := e.role("", "payment:approve")
+	approver := e.role("", "app.payment:approve")
 	e.bindIf(approver.ID, alice, `{"any":[{"aal_at_least":3},{"amr_has":["sc"]}]}`)
 
 	pwd := &check.AuthContext{AMR: []string{"pwd"}, Factors: 1, AuthTime: now.Add(-time.Hour), Attested: true}
@@ -494,13 +494,13 @@ func TestStepUp(t *testing.T) {
 		r    check.Request
 		want check.Decision
 	}{
-		{"weak and old", check.Request{Principal: alice, Action: "payment:send", Context: pwd},
+		{"weak and old", check.Request{Principal: alice, Action: "app.payment:send", Context: pwd},
 			check.Decision{Unmet: []string{"condition.aal", "condition.auth_age"}, StepUp: check.StepUp{AAL: 2, MaxAge: 300}}},
-		{"strong", check.Request{Principal: alice, Action: "payment:send", Context: mfa}, check.Decision{Allow: true}},
-		{"other action", check.Request{Principal: alice, Action: "payment:read", Context: pwd},
+		{"strong", check.Request{Principal: alice, Action: "app.payment:send", Context: mfa}, check.Decision{Allow: true}},
+		{"other action", check.Request{Principal: alice, Action: "app.payment:read", Context: pwd},
 			check.Decision{Unmet: []string{"condition.auth_age"}, StepUp: check.StepUp{MaxAge: 600}}},
 		// 付与の条件の any は、満たさなかった子をすべて集める（amr_has は手がかりにならない）。
-		{"grant condition", check.Request{Principal: alice, Action: "payment:approve", Context: mfa},
+		{"grant condition", check.Request{Principal: alice, Action: "app.payment:approve", Context: mfa},
 			check.Decision{Unmet: []string{"condition.aal", "condition.amr"}, StepUp: check.StepUp{AAL: 3}}},
 	} {
 		if got := e.decide(c.r); !reflect.DeepEqual(got, c.want) {
@@ -513,21 +513,21 @@ func TestStepUp(t *testing.T) {
 // スコープは付与を広げない。Holds もスコープの外の権限は持たないとみなす。
 func TestScopedContext(t *testing.T) {
 	e := newEnv(t, nil)
-	r := e.role("", "project:read", "project:write", "doc:*")
+	r := e.role("", "app.project:read", "app.project:write", "app.doc:*")
 	e.bind(r.ID, alice, "", "", "")
 	scoped := func(scopes ...string) *check.AuthContext {
 		return &check.AuthContext{AMR: []string{"pat"}, Factors: 1, AuthTime: e.clk.Now(), Attested: true, Scoped: true, Scopes: scopes}
 	}
-	e.check(true, check.Request{Principal: alice, Action: "project:read", Context: scoped("project:read")})
-	e.check(false, check.Request{Principal: alice, Action: "project:write", Context: scoped("project:read")})
-	e.check(true, check.Request{Principal: alice, Action: "doc:write", Context: scoped("doc:*")})
-	e.check(true, check.Request{Principal: alice, Action: "project:write", Context: scoped("project:*")})
+	e.check(true, check.Request{Principal: alice, Action: "app.project:read", Context: scoped("app.project:read")})
+	e.check(false, check.Request{Principal: alice, Action: "app.project:write", Context: scoped("app.project:read")})
+	e.check(true, check.Request{Principal: alice, Action: "app.doc:write", Context: scoped("app.doc:*")})
+	e.check(true, check.Request{Principal: alice, Action: "app.project:write", Context: scoped("app.project:*")})
 	// 本人が持たない権限はスコープにあっても許さない。
-	e.check(false, check.Request{Principal: alice, Action: "billing:read", Context: scoped("billing:read")})
+	e.check(false, check.Request{Principal: alice, Action: "app.billing:read", Context: scoped("app.billing:read")})
 	// 空のスコープは何も許さない（Scoped なら fail-closed）。
-	e.check(false, check.Request{Principal: alice, Action: "project:read", Context: scoped()})
+	e.check(false, check.Request{Principal: alice, Action: "app.project:read", Context: scoped()})
 	// 絞っていない文脈は今までどおり。
-	e.check(true, check.Request{Principal: alice, Action: "project:write", Context: &check.AuthContext{AMR: []string{"pwd"}}})
+	e.check(true, check.Request{Principal: alice, Action: "app.project:write", Context: &check.AuthContext{AMR: []string{"pwd"}}})
 
 	e.tx(func(ctx context.Context, tx port.Tx) error {
 		for _, c := range []struct {
@@ -535,11 +535,11 @@ func TestScopedContext(t *testing.T) {
 			ac    *check.AuthContext
 			want  bool
 		}{
-			{[]string{"project:read"}, scoped("project:read"), true},
-			{[]string{"project:read", "project:write"}, scoped("project:read"), false},
-			{[]string{"doc:*"}, scoped("doc:read"), false},
-			{[]string{"doc:*"}, scoped("doc:*"), true},
-			{[]string{"project:read", "project:write"}, nil, true},
+			{[]string{"app.project:read"}, scoped("app.project:read"), true},
+			{[]string{"app.project:read", "app.project:write"}, scoped("app.project:read"), false},
+			{[]string{"app.doc:*"}, scoped("app.doc:read"), false},
+			{[]string{"app.doc:*"}, scoped("app.doc:*"), true},
+			{[]string{"app.project:read", "app.project:write"}, nil, true},
 		} {
 			got, err := e.c.Holds(ctx, tx, realm, alice, "", c.perms, c.ac)
 			if err != nil {
@@ -556,15 +556,15 @@ func TestScopedContext(t *testing.T) {
 // TestDecideMany は、一括の判定が 1 件ずつの Decide と同じ結果を同じ順で返すこと（リソースを限った付与と Org を含む）。
 func TestDecideMany(t *testing.T) {
 	e := newEnv(t, members{"u_alice": {"org_a": port.OrgMember}})
-	reader := e.role("", "doc:read")
-	writer := e.role("", "doc:write")
+	reader := e.role("", "app.doc:read")
+	writer := e.role("", "app.doc:write")
 	e.bind(reader.ID, alice, "", "", "")
 	e.bind(writer.ID, alice, "", "doc", "d1")
 	items := []check.Item{
-		{Action: "doc:read"},
-		{Action: "doc:write", Resource: check.Resource{Type: "doc", ID: "d1"}},
-		{Action: "doc:write", Resource: check.Resource{Type: "doc", ID: "d2"}},
-		{Action: "doc:delete"},
+		{Action: "app.doc:read"},
+		{Action: "app.doc:write", Resource: check.Resource{Type: "doc", ID: "d1"}},
+		{Action: "app.doc:write", Resource: check.Resource{Type: "doc", ID: "d2"}},
+		{Action: "app.doc:delete"},
 	}
 	for _, orgID := range []string{"", "org_a"} {
 		base := check.Request{Principal: alice, OrgID: orgID}

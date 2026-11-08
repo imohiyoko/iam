@@ -46,14 +46,14 @@ func TestE2EM4OrgScope(t *testing.T) {
 	delay := l.e.cfg.Security.Session.ValidityMaxDelay.D()
 
 	// 1. 独自のロールを Group 経由で Acme にだけ付与する。判定は Org ごと、realm の範囲には効かない。
-	_, body := l.meDo(t, "POST", owner, "/v1/me/orgs/"+acme+"/roles", map[string]any{"name": "editor", "permissions": []string{"doc:read", "doc:write"}})
+	_, body := l.meDo(t, "POST", owner, "/v1/me/orgs/"+acme+"/roles", map[string]any{"name": "editor", "permissions": []string{"app.doc:read", "app.doc:write"}})
 	editor := body["id"].(string)
 	_, body = l.meDo(t, "POST", owner, "/v1/me/orgs/"+acme+"/groups", map[string]any{"name": "Writers"})
 	writers := body["id"].(string)
 	if code, body := l.meDo(t, "POST", owner, "/v1/me/orgs/"+acme+"/role-bindings", map[string]any{"role": editor, "principal_type": "group", "principal_id": writers}); code != 201 {
 		t.Fatalf("bind group: %d %v", code, body)
 	}
-	if l.adminCheck(t, checker, samID, "doc:write", acme) {
+	if l.adminCheck(t, checker, samID, "app.doc:write", acme) {
 		t.Fatal("allowed before joining the group")
 	}
 	// 管理の変更は、このインスタンスではすぐに反映する。
@@ -64,10 +64,10 @@ func TestE2EM4OrgScope(t *testing.T) {
 		action, org string
 		want        bool
 	}{
-		{"doc:write", acme, true},
-		{"doc:delete", acme, false},
-		{"doc:write", beta, false},
-		{"doc:write", "", false},
+		{"app.doc:write", acme, true},
+		{"app.doc:delete", acme, false},
+		{"app.doc:write", beta, false},
+		{"app.doc:write", "", false},
 		{role.PermOrgRead, beta, true},
 		{role.PermOrgInvite, acme, false},
 	} {
@@ -76,7 +76,7 @@ func TestE2EM4OrgScope(t *testing.T) {
 		}
 	}
 	// 本人の check は active な Org（ログインで選ばれた Org）か、指定した Org で判定する。
-	if code, out := l.meDo(t, "POST", sam, "/v1/me:check", map[string]any{"action": "doc:write", "org_id": acme}); code != 200 || out["allowed"] != true {
+	if code, out := l.meDo(t, "POST", sam, "/v1/me:check", map[string]any{"action": "app.doc:write", "org_id": acme}); code != 200 || out["allowed"] != true {
 		t.Fatalf("self check: %d %v", code, out)
 	}
 
@@ -94,7 +94,7 @@ func TestE2EM4OrgScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.advance(delay + time.Second)
-	if l.adminCheck(t, checker, samID, "doc:write", acme) || l.adminCheck(t, checker, samID, role.PermOrgRead, acme) {
+	if l.adminCheck(t, checker, samID, "app.doc:write", acme) || l.adminCheck(t, checker, samID, role.PermOrgRead, acme) {
 		t.Fatal("membership outside validity still allowed after the delay")
 	}
 	// 本人の check は、realm の範囲の付与があっても、使える所属の無い Org では allowed: false。
@@ -124,7 +124,7 @@ func TestE2EM4OrgScope(t *testing.T) {
 
 	// 3. 権限の無い管理操作は permission_denied。
 	_, support := l.operator(t, "support@example.com", role.RealmSupport)
-	if code, out := l.admin(t, "/v1/admin/authz:check", support, map[string]any{"principal_id": samID, "action": "doc:read"}); code != 403 || out["error"] != "permission_denied" {
+	if code, out := l.admin(t, "/v1/admin/authz:check", support, map[string]any{"principal_id": samID, "action": "app.doc:read"}); code != 403 || out["error"] != "permission_denied" {
 		t.Fatalf("support check: %d %v", code, out)
 	}
 	if code, out := l.admin(t, "/v1/admin/users", support, map[string]any{"email": "x@example.com"}); code != 403 || out["error"] != "permission_denied" {
@@ -144,7 +144,7 @@ func TestE2EM4RealmScope(t *testing.T) {
 	patID := l.userID(t, "pat@example.com")
 	delay := l.e.cfg.Security.Session.ValidityMaxDelay.D()
 
-	code, body := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "reviewer", "permissions": []string{"doc:read", "orgs:read"}})
+	code, body := l.admin(t, "/v1/admin/roles", owner, map[string]any{"name": "reviewer", "permissions": []string{"app.doc:read", "orgs:read"}})
 	if code != 201 {
 		t.Fatalf("create realm role: %d %v", code, body)
 	}
@@ -152,11 +152,11 @@ func TestE2EM4RealmScope(t *testing.T) {
 	if code, body := l.admin(t, "/v1/admin/role-bindings", owner, map[string]any{"role": reviewer, "principal_type": "user", "principal_id": patID}); code != 201 {
 		t.Fatalf("bind: %d %v", code, body)
 	}
-	if !l.adminCheck(t, checker, patID, "doc:read", "") || l.adminCheck(t, checker, patID, "doc:write", "") {
+	if !l.adminCheck(t, checker, patID, "app.doc:read", "") || l.adminCheck(t, checker, patID, "app.doc:write", "") {
 		t.Fatal("realm role not applied")
 	}
 	// Org がオフなら org_id は無視して realm の範囲で判定する。
-	if !l.adminCheck(t, checker, patID, "doc:read", "org_unknown") {
+	if !l.adminCheck(t, checker, patID, "app.doc:read", "org_unknown") {
 		t.Fatal("org id should be ignored with org off")
 	}
 	// リソースを限った付与。
@@ -169,7 +169,7 @@ func TestE2EM4RealmScope(t *testing.T) {
 		rtype, rid string
 		want       bool
 	}{{"doc", "d1", true}, {"doc", "d2", false}, {"", "", false}} {
-		body := map[string]any{"principal_id": appID, "action": "doc:read"}
+		body := map[string]any{"principal_id": appID, "action": "app.doc:read"}
 		if c.rtype != "" {
 			body["resource_type"], body["resource_id"] = c.rtype, c.rid
 		}

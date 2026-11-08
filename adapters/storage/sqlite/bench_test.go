@@ -82,7 +82,7 @@ func BenchmarkCheckMiss(b *testing.B) {
 		}
 		for i := range 4 {
 			r := port.Role{ID: id.New(id.Role), PublicID: id.NewExternal(id.Role), RealmID: realm, Name: "role" + string(rune('a'+i)),
-				Permissions: []string{"doc:read", "doc:write", "project:" + string(rune('a'+i))}, CreatedAt: now, UpdatedAt: now}
+				Permissions: []string{"app.doc:read", "app.doc:write", "app.project:" + string(rune('a'+i))}, CreatedAt: now, UpdatedAt: now}
 			if err := tx.Roles().Create(ctx, r); err != nil {
 				return err
 			}
@@ -109,7 +109,7 @@ func BenchmarkCheckMiss(b *testing.B) {
 		b.Fatal(err)
 	}
 	c := &check.Checker{Storage: s, Clock: clk}
-	req := check.Request{Principal: user, Action: "project:d"}
+	req := check.Request{Principal: user, Action: "app.project:d"}
 	for b.Loop() {
 		ok, err := c.Check(ctx, realm, req)
 		if err != nil || !ok {

@@ -2090,7 +2090,7 @@ type OrgSettings struct {
 	// MaxAuthAgeSeconds 重要な操作に求める直近の認証の期限
 	MaxAuthAgeSeconds *int64 `json:"max_auth_age_seconds,omitempty"`
 
-	// Requirements Org の要件（ADR 0084）。操作（ワイルドカード `payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。 この Org を文脈にした判定で、どの付与で許されたかに関係なく求め、`attested` を暗黙に AND する（厳しくする方向だけ）。 Org 階層がオンなら祖先の Org の要件も AND する。操作が外れれば invalid_requirement、条件が外れれば invalid_condition
+	// Requirements Org の要件（ADR 0084）。操作（ワイルドカード `shop.payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。 この Org を文脈にした判定で、どの付与で許されたかに関係なく求め、`attested` を暗黙に AND する（厳しくする方向だけ）。 Org 階層がオンなら祖先の Org の要件も AND する。操作が外れれば invalid_requirement、条件が外れれば invalid_condition
 	Requirements *map[string]map[string]interface{} `json:"requirements,omitempty"`
 
 	// Warnings 警告のコードごとのアクション
@@ -2135,6 +2135,41 @@ type PasskeyPolicy struct {
 
 // PasskeyPolicyMinCertificationLevel 求める FIDO の認定レベル（FIDO Metadata Service の status report）
 type PasskeyPolicyMinCertificationLevel string
+
+// PermissionCatalog defines model for PermissionCatalog.
+type PermissionCatalog struct {
+	CreatedAt   time.Time       `json:"created_at"`
+	DisplayName string          `json:"display_name"`
+	Permissions []PermissionDef `json:"permissions"`
+	Prefix      string          `json:"prefix"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+// PermissionCatalogCreate defines model for PermissionCatalogCreate.
+type PermissionCatalogCreate struct {
+	DisplayName string          `json:"display_name"`
+	Permissions []PermissionDef `json:"permissions"`
+	Prefix      string          `json:"prefix"`
+}
+
+// PermissionCatalogInput defines model for PermissionCatalogInput.
+type PermissionCatalogInput struct {
+	DisplayName string          `json:"display_name"`
+	Permissions []PermissionDef `json:"permissions"`
+}
+
+// PermissionCatalogs defines model for PermissionCatalogs.
+type PermissionCatalogs struct {
+	Catalogs []PermissionCatalog `json:"catalogs"`
+}
+
+// PermissionDef defines model for PermissionDef.
+type PermissionDef struct {
+	Description *string `json:"description,omitempty"`
+
+	// Name `<接頭辞>.<リソース>:<操作>`
+	Name string `json:"name"`
+}
 
 // PersonalAccessToken Personal Access Token（秘密は含めない。ADR 0109）
 type PersonalAccessToken struct {
@@ -3412,6 +3447,12 @@ type DeleteOrgJSONRequestBody DeleteOrgJSONBody
 // SetOrgParentJSONRequestBody defines body for SetOrgParent for application/json ContentType.
 type SetOrgParentJSONRequestBody SetOrgParentJSONBody
 
+// CreatePermissionCatalogJSONRequestBody defines body for CreatePermissionCatalog for application/json ContentType.
+type CreatePermissionCatalogJSONRequestBody = PermissionCatalogCreate
+
+// UpdatePermissionCatalogJSONRequestBody defines body for UpdatePermissionCatalog for application/json ContentType.
+type UpdatePermissionCatalogJSONRequestBody = PermissionCatalogInput
+
 // PutPersonalAccessTokenPolicyJSONRequestBody defines body for PutPersonalAccessTokenPolicy for application/json ContentType.
 type PutPersonalAccessTokenPolicyJSONRequestBody = PersonalAccessTokenPolicyInput
 
@@ -3741,6 +3782,21 @@ type ServerInterface interface {
 	// SetOrgParent Org の親を設定する・外す（Org 階層。11.4、ADR 0078）
 	// (POST /v1/admin/orgs/{id}:set-parent)
 	SetOrgParent(w http.ResponseWriter, r *http.Request, id string)
+	// ListPermissionCatalogs 連携先の権限のカタログの一覧（ADR 0121）
+	// (GET /v1/admin/permission-catalogs)
+	ListPermissionCatalogs(w http.ResponseWriter, r *http.Request)
+	// CreatePermissionCatalog 連携先の権限のカタログを登録する（ADR 0121）
+	// (POST /v1/admin/permission-catalogs)
+	CreatePermissionCatalog(w http.ResponseWriter, r *http.Request)
+	// GetPermissionCatalog 連携先の権限のカタログを返す
+	// (GET /v1/admin/permission-catalogs/{prefix})
+	GetPermissionCatalog(w http.ResponseWriter, r *http.Request, prefix string)
+	// UpdatePermissionCatalog 連携先の権限のカタログを置き換える
+	// (PUT /v1/admin/permission-catalogs/{prefix})
+	UpdatePermissionCatalog(w http.ResponseWriter, r *http.Request, prefix string)
+	// DeletePermissionCatalog 連携先の権限のカタログを消す
+	// (POST /v1/admin/permission-catalogs/{prefix}:delete)
+	DeletePermissionCatalog(w http.ResponseWriter, r *http.Request, prefix string)
 	// GetPersonalAccessTokenPolicy realm の Personal Access Token のポリシー（ADR 0109）
 	// (GET /v1/admin/personal-access-token-policy)
 	GetPersonalAccessTokenPolicy(w http.ResponseWriter, r *http.Request)
@@ -6001,6 +6057,112 @@ func (siw *ServerInterfaceWrapper) SetOrgParent(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetOrgParent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPermissionCatalogs operation middleware
+func (siw *ServerInterfaceWrapper) ListPermissionCatalogs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPermissionCatalogs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePermissionCatalog operation middleware
+func (siw *ServerInterfaceWrapper) CreatePermissionCatalog(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePermissionCatalog(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPermissionCatalog operation middleware
+func (siw *ServerInterfaceWrapper) GetPermissionCatalog(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "prefix" -------------
+	var prefix string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "prefix", r.PathValue("prefix"), &prefix, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPermissionCatalog(w, r, prefix)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdatePermissionCatalog operation middleware
+func (siw *ServerInterfaceWrapper) UpdatePermissionCatalog(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "prefix" -------------
+	var prefix string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "prefix", r.PathValue("prefix"), &prefix, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdatePermissionCatalog(w, r, prefix)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeletePermissionCatalog operation middleware
+func (siw *ServerInterfaceWrapper) DeletePermissionCatalog(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "prefix" -------------
+	var prefix string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "prefix", r.PathValue("prefix"), &prefix, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeletePermissionCatalog(w, r, prefix)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8695,6 +8857,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/saml/service-providers/{id}", wrapper.GetSAMLServiceProvider)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/saml/service-providers/{id}", wrapper.UpdateSAMLServiceProvider)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/saml/service-providers/{id}:delete", wrapper.DeleteSAMLServiceProvider)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/permission-catalogs", wrapper.ListPermissionCatalogs)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/permission-catalogs", wrapper.CreatePermissionCatalog)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/permission-catalogs/{prefix}", wrapper.GetPermissionCatalog)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/v1/admin/permission-catalogs/{prefix}", wrapper.UpdatePermissionCatalog)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/permission-catalogs/{prefix}:delete", wrapper.DeletePermissionCatalog)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/oauth/resources", wrapper.ListOAuthResources)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/oauth/resources", wrapper.CreateOAuthResource)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/oauth/resources/{id}", wrapper.GetOAuthResource)
@@ -14298,6 +14465,362 @@ func (response SetOrgParent404JSONResponse) VisitSetOrgParentResponse(w http.Res
 type SetOrgParent409JSONResponse Error
 
 func (response SetOrgParent409JSONResponse) VisitSetOrgParentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPermissionCatalogsRequestObject struct {
+}
+
+type ListPermissionCatalogsResponseObject interface {
+	VisitListPermissionCatalogsResponse(w http.ResponseWriter) error
+}
+
+type ListPermissionCatalogs200JSONResponse PermissionCatalogs
+
+func (response ListPermissionCatalogs200JSONResponse) VisitListPermissionCatalogsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPermissionCatalogs401JSONResponse struct{ ErrorJSONResponse }
+
+func (response ListPermissionCatalogs401JSONResponse) VisitListPermissionCatalogsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPermissionCatalogs403JSONResponse Error
+
+func (response ListPermissionCatalogs403JSONResponse) VisitListPermissionCatalogsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePermissionCatalogRequestObject struct {
+	Body *CreatePermissionCatalogJSONRequestBody
+}
+
+type CreatePermissionCatalogResponseObject interface {
+	VisitCreatePermissionCatalogResponse(w http.ResponseWriter) error
+}
+
+type CreatePermissionCatalog201JSONResponse PermissionCatalog
+
+func (response CreatePermissionCatalog201JSONResponse) VisitCreatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePermissionCatalog400JSONResponse struct{ ErrorJSONResponse }
+
+func (response CreatePermissionCatalog400JSONResponse) VisitCreatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePermissionCatalog401JSONResponse Error
+
+func (response CreatePermissionCatalog401JSONResponse) VisitCreatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePermissionCatalog403JSONResponse Error
+
+func (response CreatePermissionCatalog403JSONResponse) VisitCreatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePermissionCatalog409JSONResponse Error
+
+func (response CreatePermissionCatalog409JSONResponse) VisitCreatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPermissionCatalogRequestObject struct {
+	Prefix string `json:"prefix"`
+}
+
+type GetPermissionCatalogResponseObject interface {
+	VisitGetPermissionCatalogResponse(w http.ResponseWriter) error
+}
+
+type GetPermissionCatalog200JSONResponse PermissionCatalog
+
+func (response GetPermissionCatalog200JSONResponse) VisitGetPermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPermissionCatalog401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetPermissionCatalog401JSONResponse) VisitGetPermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPermissionCatalog403JSONResponse Error
+
+func (response GetPermissionCatalog403JSONResponse) VisitGetPermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPermissionCatalog404JSONResponse Error
+
+func (response GetPermissionCatalog404JSONResponse) VisitGetPermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePermissionCatalogRequestObject struct {
+	Prefix string `json:"prefix"`
+	Body   *UpdatePermissionCatalogJSONRequestBody
+}
+
+type UpdatePermissionCatalogResponseObject interface {
+	VisitUpdatePermissionCatalogResponse(w http.ResponseWriter) error
+}
+
+type UpdatePermissionCatalog200JSONResponse PermissionCatalog
+
+func (response UpdatePermissionCatalog200JSONResponse) VisitUpdatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePermissionCatalog400JSONResponse struct{ ErrorJSONResponse }
+
+func (response UpdatePermissionCatalog400JSONResponse) VisitUpdatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePermissionCatalog401JSONResponse Error
+
+func (response UpdatePermissionCatalog401JSONResponse) VisitUpdatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePermissionCatalog403JSONResponse Error
+
+func (response UpdatePermissionCatalog403JSONResponse) VisitUpdatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePermissionCatalog404JSONResponse Error
+
+func (response UpdatePermissionCatalog404JSONResponse) VisitUpdatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePermissionCatalog409JSONResponse Error
+
+func (response UpdatePermissionCatalog409JSONResponse) VisitUpdatePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePermissionCatalogRequestObject struct {
+	Prefix string `json:"prefix"`
+}
+
+type DeletePermissionCatalogResponseObject interface {
+	VisitDeletePermissionCatalogResponse(w http.ResponseWriter) error
+}
+
+type DeletePermissionCatalog204Response struct {
+}
+
+func (response DeletePermissionCatalog204Response) VisitDeletePermissionCatalogResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeletePermissionCatalog401JSONResponse struct{ ErrorJSONResponse }
+
+func (response DeletePermissionCatalog401JSONResponse) VisitDeletePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePermissionCatalog403JSONResponse Error
+
+func (response DeletePermissionCatalog403JSONResponse) VisitDeletePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePermissionCatalog404JSONResponse Error
+
+func (response DeletePermissionCatalog404JSONResponse) VisitDeletePermissionCatalogResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePermissionCatalog409JSONResponse Error
+
+func (response DeletePermissionCatalog409JSONResponse) VisitDeletePermissionCatalogResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -21440,6 +21963,21 @@ type StrictServerInterface interface {
 	// SetOrgParent Org の親を設定する・外す（Org 階層。11.4、ADR 0078）
 	// (POST /v1/admin/orgs/{id}:set-parent)
 	SetOrgParent(ctx context.Context, request SetOrgParentRequestObject) (SetOrgParentResponseObject, error)
+	// ListPermissionCatalogs 連携先の権限のカタログの一覧（ADR 0121）
+	// (GET /v1/admin/permission-catalogs)
+	ListPermissionCatalogs(ctx context.Context, request ListPermissionCatalogsRequestObject) (ListPermissionCatalogsResponseObject, error)
+	// CreatePermissionCatalog 連携先の権限のカタログを登録する（ADR 0121）
+	// (POST /v1/admin/permission-catalogs)
+	CreatePermissionCatalog(ctx context.Context, request CreatePermissionCatalogRequestObject) (CreatePermissionCatalogResponseObject, error)
+	// GetPermissionCatalog 連携先の権限のカタログを返す
+	// (GET /v1/admin/permission-catalogs/{prefix})
+	GetPermissionCatalog(ctx context.Context, request GetPermissionCatalogRequestObject) (GetPermissionCatalogResponseObject, error)
+	// UpdatePermissionCatalog 連携先の権限のカタログを置き換える
+	// (PUT /v1/admin/permission-catalogs/{prefix})
+	UpdatePermissionCatalog(ctx context.Context, request UpdatePermissionCatalogRequestObject) (UpdatePermissionCatalogResponseObject, error)
+	// DeletePermissionCatalog 連携先の権限のカタログを消す
+	// (POST /v1/admin/permission-catalogs/{prefix}:delete)
+	DeletePermissionCatalog(ctx context.Context, request DeletePermissionCatalogRequestObject) (DeletePermissionCatalogResponseObject, error)
 	// GetPersonalAccessTokenPolicy realm の Personal Access Token のポリシー（ADR 0109）
 	// (GET /v1/admin/personal-access-token-policy)
 	GetPersonalAccessTokenPolicy(ctx context.Context, request GetPersonalAccessTokenPolicyRequestObject) (GetPersonalAccessTokenPolicyResponseObject, error)
@@ -23872,6 +24410,146 @@ func (sh *strictHandler) SetOrgParent(w http.ResponseWriter, r *http.Request, id
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetOrgParentResponseObject); ok {
 		if err := validResponse.VisitSetOrgParentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPermissionCatalogs operation middleware
+func (sh *strictHandler) ListPermissionCatalogs(w http.ResponseWriter, r *http.Request) {
+	var request ListPermissionCatalogsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPermissionCatalogs(ctx, request.(ListPermissionCatalogsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPermissionCatalogs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPermissionCatalogsResponseObject); ok {
+		if err := validResponse.VisitListPermissionCatalogsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreatePermissionCatalog operation middleware
+func (sh *strictHandler) CreatePermissionCatalog(w http.ResponseWriter, r *http.Request) {
+	var request CreatePermissionCatalogRequestObject
+
+	var body CreatePermissionCatalogJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreatePermissionCatalog(ctx, request.(CreatePermissionCatalogRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreatePermissionCatalog")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreatePermissionCatalogResponseObject); ok {
+		if err := validResponse.VisitCreatePermissionCatalogResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPermissionCatalog operation middleware
+func (sh *strictHandler) GetPermissionCatalog(w http.ResponseWriter, r *http.Request, prefix string) {
+	var request GetPermissionCatalogRequestObject
+
+	request.Prefix = prefix
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPermissionCatalog(ctx, request.(GetPermissionCatalogRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPermissionCatalog")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPermissionCatalogResponseObject); ok {
+		if err := validResponse.VisitGetPermissionCatalogResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdatePermissionCatalog operation middleware
+func (sh *strictHandler) UpdatePermissionCatalog(w http.ResponseWriter, r *http.Request, prefix string) {
+	var request UpdatePermissionCatalogRequestObject
+
+	request.Prefix = prefix
+
+	var body UpdatePermissionCatalogJSONRequestBody
+	if err := runtime.BindJSONBody(r, &body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdatePermissionCatalog(ctx, request.(UpdatePermissionCatalogRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdatePermissionCatalog")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdatePermissionCatalogResponseObject); ok {
+		if err := validResponse.VisitUpdatePermissionCatalogResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeletePermissionCatalog operation middleware
+func (sh *strictHandler) DeletePermissionCatalog(w http.ResponseWriter, r *http.Request, prefix string) {
+	var request DeletePermissionCatalogRequestObject
+
+	request.Prefix = prefix
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeletePermissionCatalog(ctx, request.(DeletePermissionCatalogRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeletePermissionCatalog")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeletePermissionCatalogResponseObject); ok {
+		if err := validResponse.VisitDeletePermissionCatalogResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

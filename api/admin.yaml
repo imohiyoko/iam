@@ -614,7 +614,7 @@ paths:
       summary: 操作の名前空間の設定を置き換える（ADR 0084）
       description: |
         権限は GET と同じ。`name` は `[a-z][a-z0-9_.-]{0,63}`（外れれば `400 invalid_namespace`）。全体の置き換え。
-        `requirements` は操作（この名前空間のもの。ワイルドカード `payment:*` 可）→ 条件（RoleBindingInput の `condition` と
+        `requirements` は操作（この名前空間のもの。ワイルドカード `shop.payment:*` 可）→ 条件（RoleBindingInput の `condition` と
         同じ言語）。最大 64 件。操作が外れれば `400 invalid_requirement`、条件が外れれば `400 invalid_condition`。
         要件は、どの付与で許されたかに関係なくその操作に求め、`attested` を暗黙に AND する。同じ操作に当たる要件はすべて AND する。
         `bands` はリスクの種類 → 段階の境界で、この名前空間の判定（付与の条件と要件の `risk_at_most`）に使う。realm の境界より
@@ -1417,7 +1417,7 @@ paths:
       operationId: createRole
       summary: 独自のロールを作る（4.11）
       description: |
-        権限 `roles:manage`。渡す IAM 自身の権限（`users:`・`orgs:` など）はすべて自分が realm の範囲で持っていなければならない（`403 permission_denied`）。連携先の権限（`doc:read` など）は自由に入れられる。
+        権限 `roles:manage`。渡す IAM 自身の権限（`users:`・`orgs:` など）はすべて自分が realm の範囲で持っていなければならない（`403 permission_denied`）。連携先の権限（`docs.doc:read` など）は、権限のカタログにあるもの（とカタログにあるリソースの `*`）だけを入れられ（`400 unknown_permission`）、持っていなくても渡せる。形がどちらの空間でもなければ `400 invalid_permission`（ADR 0121）。
         名前に組み込みの名前空間（`realm:`・`org:`・`system:`）は使えない（`400 invalid_name`）。権限の形は `<リソース>:<操作>`（`400 invalid_permission`）。
         名前の重複は `409 role_exists`。`role.created` を監査ログに残す。
       requestBody:
@@ -1677,6 +1677,9 @@ paths:
       summary: 主体が操作をできるかを判定する（4.5、check）
       description: |
         権限 `authz:check`（連携先・サービスアカウント向け）。`check(principal, action, resource, context)` の API。
+        連携先の権限（`docs.doc:read`）の判定には、その接頭辞の権限のカタログの `authz:check`（`resource_type: permission_catalog`、
+        `resource_id` が接頭辞の付与）か realm 全体の `authz:check` が要り、IAM 自身の権限の判定には realm 全体の `authz:check` が要る
+        （無ければ `403`。ADR 0121）。
         主体はユーザーかサービスアカウント（`principal_type`）の公開 ID。削除・停止中・有効期間の外の主体と、所属の Org が
         使えないサービスアカウントは `allowed: false`（`reasons` に理由のコード。削除は `inactive`）。
         Group の所属・Org の範囲・リソースの範囲の扱いはユーザーとサービスアカウントで同じ。
@@ -1709,6 +1712,7 @@ paths:
       description: |
         権限 `authz:check`。`/v1/admin/authz:check` と同じ判定を、主体・`org_id`・認証の文脈（`sid`・`access_token`・`context`）を
         共通にして `checks` の件数だけ行い、`results` を `checks` と同じ順に返す。判定の材料（付与・所属）は 1 回だけ読む。
+        呼び出し元は、すべての項目について `/v1/admin/authz:check` と同じ権限が要る（1 つでも無ければ `403`）。
         `checks` の件数の上限は設定の `authz.batch_check_max`（既定 100。超えれば `400`）。`checks` の `resource_type` に `org` は
         使えない（判定の Org は `org_id` で決める。`400`）。主体が使えなければ、すべての結果が `allowed: false` で同じ `reasons`。
         主体か Org が無ければ `404`。
@@ -3306,6 +3310,102 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/permission-catalogs:
+    get:
+      operationId: listPermissionCatalogs
+      summary: 連携先の権限のカタログの一覧（ADR 0121）
+      description: 権限 `permission_catalogs:manage`。接頭辞の順。
+      responses:
+        "200":
+          description: カタログ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PermissionCatalogs" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPermissionCatalog
+      summary: 連携先の権限のカタログを登録する（ADR 0121）
+      description: |
+        権限 `permission_catalogs:manage`。連携先の権限は `<接頭辞>.<リソース>:<操作>` の形で、カタログにある権限（と、カタログに
+        あるリソースの `<接頭辞>.<リソース>:*`）だけを独自のロール・トークンのスコープ・要件に使える。`prefix` は
+        `^[a-z][a-z0-9-]{0,31}$`（realm の中で一意。作成後は変えられない）。`permissions` はすべてこの接頭辞の下で、操作の `*` は
+        使えない（500 個まで）。内容が正しくなければ `400 invalid_catalog`、`prefix` が重複すれば `409 catalog_exists`。
+        `permission_catalog.created` を監査ログに残す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PermissionCatalogCreate" }
+      responses:
+        "201":
+          description: 登録した
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PermissionCatalog" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/permission-catalogs/{prefix}:
+    get:
+      operationId: getPermissionCatalog
+      summary: 連携先の権限のカタログを返す
+      description: 権限 `permission_catalogs:manage`。
+      parameters:
+        - { name: prefix, in: path, required: true, schema: { type: string, maxLength: 32 } }
+      responses:
+        "200":
+          description: カタログ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PermissionCatalog" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updatePermissionCatalog
+      summary: 連携先の権限のカタログを置き換える
+      description: |
+        権限 `permission_catalogs:manage`。独自のロール（realm 共通と Org のもの）が使っている権限を外すことはできない
+        （`409 catalog_in_use`。使っているロールを返す）。`permission_catalog.updated` を監査ログに残す。
+      parameters:
+        - { name: prefix, in: path, required: true, schema: { type: string, maxLength: 32 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PermissionCatalogInput" }
+      responses:
+        "200":
+          description: 置き換えた
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PermissionCatalog" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/admin/permission-catalogs/{prefix}:delete:
+    post:
+      operationId: deletePermissionCatalog
+      summary: 連携先の権限のカタログを消す
+      description: |
+        権限 `permission_catalogs:manage`。独自のロール（realm 共通と Org のもの）がこのカタログの権限を使っていれば消せない
+        （`409 catalog_in_use`）。`permission_catalog.deleted` を監査ログに残す。
+      parameters:
+        - { name: prefix, in: path, required: true, schema: { type: string, maxLength: 32 } }
+      responses:
+        "204":
+          description: 消した
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
   /v1/admin/oauth/resources:
     get:
       operationId: listOAuthResources
@@ -4005,7 +4105,7 @@ components:
         requirements:
           type: object
           description: >-
-            Org の要件（ADR 0084）。操作（ワイルドカード `payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。
+            Org の要件（ADR 0084）。操作（ワイルドカード `shop.payment:*` 可）→ 条件（付与の条件と同じ言語）。最大 64 件。
             この Org を文脈にした判定で、どの付与で許されたかに関係なく求め、`attested` を暗黙に AND する（厳しくする方向だけ）。
             Org 階層がオンなら祖先の Org の要件も AND する。操作が外れれば invalid_requirement、条件が外れれば invalid_condition
           additionalProperties:
@@ -4655,7 +4755,7 @@ components:
           default: user
           description: "`service_account` はフィーチャー `service_accounts` が動いているときだけ（止まっていれば `400`）"
         principal_id: { type: string, description: 主体の公開 ID（サービスアカウントは `sva_…`） }
-        action: { type: string, minLength: 1, maxLength: 130, description: "`<リソース>:<操作>`" }
+        action: { type: string, minLength: 1, maxLength: 162, description: "`<リソース>:<操作>`" }
         org_id: { type: string, description: 判定の文脈の Org の公開 ID }
         resource_type: { type: string, maxLength: 64, description: "`org` なら `resource_id`（Org の公開 ID）が判定の文脈の Org になる。`org_id` と食い違えば `400`" }
         resource_id: { type: string, maxLength: 256 }
@@ -4692,7 +4792,7 @@ components:
       type: object
       required: [action]
       properties:
-        action: { type: string, minLength: 1, maxLength: 130, description: "`<リソース>:<操作>`" }
+        action: { type: string, minLength: 1, maxLength: 162, description: "`<リソース>:<操作>`" }
         resource_type: { type: string, maxLength: 64, description: "`org` は使えない" }
         resource_id: { type: string, maxLength: 256 }
     BatchCheckResult:
@@ -5148,7 +5248,7 @@ components:
         allowed_scopes:
           type: array
           maxItems: 100
-          items: { type: string, maxLength: 130 }
+          items: { type: string, maxLength: 162 }
           description: 作れるスコープ（権限の名前。`x:*` も可）。空なら形だけを確かめる
         require_expiry: { type: boolean, description: 期限の無いトークンを作れない・使えない }
     PersonalAccessTokenPolicy:
@@ -5262,6 +5362,46 @@ components:
         service_providers:
           type: array
           items: { $ref: "#/components/schemas/SAMLServiceProvider" }
+    PermissionDef:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 162, description: "`<接頭辞>.<リソース>:<操作>`" }
+        description: { type: string, maxLength: 256 }
+    PermissionCatalogInput:
+      type: object
+      required: [display_name, permissions]
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 64 }
+        permissions:
+          type: array
+          maxItems: 500
+          items: { $ref: "#/components/schemas/PermissionDef" }
+    PermissionCatalogCreate:
+      allOf:
+        - { $ref: "#/components/schemas/PermissionCatalogInput" }
+        - type: object
+          required: [prefix]
+          properties:
+            prefix: { type: string, minLength: 1, maxLength: 32 }
+    PermissionCatalog:
+      type: object
+      required: [prefix, display_name, permissions, created_at, updated_at]
+      properties:
+        prefix: { type: string }
+        display_name: { type: string }
+        permissions:
+          type: array
+          items: { $ref: "#/components/schemas/PermissionDef" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PermissionCatalogs:
+      type: object
+      required: [catalogs]
+      properties:
+        catalogs:
+          type: array
+          items: { $ref: "#/components/schemas/PermissionCatalog" }
     OAuthResourceInput:
       type: object
       required: [uri, name, scopes]

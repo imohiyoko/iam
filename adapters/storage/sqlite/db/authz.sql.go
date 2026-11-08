@@ -80,6 +80,31 @@ func (q *Queries) CreateGroup(ctx context.Context, arg CreateGroupParams) error 
 	return err
 }
 
+const createPermissionCatalog = `-- name: CreatePermissionCatalog :exec
+INSERT INTO authz_permission_catalogs (realm_id, prefix, display_name, permissions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+`
+
+type CreatePermissionCatalogParams struct {
+	RealmID     string
+	Prefix      string
+	DisplayName string
+	Permissions []byte
+	CreatedAt   string
+	UpdatedAt   string
+}
+
+func (q *Queries) CreatePermissionCatalog(ctx context.Context, arg CreatePermissionCatalogParams) error {
+	_, err := q.db.ExecContext(ctx, createPermissionCatalog,
+		arg.RealmID,
+		arg.Prefix,
+		arg.DisplayName,
+		arg.Permissions,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
 const createRole = `-- name: CreateRole :exec
 INSERT INTO authz_roles (id, public_id, realm_id, org_id, name, permissions, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
@@ -208,6 +233,23 @@ func (q *Queries) DeleteGroupMemberships(ctx context.Context, memberID string) e
 	return err
 }
 
+const deletePermissionCatalog = `-- name: DeletePermissionCatalog :execrows
+DELETE FROM authz_permission_catalogs WHERE realm_id = ? AND prefix = ?
+`
+
+type DeletePermissionCatalogParams struct {
+	RealmID string
+	Prefix  string
+}
+
+func (q *Queries) DeletePermissionCatalog(ctx context.Context, arg DeletePermissionCatalogParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deletePermissionCatalog, arg.RealmID, arg.Prefix)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteRole = `-- name: DeleteRole :execrows
 DELETE FROM authz_roles WHERE realm_id = ? AND id = ?
 `
@@ -306,6 +348,29 @@ func (q *Queries) GetGroupByPublicID(ctx context.Context, arg GetGroupByPublicID
 		&i.RealmID,
 		&i.OrgID,
 		&i.Name,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPermissionCatalog = `-- name: GetPermissionCatalog :one
+SELECT realm_id, prefix, display_name, permissions, created_at, updated_at FROM authz_permission_catalogs WHERE realm_id = ? AND prefix = ?
+`
+
+type GetPermissionCatalogParams struct {
+	RealmID string
+	Prefix  string
+}
+
+func (q *Queries) GetPermissionCatalog(ctx context.Context, arg GetPermissionCatalogParams) (AuthzPermissionCatalog, error) {
+	row := q.db.QueryRowContext(ctx, getPermissionCatalog, arg.RealmID, arg.Prefix)
+	var i AuthzPermissionCatalog
+	err := row.Scan(
+		&i.RealmID,
+		&i.Prefix,
+		&i.DisplayName,
+		&i.Permissions,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -843,6 +908,40 @@ func (q *Queries) ListGroupsByOrg(ctx context.Context, arg ListGroupsByOrgParams
 	return items, nil
 }
 
+const listPermissionCatalogs = `-- name: ListPermissionCatalogs :many
+SELECT realm_id, prefix, display_name, permissions, created_at, updated_at FROM authz_permission_catalogs WHERE realm_id = ? ORDER BY prefix
+`
+
+func (q *Queries) ListPermissionCatalogs(ctx context.Context, realmID string) ([]AuthzPermissionCatalog, error) {
+	rows, err := q.db.QueryContext(ctx, listPermissionCatalogs, realmID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthzPermissionCatalog
+	for rows.Next() {
+		var i AuthzPermissionCatalog
+		if err := rows.Scan(
+			&i.RealmID,
+			&i.Prefix,
+			&i.DisplayName,
+			&i.Permissions,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRiskTypes = `-- name: ListRiskTypes :many
 SELECT realm_id, name, enabled, band_medium, band_high, created_at, updated_at FROM authz_risk_types WHERE realm_id = ? ORDER BY name
 `
@@ -1166,6 +1265,32 @@ func (q *Queries) RenameGroup(ctx context.Context, arg RenameGroupParams) (int64
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updatePermissionCatalog = `-- name: UpdatePermissionCatalog :execrows
+UPDATE authz_permission_catalogs SET display_name = ?, permissions = ?, updated_at = ? WHERE realm_id = ? AND prefix = ?
+`
+
+type UpdatePermissionCatalogParams struct {
+	DisplayName string
+	Permissions []byte
+	UpdatedAt   string
+	RealmID     string
+	Prefix      string
+}
+
+func (q *Queries) UpdatePermissionCatalog(ctx context.Context, arg UpdatePermissionCatalogParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updatePermissionCatalog,
+		arg.DisplayName,
+		arg.Permissions,
+		arg.UpdatedAt,
+		arg.RealmID,
+		arg.Prefix,
 	)
 	if err != nil {
 		return 0, err

@@ -493,6 +493,15 @@ type AuthzGroupMember struct {
 	CreatedAt  string
 }
 
+type AuthzPermissionCatalog struct {
+	RealmID     string
+	Prefix      string
+	DisplayName string
+	Permissions []byte
+	CreatedAt   string
+	UpdatedAt   string
+}
+
 type AuthzRiskType struct {
 	RealmID    string
 	Name       string

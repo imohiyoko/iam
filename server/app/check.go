@@ -12,6 +12,7 @@ import (
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authz/check"
+	"github.com/imohiyoko/iam/authz/permcatalog"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/server/publicapi"
@@ -46,8 +47,41 @@ func orgTarget(orgID *string, res check.Resource) (*string, check.Resource, bool
 	return &res.ID, check.Resource{}, true
 }
 
+// authorizeCheck は判定の問い合わせの呼び出し元を確かめる（ADR 0121）。連携先の権限の判定には、その権限のカタログの
+// authz:check（カタログの単位の付与か realm 全体の付与）が要る。IAM 自身の権限（と形の正しくない操作）の判定には、realm 全体の
+// authz:check が要る。連携先のサービスアカウントには自分のカタログの authz:check だけを渡し、ほかの連携先の権限を問い合わせ
+// させない。
+func (s adminServer) authorizeCheck(ctx context.Context, actions []string) (adminPrincipal, *denial, error) {
+	var targets []check.Resource
+	for _, a := range actions {
+		res := check.Resource{}
+		if prefix, ok := role.CatalogPrefix(a); ok {
+			res = check.Resource{Type: permcatalog.ResourceType, ID: prefix}
+		}
+		if !slices.Contains(targets, res) {
+			targets = append(targets, res)
+		}
+	}
+	if len(targets) == 0 {
+		targets = []check.Resource{{}}
+	}
+	var p adminPrincipal
+	for _, res := range targets {
+		var d *denial
+		var err error
+		if p, d, err = s.a.authorizeOn(ctx, role.PermAuthzCheck, res, true); d != nil || err != nil {
+			return p, d, err
+		}
+	}
+	return p, nil, nil
+}
+
 func (s adminServer) CheckAuthz(ctx context.Context, req adminapi.CheckAuthzRequestObject) (adminapi.CheckAuthzResponseObject, error) {
-	p, d, err := s.a.authorizeWith(ctx, role.PermAuthzCheck, true)
+	var actions []string
+	if req.Body != nil {
+		actions = []string{req.Body.Action}
+	}
+	p, d, err := s.authorizeCheck(ctx, actions)
 	switch {
 	case err != nil:
 		return nil, err
@@ -138,7 +172,16 @@ func (s adminServer) checkSubject(ctx context.Context, caller adminPrincipal, sa
 
 func (s adminServer) BatchCheckAuthz(ctx context.Context, req adminapi.BatchCheckAuthzRequestObject) (adminapi.BatchCheckAuthzResponseObject, error) {
 	bad := adminapi.BatchCheckAuthz400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", ""))}
-	p, d, err := s.a.authorizeWith(ctx, role.PermAuthzCheck, true)
+	// 件数の上限は、カタログごとの呼び出し元の確かめより先に見る（上限を超えた要求で判定を重ねない）。認証の 401 は先に返す。
+	var actions []string
+	if b := req.Body; b != nil && len(b.Checks) > 0 && len(b.Checks) <= s.a.cfg.Authz.BatchCheckMax {
+		for _, c := range b.Checks {
+			actions = append(actions, c.Action)
+		}
+	} else if _, authed := ctx.Value(adminKey{}).(adminPrincipal); authed {
+		return bad, nil
+	}
+	p, d, err := s.authorizeCheck(ctx, actions)
 	switch {
 	case err != nil:
 		return nil, err
@@ -146,13 +189,8 @@ func (s adminServer) BatchCheckAuthz(ctx context.Context, req adminapi.BatchChec
 		return adminapi.BatchCheckAuthz401JSONResponse(d.Body), nil
 	case d != nil:
 		return adminapi.BatchCheckAuthz403JSONResponse(d.Body), nil
-	case req.Body == nil:
-		return bad, nil
 	}
 	b := req.Body
-	if len(b.Checks) == 0 || len(b.Checks) > s.a.cfg.Authz.BatchCheckMax {
-		return bad, nil
-	}
 	items := make([]check.Item, len(b.Checks))
 	for i, c := range b.Checks {
 		res, ok := checkResource(c.ResourceType, c.ResourceId)

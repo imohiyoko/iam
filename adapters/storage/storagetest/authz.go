@@ -89,7 +89,7 @@ func testRoles(t *testing.T, h Harness) {
 	r, org := id.New(id.Realm), id.New(id.Org)
 	mk := func(name, orgID string) port.Role {
 		return port.Role{ID: id.New(id.Role), PublicID: id.NewExternal(id.Role), RealmID: r, OrgID: orgID, Name: name,
-			Permissions: []string{"project:read", "project:write"}, CreatedAt: T0, UpdatedAt: T0}
+			Permissions: []string{"app.project:read", "app.project:write"}, CreatedAt: T0, UpdatedAt: T0}
 	}
 	editor, viewer, orgEditor := mk("editor", ""), mk("viewer", ""), mk("editor", org)
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
@@ -117,7 +117,7 @@ func testRoles(t *testing.T, h Harness) {
 			return fmt.Errorf("ListByOrg = %+v, %v", list, err)
 		}
 		// 権限の並びは保存した順。空にもできる。
-		editor.Name, editor.Permissions, editor.UpdatedAt = "writer", []string{"project:write", "doc:read"}, T0.Add(time.Hour)
+		editor.Name, editor.Permissions, editor.UpdatedAt = "writer", []string{"app.project:write", "docs.doc:read"}, T0.Add(time.Hour)
 		if err := repo.Update(ctx, editor); err != nil {
 			return err
 		}
@@ -239,7 +239,7 @@ func testEffectiveBindings(t *testing.T, h Harness) {
 	r, other, org := id.New(id.Realm), id.New(id.Realm), id.New(id.Org)
 	u, v := id.New(id.User), id.New(id.User)
 	custom := port.Role{ID: id.New(id.Role), PublicID: id.NewExternal(id.Role), RealmID: r, OrgID: org, Name: "viewer",
-		Permissions: []string{"doc:read"}, CreatedAt: T0, UpdatedAt: T0}
+		Permissions: []string{"docs.doc:read"}, CreatedAt: T0, UpdatedAt: T0}
 	og := port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r, OrgID: org, Name: "team", CreatedAt: T0, UpdatedAt: T0}
 	rg := port.Group{ID: id.New(id.Group), PublicID: id.NewExternal(id.Group), RealmID: r, Name: "all", CreatedAt: T0, UpdatedAt: T0}
 	direct := newBinding(r, "realm:support", port.PrincipalUser, u, "", T0)
@@ -448,7 +448,7 @@ func testRiskTypes(t *testing.T, h Harness) {
 func testActionNamespaces(t *testing.T, h Harness) {
 	s, _ := open(t, h)
 	r, other := id.New(id.Realm), id.New(id.Realm)
-	pay := port.ActionNamespace{RealmID: r, Name: "payment", Settings: []byte(`{"requirements":{"payment:send":{"auth_within":300}}}`), CreatedAt: T0, UpdatedAt: T0}
+	pay := port.ActionNamespace{RealmID: r, Name: "payment", Settings: []byte(`{"requirements":{"shop.payment:send":{"auth_within":300}}}`), CreatedAt: T0, UpdatedAt: T0}
 	orgs := port.ActionNamespace{RealmID: r, Name: "orgs", Settings: []byte(`{}`), CreatedAt: T0, UpdatedAt: T0}
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.ActionNamespaces()
@@ -483,6 +483,59 @@ func testActionNamespaces(t *testing.T, h Harness) {
 		}
 		if got, err := repo.Get(ctx, other, "empty"); err != nil || len(got.Settings) != 0 {
 			return fmt.Errorf("actionNamespaces.Get with nil settings = %+v, %v", got, err)
+		}
+		return nil
+	})
+}
+
+// testPermissionCatalogs は連携先の権限のカタログ（ADR 0121）。
+func testPermissionCatalogs(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, other := id.New(id.Realm), id.New(id.Realm)
+	docs := port.PermissionCatalog{RealmID: r, Prefix: "docs", DisplayName: "Docs", CreatedAt: T0, UpdatedAt: T0,
+		Permissions: []port.PermissionDef{{Name: "docs.doc:read", Description: "文書を読む"}, {Name: "docs.doc:write"}}}
+	app := port.PermissionCatalog{RealmID: r, Prefix: "app", DisplayName: "App", Permissions: []port.PermissionDef{}, CreatedAt: T0, UpdatedAt: T0}
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.PermissionCatalogs()
+		if _, err := repo.Get(ctx, r, "docs"); notFound("permissionCatalogs.Get before Create", err) != nil {
+			return notFound("permissionCatalogs.Get before Create", err)
+		}
+		for _, c := range []port.PermissionCatalog{docs, app, {RealmID: other, Prefix: "docs", DisplayName: "Other", Permissions: []port.PermissionDef{}, CreatedAt: T0, UpdatedAt: T0}} {
+			if err := repo.Create(ctx, c); err != nil {
+				return err
+			}
+		}
+		if err := conflict("permissionCatalogs.Create duplicate", repo.Create(ctx, docs)); err != nil {
+			return err
+		}
+		if got, err := repo.Get(ctx, r, "docs"); err != nil || !reflect.DeepEqual(got, docs) {
+			return fmt.Errorf("permissionCatalogs.Get = %+v, %v", got, err)
+		}
+		// 置き換えは表示名・権限・更新時刻だけを変える。
+		upd := docs
+		upd.DisplayName, upd.Permissions, upd.CreatedAt, upd.UpdatedAt = "Docs 2", []port.PermissionDef{{Name: "docs.doc:read"}}, T0.Add(time.Hour), T0.Add(time.Hour)
+		if err := repo.Update(ctx, upd); err != nil {
+			return err
+		}
+		want := upd
+		want.CreatedAt = T0
+		if got, err := repo.Get(ctx, r, "docs"); err != nil || !reflect.DeepEqual(got, want) {
+			return fmt.Errorf("permissionCatalogs.Get after Update = %+v, %v", got, err)
+		}
+		if got, err := repo.List(ctx, r); err != nil || !reflect.DeepEqual(got, []port.PermissionCatalog{app, want}) {
+			return fmt.Errorf("permissionCatalogs.List = %+v, %v", got, err)
+		}
+		if err := repo.Update(ctx, port.PermissionCatalog{RealmID: r, Prefix: "none", UpdatedAt: T0}); notFound("permissionCatalogs.Update missing", err) != nil {
+			return notFound("permissionCatalogs.Update missing", err)
+		}
+		if err := repo.Delete(ctx, r, "docs"); err != nil {
+			return err
+		}
+		if err := repo.Delete(ctx, r, "docs"); notFound("permissionCatalogs.Delete twice", err) != nil {
+			return notFound("permissionCatalogs.Delete twice", err)
+		}
+		if _, err := repo.Get(ctx, other, "docs"); err != nil {
+			return fmt.Errorf("permissionCatalogs of another realm: %w", err)
 		}
 		return nil
 	})

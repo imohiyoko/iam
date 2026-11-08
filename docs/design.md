@@ -260,7 +260,8 @@ group_members  group_id, member_type（user / service_account / group）, member
 authn_directory_groups  realm_id, connection_id, external_key（ディレクトリのグループの DN）, group_id, created_at
                PK (realm_id, connection_id, external_key), UNIQUE (realm_id, group_id)。LDAP の同期が作った Group（ADR 0102）
 roles          id, realm_id, org_id（NULL=realm 共通）, name
-role_permissions  role_id, permission（"project:read" など）
+role_permissions  role_id, permission（IAM 自身の "users:read" か、連携先の "docs.doc:read" など）
+authz_permission_catalogs  realm_id, prefix, display_name, permissions（JSON）。連携先の権限のカタログ（ADR 0121）
 role_bindings  role_id, principal_type, principal_id
                org_id（NULL=realm 全体）, resource_type, resource_id（NULL=Org 全体）
 ```
@@ -385,6 +386,9 @@ check(principal, action, resource, context) -> allow / deny
 - 管理 API の判定の主体はユーザーかサービスアカウント（`principal_type: service_account`。フィーチャー `service_accounts` が動いているとき）。サービスアカウントは、削除・停止・有効期間の外・所属の Org が使えないときに `allowed: false` と理由のコードを返し、Group の所属・Org の範囲・リソースの範囲はユーザーと同じに扱う。文脈は、そのアクセストークン（管理 API 向けか自前の API 向け）を渡せばその認証から組み立てる（`attested`。amr は認証情報の種類、要素は 1）。API キーと `sid`・申告の文脈は使わない
 - 本人の重要な操作（`me:methods`・`me:password`・`me:recovery_codes`・`me:delete`・`me:merge`・`me:accept_management`・`me:delete_org`・`me:delete_managed`）は付与を問わず、直近の認証（max_auth_age。5.4）を既定として求め、加えて名前空間 `me` と active な Org の要件を求める（`auth_within` などで操作ごとに厳しくできる）。満たさなければ今までどおり 401 `reauthentication_required`（フィーチャー acr がオンなら RFC 9470 の `WWW-Authenticate` を足す。11.15）。運営者の操作は管理 API の権限の判定で名前空間の要件が効く
 - 付与で許した操作には、名前空間の要件（realm の設定。`/v1/admin/action-namespaces/{name}`、権限 `requirements:manage` は `resource_type = action_namespace` で名前空間に限れる）と Org の要件（Org の設定の `requirements`。階層がオンなら祖先の要件も）をすべて AND で求める。要件は `attested` を暗黙に AND し、名前空間の段階の境界は realm より厳しくする向きだけ。変えた後に自分がその設定を変えられなくなる要件は 409 `requirement_lockout` で拒む。要件は realm・Org ごとにキャッシュし、変更で捨てる。見ている条件（付与・名前空間・Org の要件）が残るリスクの種類は止められない（409 `risk_type_in_use`）
+- 権限の名前は 2 つの空間に分ける（ADR 0121）。IAM 自身の権限はリソースに `.` を含まない（`users:read`）。連携先の権限は `<接頭辞>.<リソース>:<操作>`（`docs.doc:read`。接頭辞 32 文字・リソース 64 文字・操作 64 文字まで）で、接頭辞は realm に登録した **権限のカタログ**（`/v1/admin/permission-catalogs`、権限 `permission_catalogs:manage`）のもの。どちらでもない名前（`doc:read`）は使えない（`400 invalid_permission`）
+- 独自のロールに入れてよい連携先の権限は、カタログにある権限と、カタログにあるリソースの `*` だけ（`400 unknown_permission`）。ロールが使っている権限をカタログから外すことと、使っているカタログを消すことはできない（`409 catalog_in_use`）。Personal Access Token のスコープと名前空間の要件は、権限を狭めるだけなので形だけを確かめる
+- 連携先の権限の判定（`authz:check`・`authz:batch-check`）には、呼び出し元がその接頭辞のカタログの `authz:check`（`resource_type = permission_catalog`、`resource_id` = 接頭辞の付与か、realm 全体の付与）を持つことを求める。IAM 自身の権限の判定には realm 全体の `authz:check` が要る。連携先のサービスアカウントには自分のカタログの `authz:check` だけを渡す
 - 将来 OpenFGA / Cedar 等に同じシグネチャで差し替えられる
 
 ### 4.6 認証情報の無効化
