@@ -127,7 +127,7 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 	if c.DPoPJKT != "" && (b.JKT == "" || !(Binding{JKT: c.DPoPJKT}).Satisfies(Binding{JKT: b.JKT})) {
 		return Issued{}, ErrInvalidGrant
 	}
-	s, err := t.lineage(ctx, tx, c.RealmID, c.SID, c.UserID, c.OrgID, now)
+	_, err := t.lineage(ctx, tx, c.RealmID, c.SID, c.UserID, c.OrgID, now)
 	if err != nil {
 		if errors.Is(err, ErrInvalidToken) {
 			return Issued{}, ErrInvalidGrant
@@ -141,12 +141,8 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 		// ログインの系列から切り離す（ADR 0126）。コードを出したときの認証情報を写し、無効化されたら使えなくする。
 		creds := c.Credentials
 		if creds == nil {
-			// 認証情報を記録していないコード（以前に出したもの）。コードの後にログインの系列で本人確認をやり直していれば、
-			// 今のセッションの認証情報はコードを出したときのものではないので交換しない。
-			if s.AuthenticatedAt.Truncate(time.Second).After(c.AuthTime.Truncate(time.Second)) {
-				return Issued{}, ErrInvalidGrant
-			}
-			creds = s.AuthCredentialIDs
+			// 認証情報を記録していないコード（以前に出したもの）。どの認証情報で出したか分からないので交換しない。
+			return Issued{}, ErrInvalidGrant
 		}
 		// コードの後に認証情報が無効になっていれば（変更・削除。まとめての失効はまだ無い認可に届かない）交換しない。
 		if err := session.CheckCredentials(ctx, tx, c.RealmID, c.UserID, creds); errors.Is(err, session.ErrInvalid) {

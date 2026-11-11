@@ -499,3 +499,28 @@ func TestOfflineAccessCredentialGoneBeforeExchange(t *testing.T) {
 		t.Fatalf("exchange after the credential is gone: %d %v", status, out)
 	}
 }
+
+// TestOfflineAccessLegacyCode は、認証情報を記録していない以前の認可コードを Offline の認可に交換しないことを確かめる
+// （どの認証情報で出したか分からない。同じ秒の本人確認のやり直しも見分けられない）。
+func TestOfflineAccessLegacyCode(t *testing.T) {
+	l := newOfflineEnv(t, true)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "offline_access": true})
+	code, _ := p.login(t, "alice@example.com", offlineScope)
+	ctx := context.Background()
+	c, err := l.a.flow.Redeem(ctx, l.a.realm.ID, p.clientID, code, p.redirect, p.verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Credentials == nil {
+		t.Fatal("the code has no recorded credentials")
+	}
+	c.Credentials = nil
+	legacy, err := l.a.flow.IssueCode(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, out := p.exchange(t, legacy, nil); status != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("exchange of a legacy code: %d %v", status, out)
+	}
+}
