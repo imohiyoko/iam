@@ -131,7 +131,8 @@ func TestFormPost(t *testing.T) {
 	}
 }
 
-// TestFormPostDisabledDuringLogin は、ログインの間にフィーチャーが止まったら、預かった form_post の要求にコードを出さないことを確かめる。
+// TestFormPostDisabledDuringLogin は、ログインの間にフィーチャーを止めて起動し直したら（Storage と EphemeralStore はそのまま）、
+// 預かった form_post の要求にコードを出さないことを確かめる。
 func TestFormPostDisabledDuringLogin(t *testing.T) {
 	l := senderEnv(t, nil, feature.FormPost)
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
@@ -141,7 +142,10 @@ func TestFormPostDisabledDuringLogin(t *testing.T) {
 	if u.Path != "/login" || !strings.HasPrefix(back, oidcResume+"?request=") {
 		t.Fatalf("not sent to login: %s", u)
 	}
-	l.a.formPost = false
+	enabled := slices.DeleteFunc(slices.Clone(*l.e.cfg.Features), func(n string) bool { return n == feature.FormPost })
+	if _, err := l.restart(t, enabled, feature.Registered()); err != nil || l.a.formPost {
+		t.Fatalf("restart without form_post: %v", err)
+	}
 	_, cookie := l.login(t, "alice@example.com")
 	u = location(t, l.oidcDo(t, "GET", back, nil, cookie))
 	if u.Host != "rp.example.com" || u.Query().Get("error") != "invalid_request" || u.Query().Get("code") != "" || u.Query().Get("state") != p.state {
