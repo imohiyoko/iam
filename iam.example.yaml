@@ -138,7 +138,7 @@ oidc:
   refresh_token_ttl: 30d  # リフレッシュトークンの寿命（ローテーションし、再利用を検知したらファミリーごと失効）
   offline_idle_ttl: 30d    # offline_access の認可のリフレッシュトークンの無操作の期限（フィーチャー offline_access。ADR 0126）
   offline_max_ttl: 365d    # offline_access の認可の寿命（延びない）
-  retired_key_ttl: 7d  # ローテーションした古い署名鍵を JWKS に残す期間
+  retired_key_ttl: 7d  # ローテーションした古い署名鍵を JWKS に残す期間（id_token_ttl・access_token_ttl より長く）
   device_code_ttl: 10m  # Device Authorization Grant の device_code と user_code の寿命（30分以下。フィーチャー device_flow）
   device_poll_interval: 5s  # 端末のポーリングの最短の間隔（1秒から1分）
   par_request_uri_ttl: 1m  # PAR（RFC 9126）の request_uri の寿命（10分以下。フィーチャー par）

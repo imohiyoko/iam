@@ -118,6 +118,14 @@ func TestJWTAccessTokensE2E(t *testing.T) {
 	if _, err := oidcrp.Userinfo[*oidc.UserInfo](ctx, forged, oidc.BearerToken, alice, relying); err == nil {
 		t.Fatal("forged userinfo accepted")
 	}
+	// "<jti>." で包んで不透明のトークンに見せかけても通らない（フィーチャーを止めた後に JWT を使い続けられないように）。
+	wrapped := claims["jti"].(string) + "." + tokens.AccessToken
+	if in, err := rs.Introspect[*oidc.IntrospectionResponse](ctx, server, wrapped); err != nil || in.Active {
+		t.Fatalf("wrapped introspect: %+v %v", in, err)
+	}
+	if _, err := oidcrp.Userinfo[*oidc.UserInfo](ctx, wrapped, oidc.BearerToken, alice, relying); err == nil {
+		t.Fatal("wrapped userinfo accepted")
+	}
 	// リフレッシュでも JWT。失効させるとイントロスペクションと UserInfo はすぐ止まる。
 	refreshed, err := oidcrp.RefreshTokens[*oidc.IDTokenClaims](ctx, relying, tokens.RefreshToken, "", "")
 	if err != nil {
