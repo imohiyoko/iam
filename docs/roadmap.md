@@ -567,7 +567,7 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] `wa=wsignout1.0`：登録済みの `wtrealm` と `wreply` のときだけセッションを終えて戻す
 - [x] 監査ログ（`wsfed.token_issued`・`wsfed.signed_out`・RP の作成・変更・削除）、無効化で RP と証明書を消す、
   memory・SQLite・PostgreSQL の契約テスト、要求の引数と登録の入力のファジング
-- RSA-SHA256 の署名（RS256 のフィーチャーの後。.NET Framework の WIF の RP のため）、ほかの RP へのサインアウトの伝播（`wsignoutcleanup1.0`）、
+- ほかの RP へのサインアウトの伝播（`wsignoutcleanup1.0`）、
   `wreq` のクレームの要求、暗号化したトークン、RP のメタデータからの登録
 
 #### CIBA（ADR 0114）
@@ -607,7 +607,7 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] `/saml/idp/metadata`（署名付き）。鍵ごとの証明書を置いて同じものを返す
 - [x] 監査ログ（`saml_idp.assertion_issued`・`saml_idp.logged_out`・SP の作成・変更・削除）、無効化で SP と証明書を消す、memory・SQLite・PostgreSQL の
   契約テスト、AuthnRequest・HTTP-Redirect のクエリ・LogoutRequest のファジング
-- RSA-SHA256 の署名（RS256 のフィーチャーの後）、ほかの SP への SLO の伝播と IdP から始める SLO、HTTP-Artifact、SP のメタデータからの登録、
+- ほかの SP への SLO の伝播と IdP から始める SLO、HTTP-Artifact、SP のメタデータからの登録、
   `pre_token` フックでの属性、Scoping（IdP のプロキシ）
 
 #### OpenID4VCI の発行者（ADR 0119）
@@ -693,6 +693,15 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] トークンの行を残し、UserInfo・イントロスペクション・失効・リフレッシュが JWT でも今までどおり効く。書き換えた JWT は通らない
 - [x] 無効化で連携先の設定を外す。memory・SQLite・PostgreSQL の契約テスト
 - Token Exchange のトークンの JWT（`act`）
+
+#### SAML の IdP・WS-Federation の RSA-SHA256（ADR 0125）
+
+**ゴール**：RSA-SHA256 しか確かめない SAML の SP（古い SaaS）と WS-Federation の RP（.NET Framework の WIF）が、既定を変えずにつながる。
+
+- [x] SP・RP の `signing_alg`（`ES256` 既定・`RS256`）。フィーチャー `rs256` がオフなら `RS256` を拒み、メタデータに RSA の証明書を出さないテストがある
+- [x] `RS256` の SP に Response・Assertion・HTTP-Redirect の LogoutResponse を RSA-SHA256 で署名し、SP の側の検証（authn/saml）が RSA の証明書で通る
+- [x] `RS256` の RP に SAML 1.1・2.0 の Assertion を RSA-SHA256 で署名し、標準の XML 署名の検証（goxmldsig）が通る。メタデータに両方の証明書を載せる
+- [x] 無効化で SP・RP を ES256 に戻してから RSA の鍵を退役させる。memory・SQLite・PostgreSQL の契約テスト
 
 #### `form_post` の応答（ADR 0124）
 

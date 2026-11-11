@@ -138,6 +138,9 @@ type Config struct {
 	AllowIdPInitiated bool        `json:"allow_idp_initiated,omitempty"`
 	// AssertionLifetime は Assertion の有効期間（秒）。
 	AssertionLifetime int `json:"assertion_lifetime"`
+	// SigningAlg は Response・Assertion・LogoutResponse の署名（ES256 は ECDSA-SHA256、RS256 は RSA-SHA256）。既定は ES256。
+	// RS256 はフィーチャー rs256 が動いているときだけ選べる（ADR 0125）。
+	SigningAlg string `json:"signing_alg,omitempty"`
 }
 
 // Input は SP の登録の内容（管理 API）。
@@ -291,6 +294,13 @@ func Validate(in Input, now time.Time) (Input, error) {
 	if !c.SignAssertion && !c.SignResponse {
 		return Input{}, errInvalid("sign_assertion or sign_response must be true")
 	}
+	switch c.SigningAlg {
+	case "":
+		c.SigningAlg = port.AlgES256
+	case port.AlgES256, port.AlgRS256:
+	default:
+		return Input{}, errInvalid("signing_alg must be ES256 or RS256")
+	}
 	switch {
 	case c.AssertionLifetime == 0:
 		c.AssertionLifetime = DefaultAssertionLifetime
@@ -416,11 +426,26 @@ func (s *Service) SSOURL() string { return s.Issuer + SSOPath }
 // SLOURL は SingleLogoutService の URL（LogoutRequest の Destination）。
 func (s *Service) SLOURL() string { return s.Issuer + SLOPath }
 
+// validate は Validate に、フィーチャー rs256 が止まっていれば RS256 を拒むことを足す。
+func (s *Service) validate(in Input, now time.Time) (Input, error) {
+	out, err := Validate(in, now)
+	if err != nil {
+		return Input{}, err
+	}
+	if out.Config.SigningAlg == port.AlgRS256 && (s.Keys == nil || !s.Keys.RS256) {
+		return Input{}, errInvalid("signing_alg RS256 requires the rs256 feature")
+	}
+	return out, nil
+}
+
 // ConfigOf は SP の登録の設定を読む。
 func ConfigOf(sp port.SAMLServiceProvider) (Config, error) {
 	var c Config
 	if err := json.Unmarshal(sp.Config, &c); err != nil {
 		return Config{}, err
+	}
+	if c.SigningAlg == "" {
+		c.SigningAlg = port.AlgES256 // signing_alg の前に登録した SP（ADR 0125）
 	}
 	return c, nil
 }
@@ -443,7 +468,7 @@ func (s *Service) record(ctx context.Context, tx port.Tx, typ, realmID string, a
 // Create は SP を登録する（監査ログ saml_idp.service_provider.created）。Entity ID が重複すれば ErrEntityIDExists。
 func (s *Service) Create(ctx context.Context, tx port.Tx, realmID string, in Input, actor audit.Actor, requestID string) (port.SAMLServiceProvider, error) {
 	now := s.Clock.Now()
-	in, err := Validate(in, now)
+	in, err := s.validate(in, now)
 	if err != nil {
 		return port.SAMLServiceProvider{}, err
 	}
@@ -465,7 +490,7 @@ func (s *Service) Create(ctx context.Context, tx port.Tx, realmID string, in Inp
 // Update は SP の登録を置き換える（監査ログ saml_idp.service_provider.updated）。無ければ errs.NotFound。
 func (s *Service) Update(ctx context.Context, tx port.Tx, sp port.SAMLServiceProvider, in Input, actor audit.Actor, requestID string) (port.SAMLServiceProvider, error) {
 	now := s.Clock.Now()
-	in, err := Validate(in, now)
+	in, err := s.validate(in, now)
 	if err != nil {
 		return port.SAMLServiceProvider{}, err
 	}

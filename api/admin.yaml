@@ -5213,9 +5213,10 @@ components:
           description: 省けば `email` を `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress` に出す。空の配列ならクレームを出さない
           items: { $ref: "#/components/schemas/WSFedClaim" }
         token_lifetime: { type: integer, minimum: 300, maximum: 86400, description: Assertion の有効期間（秒。既定 3600） }
+        signing_alg: { type: string, enum: [ES256, RS256], description: "署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）" }
     WSFedRelyingParty:
       type: object
-      required: [id, realm, name, reply_urls, token_type, claims, token_lifetime, created_at, updated_at]
+      required: [id, realm, name, reply_urls, token_type, claims, token_lifetime, signing_alg, created_at, updated_at]
       properties:
         id: { type: string }
         realm: { type: string }
@@ -5228,6 +5229,7 @@ components:
           type: array
           items: { $ref: "#/components/schemas/WSFedClaim" }
         token_lifetime: { type: integer }
+        signing_alg: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     WSFedRelyingParties:
@@ -5335,9 +5337,10 @@ components:
         sign_response: { type: boolean, description: Response に署名する（既定 false。どちらかは true） }
         allow_idp_initiated: { type: boolean, description: IdP-initiated の SSO を許す（既定 false） }
         assertion_lifetime: { type: integer, minimum: 60, maximum: 3600, description: Assertion の有効期間（秒。既定 300） }
+        signing_alg: { type: string, enum: [ES256, RS256], description: "署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）" }
     SAMLServiceProvider:
       type: object
-      required: [id, entity_id, name, acs, slo, signing_certificates, require_signed_requests, name_id_format, attributes, sign_assertion, sign_response, allow_idp_initiated, assertion_lifetime, created_at, updated_at]
+      required: [id, entity_id, name, acs, slo, signing_certificates, require_signed_requests, name_id_format, attributes, sign_assertion, sign_response, allow_idp_initiated, assertion_lifetime, signing_alg, created_at, updated_at]
       properties:
         id: { type: string }
         entity_id: { type: string }
@@ -5363,6 +5366,7 @@ components:
         sign_response: { type: boolean }
         allow_idp_initiated: { type: boolean }
         assertion_lifetime: { type: integer }
+        signing_alg: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     SAMLServiceProviders:

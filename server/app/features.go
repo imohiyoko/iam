@@ -14,6 +14,7 @@ import (
 	"github.com/imohiyoko/iam/authn/method/passkey/attestation"
 	"github.com/imohiyoko/iam/authn/org"
 	"github.com/imohiyoko/iam/authn/saml"
+	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/ssf"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/eventlog"
@@ -269,8 +270,12 @@ var cleaners = map[string]cleaner{
 		if err != nil {
 			return 0, err
 		}
+		f, err := eachRSAFederation(ctx, tx, -1, time.Time{})
+		if err != nil {
+			return 0, err
+		}
 		k, err := eachRSAKey(ctx, tx, -1, time.Time{})
-		return n + k, err
+		return n + f + k, err
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
 		n, err := eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
 			if c.IDTokenAlg != port.AlgRS256 {
@@ -280,6 +285,11 @@ var cleaners = map[string]cleaner{
 			return true, tx.Clients().Update(ctx, c)
 		})
 		if err != nil || n >= limit {
+			return n, err
+		}
+		// SAML の SP・WS-Federation の RP の RSA-SHA256 も ES256 に戻す（ADR 0125）。鍵は連携先をすべて戻してから退役させる。
+		f, err := eachRSAFederation(ctx, tx, limit-n, now)
+		if n += f; err != nil || n >= limit {
 			return n, err
 		}
 		k, err := eachRSAKey(ctx, tx, limit-n, now)
@@ -389,6 +399,68 @@ func eachClient(ctx context.Context, tx port.Tx, limit int, fn func(port.Client)
 			}
 			if ok {
 				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+// eachRSAFederation は全 realm の、RS256（RSA-SHA256）で署名する SAML の SP と WS-Federation の RP を数え、now が零でなければ
+// ES256 に戻す（limit が負なら上限なし。ADR 0125）。
+func eachRSAFederation(ctx context.Context, tx port.Tx, limit int, now time.Time) (int, error) {
+	realms, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	full := func() bool { return limit >= 0 && n >= limit }
+	for _, r := range realms {
+		sps, err := tx.SAMLIdP().ListServiceProviders(ctx, r.ID)
+		if err != nil {
+			return n, err
+		}
+		for _, sp := range sps {
+			c, err := samlidp.ConfigOf(sp)
+			if err != nil {
+				return n, err
+			}
+			if c.SigningAlg != port.AlgRS256 {
+				continue
+			}
+			if full() {
+				return n, nil
+			}
+			n++
+			if now.IsZero() {
+				continue
+			}
+			c.SigningAlg = port.AlgES256
+			if sp.Config, err = json.Marshal(c); err != nil {
+				return n, err
+			}
+			sp.UpdatedAt = now
+			if err := tx.SAMLIdP().UpdateServiceProvider(ctx, sp); err != nil {
+				return n, err
+			}
+		}
+		rps, err := tx.WSFed().ListRelyingParties(ctx, r.ID)
+		if err != nil {
+			return n, err
+		}
+		for _, rp := range rps {
+			if rp.SigningAlg != port.AlgRS256 {
+				continue
+			}
+			if full() {
+				return n, nil
+			}
+			n++
+			if now.IsZero() {
+				continue
+			}
+			rp.SigningAlg, rp.UpdatedAt = port.AlgES256, now
+			if err := tx.WSFed().UpdateRelyingParty(ctx, rp); err != nil {
+				return n, err
 			}
 		}
 	}

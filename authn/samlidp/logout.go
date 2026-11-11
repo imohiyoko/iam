@@ -186,7 +186,11 @@ func (s *Service) LogoutResponse(ctx context.Context, lp LogoutPending, st *Stat
 	}
 	out := LogoutReply{Binding: lp.Reply.Binding, Location: lp.Reply.URL, RelayState: lp.RelayState}
 	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		key, cert, err := s.signer(ctx, tx, lp.RealmID)
+		alg, err := s.spSigningAlg(ctx, tx, lp.RealmID, lp.SPID)
+		if err != nil {
+			return err
+		}
+		key, cert, err := s.signer(ctx, tx, lp.RealmID, alg)
 		if err != nil {
 			return err
 		}

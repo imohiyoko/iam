@@ -445,7 +445,7 @@ func samlIdPOut(sp port.SAMLServiceProvider) (adminapi.SAMLServiceProvider, erro
 	out := adminapi.SAMLServiceProvider{Id: sp.ID, EntityId: sp.EntityID, Name: sp.Name, Acs: samlEndpointsOut(c.ACS, true), Slo: samlEndpointsOut(c.SLO, false),
 		SigningCertificates: []string{}, RequireSignedRequests: c.RequireSignedRequests, NameIdFormat: c.NameIDFormat, Attributes: []adminapi.SAMLAttribute{},
 		SignAssertion: c.SignAssertion, SignResponse: c.SignResponse, AllowIdpInitiated: c.AllowIdPInitiated, AssertionLifetime: c.AssertionLifetime,
-		CreatedAt: sp.CreatedAt, UpdatedAt: sp.UpdatedAt}
+		SigningAlg: c.SigningAlg, CreatedAt: sp.CreatedAt, UpdatedAt: sp.UpdatedAt}
 	for _, d := range c.SigningCerts {
 		out.SigningCertificates = append(out.SigningCertificates, base64.StdEncoding.EncodeToString(d))
 	}
@@ -498,6 +498,9 @@ func samlIdPIn(b *adminapi.SAMLServiceProviderInput) (samlidp.Input, error) {
 	c.SignAssertion = b.SignAssertion == nil || *b.SignAssertion
 	c.SignResponse = deref(b.SignResponse)
 	c.AllowIdPInitiated = deref(b.AllowIdpInitiated)
+	if b.SigningAlg != nil {
+		c.SigningAlg = string(*b.SigningAlg)
+	}
 	if b.AssertionLifetime != nil {
 		c.AssertionLifetime = *b.AssertionLifetime
 		if c.AssertionLifetime == 0 {

@@ -53,8 +53,8 @@ func (q *Queries) CreateWSFedCertificate(ctx context.Context, arg CreateWSFedCer
 }
 
 const createWSFedRelyingParty = `-- name: CreateWSFedRelyingParty :exec
-INSERT INTO authn_wsfed_relying_parties (id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_wsfed_relying_parties (id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, signing_alg, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateWSFedRelyingPartyParams struct {
@@ -66,6 +66,7 @@ type CreateWSFedRelyingPartyParams struct {
 	TokenType     string
 	Claims        []byte
 	TokenLifetime int64
+	SigningAlg    string
 	CreatedAt     string
 	UpdatedAt     string
 }
@@ -80,6 +81,7 @@ func (q *Queries) CreateWSFedRelyingParty(ctx context.Context, arg CreateWSFedRe
 		arg.TokenType,
 		arg.Claims,
 		arg.TokenLifetime,
+		arg.SigningAlg,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -121,7 +123,7 @@ func (q *Queries) DeleteWSFedRelyingParty(ctx context.Context, arg DeleteWSFedRe
 }
 
 const getWSFedRelyingParty = `-- name: GetWSFedRelyingParty :one
-SELECT id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, created_at, updated_at FROM authn_wsfed_relying_parties WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, created_at, updated_at, signing_alg FROM authn_wsfed_relying_parties WHERE realm_id = ? AND id = ?
 `
 
 type GetWSFedRelyingPartyParams struct {
@@ -143,12 +145,13 @@ func (q *Queries) GetWSFedRelyingParty(ctx context.Context, arg GetWSFedRelyingP
 		&i.TokenLifetime,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SigningAlg,
 	)
 	return i, err
 }
 
 const getWSFedRelyingPartyByRealm = `-- name: GetWSFedRelyingPartyByRealm :one
-SELECT id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, created_at, updated_at FROM authn_wsfed_relying_parties WHERE realm_id = ? AND realm = ?
+SELECT id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, created_at, updated_at, signing_alg FROM authn_wsfed_relying_parties WHERE realm_id = ? AND realm = ?
 `
 
 type GetWSFedRelyingPartyByRealmParams struct {
@@ -170,6 +173,7 @@ func (q *Queries) GetWSFedRelyingPartyByRealm(ctx context.Context, arg GetWSFedR
 		&i.TokenLifetime,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SigningAlg,
 	)
 	return i, err
 }
@@ -207,7 +211,7 @@ func (q *Queries) ListWSFedCertificates(ctx context.Context, realmID string) ([]
 }
 
 const listWSFedRelyingParties = `-- name: ListWSFedRelyingParties :many
-SELECT id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, created_at, updated_at FROM authn_wsfed_relying_parties WHERE realm_id = ? ORDER BY created_at, id
+SELECT id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, created_at, updated_at, signing_alg FROM authn_wsfed_relying_parties WHERE realm_id = ? ORDER BY created_at, id
 `
 
 func (q *Queries) ListWSFedRelyingParties(ctx context.Context, realmID string) ([]AuthnWsfedRelyingParty, error) {
@@ -230,6 +234,7 @@ func (q *Queries) ListWSFedRelyingParties(ctx context.Context, realmID string) (
 			&i.TokenLifetime,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SigningAlg,
 		); err != nil {
 			return nil, err
 		}
@@ -270,7 +275,7 @@ func (q *Queries) PurgeWSFedRelyingParties(ctx context.Context, lim int64) (int6
 }
 
 const updateWSFedRelyingParty = `-- name: UpdateWSFedRelyingParty :execrows
-UPDATE authn_wsfed_relying_parties SET realm = ?, name = ?, reply_urls = ?, token_type = ?, claims = ?, token_lifetime = ?, updated_at = ?
+UPDATE authn_wsfed_relying_parties SET realm = ?, name = ?, reply_urls = ?, token_type = ?, claims = ?, token_lifetime = ?, signing_alg = ?, updated_at = ?
 WHERE realm_id = ? AND id = ?
 `
 
@@ -281,6 +286,7 @@ type UpdateWSFedRelyingPartyParams struct {
 	TokenType     string
 	Claims        []byte
 	TokenLifetime int64
+	SigningAlg    string
 	UpdatedAt     string
 	RealmID       string
 	ID            string
@@ -294,6 +300,7 @@ func (q *Queries) UpdateWSFedRelyingParty(ctx context.Context, arg UpdateWSFedRe
 		arg.TokenType,
 		arg.Claims,
 		arg.TokenLifetime,
+		arg.SigningAlg,
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.ID,

@@ -766,6 +766,24 @@ func (e RealmSettingsVerifiedVia) Valid() bool {
 	}
 }
 
+// Defines values for SAMLServiceProviderInputSigningAlg.
+const (
+	SAMLServiceProviderInputSigningAlgES256 SAMLServiceProviderInputSigningAlg = "ES256"
+	SAMLServiceProviderInputSigningAlgRS256 SAMLServiceProviderInputSigningAlg = "RS256"
+)
+
+// Valid indicates whether the value is a known member of the SAMLServiceProviderInputSigningAlg enum.
+func (e SAMLServiceProviderInputSigningAlg) Valid() bool {
+	switch e {
+	case SAMLServiceProviderInputSigningAlgES256:
+		return true
+	case SAMLServiceProviderInputSigningAlgRS256:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SSFStreamDeliveryMethod.
 const (
 	SSFStreamDeliveryMethodPoll SSFStreamDeliveryMethod = "poll"
@@ -910,6 +928,24 @@ func (e SuspensionTargetType) Valid() bool {
 	case SuspensionTargetTypeServiceAccount:
 		return true
 	case SuspensionTargetTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WSFedRelyingPartyInputSigningAlg.
+const (
+	WSFedRelyingPartyInputSigningAlgES256 WSFedRelyingPartyInputSigningAlg = "ES256"
+	WSFedRelyingPartyInputSigningAlgRS256 WSFedRelyingPartyInputSigningAlg = "RS256"
+)
+
+// Valid indicates whether the value is a known member of the WSFedRelyingPartyInputSigningAlg enum.
+func (e WSFedRelyingPartyInputSigningAlg) Valid() bool {
+	switch e {
+	case WSFedRelyingPartyInputSigningAlgES256:
+		return true
+	case WSFedRelyingPartyInputSigningAlgRS256:
 		return true
 	default:
 		return false
@@ -2562,6 +2598,7 @@ type SAMLServiceProvider struct {
 	RequireSignedRequests bool    `json:"require_signed_requests"`
 	SignAssertion         bool    `json:"sign_assertion"`
 	SignResponse          bool    `json:"sign_response"`
+	SigningAlg            string  `json:"signing_alg"`
 
 	// SigningCertificates base64 の DER
 	SigningCertificates []string       `json:"signing_certificates"`
@@ -2602,12 +2639,18 @@ type SAMLServiceProviderInput struct {
 	// SignResponse Response に署名する（既定 false。どちらかは true）
 	SignResponse *bool `json:"sign_response,omitempty"`
 
+	// SigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）
+	SigningAlg *SAMLServiceProviderInputSigningAlg `json:"signing_alg,omitempty"`
+
 	// SigningCertificates AuthnRequest・LogoutRequest の署名を確かめる SP の証明書（PEM か base64 の DER。RSA 2048 bit 以上か ECDSA。期限切れは受けない）
 	SigningCertificates *[]string `json:"signing_certificates,omitempty"`
 
 	// Slo SingleLogoutService（LogoutResponse を返す先）。登録するには `signing_certificates` が要る（LogoutRequest はいつも署名を求める）
 	Slo *[]SAMLEndpoint `json:"slo,omitempty"`
 }
+
+// SAMLServiceProviderInputSigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）
+type SAMLServiceProviderInputSigningAlg string
 
 // SAMLServiceProviders defines model for SAMLServiceProviders.
 type SAMLServiceProviders struct {
@@ -3029,6 +3072,7 @@ type WSFedRelyingParty struct {
 	Name          string       `json:"name"`
 	Realm         string       `json:"realm"`
 	ReplyUrls     []string     `json:"reply_urls"`
+	SigningAlg    string       `json:"signing_alg"`
 	TokenLifetime int          `json:"token_lifetime"`
 	TokenType     string       `json:"token_type"`
 	UpdatedAt     time.Time    `json:"updated_at"`
@@ -3044,12 +3088,18 @@ type WSFedRelyingPartyInput struct {
 	Realm     string   `json:"realm"`
 	ReplyUrls []string `json:"reply_urls"`
 
+	// SigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）
+	SigningAlg *WSFedRelyingPartyInputSigningAlg `json:"signing_alg,omitempty"`
+
 	// TokenLifetime Assertion の有効期間（秒。既定 3600）
 	TokenLifetime *int `json:"token_lifetime,omitempty"`
 
 	// TokenType 既定は saml11
 	TokenType *WSFedRelyingPartyInputTokenType `json:"token_type,omitempty"`
 }
+
+// WSFedRelyingPartyInputSigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）
+type WSFedRelyingPartyInputSigningAlg string
 
 // WSFedRelyingPartyInputTokenType 既定は saml11
 type WSFedRelyingPartyInputTokenType string

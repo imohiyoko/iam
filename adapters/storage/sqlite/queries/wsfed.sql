@@ -1,6 +1,6 @@
 -- name: CreateWSFedRelyingParty :exec
-INSERT INTO authn_wsfed_relying_parties (id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_wsfed_relying_parties (id, realm_id, realm, name, reply_urls, token_type, claims, token_lifetime, signing_alg, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetWSFedRelyingParty :one
 SELECT * FROM authn_wsfed_relying_parties WHERE realm_id = ? AND id = ?;
@@ -12,7 +12,7 @@ SELECT * FROM authn_wsfed_relying_parties WHERE realm_id = ? AND realm = ?;
 SELECT * FROM authn_wsfed_relying_parties WHERE realm_id = ? ORDER BY created_at, id;
 
 -- name: UpdateWSFedRelyingParty :execrows
-UPDATE authn_wsfed_relying_parties SET realm = ?, name = ?, reply_urls = ?, token_type = ?, claims = ?, token_lifetime = ?, updated_at = ?
+UPDATE authn_wsfed_relying_parties SET realm = ?, name = ?, reply_urls = ?, token_type = ?, claims = ?, token_lifetime = ?, signing_alg = ?, updated_at = ?
 WHERE realm_id = ? AND id = ?;
 
 -- name: DeleteWSFedRelyingParty :execrows

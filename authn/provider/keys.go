@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/mldsa"
@@ -254,9 +255,31 @@ func (k *Keys) Published(ctx context.Context, tx port.Tx, realmID string) ([]por
 	return k.published(ctx, tx, realmID)
 }
 
-// ECSigner は ES256 の使っている鍵（無ければ作る）と、その秘密鍵を返す（JWS 以外の署名。WS-Federation の XML 署名。ADR 0110）。
-func (k *Keys) ECSigner(ctx context.Context, tx port.Tx, realmID string) (port.SigningKey, *ecdsa.PrivateKey, error) {
-	key, err := k.active(ctx, tx, realmID, port.AlgES256)
+// signingAlg は alg で署名するときに実際に使うアルゴリズム。フィーチャー rs256 が止まっていれば RS256 の鍵を新しく作らない。
+// 片付けで鍵が退役した後は、連携先の選択も ES256 に戻っている（片付けは連携先を先に戻す）ので、片付けの前に読んだ連携先の
+// 署名も ES256 にする（ADR 0122）。
+func (k *Keys) signingAlg(ctx context.Context, tx port.Tx, realmID, alg string) (string, error) {
+	if alg != port.AlgRS256 || k.RS256 {
+		return alg, nil
+	}
+	ok, err := k.hasActive(ctx, tx, realmID, port.AlgRS256)
+	if err != nil || ok {
+		return alg, err
+	}
+	return port.AlgES256, nil
+}
+
+// XMLSigner は alg（ES256 か RS256）の使っている鍵（無ければ作る）と、その秘密鍵を返す（JWS 以外の署名。SAML の IdP・
+// WS-Federation の XML 署名。ADR 0110、0115、0125）。RS256 の扱いは Sign と同じ。
+func (k *Keys) XMLSigner(ctx context.Context, tx port.Tx, realmID, alg string) (port.SigningKey, crypto.Signer, error) {
+	alg, err := k.signingAlg(ctx, tx, realmID, alg)
+	if err != nil {
+		return port.SigningKey{}, nil, err
+	}
+	if alg != port.AlgES256 && alg != port.AlgRS256 {
+		return port.SigningKey{}, nil, errs.New(errs.KindInvalid, "unsupported alg %s for xml signatures", alg)
+	}
+	key, err := k.active(ctx, tx, realmID, alg)
 	if err != nil {
 		return port.SigningKey{}, nil, err
 	}
@@ -268,25 +291,24 @@ func (k *Keys) ECSigner(ctx context.Context, tx port.Tx, realmID string) (port.S
 	if err != nil {
 		return port.SigningKey{}, nil, err
 	}
-	sk, ok := p.(*ecdsa.PrivateKey)
-	if !ok {
-		return port.SigningKey{}, nil, errs.New(errs.KindInternal, "signing key %s is not ECDSA", key.ID)
+	switch sk := p.(type) {
+	case *ecdsa.PrivateKey:
+		if alg == port.AlgES256 {
+			return key, sk, nil
+		}
+	case *rsa.PrivateKey:
+		if alg == port.AlgRS256 {
+			return key, sk, nil
+		}
 	}
-	return key, sk, nil
+	return port.SigningKey{}, nil, errs.New(errs.KindInternal, "signing key %s does not match %s", key.ID, alg)
 }
 
 // Sign は claims（JSON）を alg の使っている鍵で署名した JWS（compact）を返す。ヘッダーに kid と typ を付ける（ADR 0040）。
 func (k *Keys) Sign(ctx context.Context, tx port.Tx, realmID, alg, typ string, claims []byte) (string, error) {
-	if alg == port.AlgRS256 && !k.RS256 {
-		// フィーチャー rs256 が止まっていれば RS256 の鍵を新しく作らない。片付けで鍵が退役した後は、連携先の選択も
-		// ES256 に戻っている（片付けは連携先を先に戻す）ので、片付けの前に読んだ連携先の署名も ES256 にする。
-		ok, err := k.hasActive(ctx, tx, realmID, port.AlgRS256)
-		if err != nil {
-			return "", err
-		}
-		if !ok {
-			alg = port.AlgES256
-		}
+	alg, err := k.signingAlg(ctx, tx, realmID, alg)
+	if err != nil {
+		return "", err
 	}
 	key, err := k.active(ctx, tx, realmID, alg)
 	if err != nil {

@@ -2,7 +2,7 @@ package wsfed
 
 import (
 	"context"
-	"crypto/ecdsa"
+	"crypto"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -156,7 +156,7 @@ func (a assertion) saml20() *etree.Element {
 }
 
 // signed は tokenType の Assertion を組み立てて署名する。
-func (a assertion) signed(tokenType string, key *ecdsa.PrivateKey, cert []byte) (*etree.Element, error) {
+func (a assertion) signed(tokenType string, key crypto.Signer, cert []byte) (*etree.Element, error) {
 	if tokenType == TokenSAML20 {
 		el := a.saml20()
 		return el, signAt(el, key, cert, "ID", 1)
@@ -230,7 +230,7 @@ func (s *Service) Issue(ctx context.Context, realmID string, rp port.WSFedRelyin
 		if subject == "" {
 			return fmt.Errorf("wsfed: no subject for user")
 		}
-		key, cert, err := s.signer(ctx, tx, realmID)
+		key, cert, err := s.signer(ctx, tx, realmID, rp.SigningAlg)
 		if err != nil {
 			return err
 		}

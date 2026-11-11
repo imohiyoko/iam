@@ -22,8 +22,10 @@ type WSFedRelyingParty struct {
 	Claims []byte
 	// TokenLifetime は Assertion の有効期間（秒）。
 	TokenLifetime int
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// SigningAlg は署名のアルゴリズム（AlgES256 は ECDSA-SHA256、AlgRS256 は RSA-SHA256。空は ES256。ADR 0125）。
+	SigningAlg string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // WSFedCertificate は authn_wsfed_certificates の1行。realm の署名鍵（ES256）の自己署名の証明書（ECDSA の署名は毎回変わるため、
