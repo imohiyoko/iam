@@ -368,3 +368,25 @@ func TestOfflineAccessNoRotation(t *testing.T) {
 		t.Fatalf("refresh after idle: %d", st)
 	}
 }
+
+// TestOfflineAccessExchange は、Offline のアクセストークンを交換したトークンに offline_access が付かないことを確かめる
+// （交換の認可は Offline にしない。ADR 0099）。
+func TestOfflineAccessExchange(t *testing.T) {
+	l := exchangeEnv(t, nil, feature.TokenExchange, feature.OfflineAccess)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	web := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "offline_access": true})
+	api := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "redirect_uris": []string{"https://api.example.com/cb"}})
+	down := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	if code, out := l.setExchange(t, owner, api.clientID, map[string]any{"audiences": []string{down.clientID}, "subject_clients": []string{web.clientID}}); code != 200 {
+		t.Fatalf("set policy: %d %v", code, out)
+	}
+	code, _ := web.login(t, "alice@example.com", offlineScope)
+	_, tok := web.exchange(t, code, nil)
+	if tok["scope"] != "openid email offline_access" {
+		t.Fatalf("scope: %v", tok)
+	}
+	at := api.delegate(t, tok["access_token"].(string), down.clientID)
+	if in := down.introspect(t, at); in["active"] != true || in["scope"] != "openid email" {
+		t.Fatalf("exchanged token: %v", in)
+	}
+}

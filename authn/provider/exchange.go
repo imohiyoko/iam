@@ -443,6 +443,8 @@ func (t *Tokens) delegate(ctx context.Context, tx port.Tx, cl port.Client, pol E
 	if err != nil {
 		return Issued{}, err
 	}
+	// 交換の認可は Offline にしない（リフレッシュトークンも出さない）ので、offline_access は引き継がない（ADR 0126）。
+	scopes = withoutOffline(scopes)
 	act := map[string]any{"sub": cl.PublicID}
 	var actorUserID string
 	switch {
@@ -590,6 +592,7 @@ func (t *Tokens) impersonate(ctx context.Context, tx port.Tx, cl port.Client, po
 	if err != nil {
 		return Issued{}, err
 	}
+	scopes = withoutOffline(scopes) // なりすましの認可も Offline にしない（ADR 0126）
 	act, err := json.Marshal(map[string]any{"sub": operator.PublicID})
 	if err != nil {
 		return Issued{}, err
