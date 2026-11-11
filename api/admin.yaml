@@ -3183,7 +3183,7 @@ paths:
       operationId: updateWSFedRelyingParty
       summary: WS-Federation の RP の登録を置き換える
       description: |
-        権限 `clients:manage`。省いた項目は既定に戻る（`claims` を省けばメールだけ）。`wsfed.relying_party.updated` を監査ログに残す。
+        権限 `clients:manage`。省いた項目は既定に戻る（`claims` を省けばメールだけ）。`signing_alg` だけは省けば今の値を保つ（フィーチャー `rs256` が止まっていれば `ES256`）。`wsfed.relying_party.updated` を監査ログに残す。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -3276,7 +3276,7 @@ paths:
       operationId: updateSAMLServiceProvider
       summary: SAML の SP の登録を置き換える
       description: |
-        権限 `clients:manage`。省いた項目は既定に戻る。`saml_idp.service_provider.updated` を監査ログに残す。
+        権限 `clients:manage`。省いた項目は既定に戻る。`signing_alg` だけは省けば今の値を保つ（フィーチャー `rs256` が止まっていれば `ES256`）。`saml_idp.service_provider.updated` を監査ログに残す。
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
