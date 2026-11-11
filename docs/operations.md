@@ -59,6 +59,15 @@ OIDC の署名鍵と、監査ログの日ごとの鍵は Storage にあり、マ
 
 本体の更新とフィーチャーの構成の変更は、別のデプロイで行う。
 
+バージョンごとの注意:
+
+- JWT のアクセストークン（ADR 0123）を入れた版から、`oidc.retired_key_ttl` は `oidc.id_token_ttl` に加えて `oidc.access_token_ttl` より長くなければ起動を拒む（フィーチャーを使うかどうかに関わらない）。既定値（7 日・1 時間・10 分）のままなら影響はない。`access_token_ttl` を長くしている構成は、入れ替えの前に `retired_key_ttl` を両方より長くする
+
+`oidc.access_token_ttl`・`oidc.id_token_ttl` と `oidc.retired_key_ttl` を変えるときの順序:
+
+- 縮めるときは、先にトークンの寿命（`access_token_ttl`・`id_token_ttl`）を縮めて全台に出し、古い寿命で発行したトークンがすべて期限を過ぎてから `retired_key_ttl` を縮める。逆の順にすると、まだ有効な JWT の鍵が JWKS から先に消え、リソースサーバー・RP が検証できなくなる
+- 延ばすときは、先に `retired_key_ttl` を延ばしてから、トークンの寿命を延ばす
+
 ## 4. 構成の変更（フィーチャー）
 
 ```sh
@@ -101,5 +110,5 @@ dump.jsonl には暗号化した個人情報が入る。移行が終わったら
 | 起動を拒否する（鍵） | KeyStore を読めない | 鍵のファイルの権限（0600）と環境変数を確かめ、バックアップから戻す |
 | `storage import` が監査ログの検証で失敗する | 監査ログの改ざん、書き出しの破損、または移行先の KeyStore に監査の鍵（`audit_keys`）・`audit_unkeyed_until` が無い | 監査の鍵が無いなら、移行元と同じ `audit_keys`・`current_audit_key`・`audit_unkeyed_until` を移行先に置き、移行先の Storage を空に戻して `storage import` をやり直す（取り込みは空の Storage にしかできない）。破損なら書き出しをやり直す。改ざんならインシデントとして扱い、SIEM の記録と照らし合わせる |
 | 運営者のアカウントの乗っ取りが疑われる | ― | 別の owner が管理 API で停止（`security_risk`）し、全認証情報と全セッションを無効化する（`POST /v1/admin/users/{id}/credentials:revoke-all`）。運営者がいなければ `iam operator create` で作り直す |
-| 署名鍵の漏洩が疑われる | ― | 運営者のトークンで `POST /v1/admin/signing-keys:rotate`（`Authorization: Bearer …`、`Content-Type: application/json`、本文 `{"alg": "ES256"}` か `{"alg": "ML-DSA-65"}`）を実行し、漏れた鍵のアルゴリズムを新しい鍵に切り替える。古い鍵は `oidc.retired_key_ttl`（既定 7 日）の間 JWKS に残り、その間は漏れた鍵で署名した ID トークンが RP の検証を通りうる。個別に失効させる API は無いので、`oidc.retired_key_ttl` を `oidc.id_token_ttl` を少し超える値に一時的に下げて全台を再起動し、残る期間を縮める。影響の範囲を記録し、RP に古い `kid` を信頼しないよう伝える |
+| 署名鍵の漏洩が疑われる | ― | 運営者のトークンで `POST /v1/admin/signing-keys:rotate`（`Authorization: Bearer …`、`Content-Type: application/json`、本文 `{"alg": "ES256"}` か `{"alg": "ML-DSA-65"}`、フィーチャー `rs256` を使っていれば `{"alg": "RS256"}`）を実行し、漏れた鍵のアルゴリズムを新しい鍵に切り替える。古い鍵は `oidc.retired_key_ttl`（既定 7 日）の間 JWKS に残り、その間は漏れた鍵で署名した ID トークンと JWT のアクセストークンが RP・リソースサーバーの検証を通りうる。個別に失効させる API は無いので、`oidc.retired_key_ttl` を `oidc.id_token_ttl` と `oidc.access_token_ttl`（JWT のアクセストークン。ADR 0123）を少し超える値に一時的に下げて全台を再起動し、残る期間を縮める。この短縮は漏れた鍵だけでなく、ほかの退役した鍵も JWKS から早く消すため、トークンの寿命を最近縮めていて 3 章の待ち時間が過ぎていなければ、古い寿命で発行されたまだ有効なトークンも検証できなくなり、利用者に再認証が要ることがある。影響の範囲を記録し、RP と、JWT のアクセストークンを JWKS で確かめるリソースサーバーに、古い `kid` を信頼しないよう伝える |
 | マスター鍵の漏洩が疑われる | ― | DB の漏洩と合わせて評価する。新しいマスター鍵に切り替え（2章）、データ鍵の包み直しは今は無いため、影響を記録する |

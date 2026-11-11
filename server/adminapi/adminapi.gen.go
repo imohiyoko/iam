@@ -1512,9 +1512,12 @@ type Client struct {
 	FrontchannelLogoutUri             *string                 `json:"frontchannel_logout_uri,omitempty"`
 	IdTokenSignedResponseAlg          string                  `json:"id_token_signed_response_alg"`
 	Jwks                              *map[string]interface{} `json:"jwks,omitempty"`
-	Name                              string                  `json:"name"`
-	PostLogoutRedirectUris            []string                `json:"post_logout_redirect_uris"`
-	RedirectUris                      []string                `json:"redirect_uris"`
+
+	// JwtAccessTokens JWT のアクセストークン（RFC 9068）を出す連携先だけ true を返す（出さないなら省く）
+	JwtAccessTokens        *bool    `json:"jwt_access_tokens,omitempty"`
+	Name                   string   `json:"name"`
+	PostLogoutRedirectUris []string `json:"post_logout_redirect_uris"`
+	RedirectUris           []string `json:"redirect_uris"`
 
 	// RequirePushedAuthorizationRequests PAR を求める連携先だけ true を返す（求めないなら省く）
 	RequirePushedAuthorizationRequests *bool   `json:"require_pushed_authorization_requests,omitempty"`
@@ -1568,9 +1571,15 @@ type ClientInput struct {
 	IdTokenSignedResponseAlg *ClientInputIdTokenSignedResponseAlg `json:"id_token_signed_response_alg,omitempty"`
 
 	// Jwks `private_key_jwt` の公開鍵（JWKS）
-	Jwks                   *map[string]interface{} `json:"jwks,omitempty"`
-	Name                   string                  `json:"name"`
-	PostLogoutRedirectUris *[]string               `json:"post_logout_redirect_uris,omitempty"`
+	Jwks *map[string]interface{} `json:"jwks,omitempty"`
+
+	// JwtAccessTokens アクセストークンを JWT（RFC 9068。`typ: at+jwt`、`id_token_signed_response_alg` と同じアルゴリズム）で出す。フィーチャー
+	// `jwt_access_tokens` が動いているときだけ true にできる（ADR 0123）。リソースサーバーは JWKS で署名を確かめられるが、失効・停止は
+	// 期限まで届かない（イントロスペクションは今までどおり即時）。省けば false（不透明なトークン）。Token Exchange で出す
+	// アクセストークンは、この設定にかかわらず不透明なトークン
+	JwtAccessTokens        *bool     `json:"jwt_access_tokens,omitempty"`
+	Name                   string    `json:"name"`
+	PostLogoutRedirectUris *[]string `json:"post_logout_redirect_uris,omitempty"`
 
 	// RedirectUris 1 つ以上。`device_authorization_grant` を許すか `backchannel_token_delivery_mode` を登録した連携先だけは空でよい
 	RedirectUris []string `json:"redirect_uris"`

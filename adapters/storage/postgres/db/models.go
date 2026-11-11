@@ -48,6 +48,7 @@ type AuthnClient struct {
 	CibaMode                          string
 	CibaNotificationEndpoint          string
 	Fapi2SecurityProfile              int64
+	JwtAccessTokens                   int64
 }
 
 type AuthnConnection struct {

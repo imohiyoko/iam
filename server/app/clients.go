@@ -90,6 +90,9 @@ func clientOutBase(c port.Client, secret string, deviceFlow, ciba bool) (adminap
 	if c.FAPI2 {
 		out.Fapi2SecurityProfile = &c.FAPI2
 	}
+	if c.JWTAccessTokens {
+		out.JwtAccessTokens = &c.JWTAccessTokens
+	}
 	return out, nil
 }
 
@@ -124,6 +127,9 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.Fapi2SecurityProfile != nil {
 		in.FAPI2 = *b.Fapi2SecurityProfile
+	}
+	if b.JwtAccessTokens != nil {
+		in.JWTAccessTokens = *b.JwtAccessTokens
 	}
 	if b.DpopBoundAccessTokens != nil {
 		in.DPoPBoundAccessTokens = *b.DpopBoundAccessTokens

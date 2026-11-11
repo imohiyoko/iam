@@ -65,6 +65,8 @@ type Clients struct {
 	FAPI2, RealmFAPI2 bool
 	// RS256 はフィーチャー rs256 が動いているか（id_token_signed_response_alg に RS256 を受け付けるか。ADR 0122）。
 	RS256 bool
+	// JWTAccess はフィーチャー jwt_access_tokens が動いているか（jwt_access_tokens を受け付けるか。ADR 0123）。
+	JWTAccess bool
 }
 
 // ClientInput は登録・変更の内容。
@@ -95,6 +97,8 @@ type ClientInput struct {
 	RequirePAR bool
 	// FAPI2 は FAPI 2.0 Security Profile を強いる（フィーチャー fapi2。ADR 0117）。
 	FAPI2 bool
+	// JWTAccessTokens はアクセストークンを JWT（RFC 9068）で出す（フィーチャー jwt_access_tokens。ADR 0123）。
+	JWTAccessTokens bool
 }
 
 // ValidRedirectURI は連携先の URI に使えるか（絶対 URL、https か loopback の http、フラグメントと userinfo なし）を返す。
@@ -343,6 +347,14 @@ func (c *Clients) checkPAR(in ClientInput, prev port.Client) error {
 	return invalidClient("require_pushed_authorization_requests: the par feature is not enabled")
 }
 
+// checkJWTAccess は、フィーチャー jwt_access_tokens が動いていないときに JWT のアクセストークンを新たに置くのを拒む。今の値のままなら受け付ける。
+func (c *Clients) checkJWTAccess(in ClientInput, prev port.Client) error {
+	if c.JWTAccess || !in.JWTAccessTokens || prev.JWTAccessTokens {
+		return nil
+	}
+	return invalidClient("jwt_access_tokens: the jwt_access_tokens feature is not enabled")
+}
+
 // checkFAPI2 は FAPI 2.0 Security Profile の連携先（連携先の設定か realm の設定）の条件を確かめる（ADR 0117）。
 // 連携先に新しく入れるときは、フィーチャー fapi2・par と、dpop か mtls_client_auth が動いていなければ拒む（今の値のままの変更と
 // 外すのは受ける）。cl は保存する内容。
@@ -378,6 +390,9 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 	if err := c.checkPAR(in, port.Client{}); err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkJWTAccess(in, port.Client{}); err != nil {
+		return port.Client{}, "", err
+	}
 	now := c.Clock.Now()
 	cl := port.Client{ID: id.New(id.Client), PublicID: id.NewExternal(id.Client), RealmID: realmID, Name: in.Name, TrustLevel: port.TrustFirstParty,
 		RedirectURIs: in.RedirectURIs, PostLogoutRedirectURIs: in.PostLogoutRedirectURIs, AuthMethod: in.AuthMethod, JWKS: in.JWKS,
@@ -385,7 +400,7 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 		FrontchannelLogoutURI: in.FrontchannelLogoutURI, FrontchannelLogoutSessionRequired: in.FrontchannelLogoutSessionRequired,
 		DPoPBoundAccessTokens: in.DPoPBoundAccessTokens, TLSBoundAccessTokens: in.TLSBoundAccessTokens, TLSAuthField: in.TLSAuthField,
 		TLSAuthValue: in.TLSAuthValue, CIBAMode: in.CIBAMode, CIBANotificationEndpoint: in.CIBANotificationEndpoint,
-		RequirePAR: in.RequirePAR, FAPI2: in.FAPI2, CreatedAt: now, UpdatedAt: now}
+		RequirePAR: in.RequirePAR, FAPI2: in.FAPI2, JWTAccessTokens: in.JWTAccessTokens, CreatedAt: now, UpdatedAt: now}
 	if err := c.checkFAPI2(cl, port.Client{}); err != nil {
 		return port.Client{}, "", err
 	}
@@ -416,6 +431,9 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	if err := c.checkPAR(in, cl); err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkJWTAccess(in, cl); err != nil {
+		return port.Client{}, "", err
+	}
 	prev := cl
 	var secret string
 	if in.AuthMethod != port.ClientAuthSecret {
@@ -432,6 +450,7 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	cl.FrontchannelLogoutURI, cl.FrontchannelLogoutSessionRequired = in.FrontchannelLogoutURI, in.FrontchannelLogoutSessionRequired
 	cl.DPoPBoundAccessTokens, cl.TLSBoundAccessTokens = in.DPoPBoundAccessTokens, in.TLSBoundAccessTokens
 	cl.TLSAuthField, cl.TLSAuthValue, cl.FAPI2 = in.TLSAuthField, in.TLSAuthValue, in.FAPI2
+	cl.JWTAccessTokens = in.JWTAccessTokens
 	if cl.AuthMethod == port.ClientAuthNone {
 		// 公開クライアントには交換を許さない（ADR 0099）。
 		cl.TokenExchange = nil

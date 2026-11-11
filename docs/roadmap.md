@@ -684,6 +684,16 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] 無効化で連携先を ES256 に戻し、RS256 の鍵を退役させる
 - SAML の IdP・WS-Federation の RSA-SHA256、PS256
 
+#### JWT のアクセストークン（ADR 0123）
+
+**ゴール**：イントロスペクションを呼べないリソースサーバー（API ゲートウェイなど）が、JWKS だけでアクセストークンを確かめられる。
+
+- [x] フィーチャー `jwt_access_tokens`（既定オフ）と連携先ごとの `jwt_access_tokens`。オフなら登録を拒み、JWT の形のトークンを受けないテストがある
+- [x] RFC 9068 の形（`typ: at+jwt`、`iss`・`sub`・`aud`・`client_id`・`jti`・`scope`・`cnf` ほか）。標準のライブラリ（jwx）が JWKS で確かめられる
+- [x] トークンの行を残し、UserInfo・イントロスペクション・失効・リフレッシュが JWT でも今までどおり効く。書き換えた JWT は通らない
+- [x] 無効化で連携先の設定を外す。memory・SQLite・PostgreSQL の契約テスト
+- Token Exchange のトークンの JWT（`act`）
+
 #### Token Exchange・なりすまし（ADR 0099）
 
 **ゴール**：連携先が本人のトークンを、行為者付きで範囲を絞ったトークンに替えられる。運営者は記録と通知付きで本人として動ける。

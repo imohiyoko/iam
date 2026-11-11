@@ -20,6 +20,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/flowhooks"
 	_ "github.com/imohiyoko/iam/features/hotp"
 	_ "github.com/imohiyoko/iam/features/impersonation"
+	_ "github.com/imohiyoko/iam/features/jwtaccesstokens"
 	_ "github.com/imohiyoko/iam/features/kerberos"
 	_ "github.com/imohiyoko/iam/features/ldap"
 	_ "github.com/imohiyoko/iam/features/loginrisk"

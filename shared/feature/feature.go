@@ -84,6 +84,8 @@ const (
 	APIKeyIntrospection = "api_key_introspection" // #nosec G101 -- フィーチャーの名前で、秘密ではない
 	// RS256 は ID トークン・Logout Token の RS256 の署名を連携先ごとに選べるようにする（ADR 0122）。
 	RS256 = "rs256"
+	// JWTAccessTokens はアクセストークンを連携先ごとに JWT（RFC 9068）で出せるようにする（ADR 0123）。
+	JWTAccessTokens = "jwt_access_tokens"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

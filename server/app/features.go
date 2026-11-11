@@ -250,6 +250,18 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.SAMLIdP().Purge(ctx, limit)
 		}},
+	// 連携先の JWT のアクセストークンを外す（ADR 0123）。発行済みの JWT は無効化の後は受けない（期限で消える）。
+	feature.JWTAccessTokens: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.JWTAccessTokens, nil })
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
+			if !c.JWTAccessTokens {
+				return false, nil
+			}
+			c.JWTAccessTokens, c.UpdatedAt = false, now
+			return true, tx.Clients().Update(ctx, c)
+		})
+	}},
 	// 連携先の RS256 を ES256 に戻し、RS256 の鍵を退役させる（ADR 0122）。退役した鍵は oidc.retired_key_ttl の間 JWKS に残り、
 	// 発行済みの ID トークンはその間検証できる。
 	feature.RS256: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
