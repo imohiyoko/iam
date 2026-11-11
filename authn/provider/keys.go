@@ -66,6 +66,19 @@ func (k *Keys) Algs() []string {
 	return Algs
 }
 
+// Advertised は Discovery の id_token_signing_alg_values_supported に載せるアルゴリズム。フィーチャー rs256 を無効にしている
+// 間（片付けで RS256 の鍵が退役するまで）は、RS256 の連携先にまだ RS256 で署名するので RS256 も載せる（ADR 0122）。
+func (k *Keys) Advertised(ctx context.Context, tx port.Tx, realmID string) ([]string, error) {
+	if k.RS256 {
+		return k.Algs(), nil
+	}
+	ok, err := k.hasActive(ctx, tx, realmID, port.AlgRS256)
+	if err != nil || !ok {
+		return Algs, err
+	}
+	return append(slices.Clone(Algs), port.AlgRS256), nil
+}
+
 func sealPurpose(kid string) string { return "signing_key\x00" + kid }
 
 // Ensure は realm に、アルゴリズムごとの使っている鍵が無ければ作る。
@@ -213,6 +226,15 @@ func publicKey(x port.SigningKey) (any, error) {
 	return nil, errs.New(errs.KindInternal, "unsupported alg %s", x.Alg)
 }
 
+// hasActive は realm に alg の使っている鍵があるか。
+func (k *Keys) hasActive(ctx context.Context, tx port.Tx, realmID, alg string) (bool, error) {
+	ks, err := tx.SigningKeys().List(ctx, realmID)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(ks, func(x port.SigningKey) bool { return x.Alg == alg && x.RetiredAt == nil }), nil
+}
+
 // active は alg の使っている鍵を返す。無ければ作る。
 func (k *Keys) active(ctx context.Context, tx port.Tx, realmID, alg string) (port.SigningKey, error) {
 	ks, err := tx.SigningKeys().List(ctx, realmID)
@@ -255,6 +277,17 @@ func (k *Keys) ECSigner(ctx context.Context, tx port.Tx, realmID string) (port.S
 
 // Sign は claims（JSON）を alg の使っている鍵で署名した JWS（compact）を返す。ヘッダーに kid と typ を付ける（ADR 0040）。
 func (k *Keys) Sign(ctx context.Context, tx port.Tx, realmID, alg, typ string, claims []byte) (string, error) {
+	if alg == port.AlgRS256 && !k.RS256 {
+		// フィーチャー rs256 が止まっていれば RS256 の鍵を新しく作らない。片付けで鍵が退役した後は、連携先の選択も
+		// ES256 に戻っている（片付けは連携先を先に戻す）ので、片付けの前に読んだ連携先の署名も ES256 にする。
+		ok, err := k.hasActive(ctx, tx, realmID, port.AlgRS256)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			alg = port.AlgES256
+		}
+	}
 	key, err := k.active(ctx, tx, realmID, alg)
 	if err != nil {
 		return "", err
@@ -279,7 +312,7 @@ func (k *Keys) Sign(ctx context.Context, tx port.Tx, realmID, alg, typ string, c
 		sk = jose.SigningKey{Algorithm: AlgMLDSA65, Key: mldsaSigner{p}}
 	case port.AlgRS256:
 		// フィーチャー rs256 を無効にしている間も、片付けで連携先の選択が ES256 に戻るまでは RS256 で署名し続ける
-		// （黙って ES256 にすると RP の検証が通らなくなるため。ADR 0122）。
+		// （黙って ES256 にすると RP の検証が通らなくなるため。ADR 0122）。鍵が退役した後は上で ES256 にしている。
 		p, err := x509.ParsePKCS8PrivateKey(raw)
 		if err != nil {
 			return "", err
