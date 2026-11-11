@@ -813,7 +813,9 @@ type cached struct {
 	Restriction       port.SessionRestriction `json:"r,omitempty"`
 }
 
-func cacheKey(realmID, sessionID string) string { return "session:v1:" + realmID + ":" + sessionID }
+// cacheKey はセッションの検証結果のキャッシュのキー。v2 で認証情報の ID（ac）を足した。ac の無い v1 のエントリを
+// 「認証情報が無い」と読まないよう、名前空間を分ける（ADR 0126）。
+func cacheKey(realmID, sessionID string) string { return "session:v2:" + realmID + ":" + sessionID }
 
 // Validate はトークンを検証する。使えないセッションは ErrInvalid（理由はログにだけ出す）。
 // ストレージの障害では ErrInvalid 以外のエラーを返す（呼び出し側は Cookie を消さない）。
