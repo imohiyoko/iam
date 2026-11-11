@@ -2,7 +2,7 @@
 
 - 状態: 承認
 - 日付: 2026-11-11
-- 関連: [design.md](../design.md) 5.8、5.9、9.3、11.0、[0110](0110-ws-federation.md)、[0115](0115-saml-idp.md)、
+- 関連: [design.md](../design.md) 5.8、5.9、9.3、11.0、[0110](0110-wsfed-passive-idp.md)、[0115](0115-saml-idp.md)、
   [0122](0122-rs256-id-tokens.md)
 
 ## 背景
@@ -19,7 +19,11 @@ SAML の IdP（ADR 0115）と WS-Federation（ADR 0110）は、realm の ES256 �
   SAML の Response・Assertion・LogoutResponse（HTTP-Redirect の `SigAlg` も RSA-SHA256、値は PKCS #1 v1.5）、WS-Federation の
   Assertion（SAML 1.1・2.0）が対象。正規化・ダイジェストは今までどおり（Exclusive C14N・SHA-256）
 - 鍵ごとの自己署名の証明書は今までと同じ表に置く。メタデータの KeyDescriptor には、公開している ES256 と RS256 の鍵の証明書を
-  並べる（フィーチャーがオンなら、使っている RS256 の鍵の証明書も用意する）。メタデータ自体の署名は ES256 のまま
+  並べる（使っている RS256 の鍵があれば、その証明書も用意する。フィーチャーを止めた後でも片付けの前なら載せる）。メタデータの取得では
+  鍵を作らない（RS256 の鍵は起動のときに作る。片付けが鍵を退役させた後に、止める前から動いているインスタンスが鍵を作り直さないように）。
+  メタデータ自体の署名は ES256 のまま
+- 管理 API の SP・RP の更新で `signing_alg` を省けば今の値を保つ（`signing_alg` を知らない管理クライアントの更新で RS256 が ES256 に
+  戻らないように）。フィーチャーが止まっていれば ES256 にする
 - 無効化（`rs256` の片付け）では、OIDC の連携先に加えて `RS256` の SP・RP を `ES256` に戻してから RSA の鍵を退役させる。
   片付けの前に読んだ SP・RP への署名は、鍵が退役していれば ES256 にする（ADR 0122 と同じ）。退役した鍵の証明書は
   `oidc.retired_key_ttl` の間メタデータに残る
