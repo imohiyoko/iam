@@ -884,8 +884,9 @@ func (c Config) Validate() error {
 	if o.IDTokenTTL <= 0 || o.AccessTokenTTL <= 0 || o.RefreshTokenTTL <= 0 {
 		problems = append(problems, "oidc: token ttls must be positive")
 	}
-	if o.RetiredKeyTTL <= o.IDTokenTTL {
-		problems = append(problems, "oidc.retired_key_ttl must be longer than oidc.id_token_ttl")
+	if o.RetiredKeyTTL <= o.IDTokenTTL || o.RetiredKeyTTL <= o.AccessTokenTTL {
+		// 退役した鍵は、その鍵で署名した ID トークンと JWT のアクセストークン（ADR 0123）の期限まで JWKS に残す。
+		problems = append(problems, "oidc.retired_key_ttl must be longer than oidc.id_token_ttl and oidc.access_token_ttl")
 	}
 	if o.DeviceCodeTTL <= 0 || o.DeviceCodeTTL > Duration(30*time.Minute) {
 		problems = append(problems, "oidc.device_code_ttl must be positive and at most 30m")
