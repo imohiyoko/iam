@@ -490,6 +490,18 @@ func (s *Service) Create(ctx context.Context, tx port.Tx, realmID string, in Inp
 // Update は SP の登録を置き換える（監査ログ saml_idp.service_provider.updated）。無ければ errs.NotFound。
 func (s *Service) Update(ctx context.Context, tx port.Tx, sp port.SAMLServiceProvider, in Input, actor audit.Actor, requestID string) (port.SAMLServiceProvider, error) {
 	now := s.Clock.Now()
+	if in.Config.SigningAlg == "" {
+		// 省けば今の値を保つ（signing_alg を知らない管理クライアントの更新で RS256 が ES256 に戻らないように）。
+		// フィーチャー rs256 が止まっていれば ES256（片付けと同じ。ADR 0125）。
+		cur, err := ConfigOf(sp)
+		if err != nil {
+			return port.SAMLServiceProvider{}, err
+		}
+		in.Config.SigningAlg = cur.SigningAlg
+		if in.Config.SigningAlg == port.AlgRS256 && (s.Keys == nil || !s.Keys.RS256) {
+			in.Config.SigningAlg = port.AlgES256
+		}
+	}
 	in, err := s.validate(in, now)
 	if err != nil {
 		return port.SAMLServiceProvider{}, err

@@ -227,6 +227,11 @@ func publicKey(x port.SigningKey) (any, error) {
 	return nil, errs.New(errs.KindInternal, "unsupported alg %s", x.Alg)
 }
 
+// HasActive は realm に alg の使っている鍵があるか（鍵は作らない）。
+func (k *Keys) HasActive(ctx context.Context, tx port.Tx, realmID, alg string) (bool, error) {
+	return k.hasActive(ctx, tx, realmID, alg)
+}
+
 // hasActive は realm に alg の使っている鍵があるか。
 func (k *Keys) hasActive(ctx context.Context, tx port.Tx, realmID, alg string) (bool, error) {
 	ks, err := tx.SigningKeys().List(ctx, realmID)

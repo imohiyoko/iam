@@ -191,6 +191,15 @@ func (s *Service) validate(in Input) (Input, error) {
 	return out, nil
 }
 
+// keptSigningAlg は更新で signing_alg を省いたときの値。今の値を保つ（signing_alg を知らない管理クライアントの更新で
+// RS256 が ES256 に戻らないように）。ただしフィーチャー rs256 が止まっていれば ES256（片付けと同じ。ADR 0125）。
+func (s *Service) keptSigningAlg(cur string) string {
+	if cur == port.AlgRS256 && (s.Keys == nil || !s.Keys.RS256) {
+		return port.AlgES256
+	}
+	return cur
+}
+
 func isControl(r rune) bool { return r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) }
 
 func quoteShort(s string) string {
@@ -311,6 +320,9 @@ func (s *Service) Create(ctx context.Context, tx port.Tx, realmID string, in Inp
 
 // Update は RP の登録を置き換える（監査ログ wsfed.relying_party.updated）。無ければ errs.NotFound。
 func (s *Service) Update(ctx context.Context, tx port.Tx, rp port.WSFedRelyingParty, in Input, actor audit.Actor, requestID string) (port.WSFedRelyingParty, error) {
+	if in.SigningAlg == "" {
+		in.SigningAlg = s.keptSigningAlg(rp.SigningAlg)
+	}
 	in, err := s.validate(in)
 	if err != nil {
 		return port.WSFedRelyingParty{}, err

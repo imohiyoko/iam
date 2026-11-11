@@ -67,8 +67,12 @@ func (s *Service) certificates(ctx context.Context, tx port.Tx, realmID string) 
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if s.Keys.RS256 {
-		// RS256 の SP がメタデータから証明書を取れるように、使っている RS256 の鍵の証明書も用意する。
+	// RS256 の SP がメタデータから証明書を取れるように、使っている RS256 の鍵があればその証明書も用意する。鍵はここでは作らない
+	// （起動のときに Ensure が作る。フィーチャー rs256 を止める片付けが鍵を退役させた後に、止める前から動いているインスタンスが
+	// メタデータの取得で鍵を作り直さないように）。止めた後でも片付けの前なら、まだ RS256 で署名するので証明書を載せる。
+	if ok, err := s.Keys.HasActive(ctx, tx, realmID, port.AlgRS256); err != nil {
+		return nil, nil, nil, err
+	} else if ok {
 		if _, _, err := s.signer(ctx, tx, realmID, port.AlgRS256); err != nil {
 			return nil, nil, nil, err
 		}
