@@ -95,6 +95,9 @@ type Code struct {
 	// AuthTime はセッションで最後に本人確認した時刻。
 	AuthTime time.Time `json:"auth_time"`
 	AMR      []string  `json:"amr"`
+	// Credentials はコードを出したときのセッションの認証情報の ID（offline_access の認可に結び付ける。ADR 0126）。
+	// nil なら記録していない（以前に出したコード）。
+	Credentials []string `json:"credentials"`
 	// GrantType は認可コード以外で作ったときの grant_type（Device Authorization Grant。監査ログに残す）。
 	GrantType string `json:"grant_type,omitempty"`
 	// SelectedACR は ID トークンなどに載せる acr（フィーチャー acr。ADR 0093）。空なら載せない。

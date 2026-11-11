@@ -784,6 +784,8 @@ type Validated struct {
 	MaxAuthAge      time.Duration
 	AuthMethods     []string
 	AuthenticatedAt time.Time
+	// AuthCredentialIDs はセッションの認証に使った認証情報の ID（認可コードに写す。ADR 0126）。
+	AuthCredentialIDs []string
 	// Risk はリスクの種類ごとの点数（一覧で有効なものだけ。ADR 0084）。評価していない種類は無い。
 	Risk map[string]int
 	// Restriction は使える操作の制限（2要素目の確認待ちなど）。空なら制限なし。
@@ -794,20 +796,21 @@ type Validated struct {
 
 // cached はキャッシュに置く検証の結果。秘密は置かない。
 type cached struct {
-	Hash            []byte                  `json:"h"`
-	SID             string                  `json:"s,omitempty"`
-	PrincipalType   port.PrincipalType      `json:"pt"`
-	PrincipalID     string                  `json:"p"`
-	PublicID        string                  `json:"u"`
-	ActiveOrgID     string                  `json:"o,omitempty"`
-	OrgUnavailable  []string                `json:"ou,omitempty"`
-	MaxAuthAge      time.Duration           `json:"ma,omitempty"`
-	AuthMethods     []string                `json:"amr"`
-	AuthenticatedAt time.Time               `json:"at"`
-	Risk            map[string]int          `json:"rk,omitempty"`
-	CreatedAt       time.Time               `json:"c"`
-	NextCheck       time.Time               `json:"n"`
-	Restriction     port.SessionRestriction `json:"r,omitempty"`
+	Hash              []byte                  `json:"h"`
+	SID               string                  `json:"s,omitempty"`
+	PrincipalType     port.PrincipalType      `json:"pt"`
+	PrincipalID       string                  `json:"p"`
+	PublicID          string                  `json:"u"`
+	ActiveOrgID       string                  `json:"o,omitempty"`
+	OrgUnavailable    []string                `json:"ou,omitempty"`
+	MaxAuthAge        time.Duration           `json:"ma,omitempty"`
+	AuthMethods       []string                `json:"amr"`
+	AuthenticatedAt   time.Time               `json:"at"`
+	AuthCredentialIDs []string                `json:"ac,omitempty"`
+	Risk              map[string]int          `json:"rk,omitempty"`
+	CreatedAt         time.Time               `json:"c"`
+	NextCheck         time.Time               `json:"n"`
+	Restriction       port.SessionRestriction `json:"r,omitempty"`
 }
 
 func cacheKey(realmID, sessionID string) string { return "session:v1:" + realmID + ":" + sessionID }
@@ -878,7 +881,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 			return err
 		}
 		c = cached{Risk: scores, Hash: s.TokenHash, SID: s.SID, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
-			ActiveOrgID: s.ActiveOrgID, OrgUnavailable: slices.Compact(orgUnavailable), MaxAuthAge: lim.MaxAuthAge, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
+			ActiveOrgID: s.ActiveOrgID, OrgUnavailable: slices.Compact(orgUnavailable), MaxAuthAge: lim.MaxAuthAge, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, AuthCredentialIDs: s.AuthCredentialIDs, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
 		return nil
 	})
 	if errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) {
@@ -905,7 +908,7 @@ func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Valida
 	}
 	v := Validated{SessionID: sid, SID: lineage, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
 		PublicID: c.PublicID, ActiveOrgID: c.ActiveOrgID, OrgUnavailable: c.OrgUnavailable, MaxAuthAge: c.MaxAuthAge, AuthMethods: c.AuthMethods,
-		AuthenticatedAt: c.AuthenticatedAt, Risk: c.Risk, Restriction: c.Restriction}
+		AuthenticatedAt: c.AuthenticatedAt, AuthCredentialIDs: c.AuthCredentialIDs, Risk: c.Risk, Restriction: c.Restriction}
 	if m.Config.RotationInterval > 0 && !now.Before(c.CreatedAt.Add(m.Config.RotationInterval)) {
 		v.RotateDue = true
 	}

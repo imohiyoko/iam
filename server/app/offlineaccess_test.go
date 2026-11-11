@@ -426,31 +426,76 @@ func TestOfflineAccessExchange(t *testing.T) {
 	}
 }
 
-// TestOfflineAccessReauthBeforeExchange は、認可コードを出した後に系列で本人確認をやり直したら（ログインのやり直しなど）、
-// コードを Offline の認可に交換しないことを確かめる（今のセッションの認証情報はコードを出したときのものではない）。
+// TestOfflineAccessReauthBeforeExchange は、認可コードの後に同じ系列で本人確認をやり直しても（同じ秒でも）、
+// Offline の認可にはコードを出したときの認証情報が結び付くことを確かめる。
 func TestOfflineAccessReauthBeforeExchange(t *testing.T) {
 	l := newOfflineEnv(t, true)
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "offline_access": true})
 	code, _ := p.login(t, "alice@example.com", offlineScope)
-	l.advance(2 * time.Second)
+	uid := l.internalUserID(t, l.userID(t, "alice@example.com"))
+	var original []string
+	err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+		ss, err := tx.Sessions().ListByPrincipal(ctx, l.a.realm.ID, port.PrincipalUser, uid)
+		if err != nil || len(ss) != 1 {
+			return fmt.Errorf("sessions: %v %v", ss, err)
+		}
+		// 同じ系列を、同じ秒に別の認証情報で本人確認したセッションが継ぐ（ログインのやり直し）。
+		s := ss[0]
+		original = s.AuthCredentialIDs
+		now := l.a.deps.Clock.Now()
+		s.ID, s.TokenHash, s.CreatedAt, s.LastSeenAt, s.AuthenticatedAt = "ses_reauth", []byte("reauth"), now, now, now
+		s.AuthCredentialIDs = []string{"pky_other"}
+		return tx.Sessions().Create(ctx, s)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(original) == 0 {
+		t.Fatal("the login session has no credentials")
+	}
+	if status, out := p.exchange(t, code, nil); status != 200 {
+		t.Fatalf("exchange after reauth: %d %v", status, out)
+	}
+	err = l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+		gs, err := tx.Grants().ListOfflineByUser(ctx, l.a.realm.ID, uid)
+		if err != nil || len(gs) != 1 {
+			return fmt.Errorf("grants: %v %v", gs, err)
+		}
+		if !slices.Equal(gs[0].AuthCredentialIDs, original) {
+			return fmt.Errorf("grant credentials %v, want %v", gs[0].AuthCredentialIDs, original)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestOfflineAccessCredentialGoneBeforeExchange は、認可コードの後にコードの認証情報が無効になれば、系列が生きていても
+// Offline の認可に交換しないことを確かめる。
+func TestOfflineAccessCredentialGoneBeforeExchange(t *testing.T) {
+	l := newOfflineEnv(t, true)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "offline_access": true})
+	code, _ := p.login(t, "alice@example.com", offlineScope)
 	uid := l.internalUserID(t, l.userID(t, "alice@example.com"))
 	err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
 		ss, err := tx.Sessions().ListByPrincipal(ctx, l.a.realm.ID, port.PrincipalUser, uid)
 		if err != nil || len(ss) != 1 {
 			return fmt.Errorf("sessions: %v %v", ss, err)
 		}
-		// 同じ系列を、後で本人確認したセッションが継ぐ（ログインのやり直し）。
-		s := ss[0]
-		now := l.a.deps.Clock.Now()
-		s.ID, s.TokenHash, s.CreatedAt, s.LastSeenAt, s.AuthenticatedAt = "ses_reauth", []byte("reauth"), now, now, now
-		return tx.Sessions().Create(ctx, s)
+		for _, c := range ss[0].AuthCredentialIDs {
+			if strings.HasPrefix(c, "eml_") {
+				return tx.Emails().Delete(ctx, l.a.realm.ID, c)
+			}
+		}
+		return fmt.Errorf("no email credential: %v", ss[0].AuthCredentialIDs)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, out := p.exchange(t, code, nil)
-	if status != 400 || out["error"] != "invalid_grant" {
-		t.Fatalf("exchange after reauth: %d %v", status, out)
+	if status, out := p.exchange(t, code, nil); status != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("exchange after the credential is gone: %d %v", status, out)
 	}
 }
