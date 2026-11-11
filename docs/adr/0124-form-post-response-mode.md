@@ -18,11 +18,13 @@
   `response_mode=form_post` を受ける。`query` は今までどおり。`fragment` は扱わない（`response_type` は `code` だけのため）
 - 認可エンドポイントは転送を返すので、応答（`code`・`state`・`iss`、またはエラー）と送り先を EphemeralStore に 1 回限り・1 分で預け、
   `/oauth2/authorize/form_post` の画面へ転送する。画面は値を取り出して消し、redirect_uri へ自動で POST するフォームを返す
-- ログインした後の応答はそのブラウザのセッション（`sid`）に結び付け、別のブラウザでは開けない。応答の値は redirect_uri が元から
-  持つクエリを除いたもの（元のクエリは送り先の URL に残る）
+- ログインした後の応答はそのブラウザのセッション（`sid`）を預け先の鍵に含め、別のブラウザでは開けない（開こうとしても使い切らない）。
+  応答の値はエンコーダーの出力そのもので、redirect_uri が元から持つクエリは送り先の URL に残り、値には混ぜない（同じ名前があっても）
 - 画面は `Cache-Control: no-store`、`Referrer-Policy: no-referrer`、CSP の `form-action` を redirect_uri のオリジンに限り、
   スクリプトは自前の `formpost.js` だけ（インラインのスクリプトは使わない）。スクリプトが無ければボタンで送る
-- エラーの応答（`prompt=none` の `login_required` など）も、要求が `form_post` なら同じ画面で返す
+- エラーの応答（`prompt=none` の `login_required` など）も、要求が `form_post` なら同じ画面で返す。op が自分で戻り先へ転送する
+  エラー（`prompt`・`scope`・`code_challenge_method` などの検証。戻り先を確かめた後のものだけ）も、認可エンドポイントの応答を包んで画面に回す
+- ログインの間にフィーチャーが止まったら、預かった `form_post` の要求にはコードを出さず、`invalid_request` を `query` で返す
 - フィーチャーが止まっていれば `response_mode=form_post` は今までどおり扱わず（`query` で返す）、画面は 404。持つデータは無い
 
 ## 結果
