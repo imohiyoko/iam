@@ -147,6 +147,13 @@ type LineageHook interface {
 	LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, reason, requestID string) error
 }
 
+// PrincipalHook は、ユーザーのセッションを except 以外まとめて失効させたことを受け取る（LineageHook が実装していれば呼ぶ）。
+// 終わった系列（ログアウト済みのものを含む）から切り離した認可（offline_access。ADR 0126）を一緒に失効させるのに使う。
+// keepSID は残したセッションの系列（無ければ空）。失効と同じトランザクションで呼ぶ。
+type PrincipalHook interface {
+	PrincipalRevoked(ctx context.Context, tx port.Tx, realmID, userID, keepSID, reason, requestID string) error
+}
+
 // OrgPicker はログインで入る Org を決めるもの（authn/org）。
 type OrgPicker interface {
 	Pick(ctx context.Context, tx port.Tx, u port.User, in OrgPick) (PickedOrg, error)
@@ -1014,9 +1021,28 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 	return nil
 }
 
-// CheckCredentials は、ユーザーの認証に使った認証情報 ids（外部 ID・汎用の認証情報）がどれも無効化されていないかを確かめる
-// （ログインの系列から切り離した OIDC の認可。ADR 0126）。無効化か削除されていれば ErrInvalid。
+// CheckCredentials は、ユーザーの認証に使った認証情報 ids（外部 ID・汎用の認証情報・メール）がどれも無効化されていないかを
+// 確かめる（ログインの系列から切り離した OIDC の認可。ADR 0126）。無効化か削除されていれば ErrInvalid。
+// セッションと違い、ログインに使ったメール（パスワード・メールのリンクやコード）も、本人から外していないかを確かめる。
 func CheckCredentials(ctx context.Context, tx port.Tx, realmID, userID string, ids []string) error {
+	var emails []port.UserEmail
+	for _, c := range ids {
+		if !strings.HasPrefix(c, string(id.Email)+"_") {
+			continue
+		}
+		if emails == nil {
+			var err error
+			if emails, err = tx.Emails().ListByUser(ctx, realmID, userID); err != nil {
+				return err
+			}
+			if emails == nil {
+				emails = []port.UserEmail{}
+			}
+		}
+		if !slices.ContainsFunc(emails, func(e port.UserEmail) bool { return e.ID == c }) {
+			return ErrInvalid
+		}
+	}
 	err := checkCredentials(ctx, tx, port.Session{RealmID: realmID, PrincipalID: userID, AuthCredentialIDs: ids})
 	if errors.Is(err, errRejected) {
 		return ErrInvalid
@@ -1266,24 +1292,47 @@ func (m *Manager) RevokeAll(ctx context.Context, realmID, userID, except, reason
 // RevokeAllTx は RevokeAll を呼び出し側のトランザクションで行う。確定の後に ForgetIDs で返した ID のキャッシュを消す。
 func (m *Manager) RevokeAllTx(ctx context.Context, tx port.Tx, realmID, userID, except, reason string, actor audit.Actor, requestID string) ([]string, error) {
 	ids, err := tx.Sessions().RevokeByPrincipal(ctx, realmID, port.PrincipalUser, userID, except, m.Clock.Now(), reason)
-	if err != nil || len(ids) == 0 {
-		return nil, err
-	}
-	subject, err := userActor(ctx, tx, realmID, userID)
 	if err != nil {
 		return nil, err
 	}
-	_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
-		Type: "session.revoked", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
-		Details: map[string]any{"sessions": ids, "reason": reason, "user_id": subject.ID},
-	})
-	if err != nil {
-		return nil, err
+	if len(ids) > 0 {
+		subject, err := userActor(ctx, tx, realmID, userID)
+		if err != nil {
+			return nil, err
+		}
+		_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
+			Type: "session.revoked", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
+			Details: map[string]any{"sessions": ids, "reason": reason, "user_id": subject.ID},
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := m.EndLineagesTx(ctx, tx, realmID, ids, reason, requestID); err != nil {
+			return nil, err
+		}
 	}
-	if err := m.EndLineagesTx(ctx, tx, realmID, ids, reason, requestID); err != nil {
+	if err := m.PrincipalRevokedTx(ctx, tx, realmID, userID, except, reason, requestID); err != nil {
 		return nil, err
 	}
 	return ids, nil
+}
+
+// PrincipalRevokedTx は、ユーザーのセッションを except 以外まとめて失効させたことを Lineages に伝える（PrincipalHook）。
+// 失効させたセッションが無くても（ログアウト済みでも）呼ぶ。RevokeAllTx を通らずにまとめて失効させたときに呼ぶ（復旧）。
+func (m *Manager) PrincipalRevokedTx(ctx context.Context, tx port.Tx, realmID, userID, except, reason, requestID string) error {
+	h, ok := m.Lineages.(PrincipalHook)
+	if !ok {
+		return nil
+	}
+	keepSID := ""
+	if except != "" {
+		s, err := tx.Sessions().Get(ctx, realmID, except)
+		if err != nil && !errors.Is(err, errs.NotFound) {
+			return err
+		}
+		keepSID = s.SID
+	}
+	return h.PrincipalRevoked(ctx, tx, realmID, userID, keepSID, reason, requestID)
 }
 
 // ForgetIDs はセッションの検証結果のキャッシュを消す（呼び出し側のトランザクションで失効させた後に呼ぶ）。

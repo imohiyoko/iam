@@ -244,6 +244,9 @@ type OIDCTokenRepo interface {
 	Get(ctx context.Context, realmID, id string) (OIDCToken, error)
 	// Use はまだ使っていなければ at に使用済みにして true を返す（同時に使われても true は1回だけ）。無ければ errs.NotFound。
 	Use(ctx context.Context, realmID, id string, at time.Time) (bool, error)
+	// Extend はトークンの期限を expiresAt にする（ローテーションしない Offline のリフレッシュトークン。ADR 0126）。
+	// 無ければ errs.NotFound。
+	Extend(ctx context.Context, realmID, id string, expiresAt time.Time) error
 	// CountBound は全 realm の、binding（BindingDPoP・BindingMTLS）で結び付けたトークンの数を返す。
 	CountBound(ctx context.Context, binding string) (int, error)
 	// PurgeBound は全 realm の、binding で結び付けたトークンを最大 limit 件消し、消した件数を返す（フィーチャーの無効化）。

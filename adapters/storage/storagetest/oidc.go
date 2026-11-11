@@ -215,6 +215,19 @@ func testGrants(t *testing.T, h Harness) {
 		if err := notFound("use missing", func() error { _, err := toks.Use(ctx, r, "atk_missing", T0); return err }()); err != nil {
 			return err
 		}
+		ext := T0.Add(30 * 24 * time.Hour)
+		if err := toks.Extend(ctx, r, t2.ID, ext); err != nil {
+			return fmt.Errorf("Extend: %w", err)
+		}
+		if got, _ := toks.Get(ctx, r, t2.ID); !got.ExpiresAt.Equal(ext) || got.UsedAt == nil {
+			return fmt.Errorf("after Extend = %+v", got)
+		}
+		if err := notFound("extend other realm", toks.Extend(ctx, other, t2.ID, ext)); err != nil {
+			return err
+		}
+		if err := notFound("extend missing", toks.Extend(ctx, r, "rtk_missing", ext)); err != nil {
+			return err
+		}
 		return nil
 	})
 
