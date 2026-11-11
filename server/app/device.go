@@ -264,7 +264,7 @@ func (s *oidcServer) deviceVerify(w http.ResponseWriter, r *http.Request) {
 	orgUnavailable := approve && len(au.OrgUnavailable) > 0
 	var code *provider.Code
 	if approve && !orgUnavailable {
-		code = &provider.Code{UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID, AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods}
+		code = &provider.Code{UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID, AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods, Credentials: codeCredentials(au.AuthCredentialIDs)}
 	}
 	if _, err := s.a.device.Decide(ctx, s.a.realm.ID, userCode, code); errors.Is(err, provider.ErrUserCode) {
 		s.renderDevice(w, r, http.StatusBadRequest, devicePage{Step: "enter", Error: "invalid"})

@@ -138,13 +138,23 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 		Scopes: withoutOffline(c.Scopes), AuthMethods: c.AMR, AuthTime: c.AuthTime, CreatedAt: now, ExpiresAt: now.Add(ttlOr(t.GrantTTL, DefaultRefreshTTL)),
 		ACR: c.SelectedACR}
 	if t.offlineScope(cl, c.Scopes) {
-		// 認可コードの後にログインの系列で本人確認をやり直していれば（別の認証情報でのログインのやり直しなど）、今のセッションの
-		// 認証情報はコードを出したときのものではない。系列から切り離す認可には結び付けられないので交換しない。
-		if s.AuthenticatedAt.Truncate(time.Second).After(c.AuthTime.Truncate(time.Second)) {
-			return Issued{}, ErrInvalidGrant
+		// ログインの系列から切り離す（ADR 0126）。コードを出したときの認証情報を写し、無効化されたら使えなくする。
+		creds := c.Credentials
+		if creds == nil {
+			// 認証情報を記録していないコード（以前に出したもの）。コードの後にログインの系列で本人確認をやり直していれば、
+			// 今のセッションの認証情報はコードを出したときのものではないので交換しない。
+			if s.AuthenticatedAt.Truncate(time.Second).After(c.AuthTime.Truncate(time.Second)) {
+				return Issued{}, ErrInvalidGrant
+			}
+			creds = s.AuthCredentialIDs
 		}
-		// ログインの系列から切り離す（ADR 0126）。認可に使った認証情報を写し、無効化されたら使えなくする。
-		g.Scopes, g.Offline, g.AuthCredentialIDs = c.Scopes, true, s.AuthCredentialIDs
+		// コードの後に認証情報が無効になっていれば（変更・削除。まとめての失効はまだ無い認可に届かない）交換しない。
+		if err := session.CheckCredentials(ctx, tx, c.RealmID, c.UserID, creds); errors.Is(err, session.ErrInvalid) {
+			return Issued{}, ErrInvalidGrant
+		} else if err != nil {
+			return Issued{}, err
+		}
+		g.Scopes, g.Offline, g.AuthCredentialIDs = c.Scopes, true, creds
 		g.ExpiresAt = now.Add(ttlOr(t.OfflineMaxTTL, DefaultOfflineMaxTTL))
 	}
 	if c.Resource != "" {

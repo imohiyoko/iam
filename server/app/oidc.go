@@ -679,7 +679,7 @@ func (s *oidcServer) complete(ctx context.Context, req provider.AuthRequest, au 
 	if len(au.OrgUnavailable) > 0 {
 		return s.errorRedirect(ctx, req, oidc.ErrAccessDenied())
 	}
-	c := provider.Code{AuthRequest: req, UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID, AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods}
+	c := provider.Code{AuthRequest: req, UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID, AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods, Credentials: codeCredentials(au.AuthCredentialIDs)}
 	if s.a.acrActive() {
 		v, ok := acr.Select(req.ACR, au.AuthMethods)
 		if !ok {
@@ -1021,4 +1021,10 @@ func (s *oidcServer) userinfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, claims)
+}
+
+// codeCredentials は認可コードに写すセッションの認証情報の ID。認証情報の無いセッションでも記録したことが分かるように nil にしない
+// （nil は記録していないコード。ADR 0126）。
+func codeCredentials(ids []string) []string {
+	return append([]string{}, ids...)
 }
