@@ -16,7 +16,7 @@
 | [0002](0002-go.md) | 実装言語に Go を使う | 承認 |
 | [0003](0003-ports-and-adapters.md) | 外部依存をポート & アダプタで切り離し、必須の製品を持たない | 承認 |
 | [0004](0004-storage-adapter-native.md) | Storage アダプタは DB ごとに内部を最適化する | 承認 |
-| [0005](0005-crypto-no-rsa-pqc.md) | RSA を自前の鍵で使わず、耐量子暗号を併用する | 一部置き換え: 0089、0126 |
+| [0005](0005-crypto-no-rsa-pqc.md) | RSA を自前の鍵で使わず、耐量子暗号を併用する | 一部置き換え: 0089 |
 | [0006](0006-passkey-rs256.md) | 外部の RS256（passkey 等）は受け入れ、警告の対象にする | 承認 |
 | [0007](0007-auth-warnings.md) | 全認証経路に共通の警告の仕組みを持つ | 承認 |
 | [0008](0008-hosted-login-and-api.md) | ホスト型ログイン画面と公開 API の2本立てにする | 承認 |
@@ -77,7 +77,7 @@
 | [0063](0063-audit-client-data.md) | 監査ログの IP と User-Agent の暗号化 | 承認 |
 | [0064](0064-authz-roles-groups-check.md) | ロール・付与・Group と認可の判定 | 承認 |
 | [0065](0065-oidc-clients-and-signing-keys.md) | OIDC の連携先の登録と ID トークンの署名鍵 | 承認 |
-| [0066](0066-oidc-authorization-code-flow.md) | OIDC の認可コードフローと、トークンをログインの系列に結び付けること | 一部置き換え: 0089 |
+| [0066](0066-oidc-authorization-code-flow.md) | OIDC の認可コードフローと、トークンをログインの系列に結び付けること | 一部置き換え: 0089、0126 |
 | [0067](0067-postgres-adapter.md) | PostgreSQL のアダプタは SQLite のアダプタから作り、advisory lock で直列化する | 承認 |
 | [0068](0068-storage-export-import.md) | Storage の書き出しと読み込み（移行）は表ごとの行を JSON Lines で運ぶ | 承認 |
 | [0069](0069-org-login-policy.md) | Org のログインポリシーは Org の設定に持ち、ログインと切り替えのときに判定する | 承認 |

@@ -603,6 +603,14 @@ func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refres
 		if err := tx.Sessions().Touch(ctx, g.RealmID, s.ID, now); err != nil {
 			return Refreshed{}, err
 		}
+	} else if !rotate {
+		// ローテーションしない連携先（FAPI 2.0）は同じリフレッシュトークンを使い続けるので、その無操作の期限を延ばす
+		// （認可の期限は超えない）。
+		if exp := t.refreshExpiry(g, now); exp.After(tok.ExpiresAt) {
+			if err := tx.OIDCTokens().Extend(ctx, g.RealmID, tok.ID, exp); err != nil {
+				return Refreshed{}, err
+			}
+		}
 	}
 	out, err := t.issue(ctx, tx, cl, g, "", b, now, rotate)
 	return Refreshed{Issued: out}, err

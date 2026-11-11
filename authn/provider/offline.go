@@ -109,6 +109,36 @@ func (t *Tokens) offlineAliveUntil(ctx context.Context, tx port.Tx, g port.Grant
 	return t.orgAliveUntil(ctx, tx, g.RealmID, g.UserID, g.OrgID, now, next)
 }
 
+// PrincipalRevoked はユーザーのセッションをまとめて失効させたとき（認証情報の変更・復旧・運営者による失効など）、
+// 残したセッションの系列 keepSID 以外の Offline の認可を、ログアウト済みの系列のものも含めて失効させる（session.PrincipalHook）。
+// 系列の失効と同じく、ログアウトと系列の続きへの入れ替え（offlineKept）では残す。
+func (t *Tokens) PrincipalRevoked(ctx context.Context, tx port.Tx, realmID, userID, keepSID, reason, requestID string) error {
+	if slices.Contains(offlineKept, reason) {
+		return nil
+	}
+	gs, err := tx.Grants().ListOfflineByUser(ctx, realmID, userID)
+	if err != nil {
+		return err
+	}
+	now := t.Clock.Now()
+	for _, g := range gs {
+		if revoked(g, now) || (keepSID != "" && g.SID == keepSID) {
+			continue
+		}
+		cl, err := tx.Clients().Get(ctx, realmID, g.ClientID)
+		if errors.Is(err, errs.NotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := t.revoke(ctx, tx, cl, g, RevokeReasonLogout, requestID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // OfflineApp は本人の Offline の認可を連携先ごとにまとめたもの（/v1/me/offline-access）。
 type OfflineApp struct {
 	Client port.Client

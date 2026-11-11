@@ -113,3 +113,6 @@ DELETE FROM authn_oidc_tokens WHERE id IN (SELECT t.id FROM authn_oidc_tokens t 
 
 -- name: UseOIDCToken :execrows
 UPDATE authn_oidc_tokens SET used_at = $1 WHERE realm_id = $2 AND id = $3 AND used_at IS NULL;
+
+-- name: ExtendOIDCToken :execrows
+UPDATE authn_oidc_tokens SET expires_at = $1 WHERE realm_id = $2 AND id = $3;

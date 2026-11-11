@@ -9,6 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v4/jwa"
+
+	"github.com/imohiyoko/iam/authn/dpop/dpoptest"
+	"github.com/imohiyoko/iam/authn/method/passkey/passkeytest"
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/feature"
@@ -16,11 +20,12 @@ import (
 
 // フィーチャー offline_access（OIDC Core 11。ADR 0126）を HTTP で確かめる。
 
-func newOfflineEnv(t *testing.T, on bool) *loginEnv {
+func newOfflineEnv(t *testing.T, on bool, extra ...string) *loginEnv {
 	t.Helper()
 	return newLoginEnvWith(t, func(c *config.Config) {
 		withIssuer(c)
-		var names []string
+		c.Passkey.Origins = []string{passkeyOrigin}
+		names := slices.Clone(extra)
 		for _, f := range feature.Registered() {
 			if f.DefaultEnabled {
 				names = append(names, f.Name)
@@ -235,5 +240,131 @@ func TestOfflineAccessLifetime(t *testing.T) {
 	}
 	if status, apps := l.meGet(t, cookie, "/v1/me/offline-access"); status == 200 {
 		t.Fatalf("session should have expired: %v", apps)
+	}
+}
+
+// TestOfflineAccessCredentialChange は、ログアウトで残した Offline の認可が、その後の別のログインでの認証情報の変更
+// （パスワードの設定）で失効し、変更したログインの系列の認可は残ることを確かめる。
+func TestOfflineAccessCredentialChange(t *testing.T) {
+	l := newOfflineEnv(t, true, feature.Password)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "offline_access": true})
+	code, cookie := p.login(t, "alice@example.com", offlineScope)
+	_, old := p.exchange(t, code, nil)
+	if status, _, _ := l.post(t, cookie, "/v1/logout", nil); status != 204 {
+		t.Fatalf("logout: %d", status)
+	}
+	code, cookie = p.login(t, "alice@example.com", offlineScope)
+	_, kept := p.exchange(t, code, nil)
+	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": "a long and memorable passphrase"}); status != 204 {
+		t.Fatalf("password: %d %v", status, res)
+	}
+	if status, _ := p.refresh(t, old["refresh_token"].(string)); status != 400 {
+		t.Fatalf("refresh of a logged-out grant after password change: %d", status)
+	}
+	if status, _ := p.refresh(t, kept["refresh_token"].(string)); status != 200 {
+		t.Fatalf("refresh of the kept lineage: %d", status)
+	}
+}
+
+// TestOfflineAccessRemovedEmail は、ログインに使ったメールを本人から外すと、そのログインの Offline の認可が使えなくなることを確かめる。
+func TestOfflineAccessRemovedEmail(t *testing.T) {
+	l := newOfflineEnv(t, true)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "offline_access": true})
+	_, cookie := l.login(t, "alice@example.com")
+	l.advance(time.Second)
+	if status, res := l.addEmail(t, cookie, "alice@work.example"); status != 200 {
+		t.Fatalf("add email: %d %v", status, res)
+	}
+	work := l.methods(t, cookie).Emails[1].ID
+	code, wcookie := p.login(t, "alice@work.example", offlineScope)
+	_, tok := p.exchange(t, code, nil)
+	if status, _, _ := l.post(t, wcookie, "/v1/logout", nil); status != 204 {
+		t.Fatalf("logout: %d", status)
+	}
+	status, next := p.refresh(t, tok["refresh_token"].(string))
+	if status != 200 {
+		t.Fatalf("refresh before removal: %d", status)
+	}
+	if status, _ := l.mePost(t, cookie, "/v1/me/emails/"+work+":remove", nil); status != 204 {
+		t.Fatalf("remove email: %d", status)
+	}
+	if status, _ := p.refresh(t, next["refresh_token"].(string)); status != 400 {
+		t.Fatalf("refresh after removing the login email: %d", status)
+	}
+}
+
+// TestOfflineAccessRecovery は、アカウントの復旧が、ログアウト済みの系列の Offline の認可も失効させることを確かめる。
+func TestOfflineAccessRecovery(t *testing.T) {
+	l := newOfflineEnv(t, true)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "offline_access": true})
+	code, cookie := p.login(t, "pat@example.com", offlineScope)
+	_, tok := p.exchange(t, code, nil)
+	if _, status, _, _ := l.enrollTOTP(t, cookie); status != 200 {
+		t.Fatal("totp")
+	}
+	if status, _, _ := l.post(t, cookie, "/v1/logout", nil); status != 204 {
+		t.Fatalf("logout: %d", status)
+	}
+	_, st := l.mePost(t, "", "/v1/recovery/email:start", map[string]string{"email": "pat@example.com"})
+	code = l.claimLast(t)
+	status, out, rec := l.post(t, "", "/v1/recovery/email:verify", map[string]string{"flow_id": st["flow_id"].(string), "code": code})
+	if status != 200 || out["next"] != "recovery" {
+		t.Fatalf("verify: %d %v", status, out)
+	}
+	l.advance(time.Second)
+	if status, res := l.registerPasskey(t, rec, passkeytest.New(passkeyOrigin), "Key"); status != 200 {
+		t.Fatalf("register in recovery: %d %v", status, res)
+	}
+	if status, out := l.mePost(t, rec, "/v1/recovery:complete", nil); status != 200 {
+		t.Fatalf("complete: %d %v", status, out)
+	}
+	if status, _ := p.refresh(t, tok["refresh_token"].(string)); status != 400 {
+		t.Fatalf("refresh after recovery: %d", status)
+	}
+}
+
+// TestOfflineAccessNoRotation は、リフレッシュトークンをローテーションしない FAPI 2.0 の連携先でも、使うたびに無操作の期限が延び、
+// 使わなければ切れることを確かめる。
+func TestOfflineAccessNoRotation(t *testing.T) {
+	l := fapi2Env(t, nil, feature.OfflineAccess)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := registerFAPI2(t, l, owner, map[string]any{"offline_access": true})
+	h := l.a.PublicHandler()
+	k := dpoptest.NewKey(t)
+	par, token := testIssuer+oidcPAR, testIssuer+oidcToken
+	w, out := l.form(t, h, "POST", oidcPAR, withForm(p.pushForm(offlineScope), p.assertion(t, jwa.PS256())), nil, "DPoP", l.proof(t, k, "POST", par, "", ""))
+	if w.Code != 201 {
+		t.Fatalf("push: %d %v", w.Code, out)
+	}
+	_, cookie := l.login(t, "alice@example.com")
+	code := p.code(t, l.oidcDo(t, "GET", oidcAuthorize+"?"+url.Values{"client_id": {p.clientID}, "request_uri": {out["request_uri"].(string)}}.Encode(), nil, cookie))
+	f := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {p.redirect}, "code_verifier": {p.verifier}}
+	w, tok := l.form(t, h, "POST", oidcToken, withForm(f, p.assertion(t, jwa.PS256())), nil, "DPoP", l.proof(t, k, "POST", token, "", ""))
+	if w.Code != 200 || tok["scope"] != "openid email offline_access" {
+		t.Fatalf("token: %d %v", w.Code, tok)
+	}
+	if status, _, _ := l.post(t, cookie, "/v1/logout", nil); status != 204 {
+		t.Fatalf("logout: %d", status)
+	}
+	refresh := func() int {
+		f := withForm(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tok["refresh_token"].(string)}}, p.assertion(t, jwa.PS256()))
+		w, out := l.form(t, h, "POST", oidcToken, f, nil, "DPoP", l.proof(t, k, "POST", token, "", ""))
+		if w.Code == 200 && out["refresh_token"] != nil {
+			t.Fatalf("rotated: %v", out)
+		}
+		return w.Code
+	}
+	for i := range 3 { // 87 日目まで、同じトークンを 29 日ごとに使う
+		l.advance(29 * 24 * time.Hour)
+		if st := refresh(); st != 200 {
+			t.Fatalf("refresh %d: %d", i, st)
+		}
+	}
+	l.advance(31 * 24 * time.Hour)
+	if st := refresh(); st != 400 {
+		t.Fatalf("refresh after idle: %d", st)
 	}
 }

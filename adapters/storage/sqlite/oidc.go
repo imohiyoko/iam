@@ -257,6 +257,17 @@ func (r oidcTokens) Use(ctx context.Context, realmID, id string, at time.Time) (
 	return false, nil
 }
 
+func (r oidcTokens) Extend(ctx context.Context, realmID, id string, expiresAt time.Time) error {
+	n, err := r.q.ExtendOIDCToken(ctx, db.ExtendOIDCTokenParams{ExpiresAt: formatTime(expiresAt), RealmID: realmID, ID: id})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		_, err = r.Get(ctx, realmID, id)
+	}
+	return err
+}
+
 func (r oidcTokens) CountBound(ctx context.Context, binding string) (int, error) {
 	var n int64
 	var err error

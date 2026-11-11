@@ -294,6 +294,17 @@ func (r oidcTokens) Use(_ context.Context, realmID, id string, at time.Time) (bo
 	return true, nil
 }
 
+func (r oidcTokens) Extend(_ context.Context, realmID, id string, expiresAt time.Time) error {
+	t, err := get(r.t.s.oidcTokens, realmID, id, func(t port.OIDCToken) string { return t.RealmID }, "token")
+	if err != nil {
+		return err
+	}
+	t = cloneOIDCToken(t)
+	t.ExpiresAt = expiresAt
+	setKey(r.t, r.t.s.oidcTokens, id, t)
+	return nil
+}
+
 // boundBy は t が binding（port.BindingDPoP・BindingMTLS）で結び付いているか。知らない binding は偽。
 func boundBy(t port.OIDCToken, binding string) bool {
 	switch binding {

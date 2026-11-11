@@ -335,6 +335,24 @@ func (q *Queries) EraseUserGrants(ctx context.Context, arg EraseUserGrantsParams
 	return err
 }
 
+const extendOIDCToken = `-- name: ExtendOIDCToken :execrows
+UPDATE authn_oidc_tokens SET expires_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type ExtendOIDCTokenParams struct {
+	ExpiresAt string
+	RealmID   string
+	ID        string
+}
+
+func (q *Queries) ExtendOIDCToken(ctx context.Context, arg ExtendOIDCTokenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, extendOIDCToken, arg.ExpiresAt, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getClient = `-- name: GetClient :one
 SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint, fapi2_security_profile, jwt_access_tokens, offline_access FROM authn_clients WHERE realm_id = ? AND id = ?
 `
