@@ -1575,7 +1575,8 @@ type ClientInput struct {
 
 	// JwtAccessTokens アクセストークンを JWT（RFC 9068。`typ: at+jwt`、`id_token_signed_response_alg` と同じアルゴリズム）で出す。フィーチャー
 	// `jwt_access_tokens` が動いているときだけ true にできる（ADR 0123）。リソースサーバーは JWKS で署名を確かめられるが、失効・停止は
-	// 期限まで届かない（イントロスペクションは今までどおり即時）。省けば false（不透明なトークン）
+	// 期限まで届かない（イントロスペクションは今までどおり即時）。省けば false（不透明なトークン）。Token Exchange で出す
+	// アクセストークンは、この設定にかかわらず不透明なトークン
 	JwtAccessTokens        *bool     `json:"jwt_access_tokens,omitempty"`
 	Name                   string    `json:"name"`
 	PostLogoutRedirectUris *[]string `json:"post_logout_redirect_uris,omitempty"`

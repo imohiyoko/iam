@@ -78,6 +78,7 @@ func TestParseRejects(t *testing.T) {
 		"cert header bad proxy":   "dev: true\nserver: {client_certificates: {header: X-Client-Cert, proxies: [proxy]}}\n",
 		"cert header format":      "dev: true\nserver: {client_certificates: {header: X, proxies: [10.0.0.1], header_format: xml}}\n",
 		"mtls without cert":       "dev: true\nserver: {client_certificates: {mtls_addr: ':8443'}}\n",
+		"retired before access":   "dev: true\noidc: {access_token_ttl: 8d}\n",
 		"mtls same addr":          "dev: true\nserver: {public_addr: ':1', admin_addr: ':2', client_certificates: {mtls_addr: ':1', cert_file: a, key_file: b}}\n",
 	}
 	for name, y := range cases {
