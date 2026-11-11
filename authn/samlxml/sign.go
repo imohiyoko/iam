@@ -4,6 +4,8 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
@@ -18,6 +20,7 @@ import (
 )
 
 // XML 署名（ADR 0110、0115）。realm の ES256 の鍵で、ECDSA-SHA256・SHA-256・Exclusive C14N・enveloped-signature。
+// フィーチャー rs256 で RSA-SHA256 を選んだ連携先には realm の RS256 の鍵で署名する（ADR 0125）。
 // goxmldsig は ECDSA の署名の値を DER で書くので、crypto.Signer を包んで XML 署名の形（r||s の固定長。RFC 4050、
 // XML Signature 1.1 の 6.4.3）にする。
 
@@ -40,24 +43,56 @@ func (s RawECDSA) Sign(r io.Reader, digest []byte, _ crypto.SignerOpts) ([]byte,
 	return out, nil
 }
 
-// signingContext は goxmldsig の設定。idAttr は署名する要素の ID の属性。
-func signingContext(key *ecdsa.PrivateKey, cert []byte, idAttr string) (*dsig.SigningContext, error) {
-	ctx, err := dsig.NewSigningContext(RawECDSA{key}, [][]byte{cert})
+// SignatureMethod は key で作る署名の方式（ECDSA-SHA256 か RSA-SHA256）。それ以外の鍵は空。
+func SignatureMethod(key crypto.Signer) string {
+	switch key.(type) {
+	case *ecdsa.PrivateKey:
+		return AlgECDSA256
+	case *rsa.PrivateKey:
+		return AlgRSASHA256
+	}
+	return ""
+}
+
+// signingContext は goxmldsig の設定。idAttr は署名する要素の ID の属性。key は *ecdsa.PrivateKey か *rsa.PrivateKey。
+func signingContext(key crypto.Signer, cert []byte, idAttr string) (*dsig.SigningContext, error) {
+	want := SignatureMethod(key)
+	signer := key
+	switch k := key.(type) {
+	case *ecdsa.PrivateKey:
+		signer = RawECDSA{k}
+	case *rsa.PrivateKey:
+	default:
+		return nil, errors.New("samlxml: unsupported signing key")
+	}
+	ctx, err := dsig.NewSigningContext(signer, [][]byte{cert})
 	if err != nil {
 		return nil, err
 	}
 	ctx.Hash = crypto.SHA256
 	ctx.Canonicalizer = dsig.MakeC14N10ExclusiveCanonicalizerWithPrefixList("")
 	ctx.IdAttribute = idAttr
-	if ctx.GetSignatureMethodIdentifier() != dsig.ECDSASHA256SignatureMethod {
+	if ctx.GetSignatureMethodIdentifier() != want {
 		return nil, errors.New("samlxml: unexpected signature method")
 	}
 	return ctx, nil
 }
 
+// SignBytes は HTTP-Redirect の署名の値を作る（SigAlg は SignatureMethod(key)）。ECDSA は r||s、RSA は PKCS #1 v1.5。
+func SignBytes(key crypto.Signer, b []byte) ([]byte, error) {
+	sum := sha256.Sum256(b)
+	switch k := key.(type) {
+	case *ecdsa.PrivateKey:
+		return RawECDSA{Key: k}.Sign(rand.Reader, sum[:], crypto.SHA256)
+	case *rsa.PrivateKey:
+		return rsa.SignPKCS1v15(rand.Reader, k, crypto.SHA256, sum[:])
+	}
+	return nil, errors.New("samlxml: unsupported signing key")
+}
+
 // SignAt は el に enveloped の署名を作り、子の at 番目に入れる（SAML 2.0 の Assertion・Response・メタデータは Issuer の後か先頭、
 // SAML 1.1 の Assertion は最後）。at が負なら最後に足す。
-func SignAt(el *etree.Element, key *ecdsa.PrivateKey, cert []byte, idAttr string, at int) error {
+func SignAt(el *etree.Element, key crypto.Signer, cert []byte, idAttr string, at int) error {
 	ctx, err := signingContext(key, cert, idAttr)
 	if err != nil {
 		return err
@@ -78,7 +113,7 @@ func SignAt(el *etree.Element, key *ecdsa.PrivateKey, cert []byte, idAttr string
 const CertLifetime = 10 * 365 * 24 * time.Hour
 
 // NewCertificate は署名鍵の自己署名の証明書（DER）を作る。cn と org は 64 バイトまでに切る。
-func NewCertificate(key *ecdsa.PrivateKey, cn, org string, now time.Time) ([]byte, error) {
+func NewCertificate(key crypto.Signer, cn, org string, now time.Time) ([]byte, error) {
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
 	if err != nil {
 		return nil, err
@@ -90,7 +125,7 @@ func NewCertificate(key *ecdsa.PrivateKey, cn, org string, now time.Time) ([]byt
 	if org != "" {
 		tmpl.Subject.Organization = []string{truncate(org, 64)}
 	}
-	return x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	return x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 }
 
 func truncate(s string, n int) string {
@@ -101,12 +136,12 @@ func truncate(s string, n int) string {
 }
 
 // CertificateMatches は証明書の公開鍵が pub と同じかを確かめる（置いた証明書と鍵の取り違えを防ぐ）。
-func CertificateMatches(der []byte, pub *ecdsa.PublicKey) error {
+func CertificateMatches(der []byte, pub crypto.PublicKey) error {
 	c, err := x509.ParseCertificate(der)
 	if err != nil {
 		return err
 	}
-	if p, ok := c.PublicKey.(*ecdsa.PublicKey); !ok || !p.Equal(pub) {
+	if p, ok := c.PublicKey.(interface{ Equal(crypto.PublicKey) bool }); !ok || !p.Equal(pub) {
 		return errs.New(errs.KindInternal, "the certificate does not match the signing key")
 	}
 	return nil

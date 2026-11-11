@@ -20,7 +20,7 @@ func testWSFed(t *testing.T, h Harness) {
 		return port.WSFedRelyingParty{ID: id.NewExternal(id.WSFedRelyingParty), RealmID: realm, Realm: wtrealm, Name: "App " + wtrealm,
 			ReplyURLs: []string{"https://app.example/" + wtrealm, "https://app.example/b"}, TokenType: "saml11",
 			Claims:        []byte(`[{"source":"email","type":"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"}]`),
-			TokenLifetime: 3600, CreatedAt: at, UpdatedAt: at}
+			TokenLifetime: 3600, SigningAlg: port.AlgES256, CreatedAt: at, UpdatedAt: at}
 	}
 	a, b := rp(r, "urn:b", T0.Add(time.Second)), rp(r, "urn:a", T0)
 	o := rp(other, "urn:a", T0)
@@ -60,6 +60,7 @@ func testWSFed(t *testing.T, h Harness) {
 		// 置き換え。作成時刻は変えない。wtrealm の重複は errs.Conflict。
 		up := a
 		up.Realm, up.Name, up.ReplyURLs, up.TokenType, up.Claims, up.TokenLifetime = "urn:b2", "B2", []string{"https://b2.example/"}, "saml20", []byte(`[]`), 600
+		up.SigningAlg = port.AlgRS256
 		up.UpdatedAt, up.CreatedAt = T0.Add(time.Hour), T0.Add(2*time.Hour)
 		if err := w.UpdateRelyingParty(ctx, up); err != nil {
 			return err

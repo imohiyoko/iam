@@ -79,13 +79,13 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | `profile`・`address`・`phone` スコープ、`claims` パラメーター | S | ⛔ | 適合性メモ |
 | `form_post`・`fragment`、JAR（RFC 9101） | S | △ | `form_post` はフィーチャー `form_post`（ADR 0124）。`fragment`（`code` 以外の `response_type`）と JAR は無い |
 | PAR（RFC 9126） | S | ✅ | フィーチャー `par`（ADR 0112）。連携先か realm の単位で必須にできる |
-| RS256 | S | △ | フィーチャー `rs256`（ADR 0122）。OIDC の ID トークン・Logout Token。SAML の IdP・WS-Federation の RSA-SHA256 は後続 |
+| RS256 | S | ✅ | フィーチャー `rs256`（ADR 0122、0125）。OIDC の ID トークン・Logout Token・JWT のアクセストークン、SAML の IdP・WS-Federation の RSA-SHA256 |
 | JWT アクセストークン（RFC 9068） | S P | ✅ | フィーチャー `jwt_access_tokens`（ADR 0123）。連携先ごと。Token Exchange のトークンは不透明のまま |
 | `offline_access` | S | ⛔ | ADR 0066 |
 | 同意画面・サードパーティ・動的登録（RFC 7591、7592） | S P | ⛔ | ADR 0026 |
 | ロール・Group のクレーム | P | △ | `pre_token` フックで足せる |
-| SAML 2.0 IdP（Web Browser SSO・Single Logout の受け側） | S P C | ✅ | フィーチャー `saml_idp`（ADR 0115）。署名は ECDSA だけ（RSA は RS256 のフィーチャーの後） |
-| WS-Federation（パッシブ要求者プロファイル。SAML 1.1 / 2.0 のトークン） | P | ✅ | フィーチャー `wsfed`（ADR 0110）。署名は ECDSA だけ（RSA は RS256 のフィーチャーの後） |
+| SAML 2.0 IdP（Web Browser SSO・Single Logout の受け側） | S P C | ✅ | フィーチャー `saml_idp`（ADR 0115）。署名は ECDSA。フィーチャー `rs256` なら SP ごとに RSA-SHA256（ADR 0125） |
+| WS-Federation（パッシブ要求者プロファイル。SAML 1.1 / 2.0 のトークン） | P | ✅ | フィーチャー `wsfed`（ADR 0110）。署名は ECDSA。フィーチャー `rs256` なら RP ごとに RSA-SHA256（ADR 0125） |
 | CAS | P | ❌ | |
 | OAuth AS メタデータ（RFC 8414）、Protected Resource Metadata（RFC 9728） | S | ✅ | ADR 0112。9728 は IAM 自身の API（UserInfo）の分 |
 | Device Authorization Grant（RFC 8628） | S P | ✅ | フィーチャー `device_flow`（ADR 0095） |

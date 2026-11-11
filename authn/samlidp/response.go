@@ -2,9 +2,9 @@ package samlidp
 
 import (
 	"context"
+	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1" // #nosec G505 -- RSA-OAEP（rsa-oaep-mgf1p）の既定のハッシュ。OAEP の安全性は衝突への強さに依らない（ADR 0115）
@@ -265,7 +265,7 @@ func (s *Service) Issue(ctx context.Context, sp port.SAMLServiceProvider, cfg Co
 		if err != nil {
 			return err
 		}
-		key, cert, err := s.signer(ctx, tx, p.RealmID)
+		key, cert, err := s.signer(ctx, tx, p.RealmID, cfg.SigningAlg)
 		if err != nil {
 			return err
 		}
@@ -310,7 +310,11 @@ func (s *Service) IssueError(ctx context.Context, p Pending, st *StatusError) (I
 	}
 	var out Issued
 	err = s.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		key, cert, err := s.signer(ctx, tx, p.RealmID)
+		alg, err := s.spSigningAlg(ctx, tx, p.RealmID, p.SPID)
+		if err != nil {
+			return err
+		}
+		key, cert, err := s.signer(ctx, tx, p.RealmID, alg)
 		if err != nil {
 			return err
 		}
@@ -325,7 +329,7 @@ func (s *Service) IssueError(ctx context.Context, p Pending, st *StatusError) (I
 }
 
 // finish は Response に署名し（sign のとき。Issuer の後に入れる）、XML にする。
-func (s *Service) finish(r *etree.Element, sign bool, key *ecdsa.PrivateKey, cert []byte) ([]byte, error) {
+func (s *Service) finish(r *etree.Element, sign bool, key crypto.Signer, cert []byte) ([]byte, error) {
 	if sign {
 		if err := samlxml.SignAt(r, key, cert, "ID", 1); err != nil {
 			return nil, err

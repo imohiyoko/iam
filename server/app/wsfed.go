@@ -262,7 +262,7 @@ func wsfedOut(rp port.WSFedRelyingParty) (adminapi.WSFedRelyingParty, error) {
 		return adminapi.WSFedRelyingParty{}, err
 	}
 	out := adminapi.WSFedRelyingParty{Id: rp.ID, Realm: rp.Realm, Name: rp.Name, ReplyUrls: rp.ReplyURLs, TokenType: rp.TokenType,
-		TokenLifetime: rp.TokenLifetime, Claims: []adminapi.WSFedClaim{}, CreatedAt: rp.CreatedAt, UpdatedAt: rp.UpdatedAt}
+		TokenLifetime: rp.TokenLifetime, SigningAlg: rp.SigningAlg, Claims: []adminapi.WSFedClaim{}, CreatedAt: rp.CreatedAt, UpdatedAt: rp.UpdatedAt}
 	if out.ReplyUrls == nil {
 		out.ReplyUrls = []string{}
 	}
@@ -276,6 +276,9 @@ func wsfedIn(b *adminapi.WSFedRelyingPartyInput) wsfed.Input {
 	in := wsfed.Input{Realm: b.Realm, Name: b.Name, ReplyURLs: b.ReplyUrls}
 	if b.TokenType != nil {
 		in.TokenType = string(*b.TokenType)
+	}
+	if b.SigningAlg != nil {
+		in.SigningAlg = string(*b.SigningAlg)
 	}
 	if b.TokenLifetime != nil {
 		in.TokenLifetime = *b.TokenLifetime

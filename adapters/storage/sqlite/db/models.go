@@ -460,6 +460,7 @@ type AuthnWsfedRelyingParty struct {
 	TokenLifetime int64
 	CreatedAt     string
 	UpdatedAt     string
+	SigningAlg    string
 }
 
 type AuthzActionNamespace struct {

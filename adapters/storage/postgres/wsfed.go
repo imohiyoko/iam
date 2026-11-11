@@ -17,7 +17,7 @@ type wsfed struct{ q *db.Queries }
 func toWSFedRelyingParty(r db.AuthnWsfedRelyingParty) (port.WSFedRelyingParty, error) {
 	var p times
 	rp := port.WSFedRelyingParty{ID: r.ID, RealmID: r.RealmID, Realm: r.Realm, Name: r.Name, TokenType: r.TokenType, Claims: r.Claims,
-		TokenLifetime: int(r.TokenLifetime), CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		TokenLifetime: int(r.TokenLifetime), SigningAlg: r.SigningAlg, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	if p.err != nil {
 		return port.WSFedRelyingParty{}, p.err
 	}
@@ -37,7 +37,7 @@ func (r wsfed) CreateRelyingParty(ctx context.Context, rp port.WSFedRelyingParty
 	}
 	return mapErr(r.q.CreateWSFedRelyingParty(ctx, db.CreateWSFedRelyingPartyParams{ID: rp.ID, RealmID: rp.RealmID, Realm: rp.Realm, Name: rp.Name,
 		ReplyUrls: reply, TokenType: rp.TokenType, Claims: nonNil(rp.Claims), TokenLifetime: int64(rp.TokenLifetime),
-		CreatedAt: formatTime(rp.CreatedAt), UpdatedAt: formatTime(rp.UpdatedAt)}))
+		SigningAlg: signingAlg(rp.SigningAlg), CreatedAt: formatTime(rp.CreatedAt), UpdatedAt: formatTime(rp.UpdatedAt)}))
 }
 
 func (r wsfed) GetRelyingParty(ctx context.Context, realmID, id string) (port.WSFedRelyingParty, error) {
@@ -67,7 +67,7 @@ func (r wsfed) UpdateRelyingParty(ctx context.Context, rp port.WSFedRelyingParty
 		return err
 	}
 	n, err := r.q.UpdateWSFedRelyingParty(ctx, db.UpdateWSFedRelyingPartyParams{Realm: rp.Realm, Name: rp.Name, ReplyUrls: reply, TokenType: rp.TokenType,
-		Claims: nonNil(rp.Claims), TokenLifetime: int64(rp.TokenLifetime), UpdatedAt: formatTime(rp.UpdatedAt), RealmID: rp.RealmID, ID: rp.ID})
+		Claims: nonNil(rp.Claims), TokenLifetime: int64(rp.TokenLifetime), SigningAlg: signingAlg(rp.SigningAlg), UpdatedAt: formatTime(rp.UpdatedAt), RealmID: rp.RealmID, ID: rp.ID})
 	if err != nil {
 		return mapErr(err)
 	}
@@ -125,4 +125,12 @@ func (r wsfed) Purge(ctx context.Context, limit int) (int, error) {
 	}
 	c, err := r.q.PurgeWSFedCertificates(ctx, int64(limit)-n)
 	return int(n + c), mapErr(err)
+}
+
+// signingAlg は RP の署名のアルゴリズム（空なら ES256。ADR 0125）。
+func signingAlg(alg string) string {
+	if alg == "" {
+		return port.AlgES256
+	}
+	return alg
 }

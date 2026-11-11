@@ -96,6 +96,9 @@ type Input struct {
 	Claims []Claim
 	// TokenLifetime は秒。0 なら DefaultTokenLifetime。
 	TokenLifetime int
+	// SigningAlg は署名（ES256 は ECDSA-SHA256、RS256 は RSA-SHA256）。空なら ES256。RS256 はフィーチャー rs256 が
+	// 動いているときだけ選べる（ADR 0125）。
+	SigningAlg string
 }
 
 // ErrInvalidRelyingParty は登録の内容が正しくないこと。
@@ -166,7 +169,35 @@ func Validate(in Input) (Input, error) {
 	case in.TokenLifetime < MinTokenLifetime || in.TokenLifetime > MaxTokenLifetime:
 		return Input{}, errInvalid("token_lifetime must be between 300 and 86400 seconds")
 	}
+	switch in.SigningAlg {
+	case "":
+		out.SigningAlg = port.AlgES256
+	case port.AlgES256, port.AlgRS256:
+	default:
+		return Input{}, errInvalid("signing_alg must be ES256 or RS256")
+	}
 	return out, nil
+}
+
+// validate は Validate に、フィーチャー rs256 が止まっていれば RS256 を拒むことを足す。
+func (s *Service) validate(in Input) (Input, error) {
+	out, err := Validate(in)
+	if err != nil {
+		return Input{}, err
+	}
+	if out.SigningAlg == port.AlgRS256 && (s.Keys == nil || !s.Keys.RS256) {
+		return Input{}, errInvalid("signing_alg RS256 requires the rs256 feature")
+	}
+	return out, nil
+}
+
+// keptSigningAlg は更新で signing_alg を省いたときの値。今の値を保つ（signing_alg を知らない管理クライアントの更新で
+// RS256 が ES256 に戻らないように）。ただしフィーチャー rs256 が止まっていれば ES256（片付けと同じ。ADR 0125）。
+func (s *Service) keptSigningAlg(cur string) string {
+	if cur == port.AlgRS256 && (s.Keys == nil || !s.Keys.RS256) {
+		return port.AlgES256
+	}
+	return cur
 }
 
 func isControl(r rune) bool { return r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) }
@@ -258,6 +289,7 @@ func apply(rp port.WSFedRelyingParty, in Input) (port.WSFedRelyingParty, error) 
 		return port.WSFedRelyingParty{}, err
 	}
 	rp.Realm, rp.Name, rp.ReplyURLs, rp.TokenType, rp.Claims, rp.TokenLifetime = in.Realm, in.Name, in.ReplyURLs, in.TokenType, claims, in.TokenLifetime
+	rp.SigningAlg = in.SigningAlg
 	return rp, nil
 }
 
@@ -269,7 +301,7 @@ func (s *Service) record(ctx context.Context, tx port.Tx, typ, realmID string, a
 
 // Create は RP を登録する（監査ログ wsfed.relying_party.created）。wtrealm が重複すれば ErrRealmExists。
 func (s *Service) Create(ctx context.Context, tx port.Tx, realmID string, in Input, actor audit.Actor, requestID string) (port.WSFedRelyingParty, error) {
-	in, err := Validate(in)
+	in, err := s.validate(in)
 	if err != nil {
 		return port.WSFedRelyingParty{}, err
 	}
@@ -288,7 +320,10 @@ func (s *Service) Create(ctx context.Context, tx port.Tx, realmID string, in Inp
 
 // Update は RP の登録を置き換える（監査ログ wsfed.relying_party.updated）。無ければ errs.NotFound。
 func (s *Service) Update(ctx context.Context, tx port.Tx, rp port.WSFedRelyingParty, in Input, actor audit.Actor, requestID string) (port.WSFedRelyingParty, error) {
-	in, err := Validate(in)
+	if in.SigningAlg == "" {
+		in.SigningAlg = s.keptSigningAlg(rp.SigningAlg)
+	}
+	in, err := s.validate(in)
 	if err != nil {
 		return port.WSFedRelyingParty{}, err
 	}

@@ -675,7 +675,8 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 - 応答は `wreply` へ自動で POST する画面（`wa`・`wresult`・`wctx`。CSP の `form-action` は `wreply` のオリジンだけ）。`wresult` は
   WS-Trust 2005/02 の RSTR に、SAML 1.1（既定）か SAML 2.0 の bearer の Assertion を入れたもの。Audience は `wtrealm`、主体は
   公開のユーザー ID、クレームは RP ごとの対応（メールは確認済みのものだけ。Org の文脈では Membership に結び付けたもの。4.4）
-- Assertion とメタデータ（`/FederationMetadata/2007-06/FederationMetadata.xml`）は realm の ES256 の鍵で XML 署名する（9.3）
+- Assertion とメタデータ（`/FederationMetadata/2007-06/FederationMetadata.xml`）は realm の ES256 の鍵で XML 署名する（9.3）。
+  フィーチャー `rs256` なら RP ごとの `signing_alg: RS256` で、Assertion を RS256 の鍵の RSA-SHA256 で署名する（ADR 0125）
 - `wa=wsignout1.0`：登録済みの `wtrealm` と `wreply` のときだけ、確かめずにセッションを失効させて戻す（`POST /v1/logout` と同じ）
 - RP は管理 API（`/v1/admin/wsfed/relying-parties`、`clients:manage`）で realm ごとに登録する
 
@@ -689,7 +690,7 @@ RFC 8693。token エンドポイントで受け、不透明なアクセストー
 - HTTP-POST の要求は Lax の Cookie が届かないので、封をして預けて `/saml/idp/sso/resume` へ 303 で回す。ForceAuthn・RequestedAuthnContext
   （acr。11.15）をセッションが満たさなければログイン画面へ回し、IsPassive なら NoPassive を返す。応えられない内容は ACS へ失敗の Response で返す
 - 応答は ACS へ自動で POST する画面（CSP の `form-action` は ACS のオリジンだけ）。bearer の Assertion（Audience は SP の Entity ID、NameID は
-  公開のユーザー ID・確認済みのメール・属性・transient、属性は SP ごとの対応）を realm の ES256 の鍵で XML 署名する（Assertion・Response。9.3）。
+  公開のユーザー ID・確認済みのメール・属性・transient、属性は SP ごとの対応）を realm の ES256 の鍵で XML 署名する（Assertion・Response。9.3。フィーチャー `rs256` なら SP ごとの `signing_alg: RS256` で RSA-SHA256。ADR 0125）。
   SP の RSA の証明書があれば AES-128-GCM と RSA-OAEP で暗号化する
 - IdP-initiated（`/saml/idp/init`）は SP ごとに許したときだけ
 - `/saml/idp/slo`：署名した LogoutRequest の本人（NameID・SessionIndex）がブラウザのセッションの本人ならセッションを失効させ（`POST /v1/logout` と同じ）、
@@ -881,7 +882,8 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 - RS256 はフィーチャー `rs256`（既定オフ。ADR 0122）。オンなら realm ごとに RSA 3072 の鍵を足し、JWKS（`kty: RSA`、`alg: RS256`）と
   Discovery に載せ、連携先ごとに `id_token_signed_response_alg: RS256` を選べる（ID トークンと Logout Token）。起動で警告をログに出す。
   オフなら RS256 を出さず、OIDC Discovery には厳密には適合しない（既知の差異）
-- WS-Federation（5.8）の Assertion とメタデータは、同じ realm の ES256 の鍵で XML 署名する（ECDSA-SHA256、Exclusive C14N、署名の値は `r||s`）。鍵ごとの自己署名の証明書を `wsfed_certificates` に置いて同じものを出す。RSA しか読めない RP とはつながらない
+- WS-Federation（5.8）の Assertion とメタデータは、同じ realm の ES256 の鍵で XML 署名する（ECDSA-SHA256、Exclusive C14N、署名の値は `r||s`）。鍵ごとの自己署名の証明書を `wsfed_certificates` に置いて同じものを出す。RSA しか読めない RP・SP には、フィーチャー `rs256` で
+  `signing_alg: RS256` を選び、RS256 の鍵の RSA-SHA256 で署名する（メタデータには両方の鍵の証明書を載せる。ADR 0125）
 - SAML の IdP（5.9）の Assertion・Response・LogoutResponse・メタデータも同じ鍵と形で署名し、証明書は `saml_idp_certificates` に置く。受け取った XML 署名の検証は、
   ECDSA の `r||s` の値も受ける（SAML の SP の側も同じ。ADR 0115）
 
@@ -1006,7 +1008,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | API キーのイントロスペクション（5.1、ADR 0120） | オフ | サービスアカウント | API キーのイントロスペクションは `active: false`。持つデータは無い |
 | JWT のアクセストークン（5.1、ADR 0123） | オフ | ― | 連携先に `jwt_access_tokens` を新しく置けず、JWT の形のアクセストークンはどこでも通らない。無効化で連携先の設定を外して完了 |
 | `form_post` の応答（5.1、ADR 0124） | オフ | ― | `response_mode=form_post` を受けず `query` で返し、`/oauth2/authorize/form_post` は 404。Discovery に出さない。持つデータは無い |
-| RS256 の ID トークン（9.3、ADR 0122） | オフ | ― | RS256 の鍵を作らず、JWKS・Discovery に出さない。連携先とローテーションで `RS256` を選べない。無効化で連携先を ES256 に戻し、RS256 の鍵を退役させて完了（`oidc.retired_key_ttl` の間 JWKS に残る） |
+| RS256 の ID トークン（9.3、ADR 0122） | オフ | ― | RS256 の鍵を作らず、JWKS・Discovery に出さない。連携先・SAML の SP・WS-Federation の RP とローテーションで `RS256` を選べない。無効化で連携先・SP・RP を ES256 に戻し、RS256 の鍵を退役させて完了（`oidc.retired_key_ttl` の間 JWKS に残る） |
 | FAPI 2.0 Security Profile（5.12、ADR 0117） | オフ | ― | 連携先と realm の `fapi2_security_profile` を新しく置けず、realm の設定は効かない（連携先の設定は外れるまで強いる）。前提の `par` と `dpop` か `mtls_client_auth` は登録で確かめる。無効化で連携先と realm の設定を外して完了 |
 | Workload Identity Federation（5.13、ADR 0116） | オフ | サービスアカウント | `/v1/admin/token` の交換は `unsupported_grant_type`、管理 API は `404 workload_identity_disabled`。結び付けで発行したトークンは通らない。無効化で発行者・結び付け・発行したトークンを消して完了 |
 | OpenID4VCI の発行者（5.14、ADR 0119） | オフ | ― | 発行者のメタデータ・nonce・credential・申し出・status list は 404、Pre-Authorized Code の grant は `unsupported_grant_type`、定義のスコープは認可要求で選べない。管理 API は `404 openid4vci_disabled`。無効化は定義と発行の記録を消して完了（status list も出なくなる） |

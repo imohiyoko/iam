@@ -5,7 +5,6 @@ import (
 	"compress/flate"
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -207,8 +206,9 @@ func verifyECDSA(k *ecdsa.PublicKey, digest, sig []byte) bool {
 	return ecdsa.VerifyASN1(k, digest, sig)
 }
 
-// EncodeRedirect は HTTP-Redirect の URL を作り、IdP の鍵で署名する（SigAlg は ECDSA-SHA256、値は r||s）。param は SAMLResponse など。
-func EncodeRedirect(location, param string, xmlb []byte, relayState string, key *ecdsa.PrivateKey) (string, error) {
+// EncodeRedirect は HTTP-Redirect の URL を作り、IdP の鍵で署名する（SigAlg は ECDSA-SHA256 で値は r||s、RSA の鍵なら
+// RSA-SHA256）。param は SAMLResponse など。
+func EncodeRedirect(location, param string, xmlb []byte, relayState string, key crypto.Signer) (string, error) {
 	var buf bytes.Buffer
 	w, err := flate.NewWriter(&buf, flate.BestCompression)
 	if err != nil {
@@ -224,9 +224,12 @@ func EncodeRedirect(location, param string, xmlb []byte, relayState string, key 
 	if relayState != "" {
 		q += "&RelayState=" + url.QueryEscape(relayState)
 	}
-	q += "&SigAlg=" + url.QueryEscape(samlxml.AlgECDSA256)
-	sum := sha256.Sum256([]byte(q))
-	sig, err := samlxml.RawECDSA{Key: key}.Sign(rand.Reader, sum[:], crypto.SHA256)
+	alg := samlxml.SignatureMethod(key)
+	if alg == "" {
+		return "", errors.New("saml: unsupported signing key")
+	}
+	q += "&SigAlg=" + url.QueryEscape(alg)
+	sig, err := samlxml.SignBytes(key, []byte(q))
 	if err != nil {
 		return "", err
 	}
