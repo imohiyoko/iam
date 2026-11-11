@@ -109,6 +109,8 @@ var featureCatalog = map[string]struct {
 	feature.FAPI2: {provider.FAPI2Feature, module + "/features/fapi2"},
 	// ADR 0122。
 	feature.RS256: {provider.RS256Feature, module + "/features/rs256"},
+	// ADR 0123。
+	feature.JWTAccessTokens: {provider.JWTAccessFeature, module + "/features/jwtaccesstokens"},
 	// ADR 0116。
 	feature.WorkloadIdentity: {workloadidentity.Feature, module + "/features/workloadidentity"},
 	// ADR 0119。

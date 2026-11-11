@@ -73,6 +73,8 @@ type Tokens struct {
 	// ResourceIndicators はフィーチャー resource_indicators（RFC 8707。ADR 0112）が動いているか。偽なら、自前の API に向けた
 	// 認可（aud を持つ認可コードの認可）のトークンは使えない（fail-closed）。
 	ResourceIndicators bool
+	// JWTAccess はフィーチャー jwt_access_tokens が動いているか（ADR 0123）。偽なら JWT のアクセストークンを出さず、受けもしない（fail-closed）。
+	JWTAccess bool
 	// Issuer は iss（server.public_url）。
 	Issuer                               string
 	AccessTokenTTL, IDTokenTTL, GrantTTL time.Duration
@@ -178,8 +180,17 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 // issue はアクセストークンと ID トークンを発行する。refresh なら新しいリフレッシュトークンも発行する。
 func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.Grant, nonce string, b Binding, now time.Time, refresh bool) (Issued, error) {
 	ttl := ttlOr(t.AccessTokenTTL, DefaultAccessTokenTTL)
-	tid, token, hash, err := newOpaque(id.AccessToken)
-	if err != nil {
+	var tid, token string
+	var hash []byte
+	var err error
+	if t.JWTAccess && cl.JWTAccessTokens && g.Exchange == "" {
+		// JWT のアクセストークン（RFC 9068。ADR 0123）。Token Exchange のトークンは不透明のまま。
+		tid = newJWTAccessID()
+		if token, err = t.jwtAccessToken(ctx, tx, cl, g, tid, b, now, now.Add(ttl)); err != nil {
+			return Issued{}, err
+		}
+		hash = jwtHash(token)
+	} else if tid, token, hash, err = newOpaque(id.AccessToken); err != nil {
 		return Issued{}, err
 	}
 	if err := tx.OIDCTokens().Create(ctx, port.OIDCToken{ID: tid, RealmID: g.RealmID, GrantID: g.ID, Kind: port.TokenAccess, Hash: hash,
@@ -460,6 +471,13 @@ type Refreshed struct {
 // token は不透明なトークンを、種類と秘密を確かめて返す。使えなければ ErrInvalidToken。
 func (t *Tokens) token(ctx context.Context, tx port.Tx, realmID, token, kind string) (port.OIDCToken, port.Grant, error) {
 	tid, hash, ok := splitOpaque(token)
+	if strings.Count(token, ".") == 2 {
+		// JWT のアクセストークン（ADR 0123）。フィーチャーが止まっていれば受けない。
+		if !t.JWTAccess || (kind != "" && kind != port.TokenAccess) {
+			return port.OIDCToken{}, port.Grant{}, ErrInvalidToken
+		}
+		tid, hash, ok = splitJWTAccess(token)
+	}
 	if !ok {
 		return port.OIDCToken{}, port.Grant{}, ErrInvalidToken
 	}

@@ -33,6 +33,8 @@ func testClients(t *testing.T, h Harness) {
 	b.CIBAMode, b.CIBANotificationEndpoint = port.CIBAPing, "https://b.example.com/ciba"
 	// FAPI 2.0 Security Profile（ADR 0117）。
 	b.FAPI2 = true
+	// JWT のアクセストークン（ADR 0123）。
+	b.JWTAccessTokens = true
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Clients()
 		for _, c := range []port.Client{a, b} {
@@ -59,7 +61,7 @@ func testClients(t *testing.T, h Harness) {
 			return fmt.Errorf("list = %+v, %v", list, err)
 		}
 		a.Name, a.RedirectURIs, a.SecretHash, a.UpdatedAt = "A2", []string{"https://x.example.com/"}, []byte{9}, T0.Add(time.Hour)
-		a.DeviceGrant, a.RequirePAR, a.FAPI2 = true, true, true
+		a.DeviceGrant, a.RequirePAR, a.FAPI2, a.JWTAccessTokens = true, true, true, true
 		a.TokenExchange = []byte(`{"impersonation":true}`)
 		a.FrontchannelLogoutURI, a.FrontchannelLogoutSessionRequired = "https://x.example.com/fcl", true
 		a.CIBAMode = port.CIBAPoll

@@ -31,7 +31,7 @@ func toClient(r db.AuthnClient) (port.Client, error) {
 		TokenExchange: r.TokenExchange, RequirePAR: r.RequirePar != 0, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt),
 		CIBAMode: r.CibaMode, CIBANotificationEndpoint: r.CibaNotificationEndpoint, DPoPBoundAccessTokens: r.DpopBoundAccessTokens != 0,
 		TLSBoundAccessTokens: r.TlsBoundAccessTokens != 0, TLSAuthField: r.TlsAuthField, TLSAuthValue: r.TlsAuthValue,
-		FAPI2: r.Fapi2SecurityProfile != 0}
+		FAPI2: r.Fapi2SecurityProfile != 0, JWTAccessTokens: r.JwtAccessTokens != 0}
 	if p.err != nil {
 		return port.Client{}, p.err
 	}
@@ -56,7 +56,7 @@ func (r clients) Create(ctx context.Context, c port.Client) error {
 		FrontchannelLogoutSessionRequired: boolInt(c.FrontchannelLogoutSessionRequired), CreatedAt: formatTime(c.CreatedAt),
 		UpdatedAt: formatTime(c.UpdatedAt), TokenExchange: c.TokenExchange, CibaMode: c.CIBAMode, CibaNotificationEndpoint: c.CIBANotificationEndpoint,
 		RequirePar: boolInt(c.RequirePAR), DpopBoundAccessTokens: boolInt(c.DPoPBoundAccessTokens), TlsBoundAccessTokens: boolInt(c.TLSBoundAccessTokens),
-		TlsAuthField: c.TLSAuthField, TlsAuthValue: c.TLSAuthValue, Fapi2SecurityProfile: boolInt(c.FAPI2)}))
+		TlsAuthField: c.TLSAuthField, TlsAuthValue: c.TLSAuthValue, Fapi2SecurityProfile: boolInt(c.FAPI2), JwtAccessTokens: boolInt(c.JWTAccessTokens)}))
 }
 
 func (r clients) Get(ctx context.Context, realmID, id string) (port.Client, error) {
@@ -90,7 +90,7 @@ func (r clients) Update(ctx context.Context, c port.Client) error {
 		TokenExchange: c.TokenExchange, DeviceGrant: boolInt(c.DeviceGrant), CibaMode: c.CIBAMode,
 		CibaNotificationEndpoint: c.CIBANotificationEndpoint, RequirePar: boolInt(c.RequirePAR), DpopBoundAccessTokens: boolInt(c.DPoPBoundAccessTokens),
 		TlsBoundAccessTokens: boolInt(c.TLSBoundAccessTokens), TlsAuthField: c.TLSAuthField, TlsAuthValue: c.TLSAuthValue,
-		Fapi2SecurityProfile: boolInt(c.FAPI2), RealmID: c.RealmID, ID: c.ID})
+		Fapi2SecurityProfile: boolInt(c.FAPI2), JwtAccessTokens: boolInt(c.JWTAccessTokens), RealmID: c.RealmID, ID: c.ID})
 	return affected(n, err, "client")
 }
 

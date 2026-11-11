@@ -86,6 +86,8 @@ type Client struct {
 	RequirePAR bool
 	// FAPI2 はこの連携先に FAPI 2.0 Security Profile を強いる（fapi2_security_profile。フィーチャー fapi2。ADR 0117）。
 	FAPI2 bool
+	// JWTAccessTokens はアクセストークンを JWT（RFC 9068）で出す（jwt_access_tokens。フィーチャー jwt_access_tokens。ADR 0123）。
+	JWTAccessTokens bool
 }
 
 // CIBA のトークンの受け取り方（ADR 0114）。push は持たない。
