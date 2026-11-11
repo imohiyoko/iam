@@ -1014,6 +1014,16 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 	return nil
 }
 
+// CheckCredentials は、ユーザーの認証に使った認証情報 ids（外部 ID・汎用の認証情報）がどれも無効化されていないかを確かめる
+// （ログインの系列から切り離した OIDC の認可。ADR 0126）。無効化か削除されていれば ErrInvalid。
+func CheckCredentials(ctx context.Context, tx port.Tx, realmID, userID string, ids []string) error {
+	err := checkCredentials(ctx, tx, port.Session{RealmID: realmID, PrincipalID: userID, AuthCredentialIDs: ids})
+	if errors.Is(err, errRejected) {
+		return ErrInvalid
+	}
+	return err
+}
+
 // successorTime は系列を継ぐセッションの作成時刻。系列の今のセッションは作成時刻の新しい方なので（GetCurrentBySID）、
 // 同じ時刻に作っても前のセッションより後になるようにする（時計の粒度が粗いときやテストの時計）。
 func successorTime(prev, now time.Time) time.Time {

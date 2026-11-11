@@ -235,12 +235,16 @@ func (s *oidcServer) grantTypes() []oidc.GrantType {
 	return grantTypes
 }
 
-// scopes は対応するスコープ。カスタム属性が動いていれば attributes も。
+// scopes は対応するスコープ。カスタム属性が動いていれば attributes も、offline_access が動いていればそれも。
 func (s *oidcServer) scopes() []string {
+	out := provider.Scopes
 	if s.a.attributes != nil {
-		return append(slices.Clone(provider.Scopes), provider.ScopeAttributes)
+		out = append(slices.Clone(out), provider.ScopeAttributes)
 	}
-	return provider.Scopes
+	if s.a.tokens.Offline {
+		out = append(slices.Clone(out), provider.ScopeOfflineAccess) // ADR 0126
+	}
+	return out
 }
 
 // responseModes は Discovery の response_modes_supported。フィーチャー form_post なら form_post も（ADR 0124）。

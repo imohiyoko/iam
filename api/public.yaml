@@ -3166,6 +3166,46 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/me/offline-access:
+    get:
+      operationId: listMyOfflineAccess
+      summary: 本人が offline_access を許した連携先の一覧（フィーチャー offline_access。ADR 0126）
+      description: |
+        ログアウトしても残る（offline_access の）認可を、連携先ごとにまとめて返す（最初に許した順）。失効・期限切れのものは含めない。
+        動いていなければ 404。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 最初に許した順
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [applications]
+                properties:
+                  applications:
+                    type: array
+                    items: { $ref: "#/components/schemas/OfflineAccessApplication" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/me/offline-access/{client_id}:revoke:
+    post:
+      operationId: revokeMyOfflineAccess
+      summary: 連携先への offline_access を取り消す（その連携先の Offline の認可をすべて失効させる）
+      description: 連携先が無いか、使える認可が無ければ 404。監査ログは `oidc.grant_revoked`（理由 `revoked_by_user`）。
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      parameters:
+        - { name: client_id, in: path, required: true, schema: { type: string }, description: 連携先の公開の client_id }
+      responses:
+        "204": { description: 取り消した }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/me/backchannel-requests:
     get:
       operationId: listMyBackchannelRequests
@@ -4071,6 +4111,16 @@ components:
             `condition.risk.<種類>`・`condition.attested`・`condition.aal`。ADR 0084、0093）。付与の条件だけで拒み、その付与が
             条件を満たせば許されたときに限って返す。連携先はこれを見て step-up を促せる
         step_up: { $ref: "#/components/schemas/StepUp" }
+    OfflineAccessApplication:
+      type: object
+      required: [client_id, name, scopes, created_at, expires_at]
+      description: 本人が offline_access を許した連携先（ADR 0126）
+      properties:
+        client_id: { type: string, description: 連携先の公開の client_id }
+        name: { type: string, description: 連携先の名前 }
+        scopes: { type: array, items: { type: string }, description: 使える認可のスコープの和 }
+        created_at: { type: string, format: date-time, description: 最初に許した時刻 }
+        expires_at: { type: string, format: date-time, description: 認可の期限（無操作の期限はこれより早く来ることがある） }
     PersonalAccessToken:
       type: object
       required: [id, name, scopes, created_at]

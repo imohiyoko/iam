@@ -679,6 +679,9 @@ func (t *Tokens) grantAliveUntil(ctx context.Context, tx port.Tx, g port.Grant, 
 				return time.Time{}, err
 			}
 		}
+		if g.Offline {
+			return t.offlineAliveUntil(ctx, tx, g, now)
+		}
 		return t.aliveUntil(ctx, tx, g.RealmID, g.SID, g.UserID, g.OrgID, now)
 	case port.ExchangeDelegation:
 		if !t.TokenExchange {

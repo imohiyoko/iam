@@ -35,6 +35,8 @@ func testClients(t *testing.T, h Harness) {
 	b.FAPI2 = true
 	// JWT のアクセストークン（ADR 0123）。
 	b.JWTAccessTokens = true
+	// offline_access（ADR 0126）。
+	b.OfflineAccess = true
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Clients()
 		for _, c := range []port.Client{a, b} {

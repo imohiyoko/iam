@@ -586,6 +586,9 @@ GET    /v1/admin/signing-keys
   失効が `exp` まで届かない。Token Exchange のトークンは不透明のまま
 - ID トークンのクレーム：`sub`、`org_id`（Org オンのみ）、`amr`、`sid`、`email`（4.4）、`acr`（フィーチャー acr。11.15）。Group / Role は載せない
 - リフレッシュトークンはローテーションし、再利用を検知したらファミリーごと失効
+- フィーチャー `offline_access`（既定オフ。ADR 0126）なら、連携先ごとの `offline_access` で、`offline_access` のスコープを求めた認可を
+  ログインの系列から切り離す。ログアウト・セッションの期限では失効せず、使うたびにユーザーの状態・認可に使った認証情報・連携先・Org を確かめる。
+  無操作の期限（`oidc.offline_idle_ttl`、既定 30 日）と認可の寿命（`oidc.offline_max_ttl`、既定 365 日）で切れ、本人は連携先ごとに取り消せる
 - 本人の Personal Access Token（`iampat_…`）も不透明で、イントロスペクションで確かめる（連携先に結び付かない。11.18）
 - イントロスペクションは主体の種類（`principal_type`：`user` か `service_account`）を返す。サービスアカウントのトークンは
   認証の方式（`amr`）と時刻（`auth_time`）も返す。サービスアカウントの API キーは、フィーチャー `api_key_introspection`（既定オフ、
@@ -1007,6 +1010,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
 | API キーのイントロスペクション（5.1、ADR 0120） | オフ | サービスアカウント | API キーのイントロスペクションは `active: false`。持つデータは無い |
 | JWT のアクセストークン（5.1、ADR 0123） | オフ | ― | 連携先に `jwt_access_tokens` を新しく置けず、JWT の形のアクセストークンはどこでも通らない。無効化で連携先の設定を外して完了 |
+| `offline_access`（5.1、ADR 0126） | オフ | ― | 連携先に `offline_access` を新しく置けず、スコープを求めてもふつうの認可。Discovery に出さず、本人の API は 404。残った Offline の認可は使えない。無効化で連携先の設定を外し、Offline の認可を消して完了 |
 | `form_post` の応答（5.1、ADR 0124） | オフ | ― | `response_mode=form_post` を受けず `query` で返し、`/oauth2/authorize/form_post` は 404。Discovery に出さない。持つデータは無い |
 | RS256 の ID トークン（9.3、ADR 0122） | オフ | ― | RS256 の鍵を作らず、JWKS・Discovery に出さない。連携先・SAML の SP・WS-Federation の RP とローテーションで `RS256` を選べない。無効化で連携先・SP・RP を ES256 に戻し、RS256 の鍵を退役させて完了（`oidc.retired_key_ttl` の間 JWKS に残る） |
 | FAPI 2.0 Security Profile（5.12、ADR 0117） | オフ | ― | 連携先と realm の `fapi2_security_profile` を新しく置けず、realm の設定は効かない（連携先の設定は外れるまで強いる）。前提の `par` と `dpop` か `mtls_client_auth` は登録で確かめる。無効化で連携先と realm の設定を外して完了 |

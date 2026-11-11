@@ -88,6 +88,8 @@ type Client struct {
 	FAPI2 bool
 	// JWTAccessTokens はアクセストークンを JWT（RFC 9068）で出す（jwt_access_tokens。フィーチャー jwt_access_tokens。ADR 0123）。
 	JWTAccessTokens bool
+	// OfflineAccess は offline_access のスコープを受ける（ログインの系列から切り離した認可。フィーチャー offline_access。ADR 0126）。
+	OfflineAccess bool
 }
 
 // CIBA のトークンの受け取り方（ADR 0114）。push は持たない。
@@ -169,6 +171,12 @@ type Grant struct {
 	Audiences []string
 	// ACR は認可したときに決めた acr（フィーチャー acr。ADR 0093）。空ならフィーチャーがオフで、acr を返さない。
 	ACR string
+	// Offline はログインの系列から切り離した認可（offline_access。ADR 0126）。系列のログアウト・期限では失効せず、
+	// ユーザーの状態（停止・削除・有効期間）と AuthCredentialIDs の認証情報で確かめる。
+	Offline bool
+	// AuthCredentialIDs は認可に使ったセッションの認証に使った認証情報（外部 ID・passkey・TOTP など。Offline のときだけ）。
+	// どれかが無効化されれば認可も使えない。
+	AuthCredentialIDs []string
 }
 
 // 交換の認可の種類（Grant.Exchange）。
@@ -191,6 +199,12 @@ type GrantRepo interface {
 	CountExchanged(ctx context.Context, exchange string) (int, error)
 	// PurgeExchanged は全 realm の、種類が exchange の交換の認可を、そのトークンと一緒に最大 limit 件消し、消した件数を返す。
 	PurgeExchanged(ctx context.Context, exchange string, limit int) (int, error)
+	// ListOfflineByUser はユーザーの Offline の認可を作成時刻の順（同時刻は ID の順）に返す（失効・期限切れも含む）。
+	ListOfflineByUser(ctx context.Context, realmID, userID string) ([]Grant, error)
+	// CountOffline は全 realm の Offline の認可を数える（フィーチャーの無効化）。
+	CountOffline(ctx context.Context) (int, error)
+	// PurgeOffline は全 realm の Offline の認可を、そのトークンと一緒に最大 limit 件消し、消した件数を返す。
+	PurgeOffline(ctx context.Context, limit int) (int, error)
 }
 
 // トークンの種類。

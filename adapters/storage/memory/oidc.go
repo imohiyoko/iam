@@ -141,6 +141,9 @@ func cloneGrant(g port.Grant) port.Grant {
 	if g.Audiences = slices.Clone(g.Audiences); len(g.Audiences) == 0 {
 		g.Audiences = nil
 	}
+	if g.AuthCredentialIDs = slices.Clone(g.AuthCredentialIDs); len(g.AuthCredentialIDs) == 0 {
+		g.AuthCredentialIDs = nil
+	}
 	return g
 }
 
@@ -207,6 +210,42 @@ func (r grants) PurgeExchanged(_ context.Context, exchange string, limit int) (i
 	var ids []string
 	for _, g := range r.t.s.grants {
 		if g.Exchange == exchange {
+			ids = append(ids, g.ID)
+		}
+	}
+	slices.Sort(ids)
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	eraseGrants(r.t, func(g port.Grant) bool { return slices.Contains(ids, g.ID) })
+	return len(ids), nil
+}
+
+func (r grants) ListOfflineByUser(_ context.Context, realmID, userID string) ([]port.Grant, error) {
+	var out []port.Grant
+	for _, g := range r.t.s.grants {
+		if g.RealmID == realmID && g.UserID == userID && g.Offline {
+			out = append(out, cloneGrant(g))
+		}
+	}
+	sortByCreated(out, func(g port.Grant) (time.Time, string) { return g.CreatedAt, g.ID })
+	return out, nil
+}
+
+func (r grants) CountOffline(context.Context) (int, error) {
+	n := 0
+	for _, g := range r.t.s.grants {
+		if g.Offline {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (r grants) PurgeOffline(_ context.Context, limit int) (int, error) {
+	var ids []string
+	for _, g := range r.t.s.grants {
+		if g.Offline {
 			ids = append(ids, g.ID)
 		}
 	}

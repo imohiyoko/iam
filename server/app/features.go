@@ -252,6 +252,8 @@ var cleaners = map[string]cleaner{
 			return tx.SAMLIdP().Purge(ctx, limit)
 		}},
 	// 連携先の JWT のアクセストークンを外す（ADR 0123）。発行済みの JWT は無効化の後は受けない（期限で消える）。
+	// 連携先の offline_access を外し、Offline の認可を消す（ADR 0126）。
+	feature.OfflineAccess: offlineCleaner,
 	feature.JWTAccessTokens: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		return eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.JWTAccessTokens, nil })
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {

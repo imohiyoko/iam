@@ -88,6 +88,8 @@ const (
 	JWTAccessTokens = "jwt_access_tokens"
 	// FormPost は認可応答の response_mode=form_post（OAuth 2.0 Form Post Response Mode）を受けるようにする（ADR 0124）。
 	FormPost = "form_post"
+	// OfflineAccess は offline_access のスコープで、ログインの系列から切り離した認可（リフレッシュトークン）を出せるようにする（ADR 0126）。
+	OfflineAccess = "offline_access"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。
