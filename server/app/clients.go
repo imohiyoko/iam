@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 
 	"github.com/imohiyoko/iam/authn/provider"
 	"github.com/imohiyoko/iam/authz/role"
@@ -350,7 +351,7 @@ func (s adminServer) RotateSigningKey(ctx context.Context, req adminapi.RotateSi
 		return adminapi.RotateSigningKey401JSONResponse(d.Body), nil
 	case d != nil:
 		return adminapi.RotateSigningKey403JSONResponse(d.Body), nil
-	case req.Body == nil || (req.Body.Alg != adminapi.RotateSigningKeyJSONBodyAlgES256 && req.Body.Alg != adminapi.RotateSigningKeyJSONBodyAlgMLDSA65):
+	case req.Body == nil || !slices.Contains(s.a.keys.Algs(), string(req.Body.Alg)):
 		return adminapi.RotateSigningKey400JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(adminError("invalid_request", ""))}, nil
 	}
 	var k port.SigningKey

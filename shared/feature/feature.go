@@ -82,6 +82,8 @@ const (
 	SSFReceiver    = "ssf_receiver"
 	// APIKeyIntrospection はサービスアカウントの API キーをイントロスペクション（RFC 7662）で確かめられるようにする（ADR 0120）。
 	APIKeyIntrospection = "api_key_introspection" // #nosec G101 -- フィーチャーの名前で、秘密ではない
+	// RS256 は ID トークン・Logout Token の RS256 の署名を連携先ごとに選べるようにする（ADR 0122）。
+	RS256 = "rs256"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

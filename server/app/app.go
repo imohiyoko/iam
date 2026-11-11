@@ -320,6 +320,10 @@ func New(ctx context.Context, cfg config.Config, d Deps, binary []feature.Featur
 	if a.password != nil && d.BreachCheck == nil {
 		d.Logger.Warn("password breach check is disabled: set breach_check.driver")
 	}
+	if plan.IsActive(feature.RS256) {
+		// ADR 0089・0122：自前の鍵で RSA を使うことは、耐量子でなく ECC より鍵が大きい。選んだ連携先だけが使う。
+		d.Logger.Warn("rs256 is active: RSA signing keys are created for ID tokens; prefer ES256 or ML-DSA-65 where the RP supports them")
+	}
 	if !plan.IsActive(feature.FlowHooks) && len(cfg.Hooks) > 0 {
 		d.Logger.Warn("hooks are configured but the flow_hooks feature is not active")
 	}
@@ -479,13 +483,14 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
 	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout),
-		CIBA: plan.IsActive(feature.CIBA), PAR: plan.IsActive(feature.PAR), DPoP: plan.IsActive(feature.DPoP), MTLS: plan.IsActive(feature.MTLSClientAuth)}
+		CIBA: plan.IsActive(feature.CIBA), PAR: plan.IsActive(feature.PAR), DPoP: plan.IsActive(feature.DPoP), MTLS: plan.IsActive(feature.MTLSClientAuth),
+		RS256: plan.IsActive(feature.RS256)}
 	a.fapi2 = plan.IsActive(feature.FAPI2)
 	a.clients.FAPI2, a.clients.RealmFAPI2 = a.fapi2, a.fapi2 && rs.FAPI2SecurityProfile
 	if err := a.setupSenderConstraint(); err != nil {
 		return err
 	}
-	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D()}
+	a.keys = &provider.Keys{Crypter: a.pii, Clock: d.Clock, RetiredKeyTTL: cfg.OIDC.RetiredKeyTTL.D(), RS256: plan.IsActive(feature.RS256)}
 	// ID トークンの署名鍵は realm ごとに用意しておく（JWKS が空のまま公開されないように）。
 	if err := d.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error { return a.keys.Ensure(ctx, tx, realm.ID) }); err != nil {
 		return err

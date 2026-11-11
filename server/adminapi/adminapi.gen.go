@@ -284,6 +284,7 @@ func (e ClientInputBackchannelTokenDeliveryMode) Valid() bool {
 const (
 	ClientInputIdTokenSignedResponseAlgES256   ClientInputIdTokenSignedResponseAlg = "ES256"
 	ClientInputIdTokenSignedResponseAlgMLDSA65 ClientInputIdTokenSignedResponseAlg = "ML-DSA-65"
+	ClientInputIdTokenSignedResponseAlgRS256   ClientInputIdTokenSignedResponseAlg = "RS256"
 )
 
 // Valid indicates whether the value is a known member of the ClientInputIdTokenSignedResponseAlg enum.
@@ -292,6 +293,8 @@ func (e ClientInputIdTokenSignedResponseAlg) Valid() bool {
 	case ClientInputIdTokenSignedResponseAlgES256:
 		return true
 	case ClientInputIdTokenSignedResponseAlgMLDSA65:
+		return true
+	case ClientInputIdTokenSignedResponseAlgRS256:
 		return true
 	default:
 		return false
@@ -1034,6 +1037,7 @@ func (e ListOrgsParamsStatus) Valid() bool {
 const (
 	RotateSigningKeyJSONBodyAlgES256   RotateSigningKeyJSONBodyAlg = "ES256"
 	RotateSigningKeyJSONBodyAlgMLDSA65 RotateSigningKeyJSONBodyAlg = "ML-DSA-65"
+	RotateSigningKeyJSONBodyAlgRS256   RotateSigningKeyJSONBodyAlg = "RS256"
 )
 
 // Valid indicates whether the value is a known member of the RotateSigningKeyJSONBodyAlg enum.
@@ -1042,6 +1046,8 @@ func (e RotateSigningKeyJSONBodyAlg) Valid() bool {
 	case RotateSigningKeyJSONBodyAlgES256:
 		return true
 	case RotateSigningKeyJSONBodyAlgMLDSA65:
+		return true
+	case RotateSigningKeyJSONBodyAlgRS256:
 		return true
 	default:
 		return false
@@ -1556,7 +1562,9 @@ type ClientInput struct {
 	// FrontchannelLogoutUri Front-Channel Logout の送り先（OIDC Front-Channel Logout 1.0。フィーチャー `oidc_logout`。ADR 0094）。ログアウトの
 	// 完了画面で iframe で開く。scheme・ホスト・ポートは `redirect_uris` のどれかと同じであること。フィーチャーが
 	// 動いていなければ、今の値から変えられない（`invalid_client_metadata`）
-	FrontchannelLogoutUri    *string                              `json:"frontchannel_logout_uri,omitempty"`
+	FrontchannelLogoutUri *string `json:"frontchannel_logout_uri,omitempty"`
+
+	// IdTokenSignedResponseAlg ID トークンと Logout Token の署名。`RS256` はフィーチャー `rs256` が動いているときだけ選べる（ADR 0122）
 	IdTokenSignedResponseAlg *ClientInputIdTokenSignedResponseAlg `json:"id_token_signed_response_alg,omitempty"`
 
 	// Jwks `private_key_jwt` の公開鍵（JWKS）
@@ -1589,7 +1597,7 @@ type ClientInput struct {
 // 使えない。フィーチャーが動いていなければ付けられない（`invalid_client_metadata`）。CIBA だけの連携先は `redirect_uris` が空でよい
 type ClientInputBackchannelTokenDeliveryMode string
 
-// ClientInputIdTokenSignedResponseAlg defines model for ClientInput.IdTokenSignedResponseAlg.
+// ClientInputIdTokenSignedResponseAlg ID トークンと Logout Token の署名。`RS256` はフィーチャー `rs256` が動いているときだけ選べる（ADR 0122）
 type ClientInputIdTokenSignedResponseAlg string
 
 // ClientInputTokenEndpointAuthMethod `tls_client_auth`・`self_signed_tls_client_auth` は OAuth の mTLS（RFC 8705。フィーチャー `mtls_client_auth`。ADR 0113）。

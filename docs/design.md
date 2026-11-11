@@ -854,7 +854,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 
 ### 9.1 原則
 
-- 自前の鍵で RSA を使わない。現行の最低ラインは ECC
+- 自前の鍵で RSA を使わない。現行の最低ラインは ECC。例外は RS256 しか確かめない RP のためのフィーチャー `rs256`（既定オフ。9.3、ADR 0122）
 - ECC も量子計算機で破られるため、耐量子性は ML-KEM / ML-DSA で確保する
 - 鍵とアルゴリズムは `kid` で管理し、コード変更なしで切り替えられる
 
@@ -863,7 +863,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | 用途 | 方式 |
 |---|---|
 | TLS | 1.3 のみ。鍵交換 X25519MLKEM768、証明書 ECDSA P-256 |
-| トークン署名 | ML-DSA-65 と ES256（9.3） |
+| トークン署名 | ML-DSA-65 と ES256（9.3）。フィーチャー `rs256` なら RS256（RSA 3072）も |
 | 保存データ | AES-256-GCM のエンベロープ暗号化 |
 | 検索用インデックス | HMAC-SHA-256 |
 | パスワード・リカバリーコード | argon2id |
@@ -873,7 +873,9 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 
 - JWKS に ML-DSA-65（`kty: AKP`、RFC 9964）と ES256 を公開し、クライアントごとに選ぶ（`id_token_signed_response_alg`）。主要な RP が対応したら ES256 を廃止する
 - 実装：zitadel/oidc の go-jose に `OpaqueSigner` で `crypto/mldsa` を差し込む。JWKS の AKP 出力は jwx で組み立てる（ADR 0038）
-- RS256 を出さないため、OIDC Discovery には厳密には適合しない（既知の差異）
+- RS256 はフィーチャー `rs256`（既定オフ。ADR 0122）。オンなら realm ごとに RSA 3072 の鍵を足し、JWKS（`kty: RSA`、`alg: RS256`）と
+  Discovery に載せ、連携先ごとに `id_token_signed_response_alg: RS256` を選べる（ID トークンと Logout Token）。起動で警告をログに出す。
+  オフなら RS256 を出さず、OIDC Discovery には厳密には適合しない（既知の差異）
 - WS-Federation（5.8）の Assertion とメタデータは、同じ realm の ES256 の鍵で XML 署名する（ECDSA-SHA256、Exclusive C14N、署名の値は `r||s`）。鍵ごとの自己署名の証明書を `wsfed_certificates` に置いて同じものを出す。RSA しか読めない RP とはつながらない
 - SAML の IdP（5.9）の Assertion・Response・LogoutResponse・メタデータも同じ鍵と形で署名し、証明書は `saml_idp_certificates` に置く。受け取った XML 署名の検証は、
   ECDSA の `r||s` の値も受ける（SAML の SP の側も同じ。ADR 0115）
@@ -997,6 +999,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | PAR（5.10、ADR 0112） | オフ | ― | `/oauth2/par` は 404、`request_uri` は `request_uri_not_supported`、PAR の必須は効かず新しく置けない。無効化で連携先と realm の必須を外して完了 |
 | 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
 | API キーのイントロスペクション（5.1、ADR 0120） | オフ | サービスアカウント | API キーのイントロスペクションは `active: false`。持つデータは無い |
+| RS256 の ID トークン（9.3、ADR 0122） | オフ | ― | RS256 の鍵を作らず、JWKS・Discovery に出さない。連携先とローテーションで `RS256` を選べない。無効化で連携先を ES256 に戻し、RS256 の鍵を退役させて完了（`oidc.retired_key_ttl` の間 JWKS に残る） |
 | FAPI 2.0 Security Profile（5.12、ADR 0117） | オフ | ― | 連携先と realm の `fapi2_security_profile` を新しく置けず、realm の設定は効かない（連携先の設定は外れるまで強いる）。前提の `par` と `dpop` か `mtls_client_auth` は登録で確かめる。無効化で連携先と realm の設定を外して完了 |
 | Workload Identity Federation（5.13、ADR 0116） | オフ | サービスアカウント | `/v1/admin/token` の交換は `unsupported_grant_type`、管理 API は `404 workload_identity_disabled`。結び付けで発行したトークンは通らない。無効化で発行者・結び付け・発行したトークンを消して完了 |
 | OpenID4VCI の発行者（5.14、ADR 0119） | オフ | ― | 発行者のメタデータ・nonce・credential・申し出・status list は 404、Pre-Authorized Code の grant は `unsupported_grant_type`、定義のスコープは認可要求で選べない。管理 API は `404 openid4vci_disabled`。無効化は定義と発行の記録を消して完了（status list も出なくなる） |

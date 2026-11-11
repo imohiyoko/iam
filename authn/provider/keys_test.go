@@ -3,6 +3,7 @@ package provider_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -118,4 +119,56 @@ func TestKeysVerifyType(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// TestKeysRS256 はフィーチャー rs256 の鍵（ADR 0122）を確かめる：オフなら用意せず、オンなら JWKS に RSA を alg 付きで出し、
+// 署名と検証が通り、書き換えた署名は通らない。
+func TestKeysRS256(t *testing.T) {
+	k := testkit.New(t)
+	ctx := context.Background()
+	off := &provider.Keys{Crypter: k.Crypter, Clock: k.Clock, RetiredKeyTTL: 24 * time.Hour}
+	if slices.Contains(off.Algs(), port.AlgRS256) {
+		t.Fatalf("algs while off: %v", off.Algs())
+	}
+	keys := &provider.Keys{Crypter: k.Crypter, Clock: k.Clock, RetiredKeyTTL: 24 * time.Hour, RS256: true}
+	var jws string
+	k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		if err := keys.Ensure(ctx, tx, k.RealmID); err != nil {
+			return err
+		}
+		b, err := keys.JWKS(ctx, tx, k.RealmID)
+		if err != nil {
+			return err
+		}
+		var set struct {
+			Keys []map[string]any `json:"keys"`
+		}
+		if err := json.Unmarshal(b, &set); err != nil {
+			return err
+		}
+		found := false
+		for _, x := range set.Keys {
+			if x["kty"] == "RSA" {
+				found = x["alg"] == "RS256" && x["d"] == nil
+			}
+		}
+		if !found || len(set.Keys) != 3 {
+			t.Fatalf("jwks = %s", b)
+		}
+		jws, err = keys.Sign(ctx, tx, k.RealmID, port.AlgRS256, "JWT", []byte(`{"sub":"x"}`))
+		return err
+	})
+	err := k.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		if b, err := keys.VerifyType(ctx, tx, k.RealmID, jws, "JWT"); err != nil || string(b) != `{"sub":"x"}` {
+			t.Fatalf("verify = %s, %v", b, err)
+		}
+		parts := strings.Split(jws, ".")
+		if _, err := keys.Verify(ctx, tx, k.RealmID, parts[0]+"."+parts[1]+"."+parts[2][:len(parts[2])-4]+"AAAA"); err == nil {
+			t.Fatal("tampered verified")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
