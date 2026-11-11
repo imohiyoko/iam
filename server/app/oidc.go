@@ -288,12 +288,25 @@ type discovery struct {
 	PreAuthorizedGrantAnonymousAccessSupported bool `json:"pre-authorized_grant_anonymous_access_supported,omitempty"`
 }
 
-func (s *oidcServer) Discovery(context.Context, *op.Request[struct{}]) (*op.Response, error) {
-	return op.NewResponse(s.metadata()), nil
+func (s *oidcServer) Discovery(ctx context.Context, _ *op.Request[struct{}]) (*op.Response, error) {
+	d, err := s.metadata(ctx)
+	if err != nil {
+		return nil, s.fail(ctx, err)
+	}
+	return op.NewResponse(d), nil
 }
 
 // metadata は Discovery と Authorization Server Metadata（RFC 8414）の中身。
-func (s *oidcServer) metadata() discovery {
+func (s *oidcServer) metadata(ctx context.Context) (discovery, error) {
+	var algs []string
+	err := s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		var err error
+		algs, err = s.a.keys.Advertised(ctx, tx, s.a.realm.ID)
+		return err
+	})
+	if err != nil {
+		return discovery{}, err
+	}
 	d := discovery{DiscoveryConfiguration: &oidc.DiscoveryConfiguration{
 		Issuer:                            s.a.issuer,
 		AuthorizationEndpoint:             s.endpoint(oidcAuthorize),
@@ -305,7 +318,7 @@ func (s *oidcServer) metadata() discovery {
 		ResponseModesSupported:            []string{string(oidc.ResponseModeQuery)},
 		GrantTypesSupported:               s.grantTypes(),
 		SubjectTypesSupported:             []string{"public"},
-		IDTokenSigningAlgValuesSupported:  s.a.keys.Algs(),
+		IDTokenSigningAlgValuesSupported:  algs,
 		TokenEndpointAuthMethodsSupported: authMethods,
 		TokenEndpointAuthSigningAlgValuesSupported: assertionAlgs,
 		ClaimsSupported:                                    s.claims(),
@@ -352,7 +365,7 @@ func (s *oidcServer) metadata() discovery {
 		d.GrantTypesSupported = append(slices.Clone(d.GrantTypesSupported), oidc.GrantType(vci.GrantTypePreAuthorized))
 		d.PreAuthorizedGrantAnonymousAccessSupported = true
 	}
-	return d
+	return d, nil
 }
 
 func (s *oidcServer) Keys(ctx context.Context, _ *op.Request[struct{}]) (*op.Response, error) {
