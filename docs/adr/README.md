@@ -132,5 +132,6 @@
 | [0120](0120-introspection-principals-and-callers.md) | イントロスペクションに主体の種類と認証の方式を載せ、API キーの検証とリソースを確かめてよい連携先の限定はどちらも既定オフで足す | 承認 |
 | [0121](0121-connected-permission-namespace.md) | 連携先の権限は登録したカタログの接頭辞の下に置き、IAM 自身の権限と字面で分け、判定は呼び出し元が受け持つカタログに限る | 承認 |
 | [0123](0123-jwt-access-tokens.md) | JWT のアクセストークン（RFC 9068）は既定オフのフィーチャーにし、トークンの行を残して iam の側の検証と失効は今までどおりにする | 承認 |
+| [0124](0124-form-post-response-mode.md) | `response_mode=form_post` は既定オフのフィーチャーにし、応答を 1 回限りで預けて自動 POST の画面で返す | 承認 |
 | [0122](0122-rs256-id-tokens.md) | RS256 の ID トークンは既定オフのフィーチャーにし、realm ごとに RSA 3072 の鍵を足して連携先ごとに選ばせる | 承認 |
 | [0118](0118-shared-signals-framework.md) | Shared Signals Framework は監査ログを outbox にした送信側と、許した動作だけを行う受信側の 2 つのフィーチャーにする | 承認 |

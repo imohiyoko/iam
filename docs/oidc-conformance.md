@@ -33,7 +33,7 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
   フィーチャー `rs256`（ADR 0122）を有効にして連携先を `RS256` で登録するか、ES256 で登録して実行する
 - **PKCE を必ず求める。** 機密の連携先にも S256 を求める（OAuth 2.0 Security BCP）。PKCE を送らない試験は `invalid_request`
   で戻る。試験の設定で PKCE を有効にする
-- **`response_mode` は `query` だけ。** `form_post`・`fragment`、`response_type` の `code` 以外は扱わない
+- **`response_mode` は既定で `query` だけ。** フィーチャー `form_post`（ADR 0124）なら `form_post` も受ける。`fragment`、`response_type` の `code` 以外は扱わない
 - **`request` / `request_uri` パラメーター、`claims` パラメーターを受けない**（`oidcc-request-*`・`oidcc-claims-*` は対象外）。
   フィーチャー acr がオンなら `claims` の `id_token.acr` だけを読む（`claims_parameter_supported` は出さない）
 - **満たせない `acr_values` は任意の要求でも断る。** フィーチャー acr がオンなら、ログインし直しても満たさないとき

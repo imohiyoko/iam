@@ -694,6 +694,15 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] 無効化で連携先の設定を外す。memory・SQLite・PostgreSQL の契約テスト
 - Token Exchange のトークンの JWT（`act`）
 
+#### `form_post` の応答（ADR 0124）
+
+**ゴール**：`response_mode=form_post` を前提にする RP（ASP.NET など）が、既定を変えずにつながる。
+
+- [x] フィーチャー `form_post`（既定オフ）。オフなら Discovery に出さず、`query` で返し、画面は 404 のテストがある
+- [x] 応答を 1 回限り・1 分で預け、自動 POST の画面で redirect_uri に返す。別のセッションでは開けず、2 回目は開けない
+- [x] エラーの応答（`prompt=none`）も同じ画面で返す。CSP の `form-action` を redirect_uri のオリジンに限る
+- `fragment`、JAR（RFC 9101）、JARM
+
 #### Token Exchange・なりすまし（ADR 0099）
 
 **ゴール**：連携先が本人のトークンを、行為者付きで範囲を絞ったトークンに替えられる。運営者は記録と通知付きで本人として動ける。

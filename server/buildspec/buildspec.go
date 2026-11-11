@@ -111,6 +111,8 @@ var featureCatalog = map[string]struct {
 	feature.RS256: {provider.RS256Feature, module + "/features/rs256"},
 	// ADR 0123。
 	feature.JWTAccessTokens: {provider.JWTAccessFeature, module + "/features/jwtaccesstokens"},
+	// ADR 0124。
+	feature.FormPost: {provider.FormPostFeature, module + "/features/formpost"},
 	// ADR 0116。
 	feature.WorkloadIdentity: {workloadidentity.Feature, module + "/features/workloadidentity"},
 	// ADR 0119。

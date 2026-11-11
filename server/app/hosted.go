@@ -154,7 +154,7 @@ func (h *hosted) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		name := strings.TrimPrefix(r.URL.Path, "/login/assets/")
-		if name != "login.js" && name != "login.css" && name != "logout.js" && name != "wsfed.js" && name != "samlidp.js" {
+		if name != "login.js" && name != "login.css" && name != "logout.js" && name != "wsfed.js" && name != "samlidp.js" && name != "formpost.js" {
 			http.NotFound(w, r)
 			return
 		}

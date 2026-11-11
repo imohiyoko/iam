@@ -1,0 +1,115 @@
+package app
+
+import (
+	"net/url"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/imohiyoko/iam/authz/role"
+	"github.com/imohiyoko/iam/shared/feature"
+)
+
+// フィーチャー form_post（OAuth 2.0 Form Post Response Mode。ADR 0124）を HTTP で確かめる。
+
+var hiddenInput = regexp.MustCompile(`<input type="hidden" name="([^"]+)" value="([^"]*)">`)
+
+// formFields は自動で POST する画面の action と hidden の値を返す。
+func formFields(t *testing.T, body string) (string, url.Values) {
+	t.Helper()
+	m := regexp.MustCompile(`<form id="formpost" method="post" action="([^"]+)">`).FindStringSubmatch(body)
+	if m == nil {
+		t.Fatalf("no form: %s", body)
+	}
+	out := url.Values{}
+	for _, f := range hiddenInput.FindAllStringSubmatch(body, -1) {
+		out.Add(f[1], strings.ReplaceAll(f[2], "&#43;", "+"))
+	}
+	return strings.ReplaceAll(m[1], "&amp;", "&"), out
+}
+
+func responseModesOf(t *testing.T, l *loginEnv) []string {
+	t.Helper()
+	var out []string
+	for _, v := range metadataAt(t, l, "/.well-known/openid-configuration")["response_modes_supported"].([]any) {
+		out = append(out, v.(string))
+	}
+	return out
+}
+
+func TestFormPostOff(t *testing.T) {
+	l := senderEnv(t, nil)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	if modes := responseModesOf(t, l); slices.Contains(modes, "form_post") {
+		t.Fatalf("discovery while off: %v", modes)
+	}
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	_, cookie := l.login(t, "alice@example.com")
+	u := location(t, l.oidcDo(t, "GET", p.authorizeURL(url.Values{"response_mode": {"form_post"}}), nil, cookie))
+	if u.Query().Get("error") != "invalid_request" || u.Query().Get("code") != "" {
+		t.Fatalf("form_post while off: %s", u)
+	}
+	if w := l.oidcDo(t, "GET", oidcFormPost+"?r=x", nil, cookie); w.Code != 404 {
+		t.Fatalf("form_post page while off: %d", w.Code)
+	}
+}
+
+func TestFormPost(t *testing.T) {
+	l := senderEnv(t, nil, feature.FormPost)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	if modes := responseModesOf(t, l); !slices.Contains(modes, "form_post") || !slices.Contains(modes, "query") {
+		t.Fatalf("discovery: %v", modes)
+	}
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "redirect_uris": []string{"https://rp.example.com/cb?tenant=1"}})
+	_, cookie := l.login(t, "alice@example.com")
+
+	// ログイン済みのブラウザ：認可エンドポイントは画面へ転送し、画面は戻り先へ code・state・iss を POST する。
+	u := location(t, l.oidcDo(t, "GET", p.authorizeURL(url.Values{"response_mode": {"form_post"}}), nil, cookie))
+	if u.Path != oidcFormPost || u.Query().Get("code") != "" {
+		t.Fatalf("redirect = %s", u)
+	}
+	page := u.Path + "?" + u.RawQuery
+	// 別のブラウザ（セッションなし）では開けず、使い切らない。
+	if w := l.oidcDo(t, "GET", page, nil, ""); w.Code != 400 {
+		t.Fatalf("other browser: %d", w.Code)
+	}
+	u = location(t, l.oidcDo(t, "GET", p.authorizeURL(url.Values{"response_mode": {"form_post"}}), nil, cookie))
+	page = u.Path + "?" + u.RawQuery
+	w := l.oidcDo(t, "GET", page, nil, cookie)
+	if w.Code != 200 {
+		t.Fatalf("form page: %d %s", w.Code, w.Body)
+	}
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "form-action https://rp.example.com;") || !strings.Contains(csp, "frame-ancestors 'none'") || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("headers: %v", w.Header())
+	}
+	action, fields := formFields(t, w.Body.String())
+	if action != "https://rp.example.com/cb?tenant=1" || fields.Get("state") != p.state || fields.Get("iss") != testIssuer || fields.Get("code") == "" || fields.Get("tenant") != "" {
+		t.Fatalf("form: %s %v", action, fields)
+	}
+	// 1 回限り。
+	if w := l.oidcDo(t, "GET", page, nil, cookie); w.Code != 400 {
+		t.Fatalf("second open: %d", w.Code)
+	}
+	if code, out := p.exchange(t, fields.Get("code"), nil); code != 200 || out["id_token"] == nil {
+		t.Fatalf("exchange: %d %v", code, out)
+	}
+
+	// エラーの応答も POST で返す（セッションなし、prompt=none）。
+	u = location(t, l.oidcDo(t, "GET", p.authorizeURL(url.Values{"response_mode": {"form_post"}, "prompt": {"none"}}), nil, ""))
+	if u.Path != oidcFormPost {
+		t.Fatalf("error redirect = %s", u)
+	}
+	w = l.oidcDo(t, "GET", u.Path+"?"+u.RawQuery, nil, "")
+	if w.Code != 200 {
+		t.Fatalf("error page: %d %s", w.Code, w.Body)
+	}
+	if _, fields := formFields(t, w.Body.String()); fields.Get("error") != "login_required" || fields.Get("state") != p.state || fields.Get("code") != "" {
+		t.Fatalf("error form: %v", fields)
+	}
+	// 既定（query）は今までどおり戻り先へ転送する。
+	if u := location(t, l.oidcDo(t, "GET", p.authorizeURL(nil), nil, cookie)); u.Host != "rp.example.com" || u.Query().Get("code") == "" {
+		t.Fatalf("query mode: %s", u)
+	}
+}
