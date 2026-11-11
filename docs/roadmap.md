@@ -703,6 +703,15 @@ realm ごとの規則で iam のユーザーに結び付く。
 - [x] `RS256` の RP に SAML 1.1・2.0 の Assertion を RSA-SHA256 で署名し、標準の XML 署名の検証（goxmldsig）が通る。メタデータに両方の証明書を載せる
 - [x] 無効化で SP・RP を ES256 に戻してから RSA の鍵を退役させる。memory・SQLite・PostgreSQL の契約テスト
 
+#### 標準クレーム（ADR 0127）
+
+**ゴール**：`profile`・`phone`・`address` を求める RP が、realm で定義した属性から標準クレームを受け取れる。
+
+- [x] フィーチャー `standard_claims`（既定オフ、`custom_attributes` に依存）。オフなら `claim` を置けず、Discovery に出さないテストがある
+- [x] 属性の定義の `claim`（名前と型を確かめ、realm で 1 つ）。スコープごとに ID トークン・UserInfo に載せ、address はまとめる
+- [x] 無効化で `claim` を外す。memory・SQLite・PostgreSQL の契約テスト
+- `claims` パラメーター（OIDC Core 5.5）
+
 #### `offline_access`（ADR 0126）
 
 **ゴール**：本人がいない間に動く連携先（同期・バックアップ・モバイル）が、ログアウトの後も使い続けられる。

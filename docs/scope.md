@@ -76,7 +76,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | Back-Channel Logout | S | ✅ | |
 | RP-Initiated Logout、Front-Channel Logout | S | ✅ | ADR 0094（`oidc_logout`） |
 | Session Management | S | ❌ | |
-| `profile`・`address`・`phone` スコープ、`claims` パラメーター | S | ⛔ | 適合性メモ |
+| `profile`・`address`・`phone` スコープ、`claims` パラメーター | S | △ | スコープはフィーチャー `standard_claims`（カスタム属性に対応付ける。ADR 0127）。`claims` パラメーターは未 |
 | `form_post`・`fragment`、JAR（RFC 9101） | S | △ | `form_post` はフィーチャー `form_post`（ADR 0124）。`fragment`（`code` 以外の `response_type`）と JAR は無い |
 | PAR（RFC 9126） | S | ✅ | フィーチャー `par`（ADR 0112）。連携先か realm の単位で必須にできる |
 | RS256 | S | ✅ | フィーチャー `rs256`（ADR 0122、0125）。OIDC の ID トークン・Logout Token・JWT のアクセストークン、SAML の IdP・WS-Federation の RSA-SHA256 |

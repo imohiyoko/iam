@@ -32,8 +32,8 @@ func (q *Queries) CountUserAttributes(ctx context.Context) (int64, error) {
 }
 
 const createAttributeDef = `-- name: CreateAttributeDef :exec
-INSERT INTO authn_attribute_defs (realm_id, key, type, enum_values, max_length, user_editable, in_token, encrypted, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO authn_attribute_defs (realm_id, key, type, enum_values, max_length, user_editable, in_token, encrypted, claim, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateAttributeDefParams struct {
@@ -45,6 +45,7 @@ type CreateAttributeDefParams struct {
 	UserEditable int64
 	InToken      int64
 	Encrypted    int64
+	Claim        string
 	CreatedAt    string
 	UpdatedAt    string
 }
@@ -59,6 +60,7 @@ func (q *Queries) CreateAttributeDef(ctx context.Context, arg CreateAttributeDef
 		arg.UserEditable,
 		arg.InToken,
 		arg.Encrypted,
+		arg.Claim,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -126,7 +128,7 @@ func (q *Queries) EraseUserAttributes(ctx context.Context, arg EraseUserAttribut
 }
 
 const getAttributeDef = `-- name: GetAttributeDef :one
-SELECT realm_id, "key", type, enum_values, max_length, user_editable, in_token, encrypted, created_at, updated_at FROM authn_attribute_defs WHERE realm_id = ? AND key = ?
+SELECT realm_id, "key", type, enum_values, max_length, user_editable, in_token, encrypted, created_at, updated_at, claim FROM authn_attribute_defs WHERE realm_id = ? AND key = ?
 `
 
 type GetAttributeDefParams struct {
@@ -148,12 +150,13 @@ func (q *Queries) GetAttributeDef(ctx context.Context, arg GetAttributeDefParams
 		&i.Encrypted,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Claim,
 	)
 	return i, err
 }
 
 const listAttributeDefs = `-- name: ListAttributeDefs :many
-SELECT realm_id, "key", type, enum_values, max_length, user_editable, in_token, encrypted, created_at, updated_at FROM authn_attribute_defs WHERE realm_id = ? ORDER BY key
+SELECT realm_id, "key", type, enum_values, max_length, user_editable, in_token, encrypted, created_at, updated_at, claim FROM authn_attribute_defs WHERE realm_id = ? ORDER BY key
 `
 
 func (q *Queries) ListAttributeDefs(ctx context.Context, realmID string) ([]AuthnAttributeDef, error) {
@@ -176,6 +179,7 @@ func (q *Queries) ListAttributeDefs(ctx context.Context, realmID string) ([]Auth
 			&i.Encrypted,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Claim,
 		); err != nil {
 			return nil, err
 		}
@@ -279,7 +283,7 @@ func (q *Queries) SetUserAttribute(ctx context.Context, arg SetUserAttributePara
 }
 
 const updateAttributeDef = `-- name: UpdateAttributeDef :execrows
-UPDATE authn_attribute_defs SET enum_values = ?, max_length = ?, user_editable = ?, in_token = ?, updated_at = ? WHERE realm_id = ? AND key = ?
+UPDATE authn_attribute_defs SET enum_values = ?, max_length = ?, user_editable = ?, in_token = ?, claim = ?, updated_at = ? WHERE realm_id = ? AND key = ?
 `
 
 type UpdateAttributeDefParams struct {
@@ -287,6 +291,7 @@ type UpdateAttributeDefParams struct {
 	MaxLength    int64
 	UserEditable int64
 	InToken      int64
+	Claim        string
 	UpdatedAt    string
 	RealmID      string
 	Key          string
@@ -298,6 +303,7 @@ func (q *Queries) UpdateAttributeDef(ctx context.Context, arg UpdateAttributeDef
 		arg.MaxLength,
 		arg.UserEditable,
 		arg.InToken,
+		arg.Claim,
 		arg.UpdatedAt,
 		arg.RealmID,
 		arg.Key,

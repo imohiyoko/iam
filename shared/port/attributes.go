@@ -27,6 +27,7 @@ type AttributeDef struct {
 	UserEditable bool     // 本人が公開 API で書ける
 	InToken      bool     // スコープ attributes で ID トークン・UserInfo に載せる
 	Encrypted    bool     // 値をユーザーのデータ鍵で暗号化する
+	Claim        string   // 対応付けた OIDC の標準クレーム（空なら無し。ADR 0127）
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -47,7 +48,7 @@ type AttributeRepo interface {
 	GetDef(ctx context.Context, realmID, key string) (AttributeDef, error)
 	// ListDefs は key の順に返す。
 	ListDefs(ctx context.Context, realmID string) ([]AttributeDef, error)
-	// UpdateDef は Values・MaxLength・UserEditable・InToken・UpdatedAt を置き換える。無ければ errs.NotFound。
+	// UpdateDef は Values・MaxLength・UserEditable・InToken・Claim・UpdatedAt を置き換える。無ければ errs.NotFound。
 	UpdateDef(ctx context.Context, d AttributeDef) error
 	// DeleteDef は定義と、その属性のすべての値を消す。無ければ errs.NotFound。
 	DeleteDef(ctx context.Context, realmID, key string) error

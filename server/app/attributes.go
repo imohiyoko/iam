@@ -22,6 +22,9 @@ func attributeDefOut(d port.AttributeDef) adminapi.AttributeDef {
 	if d.Type == port.AttributeString {
 		out.MaxLength = &d.MaxLength
 	}
+	if d.Claim != "" {
+		out.Claim = &d.Claim
+	}
 	return out
 }
 
@@ -94,7 +97,7 @@ func (s adminServer) CreateAttributeDef(ctx context.Context, req adminapi.Create
 	var err error
 	if b := req.Body; b != nil {
 		in := attribute.Def{Key: b.Key, Type: port.AttributeType(b.Type), Values: deref(b.Values), MaxLength: deref(b.MaxLength),
-			UserEditable: deref(b.UserEditable), InToken: deref(b.InToken), Encrypted: deref(b.Encrypted)}
+			UserEditable: deref(b.UserEditable), InToken: deref(b.InToken), Encrypted: deref(b.Encrypted), Claim: deref(b.Claim)}
 		o, err = s.attributesCall(ctx, role.PermAttributesManage, func(ctx context.Context, tx port.Tx, a attribute.Actor) error {
 			out, err = s.a.attributes.Define(ctx, tx, s.a.realm.ID, in, a)
 			return err
@@ -125,7 +128,7 @@ func (s adminServer) UpdateAttributeDef(ctx context.Context, req adminapi.Update
 	var err error
 	if b := req.Body; b != nil {
 		in := attribute.Def{Key: req.Key, Values: deref(b.Values), MaxLength: deref(b.MaxLength), UserEditable: deref(b.UserEditable),
-			InToken: deref(b.InToken)}
+			InToken: deref(b.InToken), Claim: deref(b.Claim)}
 		o, err = s.attributesCall(ctx, role.PermAttributesManage, func(ctx context.Context, tx port.Tx, a attribute.Actor) error {
 			out, err = s.a.attributes.Update(ctx, tx, s.a.realm.ID, in, a)
 			return err
@@ -144,6 +147,8 @@ func (s adminServer) UpdateAttributeDef(ctx context.Context, req adminapi.Update
 		return adminapi.UpdateAttributeDef403JSONResponse(o.body), nil
 	case o.status == http.StatusNotFound:
 		return adminapi.UpdateAttributeDef404JSONResponse(o.body), nil
+	case o.status == http.StatusConflict:
+		return adminapi.UpdateAttributeDef409JSONResponse(o.body), nil
 	}
 	return nil, errUnexpected(o)
 }

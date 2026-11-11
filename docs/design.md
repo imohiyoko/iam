@@ -585,6 +585,7 @@ GET    /v1/admin/signing-keys
   連携先の `id_token_signed_response_alg`）にできる。トークンの行は残し、iam の側の検証と失効は今までどおり即時。JWKS だけで確かめるリソースサーバーには、
   失効が `exp` まで届かない。Token Exchange のトークンは不透明のまま
 - ID トークンのクレーム：`sub`、`org_id`（Org オンのみ）、`amr`、`sid`、`email`（4.4）、`acr`（フィーチャー acr。11.15）。Group / Role は載せない
+- フィーチャー `standard_claims`（既定オフ。ADR 0127）なら、スコープ `profile`・`phone`・`address` で、カスタム属性に対応付けた標準クレーム（11.7）を ID トークンと UserInfo に載せる
 - リフレッシュトークンはローテーションし、再利用を検知したらファミリーごと失効
 - フィーチャー `offline_access`（既定オフ。ADR 0126）なら、連携先ごとの `offline_access` で、`offline_access` のスコープを求めた認可を
   ログインの系列から切り離す。ログアウト・セッションの期限では失効せず、使うたびにユーザーの状態・認可に使った認証情報・連携先・Org を確かめる。
@@ -1010,6 +1011,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
 | API キーのイントロスペクション（5.1、ADR 0120） | オフ | サービスアカウント | API キーのイントロスペクションは `active: false`。持つデータは無い |
 | JWT のアクセストークン（5.1、ADR 0123） | オフ | ― | 連携先に `jwt_access_tokens` を新しく置けず、JWT の形のアクセストークンはどこでも通らない。無効化で連携先の設定を外して完了 |
+| 標準クレーム（5.1、11.7、ADR 0127） | オフ | カスタム属性 | 定義に `claim` を置けず、`profile`・`phone`・`address` のスコープでは何も載せない。Discovery に出さない。無効化で定義の `claim` を外して完了（属性と値は残る） |
 | `offline_access`（5.1、ADR 0126） | オフ | ― | 連携先に `offline_access` を新しく置けず、スコープを求めてもふつうの認可。Discovery に出さず、本人の API は 404。残った Offline の認可は使えない。無効化で連携先の設定を外し、Offline の認可を消して完了 |
 | `form_post` の応答（5.1、ADR 0124） | オフ | ― | `response_mode=form_post` を受けず `query` で返し、`/oauth2/authorize/form_post` は 404。Discovery に出さない。持つデータは無い |
 | RS256 の ID トークン（9.3、ADR 0122） | オフ | ― | RS256 の鍵を作らず、JWKS・Discovery に出さない。連携先・SAML の SP・WS-Federation の RP とローテーションで `RS256` を選べない。無効化で連携先・SP・RP を ES256 に戻し、RS256 の鍵を退役させて完了（`oidc.retired_key_ttl` の間 JWKS に残る） |
@@ -1088,7 +1090,7 @@ A にログインした状態で B の所有を証明すると、B のメール�
 
 realm ごとに型・検証・本人による編集可否・トークンへの掲載・暗号化の有無を定義する。保存方法はアダプタが決める。
 
-実装（ADR 0080）：フィーチャー `custom_attributes`。運営者が管理 API（`/v1/admin/attributes`、権限 `attributes:manage`）で定義する。型は `string`・`integer`・`boolean`・`enum`、realm に 50 まで。型と暗号化の有無は後から変えない。値は管理 API（`attributes:read`・`attributes:write`）と、本人の `/v1/me/attributes`（編集できる属性だけ書ける）で扱う。暗号化する属性はユーザーのデータ鍵で暗号化する。`in_token` の属性は、スコープ `attributes` の ID トークン・UserInfo の `attributes` クレームに載せる。
+実装（ADR 0080）：フィーチャー `custom_attributes`。運営者が管理 API（`/v1/admin/attributes`、権限 `attributes:manage`）で定義する。型は `string`・`integer`・`boolean`・`enum`、realm に 50 まで。型と暗号化の有無は後から変えない。値は管理 API（`attributes:read`・`attributes:write`）と、本人の `/v1/me/attributes`（編集できる属性だけ書ける）で扱う。暗号化する属性はユーザーのデータ鍵で暗号化する。`in_token` の属性は、スコープ `attributes` の ID トークン・UserInfo の `attributes` クレームに載せる。フィーチャー `standard_claims`（ADR 0127）なら、定義の `claim` で OIDC の標準クレーム（`name`・`locale`・`phone_number`・`address.postal_code` など）に対応付け、`profile`・`phone`・`address` のスコープで載せる（1 つのクレームは realm で 1 つの属性にだけ）。
 
 ### 11.8 フロー フック
 

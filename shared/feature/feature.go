@@ -90,6 +90,8 @@ const (
 	FormPost = "form_post"
 	// OfflineAccess は offline_access のスコープで、ログインの系列から切り離した認可（リフレッシュトークン）を出せるようにする（ADR 0126）。
 	OfflineAccess = "offline_access"
+	// StandardClaims はカスタム属性を OIDC の標準クレーム（profile・phone・address のスコープ）に対応付ける（ADR 0127）。
+	StandardClaims = "standard_claims"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

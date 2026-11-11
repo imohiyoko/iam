@@ -114,7 +114,8 @@ var featureCatalog = map[string]struct {
 	// ADR 0124。
 	feature.FormPost: {provider.FormPostFeature, module + "/features/formpost"},
 	// ADR 0126。
-	feature.OfflineAccess: {provider.OfflineAccessFeature, module + "/features/offlineaccess"},
+	feature.OfflineAccess:  {provider.OfflineAccessFeature, module + "/features/offlineaccess"},
+	feature.StandardClaims: {attribute.StandardClaimsFeature, module + "/features/standardclaims"},
 	// ADR 0116。
 	feature.WorkloadIdentity: {workloadidentity.Feature, module + "/features/workloadidentity"},
 	// ADR 0119。

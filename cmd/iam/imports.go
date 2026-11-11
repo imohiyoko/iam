@@ -51,6 +51,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/sms"
 	_ "github.com/imohiyoko/iam/features/ssfreceiver"
 	_ "github.com/imohiyoko/iam/features/ssftransmitter"
+	_ "github.com/imohiyoko/iam/features/standardclaims"
 	_ "github.com/imohiyoko/iam/features/tokenexchange"
 	_ "github.com/imohiyoko/iam/features/warnings"
 	_ "github.com/imohiyoko/iam/features/workloadidentity"

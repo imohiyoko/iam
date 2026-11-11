@@ -60,6 +60,8 @@ var keyRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 type Service struct {
 	Clock   clock.Clock
 	Crypter *pii.Crypter
+	// StandardClaims はフィーチャー standard_claims が動いているか（ADR 0127）。
+	StandardClaims bool
 }
 
 // Def は定義の入力。Type と Encrypted は作成のときだけ使う。
@@ -71,6 +73,8 @@ type Def struct {
 	UserEditable bool
 	InToken      bool
 	Encrypted    bool
+	// Claim は対応付ける標準クレーム（空なら無し。フィーチャー standard_claims。ADR 0127）。
+	Claim string
 }
 
 // Actor は操作する主体（監査ログ）。
@@ -118,7 +122,7 @@ func check(d *port.AttributeDef) error {
 }
 
 func details(d port.AttributeDef) map[string]any {
-	return map[string]any{"key": d.Key, "type": string(d.Type), "user_editable": d.UserEditable, "in_token": d.InToken, "encrypted": d.Encrypted}
+	return map[string]any{"key": d.Key, "type": string(d.Type), "user_editable": d.UserEditable, "in_token": d.InToken, "encrypted": d.Encrypted, "claim": d.Claim}
 }
 
 // Define は属性を定義する。realm に MaxDefs まで。
@@ -128,8 +132,11 @@ func (s *Service) Define(ctx context.Context, tx port.Tx, realmID string, in Def
 	}
 	now := s.Clock.Now()
 	d := port.AttributeDef{RealmID: realmID, Key: in.Key, Type: in.Type, Values: slices.Clone(in.Values), MaxLength: in.MaxLength,
-		UserEditable: in.UserEditable, InToken: in.InToken, Encrypted: in.Encrypted, CreatedAt: now, UpdatedAt: now}
+		UserEditable: in.UserEditable, InToken: in.InToken, Encrypted: in.Encrypted, Claim: in.Claim, CreatedAt: now, UpdatedAt: now}
 	if err := check(&d); err != nil {
+		return port.AttributeDef{}, err
+	}
+	if err := s.checkClaim(ctx, tx, d); err != nil {
 		return port.AttributeDef{}, err
 	}
 	ds, err := tx.Attributes().ListDefs(ctx, realmID)
@@ -154,7 +161,11 @@ func (s *Service) Update(ctx context.Context, tx port.Tx, realmID string, in Def
 		return port.AttributeDef{}, err
 	}
 	d.Values, d.MaxLength, d.UserEditable, d.InToken, d.UpdatedAt = slices.Clone(in.Values), in.MaxLength, in.UserEditable, in.InToken, s.Clock.Now()
+	d.Claim = in.Claim
 	if err := check(&d); err != nil {
+		return port.AttributeDef{}, err
+	}
+	if err := s.checkClaim(ctx, tx, d); err != nil {
 		return port.AttributeDef{}, err
 	}
 	if err := tx.Attributes().UpdateDef(ctx, d); err != nil {
@@ -192,19 +203,24 @@ func AAD(key string) string { return "user_attributes." + key }
 
 // Values はユーザーの値を返す。onlyToken ならトークンに載せる属性だけ。復号できない値（データ鍵の削除）は返さない。
 func (s *Service) Values(ctx context.Context, tx port.Tx, u port.User, onlyToken bool) (map[string]any, error) {
-	realmID, userID := u.RealmID, u.ID
-	defs, err := defsByKey(ctx, tx, realmID)
+	defs, err := defsByKey(ctx, tx, u.RealmID)
 	if err != nil {
 		return nil, err
 	}
-	vs, err := tx.Attributes().ListValues(ctx, realmID, userID)
+	return s.values(ctx, tx, u, defs, func(d port.AttributeDef) bool { return !onlyToken || d.InToken })
+}
+
+// values は、keep が真の定義の属性の値を返す（読めなくなった暗号文は除く）。
+func (s *Service) values(ctx context.Context, tx port.Tx, u port.User, defs map[string]port.AttributeDef, keep func(port.AttributeDef) bool) (map[string]any, error) {
+	userID := u.ID
+	vs, err := tx.Attributes().ListValues(ctx, u.RealmID, userID)
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]any{}
 	for _, v := range vs {
 		d, ok := defs[v.Key]
-		if !ok || onlyToken && !d.InToken {
+		if !ok || !keep(d) {
 			continue
 		}
 		raw := v.Value
