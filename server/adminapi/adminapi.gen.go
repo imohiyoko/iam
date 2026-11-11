@@ -2648,7 +2648,7 @@ type SAMLServiceProviderInput struct {
 	// SignResponse Response に署名する（既定 false。どちらかは true）
 	SignResponse *bool `json:"sign_response,omitempty"`
 
-	// SigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）
+	// SigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。登録の既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）。更新で省けば今の値を保つ（フィーチャー `rs256` が止まっていれば `ES256`）
 	SigningAlg *SAMLServiceProviderInputSigningAlg `json:"signing_alg,omitempty"`
 
 	// SigningCertificates AuthnRequest・LogoutRequest の署名を確かめる SP の証明書（PEM か base64 の DER。RSA 2048 bit 以上か ECDSA。期限切れは受けない）
@@ -2658,7 +2658,7 @@ type SAMLServiceProviderInput struct {
 	Slo *[]SAMLEndpoint `json:"slo,omitempty"`
 }
 
-// SAMLServiceProviderInputSigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）
+// SAMLServiceProviderInputSigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。登録の既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）。更新で省けば今の値を保つ（フィーチャー `rs256` が止まっていれば `ES256`）
 type SAMLServiceProviderInputSigningAlg string
 
 // SAMLServiceProviders defines model for SAMLServiceProviders.
@@ -3097,7 +3097,7 @@ type WSFedRelyingPartyInput struct {
 	Realm     string   `json:"realm"`
 	ReplyUrls []string `json:"reply_urls"`
 
-	// SigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）
+	// SigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。登録の既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）。更新で省けば今の値を保つ（フィーチャー `rs256` が止まっていれば `ES256`）
 	SigningAlg *WSFedRelyingPartyInputSigningAlg `json:"signing_alg,omitempty"`
 
 	// TokenLifetime Assertion の有効期間（秒。既定 3600）
@@ -3107,7 +3107,7 @@ type WSFedRelyingPartyInput struct {
 	TokenType *WSFedRelyingPartyInputTokenType `json:"token_type,omitempty"`
 }
 
-// WSFedRelyingPartyInputSigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）
+// WSFedRelyingPartyInputSigningAlg 署名のアルゴリズム。`ES256`（ECDSA-SHA256。登録の既定）か `RS256`（RSA-SHA256。フィーチャー `rs256` が動いているときだけ。ADR 0125）。更新で省けば今の値を保つ（フィーチャー `rs256` が止まっていれば `ES256`）
 type WSFedRelyingPartyInputSigningAlg string
 
 // WSFedRelyingPartyInputTokenType 既定は saml11

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -115,6 +116,14 @@ func TestSAMLIdPRSA(t *testing.T) {
 	if sp["signing_alg"] != "RS256" {
 		t.Fatalf("register: %v", sp)
 	}
+	// 更新で signing_alg を省けば今の値（RS256）を保つ。
+	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/saml/service-providers/"+sp["id"].(string), map[string]any{"entity_id": samlSP,
+		"name": "App 2", "acs": []map[string]any{{"url": samlACS}}, "sign_response": true,
+		"slo":                  []map[string]any{{"url": samlSPSLO, "binding": samlidp.BindingRedirect}},
+		"signing_certificates": []string{base64.StdEncoding.EncodeToString(samlTestSP.cert)},
+		"attributes":           []map[string]any{{"source": "email", "name": "urn:oid:0.9.2342.19200300.100.1.3"}}}); code != 200 || out["signing_alg"] != "RS256" {
+		t.Fatalf("update without signing_alg: %d %v", code, out)
+	}
 	certs := l.metadataCerts(t, samlidp.MetadataPath)
 	if len(certs) != 2 {
 		t.Fatalf("metadata certificates = %d", len(certs))
@@ -159,6 +168,11 @@ func TestWSFedRSA(t *testing.T) {
 		if rp["signing_alg"] != "RS256" {
 			t.Fatalf("register: %v", rp)
 		}
+		// 更新で signing_alg を省けば今の値（RS256）を保つ。
+		if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/wsfed/relying-parties/"+rp["id"].(string), map[string]any{"realm": realm,
+			"name": "Portal 2", "reply_urls": []string{wsfedReply}, "token_type": tt}); code != 200 || out["signing_alg"] != "RS256" {
+			t.Fatalf("update without signing_alg: %d %v", code, out)
+		}
 	}
 	rc := rsaCert(t, l.metadataCerts(t, wsfed.MetadataPath))
 	_, cookie := l.login(t, "alice@example.com")
@@ -189,7 +203,7 @@ func TestDisableRS256WithFederation(t *testing.T) {
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	l.registerSAMLSP(t, owner, map[string]any{"signing_alg": "RS256"})
 	l.registerWSFed(t, owner, map[string]any{"realm": wsfedRealm, "name": "Portal", "reply_urls": []string{wsfedReply}, "signing_alg": "RS256"})
-	// 片付けるのは SP 1 つ、RP 1 つ、使っている RS256 の鍵 1 つ（SP の登録の前に鍵は作られていない場合もあるので、メタデータで作る）。
+	// 片付けるのは SP 1 つ、RP 1 つ、使っている RS256 の鍵 1 つ（鍵は起動のときに作る）。
 	l.metadataCerts(t, samlidp.MetadataPath)
 	ctx := context.Background()
 	res, err := l.a.DisableFeature(ctx, feature.RS256, true)
@@ -213,5 +227,34 @@ func TestDisableRS256WithFederation(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// 起動し直す前（フィーチャーがまだ動いているインスタンス）でも、メタデータの取得で RS256 の鍵を作り直さない。
+	l.metadataCerts(t, samlidp.MetadataPath)
+	l.metadataCerts(t, wsfed.MetadataPath)
+	err = l.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		ok, err := l.a.keys.HasActive(ctx, tx, l.a.realm.ID, port.AlgRS256)
+		if err == nil && ok {
+			t.Fatal("rs256 key recreated by metadata after disable")
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRSAXMLMetadataWhileDisabling は、フィーチャーを止めて起動し直した後、片付けの前（RS256 の鍵と RS256 の連携先が残る）は、
+// メタデータに RS256 の鍵の証明書を載せ続ける（その間は RS256 で署名する）ことを確かめる。
+func TestRSAXMLMetadataWhileDisabling(t *testing.T) {
+	l := newRSAXMLEnv(t, true)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	l.registerSAMLSP(t, owner, map[string]any{"signing_alg": "RS256"})
+	l.registerWSFed(t, owner, map[string]any{"realm": wsfedRealm, "name": "Portal", "reply_urls": []string{wsfedReply}, "signing_alg": "RS256"})
+	enabled := slices.DeleteFunc(slices.Clone(*l.e.cfg.Features), func(n string) bool { return n == feature.RS256 })
+	if _, err := l.restart(t, enabled, feature.Registered()); err != nil || l.a.keys.RS256 {
+		t.Fatalf("restart without rs256: %v", err)
+	}
+	for _, p := range []string{samlidp.MetadataPath, wsfed.MetadataPath} {
+		rsaCert(t, l.metadataCerts(t, p))
 	}
 }
