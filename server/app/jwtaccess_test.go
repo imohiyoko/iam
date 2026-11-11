@@ -126,6 +126,23 @@ func TestJWTAccessTokensE2E(t *testing.T) {
 	if _, err := oidcrp.Userinfo[*oidc.UserInfo](ctx, wrapped, oidc.BearerToken, alice, relying); err == nil {
 		t.Fatal("wrapped userinfo accepted")
 	}
+	// フィーチャーを止めた後（JWTAccess=false で動くトークン検証）は、JWT も "<jti>." で包んだものも、トークンの行が残っていても通らない。
+	off := *e.l.a.tokens
+	off.JWTAccess = false
+	err = e.l.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		for _, tok := range []string{tokens.AccessToken, wrapped} {
+			if in, err := off.Introspect(ctx, tx, e.l.a.realm.ID, tok); err != nil || in.Active {
+				t.Fatalf("introspect while off: %+v %v", in, err)
+			}
+			if _, err := off.Validate(ctx, tx, e.l.a.realm.ID, tok); err == nil {
+				t.Fatal("validate while off accepted")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	// リフレッシュでも JWT。失効させるとイントロスペクションと UserInfo はすぐ止まる。
 	refreshed, err := oidcrp.RefreshTokens[*oidc.IDTokenClaims](ctx, relying, tokens.RefreshToken, "", "")
 	if err != nil {
