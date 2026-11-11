@@ -225,7 +225,7 @@ func testGrants(t *testing.T, h Harness) {
 		}
 		ext := T0.Add(30 * 24 * time.Hour)
 		if err := toks.Extend(ctx, r, t2.ID, ext); err != nil {
-			return fmt.Errorf("Extend: %w", err)
+			return fmt.Errorf("extend: %w", err)
 		}
 		if got, _ := toks.Get(ctx, r, t2.ID); !got.ExpiresAt.Equal(ext) || got.UsedAt == nil {
 			return fmt.Errorf("after Extend = %+v", got)

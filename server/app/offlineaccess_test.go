@@ -262,8 +262,32 @@ func TestOfflineAccessCredentialChange(t *testing.T) {
 	if status, _ := p.refresh(t, old["refresh_token"].(string)); status != 400 {
 		t.Fatalf("refresh of a logged-out grant after password change: %d", status)
 	}
-	if status, _ := p.refresh(t, kept["refresh_token"].(string)); status != 200 {
+	status, next := p.refresh(t, kept["refresh_token"].(string))
+	if status != 200 {
 		t.Fatalf("refresh of the kept lineage: %d", status)
+	}
+
+	// パスワードでログインして得た認可も、ログアウトの後の別のログインでのパスワードの変更で失効する。
+	if status, _, _ := l.post(t, cookie, "/v1/logout", nil); status != 204 {
+		t.Fatalf("logout: %d", status)
+	}
+	status, _, pwCookie := l.passwordLogin(t, "alice@example.com", "a long and memorable passphrase")
+	if status != 200 || pwCookie == "" {
+		t.Fatalf("password login: %d", status)
+	}
+	_, byPassword := p.exchange(t, p.code(t, l.oidcDo(t, "GET", p.authorizeURL(offlineScope), nil, pwCookie)), nil)
+	if status, _, _ := l.post(t, pwCookie, "/v1/logout", nil); status != 204 {
+		t.Fatalf("logout: %d", status)
+	}
+	_, cookie = l.login(t, "alice@example.com")
+	if status, res := l.mePost(t, cookie, "/v1/me/password:set", map[string]string{"password": "another long passphrase here", "current_password": "a long and memorable passphrase"}); status != 204 {
+		t.Fatalf("password change: %d %v", status, res)
+	}
+	if status, _ := p.refresh(t, byPassword["refresh_token"].(string)); status != 400 {
+		t.Fatalf("refresh of a password-login grant after password change: %d", status)
+	}
+	if status, _ := p.refresh(t, next["refresh_token"].(string)); status != 400 {
+		t.Fatalf("refresh of an older lineage after password change: %d", status)
 	}
 }
 
