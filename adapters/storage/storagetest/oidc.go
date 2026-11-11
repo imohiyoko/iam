@@ -73,6 +73,14 @@ func testClients(t *testing.T, h Harness) {
 		if got, err := repo.Get(ctx, r, a.ID); err != nil || !reflect.DeepEqual(got, a) {
 			return fmt.Errorf("after Update = %+v, %v", got, err)
 		}
+		// offline_access を外す更新（フィーチャーの無効化の片付けと同じ。ADR 0126）。
+		b.OfflineAccess, b.UpdatedAt = false, T0.Add(time.Hour)
+		if err := repo.Update(ctx, b); err != nil {
+			return err
+		}
+		if got, err := repo.Get(ctx, r, b.ID); err != nil || !reflect.DeepEqual(got, b) {
+			return fmt.Errorf("after clearing offline_access = %+v, %v", got, err)
+		}
 		if err := repo.Delete(ctx, r, a.ID); err != nil {
 			return err
 		}
