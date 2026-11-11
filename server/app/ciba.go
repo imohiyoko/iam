@@ -448,7 +448,7 @@ func (a *App) resolveBackchannel(ctx context.Context, req provider.BackchannelRe
 	}
 	a.sessions.Committed(ctx, a.realm.ID, is)
 	s := is.Session
-	code := &provider.Code{UserID: req.UserID, OrgID: s.ActiveOrgID, SID: s.SID, AuthTime: s.AuthenticatedAt, AMR: s.AuthMethods, SelectedACR: selected}
+	code := &provider.Code{UserID: req.UserID, OrgID: s.ActiveOrgID, SID: s.SID, AuthTime: s.AuthenticatedAt, AMR: s.AuthMethods, Credentials: codeCredentials(s.AuthCredentialIDs), SelectedACR: selected}
 	if !a.decideBackchannel(ctx, req, code, cibaChannelPush, "", actor, s.ID) {
 		// 先に本人の API で判断していた。作ったセッションは使わない。
 		if err := a.sessions.Revoke(ctx, a.realm.ID, s.ID, req.UserID, session.ReasonLogout, actor, requestID(ctx)); err != nil {
@@ -641,7 +641,7 @@ func (s publicServer) ApproveMyBackchannelRequest(ctx context.Context, req publi
 	}
 	var code *provider.Code
 	if reason == "" {
-		code = &provider.Code{UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID, AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods, SelectedACR: selected}
+		code = &provider.Code{UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID, AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods, Credentials: codeCredentials(au.AuthCredentialIDs), SelectedACR: selected}
 	}
 	if !s.a.decideBackchannel(ctx, r, code, cibaChannelSelf, reason, au.Actor(), au.SID) {
 		return publicapi.ApproveMyBackchannelRequest404JSONResponse{NotFoundJSONResponse: notFound()}, nil

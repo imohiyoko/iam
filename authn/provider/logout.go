@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -71,7 +72,8 @@ func (t *Tokens) LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, rea
 		if err != nil {
 			return err
 		}
-		if !revoked(g, now) {
+		// Offline の認可（ADR 0126）は、ログアウトと系列の続きへの入れ替えでは残す。
+		if !revoked(g, now) && (!g.Offline || !slices.Contains(offlineKept, reason)) {
 			if err := t.revoke(ctx, tx, cl, g, RevokeReasonLogout, requestID, now); err != nil {
 				return err
 			}

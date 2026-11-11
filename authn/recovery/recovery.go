@@ -356,6 +356,10 @@ func (s *Service) Complete(ctx context.Context, realmID, sessionID string, c Cli
 		if err := s.Sessions.EndLineagesTx(ctx, tx, realmID, revoked, session.ReasonRecovered, c.RequestID); err != nil {
 			return err
 		}
+		// ログアウト済みの系列から切り離した認可（offline_access。ADR 0126）も失効させる。
+		if err := s.Sessions.PrincipalRevokedTx(ctx, tx, realmID, u.ID, "", session.ReasonRecovered, c.RequestID); err != nil {
+			return err
+		}
 		if codes, err = s.Generate(ctx, tx, realmID, u.ID, actor, c.RequestID); err != nil {
 			return err
 		}

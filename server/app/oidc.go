@@ -239,12 +239,16 @@ func (s *oidcServer) grantTypes() []oidc.GrantType {
 	return grantTypes
 }
 
-// scopes は対応するスコープ。カスタム属性が動いていれば attributes も。
+// scopes は対応するスコープ。カスタム属性が動いていれば attributes も、offline_access が動いていればそれも。
 func (s *oidcServer) scopes() []string {
+	out := provider.Scopes
 	if s.a.attributes != nil {
-		return append(slices.Clone(provider.Scopes), provider.ScopeAttributes)
+		out = append(slices.Clone(out), provider.ScopeAttributes)
 	}
-	return provider.Scopes
+	if s.a.tokens.Offline {
+		out = append(slices.Clone(out), provider.ScopeOfflineAccess) // ADR 0126
+	}
+	return out
 }
 
 // responseModes は Discovery の response_modes_supported。フィーチャー form_post なら form_post も（ADR 0124）。
@@ -668,7 +672,7 @@ func (s *oidcServer) complete(ctx context.Context, req provider.AuthRequest, au 
 	if len(au.OrgUnavailable) > 0 {
 		return s.errorRedirect(ctx, req, oidc.ErrAccessDenied())
 	}
-	c := provider.Code{AuthRequest: req, UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID, AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods}
+	c := provider.Code{AuthRequest: req, UserID: au.PrincipalID, OrgID: au.ActiveOrgID, SID: au.SID, AuthTime: au.AuthenticatedAt, AMR: au.AuthMethods, Credentials: codeCredentials(au.AuthCredentialIDs)}
 	if s.a.acrActive() {
 		v, ok := acr.Select(req.ACR, au.AuthMethods)
 		if !ok {
@@ -1010,4 +1014,10 @@ func (s *oidcServer) userinfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, claims)
+}
+
+// codeCredentials は認可コードに写すセッションの認証情報の ID。認証情報の無いセッションでも記録したことが分かるように nil にしない
+// （nil は記録していないコード。ADR 0126）。
+func codeCredentials(ids []string) []string {
+	return append([]string{}, ids...)
 }

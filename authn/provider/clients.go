@@ -67,6 +67,8 @@ type Clients struct {
 	RS256 bool
 	// JWTAccess はフィーチャー jwt_access_tokens が動いているか（jwt_access_tokens を受け付けるか。ADR 0123）。
 	JWTAccess bool
+	// Offline はフィーチャー offline_access が動いているか（offline_access を受け付けるか。ADR 0126）。
+	Offline bool
 }
 
 // ClientInput は登録・変更の内容。
@@ -99,6 +101,8 @@ type ClientInput struct {
 	FAPI2 bool
 	// JWTAccessTokens はアクセストークンを JWT（RFC 9068）で出す（フィーチャー jwt_access_tokens。ADR 0123）。
 	JWTAccessTokens bool
+	// OfflineAccess は offline_access のスコープを受ける（フィーチャー offline_access。ADR 0126）。
+	OfflineAccess bool
 }
 
 // ValidRedirectURI は連携先の URI に使えるか（絶対 URL、https か loopback の http、フラグメントと userinfo なし）を返す。
@@ -355,6 +359,14 @@ func (c *Clients) checkJWTAccess(in ClientInput, prev port.Client) error {
 	return invalidClient("jwt_access_tokens: the jwt_access_tokens feature is not enabled")
 }
 
+// checkOffline は、フィーチャー offline_access が動いていないときに offline_access を新たに置くのを拒む。今の値のままなら受け付ける。
+func (c *Clients) checkOffline(in ClientInput, prev port.Client) error {
+	if c.Offline || !in.OfflineAccess || prev.OfflineAccess {
+		return nil
+	}
+	return invalidClient("offline_access: the offline_access feature is not enabled")
+}
+
 // checkFAPI2 は FAPI 2.0 Security Profile の連携先（連携先の設定か realm の設定）の条件を確かめる（ADR 0117）。
 // 連携先に新しく入れるときは、フィーチャー fapi2・par と、dpop か mtls_client_auth が動いていなければ拒む（今の値のままの変更と
 // 外すのは受ける）。cl は保存する内容。
@@ -390,6 +402,9 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 	if err := c.checkPAR(in, port.Client{}); err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkOffline(in, port.Client{}); err != nil {
+		return port.Client{}, "", err
+	}
 	if err := c.checkJWTAccess(in, port.Client{}); err != nil {
 		return port.Client{}, "", err
 	}
@@ -400,7 +415,7 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 		FrontchannelLogoutURI: in.FrontchannelLogoutURI, FrontchannelLogoutSessionRequired: in.FrontchannelLogoutSessionRequired,
 		DPoPBoundAccessTokens: in.DPoPBoundAccessTokens, TLSBoundAccessTokens: in.TLSBoundAccessTokens, TLSAuthField: in.TLSAuthField,
 		TLSAuthValue: in.TLSAuthValue, CIBAMode: in.CIBAMode, CIBANotificationEndpoint: in.CIBANotificationEndpoint,
-		RequirePAR: in.RequirePAR, FAPI2: in.FAPI2, JWTAccessTokens: in.JWTAccessTokens, CreatedAt: now, UpdatedAt: now}
+		RequirePAR: in.RequirePAR, FAPI2: in.FAPI2, JWTAccessTokens: in.JWTAccessTokens, OfflineAccess: in.OfflineAccess, CreatedAt: now, UpdatedAt: now}
 	if err := c.checkFAPI2(cl, port.Client{}); err != nil {
 		return port.Client{}, "", err
 	}
@@ -431,6 +446,9 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	if err := c.checkPAR(in, cl); err != nil {
 		return port.Client{}, "", err
 	}
+	if err := c.checkOffline(in, cl); err != nil {
+		return port.Client{}, "", err
+	}
 	if err := c.checkJWTAccess(in, cl); err != nil {
 		return port.Client{}, "", err
 	}
@@ -451,6 +469,7 @@ func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in Cli
 	cl.DPoPBoundAccessTokens, cl.TLSBoundAccessTokens = in.DPoPBoundAccessTokens, in.TLSBoundAccessTokens
 	cl.TLSAuthField, cl.TLSAuthValue, cl.FAPI2 = in.TLSAuthField, in.TLSAuthValue, in.FAPI2
 	cl.JWTAccessTokens = in.JWTAccessTokens
+	cl.OfflineAccess = in.OfflineAccess
 	if cl.AuthMethod == port.ClientAuthNone {
 		// 公開クライアントには交換を許さない（ADR 0099）。
 		cl.TokenExchange = nil

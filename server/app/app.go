@@ -486,7 +486,8 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	a.manage = &manage.Service{Checker: a.authz, Clock: d.Clock, NestedGroups: a.authz.NestedGroups}
 	a.clients = &provider.Clients{Clock: d.Clock, DeviceFlow: plan.IsActive(feature.DeviceFlow), FrontChannel: plan.IsActive(feature.OIDCLogout),
 		CIBA: plan.IsActive(feature.CIBA), PAR: plan.IsActive(feature.PAR), DPoP: plan.IsActive(feature.DPoP), MTLS: plan.IsActive(feature.MTLSClientAuth),
-		RS256: plan.IsActive(feature.RS256), JWTAccess: plan.IsActive(feature.JWTAccessTokens)}
+		RS256: plan.IsActive(feature.RS256), JWTAccess: plan.IsActive(feature.JWTAccessTokens),
+		Offline: plan.IsActive(feature.OfflineAccess)}
 	a.fapi2 = plan.IsActive(feature.FAPI2)
 	a.formPost = plan.IsActive(feature.FormPost)
 	a.clients.FAPI2, a.clients.RealmFAPI2 = a.fapi2, a.fapi2 && rs.FAPI2SecurityProfile
@@ -550,7 +551,9 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 	}
 	a.tokens = &provider.Tokens{Clock: d.Clock, Keys: a.keys, Sessions: a.sessions, Accounts: a.accounts, Orgs: a.orgs, Attributes: a.attributes, Issuer: a.issuer,
 		AccessTokenTTL: cfg.OIDC.AccessTokenTTL.D(), IDTokenTTL: cfg.OIDC.IDTokenTTL.D(), GrantTTL: cfg.OIDC.RefreshTokenTTL.D(),
-		ACR: plan.IsActive(feature.ACR), ResourceIndicators: a.resources != nil, JWTAccess: plan.IsActive(feature.JWTAccessTokens)}
+		OfflineIdleTTL: cfg.OIDC.OfflineIdleTTL.D(), OfflineMaxTTL: cfg.OIDC.OfflineMaxTTL.D(),
+		ACR: plan.IsActive(feature.ACR), ResourceIndicators: a.resources != nil, JWTAccess: plan.IsActive(feature.JWTAccessTokens),
+		Offline: plan.IsActive(feature.OfflineAccess)}
 	if a.issuer != "" {
 		a.sessions.Lineages = a.tokens
 	}

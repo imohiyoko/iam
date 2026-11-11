@@ -154,6 +154,10 @@ type OIDC struct {
 	AccessTokenTTL Duration `yaml:"access_token_ttl"`
 	// RefreshTokenTTL はリフレッシュトークンのファミリーの寿命（ログインのセッションより長くはならない）。
 	RefreshTokenTTL Duration `yaml:"refresh_token_ttl"`
+	// OfflineIdleTTL と OfflineMaxTTL は offline_access の認可（ログインの系列から切り離した認可。フィーチャー offline_access。
+	// ADR 0126）の、リフレッシュトークンの無操作の期限（使うたびに延びる）と、認可の寿命（延びない）。
+	OfflineIdleTTL Duration `yaml:"offline_idle_ttl"`
+	OfflineMaxTTL  Duration `yaml:"offline_max_ttl"`
 	// RetiredKeyTTL はローテーションで退役した署名鍵を JWKS に残す期間（id_token_ttl より長くする）。
 	RetiredKeyTTL Duration `yaml:"retired_key_ttl"`
 	// DeviceCodeTTL は Device Authorization Grant の device_code と user_code の寿命（30 分以下。フィーチャー device_flow）。
@@ -692,7 +696,7 @@ func Default() Config {
 		IDs:        IDs{Internal: "uuidv7", External: "random"},
 		OIDC: OIDC{Impersonation: Impersonation{TokenTTL: Duration(10 * time.Minute), MaxAuthAge: Duration(5 * time.Minute), MinFactors: 2},
 			CodeTTL: Duration(time.Minute), IDTokenTTL: Duration(time.Hour), AccessTokenTTL: Duration(10 * time.Minute),
-			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day),
+			RefreshTokenTTL: Duration(30 * day), RetiredKeyTTL: Duration(7 * day), OfflineIdleTTL: Duration(30 * day), OfflineMaxTTL: Duration(365 * day),
 			DeviceCodeTTL: Duration(10 * time.Minute), DevicePollInterval: Duration(5 * time.Second),
 			CIBATTL: Duration(5 * time.Minute), CIBAPollInterval: Duration(5 * time.Second), PARRequestURITTL: Duration(time.Minute)},
 		ServiceAccounts:      ServiceAccounts{TokenTTL: Duration(10 * time.Minute)},
@@ -883,6 +887,9 @@ func (c Config) Validate() error {
 	}
 	if o.IDTokenTTL <= 0 || o.AccessTokenTTL <= 0 || o.RefreshTokenTTL <= 0 {
 		problems = append(problems, "oidc: token ttls must be positive")
+	}
+	if o.OfflineIdleTTL <= 0 || o.OfflineMaxTTL < o.OfflineIdleTTL {
+		problems = append(problems, "oidc.offline_idle_ttl must be positive and oidc.offline_max_ttl must not be shorter")
 	}
 	if o.RetiredKeyTTL <= o.IDTokenTTL || o.RetiredKeyTTL <= o.AccessTokenTTL {
 		// 退役した鍵は、その鍵で署名した ID トークンと JWT のアクセストークン（ADR 0123）の期限まで JWKS に残す。

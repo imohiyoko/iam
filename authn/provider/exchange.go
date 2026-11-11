@@ -443,6 +443,8 @@ func (t *Tokens) delegate(ctx context.Context, tx port.Tx, cl port.Client, pol E
 	if err != nil {
 		return Issued{}, err
 	}
+	// 交換の認可は Offline にしない（リフレッシュトークンも出さない）ので、offline_access は引き継がない（ADR 0126）。
+	scopes = withoutOffline(scopes)
 	act := map[string]any{"sub": cl.PublicID}
 	var actorUserID string
 	switch {
@@ -590,6 +592,7 @@ func (t *Tokens) impersonate(ctx context.Context, tx port.Tx, cl port.Client, po
 	if err != nil {
 		return Issued{}, err
 	}
+	scopes = withoutOffline(scopes) // なりすましの認可も Offline にしない（ADR 0126）
 	act, err := json.Marshal(map[string]any{"sub": operator.PublicID})
 	if err != nil {
 		return Issued{}, err
@@ -679,6 +682,9 @@ func (t *Tokens) grantAliveUntil(ctx context.Context, tx port.Tx, g port.Grant, 
 				return time.Time{}, err
 			}
 		}
+		if g.Offline {
+			return t.offlineAliveUntil(ctx, tx, g, now)
+		}
 		return t.aliveUntil(ctx, tx, g.RealmID, g.SID, g.UserID, g.OrgID, now)
 	case port.ExchangeDelegation:
 		if !t.TokenExchange {
@@ -709,6 +715,14 @@ func (t *Tokens) grantAliveUntil(ctx context.Context, tx port.Tx, g port.Grant, 
 		next = earliestOf(next, pg.ExpiresAt)
 		if pg.RevokedAt != nil {
 			next = earliestOf(next, *pg.RevokedAt)
+		}
+		// Offline の元の認可（ADR 0126）は、系列の代わりに使う確かめ（連携先の許可・認証情報など）も満たすこと。
+		if pg.Offline && pg.Exchange == "" {
+			at, err := t.offlineAliveUntil(ctx, tx, pg, now)
+			if err != nil {
+				return time.Time{}, err
+			}
+			next = earliestOf(next, at)
 		}
 		p = pg.ParentID
 	}

@@ -49,6 +49,7 @@ type AuthnClient struct {
 	CibaNotificationEndpoint          string
 	Fapi2SecurityProfile              int64
 	JwtAccessTokens                   int64
+	OfflineAccess                     int64
 }
 
 type AuthnConnection struct {
@@ -122,25 +123,27 @@ type AuthnOauthResource struct {
 }
 
 type AuthnOidcGrant struct {
-	ID           string
-	RealmID      string
-	ClientID     string
-	UserID       string
-	OrgID        string
-	Sid          string
-	Scopes       string
-	AuthMethods  string
-	AuthTime     string
-	CreatedAt    string
-	ExpiresAt    string
-	RevokedAt    sql.NullString
-	RevokeReason string
-	Acr          string
-	Exchange     string
-	ParentID     string
-	ActorUserID  string
-	Act          []byte
-	Audiences    string
+	ID                string
+	RealmID           string
+	ClientID          string
+	UserID            string
+	OrgID             string
+	Sid               string
+	Scopes            string
+	AuthMethods       string
+	AuthTime          string
+	CreatedAt         string
+	ExpiresAt         string
+	RevokedAt         sql.NullString
+	RevokeReason      string
+	Acr               string
+	Exchange          string
+	ParentID          string
+	ActorUserID       string
+	Act               []byte
+	Audiences         string
+	Offline           int64
+	AuthCredentialIds string
 }
 
 type AuthnOidcToken struct {

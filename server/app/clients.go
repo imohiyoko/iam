@@ -93,6 +93,9 @@ func clientOutBase(c port.Client, secret string, deviceFlow, ciba bool) (adminap
 	if c.JWTAccessTokens {
 		out.JwtAccessTokens = &c.JWTAccessTokens
 	}
+	if c.OfflineAccess {
+		out.OfflineAccess = &c.OfflineAccess
+	}
 	return out, nil
 }
 
@@ -130,6 +133,9 @@ func clientIn(b adminapi.ClientInput) (provider.ClientInput, error) {
 	}
 	if b.JwtAccessTokens != nil {
 		in.JWTAccessTokens = *b.JwtAccessTokens
+	}
+	if b.OfflineAccess != nil {
+		in.OfflineAccess = *b.OfflineAccess
 	}
 	if b.DpopBoundAccessTokens != nil {
 		in.DPoPBoundAccessTokens = *b.DpopBoundAccessTokens

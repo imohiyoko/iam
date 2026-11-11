@@ -44,7 +44,8 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 - **動的クライアント登録をしない**（連携先は管理 API で登録する。M5 の対象外）
 - リフレッシュで出す ID トークンには `nonce` を入れない（OIDC Core 12.2。最初の nonce を照合する RP では、リフレッシュの後の
   照合を外す）
-- `offline_access` は扱わない（リフレッシュトークンもログインの系列に結び付く。ADR 0066）
+- `offline_access` はフィーチャー `offline_access`（既定オフ）で、連携先ごとに許したときだけ扱う（ログアウトから切り離した認可。ADR 0126）。
+  それ以外では無視し、リフレッシュトークンはログインの系列に結び付く（ADR 0066）
 - Device Authorization Grant（ADR 0095）は `openid` スコープを求め、認可コードフローと同じく ID トークンを返す（OAuth だけの
   device_authorization は受けない）。ID トークンに `nonce` は無い。`verification_uri_complete` で開いても確認の画面を省かない。
   zitadel/oidc の `op.Server` の `DeviceAuthorization`・`DeviceToken` で受け、状態は `authn/provider` が EphemeralStore に置く

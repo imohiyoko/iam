@@ -75,6 +75,10 @@ type Tokens struct {
 	ResourceIndicators bool
 	// JWTAccess はフィーチャー jwt_access_tokens が動いているか（ADR 0123）。偽なら JWT のアクセストークンを出さず、受けもしない（fail-closed）。
 	JWTAccess bool
+	// Offline はフィーチャー offline_access が動いているか（ADR 0126）。偽なら Offline の認可を作らず、作ったものも使えない。
+	Offline bool
+	// OfflineIdleTTL と OfflineMaxTTL は Offline の認可のリフレッシュトークンの無操作の期限と、認可の寿命（0 なら既定）。
+	OfflineIdleTTL, OfflineMaxTTL time.Duration
 	// Issuer は iss（server.public_url）。
 	Issuer                               string
 	AccessTokenTTL, IDTokenTTL, GrantTTL time.Duration
@@ -122,15 +126,32 @@ func (t *Tokens) Exchange(ctx context.Context, tx port.Tx, cl port.Client, c Cod
 	if c.DPoPJKT != "" && (b.JKT == "" || !(Binding{JKT: c.DPoPJKT}).Satisfies(Binding{JKT: b.JKT})) {
 		return Issued{}, ErrInvalidGrant
 	}
-	if err := t.alive(ctx, tx, c.RealmID, c.SID, c.UserID, c.OrgID, now); err != nil {
+	_, err := t.lineage(ctx, tx, c.RealmID, c.SID, c.UserID, c.OrgID, now)
+	if err != nil {
 		if errors.Is(err, ErrInvalidToken) {
 			return Issued{}, ErrInvalidGrant
 		}
 		return Issued{}, err
 	}
 	g := port.Grant{ID: id.New(id.Grant), RealmID: c.RealmID, ClientID: cl.ID, UserID: c.UserID, OrgID: c.OrgID, SID: c.SID,
-		Scopes: c.Scopes, AuthMethods: c.AMR, AuthTime: c.AuthTime, CreatedAt: now, ExpiresAt: now.Add(ttlOr(t.GrantTTL, DefaultRefreshTTL)),
+		Scopes: withoutOffline(c.Scopes), AuthMethods: c.AMR, AuthTime: c.AuthTime, CreatedAt: now, ExpiresAt: now.Add(ttlOr(t.GrantTTL, DefaultRefreshTTL)),
 		ACR: c.SelectedACR}
+	if t.offlineScope(cl, c.Scopes) {
+		// ログインの系列から切り離す（ADR 0126）。コードを出したときの認証情報を写し、無効化されたら使えなくする。
+		creds := c.Credentials
+		if creds == nil {
+			// 認証情報を記録していないコード（以前に出したもの）。どの認証情報で出したか分からないので交換しない。
+			return Issued{}, ErrInvalidGrant
+		}
+		// コードの後に認証情報が無効になっていれば（変更・削除。まとめての失効はまだ無い認可に届かない）交換しない。
+		if err := session.CheckCredentials(ctx, tx, c.RealmID, c.UserID, creds); errors.Is(err, session.ErrInvalid) {
+			return Issued{}, ErrInvalidGrant
+		} else if err != nil {
+			return Issued{}, err
+		}
+		g.Scopes, g.Offline, g.AuthCredentialIDs = c.Scopes, true, creds
+		g.ExpiresAt = now.Add(ttlOr(t.OfflineMaxTTL, DefaultOfflineMaxTTL))
+	}
 	if c.Resource != "" {
 		// 自前の API に向けた認可（RFC 8707）。アクセストークンの aud はリソースの URI（ADR 0112）。
 		g.Audiences = []string{c.Resource}
@@ -215,7 +236,7 @@ func (t *Tokens) issue(ctx context.Context, tx port.Tx, cl port.Client, g port.G
 	}
 	rb := refreshBinding(cl, b)
 	if err := tx.OIDCTokens().Create(ctx, port.OIDCToken{ID: rid, RealmID: g.RealmID, GrantID: g.ID, Kind: port.TokenRefresh, Hash: rhash,
-		CreatedAt: now, ExpiresAt: g.ExpiresAt, JKT: rb.JKT, X5T: rb.X5T}); err != nil {
+		CreatedAt: now, ExpiresAt: t.refreshExpiry(g, now), JKT: rb.JKT, X5T: rb.X5T}); err != nil {
 		return Issued{}, err
 	}
 	out.RefreshToken = rt
@@ -349,16 +370,33 @@ func (t *Tokens) alive(ctx context.Context, tx port.Tx, realmID, sid, userID, or
 }
 
 func (t *Tokens) aliveUntil(ctx context.Context, tx port.Tx, realmID, sid, userID, orgID string, now time.Time) (time.Time, error) {
+	_, next, err := t.lineageUntil(ctx, tx, realmID, sid, userID, orgID, now)
+	return next, err
+}
+
+// lineage は alive と同じことを確かめ、系列の今のセッションを返す。
+func (t *Tokens) lineage(ctx context.Context, tx port.Tx, realmID, sid, userID, orgID string, now time.Time) (port.Session, error) {
+	s, _, err := t.lineageUntil(ctx, tx, realmID, sid, userID, orgID, now)
+	return s, err
+}
+
+func (t *Tokens) lineageUntil(ctx context.Context, tx port.Tx, realmID, sid, userID, orgID string, now time.Time) (port.Session, time.Time, error) {
 	s, next, err := t.Sessions.CheckLineage(ctx, tx, realmID, sid, now)
 	if errors.Is(err, session.ErrInvalid) {
-		return time.Time{}, ErrInvalidToken
+		return port.Session{}, time.Time{}, ErrInvalidToken
 	}
 	if err != nil {
-		return time.Time{}, err
+		return port.Session{}, time.Time{}, err
 	}
 	if s.PrincipalID != userID {
-		return time.Time{}, ErrInvalidToken
+		return port.Session{}, time.Time{}, ErrInvalidToken
 	}
+	next, err = t.orgAliveUntil(ctx, tx, realmID, userID, orgID, now, next)
+	return s, next, err
+}
+
+// orgAliveUntil は認可した Org がまだ使えるかを確かめ、next と Org の次の変わり目の早い方を返す。
+func (t *Tokens) orgAliveUntil(ctx context.Context, tx port.Tx, realmID, userID, orgID string, now, next time.Time) (time.Time, error) {
 	if orgID != "" && t.Orgs != nil {
 		at, err := t.Orgs.CheckActive(ctx, tx, realmID, userID, orgID, now)
 		if _, ok := errors.AsType[errs.Denial](err); ok || errors.Is(err, errs.PermissionDenied) || errors.Is(err, errs.NotFound) {
@@ -544,14 +582,14 @@ func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refres
 			return Refreshed{Reused: true}, nil
 		}
 	}
-	s, _, err := t.Sessions.CheckLineage(ctx, tx, g.RealmID, g.SID, now)
-	if errors.Is(err, session.ErrInvalid) {
-		return Refreshed{}, ErrInvalidGrant
+	// Offline の認可（ADR 0126）は系列ではなくユーザー・認証情報で確かめ、セッションの無操作の期限は延ばさない。
+	var s port.Session
+	if g.Offline {
+		_, err = t.offlineAliveUntil(ctx, tx, g, now)
+	} else {
+		s, err = t.lineage(ctx, tx, g.RealmID, g.SID, g.UserID, g.OrgID, now)
 	}
 	if err != nil {
-		return Refreshed{}, err
-	}
-	if err := t.alive(ctx, tx, g.RealmID, g.SID, g.UserID, g.OrgID, now); err != nil {
 		if errors.Is(err, ErrInvalidToken) {
 			return Refreshed{}, ErrInvalidGrant
 		}
@@ -563,8 +601,18 @@ func (t *Tokens) Refresh(ctx context.Context, tx port.Tx, cl port.Client, refres
 		}
 		return Refreshed{}, err
 	}
-	if err := tx.Sessions().Touch(ctx, g.RealmID, s.ID, now); err != nil {
-		return Refreshed{}, err
+	if !g.Offline {
+		if err := tx.Sessions().Touch(ctx, g.RealmID, s.ID, now); err != nil {
+			return Refreshed{}, err
+		}
+	} else if !rotate {
+		// ローテーションしない連携先（FAPI 2.0）は同じリフレッシュトークンを使い続けるので、その無操作の期限を延ばす
+		// （認可の期限は超えない）。
+		if exp := t.refreshExpiry(g, now); exp.After(tok.ExpiresAt) {
+			if err := tx.OIDCTokens().Extend(ctx, g.RealmID, tok.ID, exp); err != nil {
+				return Refreshed{}, err
+			}
+		}
 	}
 	out, err := t.issue(ctx, tx, cl, g, "", b, now, rotate)
 	return Refreshed{Issued: out}, err

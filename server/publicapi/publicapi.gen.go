@@ -977,6 +977,24 @@ type MyTOTP struct {
 	Id string `json:"id"`
 }
 
+// OfflineAccessApplication 本人が offline_access を許した連携先（ADR 0126）
+type OfflineAccessApplication struct {
+	// ClientId 連携先の公開の client_id
+	ClientId string `json:"client_id"`
+
+	// CreatedAt 最初に許した時刻
+	CreatedAt time.Time `json:"created_at"`
+
+	// ExpiresAt 認可の期限（無操作の期限はこれより早く来ることがある）
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Name 連携先の名前
+	Name string `json:"name"`
+
+	// Scopes 使える認可のスコープの和
+	Scopes []string `json:"scopes"`
+}
+
 // OrgAuditEvent Org の監査ログの1件（Org に見せてよい項目だけ。ADR 0100）
 type OrgAuditEvent struct {
 	Actor struct {
@@ -2126,6 +2144,12 @@ type ServerInterface interface {
 	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、認証方式のプラグインの認証情報、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(w http.ResponseWriter, r *http.Request)
+	// ListMyOfflineAccess 本人が offline_access を許した連携先の一覧（フィーチャー offline_access。ADR 0126）
+	// (GET /v1/me/offline-access)
+	ListMyOfflineAccess(w http.ResponseWriter, r *http.Request)
+	// RevokeMyOfflineAccess 連携先への offline_access を取り消す（その連携先の Offline の認可をすべて失効させる）
+	// (POST /v1/me/offline-access/{client_id}:revoke)
+	RevokeMyOfflineAccess(w http.ResponseWriter, r *http.Request, clientId string)
 	// ListMyOrgs 本人の Org の一覧（終了した Membership は含めない。11.13）
 	// (GET /v1/me/orgs)
 	ListMyOrgs(w http.ResponseWriter, r *http.Request)
@@ -3360,6 +3384,46 @@ func (siw *ServerInterfaceWrapper) ListMyMethods(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMyMethods(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyOfflineAccess operation middleware
+func (siw *ServerInterfaceWrapper) ListMyOfflineAccess(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyOfflineAccess(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeMyOfflineAccess operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMyOfflineAccess(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "client_id" -------------
+	var clientId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "client_id", r.PathValue("client_id"), &clientId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "client_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeMyOfflineAccess(w, r, clientId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5702,6 +5766,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/personal-access-tokens", wrapper.CreateMyPersonalAccessToken)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/personal-access-tokens/{id}:revoke", wrapper.RevokeMyPersonalAccessToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/personal-access-token-policy", wrapper.GetMyPersonalAccessTokenPolicy)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/offline-access", wrapper.ListMyOfflineAccess)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/offline-access/{client_id}:revoke", wrapper.RevokeMyOfflineAccess)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/me/backchannel-requests", wrapper.ListMyBackchannelRequests)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/backchannel-requests/{id}:approve", wrapper.ApproveMyBackchannelRequest)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/me/backchannel-requests/{id}:deny", wrapper.DenyMyBackchannelRequest)
@@ -9042,6 +9108,101 @@ func (response ListMyMethods401JSONResponse) VisitListMyMethodsResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOfflineAccessRequestObject struct {
+}
+
+type ListMyOfflineAccessResponseObject interface {
+	VisitListMyOfflineAccessResponse(w http.ResponseWriter) error
+}
+
+type ListMyOfflineAccess200JSONResponse struct {
+	Applications []OfflineAccessApplication `json:"applications"`
+}
+
+func (response ListMyOfflineAccess200JSONResponse) VisitListMyOfflineAccessResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOfflineAccess401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyOfflineAccess401JSONResponse) VisitListMyOfflineAccessResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOfflineAccess404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMyOfflineAccess404JSONResponse) VisitListMyOfflineAccessResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyOfflineAccessRequestObject struct {
+	ClientId string `json:"client_id"`
+}
+
+type RevokeMyOfflineAccessResponseObject interface {
+	VisitRevokeMyOfflineAccessResponse(w http.ResponseWriter) error
+}
+
+type RevokeMyOfflineAccess204Response struct {
+}
+
+func (response RevokeMyOfflineAccess204Response) VisitRevokeMyOfflineAccessResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeMyOfflineAccess401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeMyOfflineAccess401JSONResponse) VisitRevokeMyOfflineAccessResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyOfflineAccess404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeMyOfflineAccess404JSONResponse) VisitRevokeMyOfflineAccessResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -14515,6 +14676,12 @@ type StrictServerInterface interface {
 	// ListMyMethods 本人の認証手段（メール、連携した外部 ID、passkey、TOTP、認証方式のプラグインの認証情報、パスワード）の一覧
 	// (GET /v1/me/methods)
 	ListMyMethods(ctx context.Context, request ListMyMethodsRequestObject) (ListMyMethodsResponseObject, error)
+	// ListMyOfflineAccess 本人が offline_access を許した連携先の一覧（フィーチャー offline_access。ADR 0126）
+	// (GET /v1/me/offline-access)
+	ListMyOfflineAccess(ctx context.Context, request ListMyOfflineAccessRequestObject) (ListMyOfflineAccessResponseObject, error)
+	// RevokeMyOfflineAccess 連携先への offline_access を取り消す（その連携先の Offline の認可をすべて失効させる）
+	// (POST /v1/me/offline-access/{client_id}:revoke)
+	RevokeMyOfflineAccess(ctx context.Context, request RevokeMyOfflineAccessRequestObject) (RevokeMyOfflineAccessResponseObject, error)
 	// ListMyOrgs 本人の Org の一覧（終了した Membership は含めない。11.13）
 	// (GET /v1/me/orgs)
 	ListMyOrgs(ctx context.Context, request ListMyOrgsRequestObject) (ListMyOrgsResponseObject, error)
@@ -16212,6 +16379,56 @@ func (sh *strictHandler) ListMyMethods(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListMyMethodsResponseObject); ok {
 		if err := validResponse.VisitListMyMethodsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyOfflineAccess operation middleware
+func (sh *strictHandler) ListMyOfflineAccess(w http.ResponseWriter, r *http.Request) {
+	var request ListMyOfflineAccessRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyOfflineAccess(ctx, request.(ListMyOfflineAccessRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyOfflineAccess")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyOfflineAccessResponseObject); ok {
+		if err := validResponse.VisitListMyOfflineAccessResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeMyOfflineAccess operation middleware
+func (sh *strictHandler) RevokeMyOfflineAccess(w http.ResponseWriter, r *http.Request, clientId string) {
+	var request RevokeMyOfflineAccessRequestObject
+
+	request.ClientId = clientId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeMyOfflineAccess(ctx, request.(RevokeMyOfflineAccessRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeMyOfflineAccess")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeMyOfflineAccessResponseObject); ok {
+		if err := validResponse.VisitRevokeMyOfflineAccessResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

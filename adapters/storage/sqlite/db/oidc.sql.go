@@ -43,12 +43,23 @@ func (q *Queries) CountMTLSBoundOIDCTokens(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countOfflineGrants = `-- name: CountOfflineGrants :one
+SELECT count(*) FROM authn_oidc_grants WHERE offline <> 0
+`
+
+func (q *Queries) CountOfflineGrants(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countOfflineGrants)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createClient = `-- name: CreateClient :exec
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
     id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at, token_exchange, device_grant,
     ciba_mode, ciba_notification_endpoint, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value,
-    fapi2_security_profile, jwt_access_tokens)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    fapi2_security_profile, jwt_access_tokens, offline_access)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateClientParams struct {
@@ -79,6 +90,7 @@ type CreateClientParams struct {
 	TlsAuthValue                      string
 	Fapi2SecurityProfile              int64
 	JwtAccessTokens                   int64
+	OfflineAccess                     int64
 }
 
 func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) error {
@@ -110,36 +122,39 @@ func (q *Queries) CreateClient(ctx context.Context, arg CreateClientParams) erro
 		arg.TlsAuthValue,
 		arg.Fapi2SecurityProfile,
 		arg.JwtAccessTokens,
+		arg.OfflineAccess,
 	)
 	return err
 }
 
 const createGrant = `-- name: CreateGrant :exec
 INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr,
-    exchange, parent_id, actor_user_id, act, audiences)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    exchange, parent_id, actor_user_id, act, audiences, offline, auth_credential_ids)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateGrantParams struct {
-	ID           string
-	RealmID      string
-	ClientID     string
-	UserID       string
-	OrgID        string
-	Sid          string
-	Scopes       string
-	AuthMethods  string
-	AuthTime     string
-	CreatedAt    string
-	ExpiresAt    string
-	RevokedAt    sql.NullString
-	RevokeReason string
-	Acr          string
-	Exchange     string
-	ParentID     string
-	ActorUserID  string
-	Act          []byte
-	Audiences    string
+	ID                string
+	RealmID           string
+	ClientID          string
+	UserID            string
+	OrgID             string
+	Sid               string
+	Scopes            string
+	AuthMethods       string
+	AuthTime          string
+	CreatedAt         string
+	ExpiresAt         string
+	RevokedAt         sql.NullString
+	RevokeReason      string
+	Acr               string
+	Exchange          string
+	ParentID          string
+	ActorUserID       string
+	Act               []byte
+	Audiences         string
+	Offline           int64
+	AuthCredentialIds string
 }
 
 func (q *Queries) CreateGrant(ctx context.Context, arg CreateGrantParams) error {
@@ -163,6 +178,8 @@ func (q *Queries) CreateGrant(ctx context.Context, arg CreateGrantParams) error 
 		arg.ActorUserID,
 		arg.Act,
 		arg.Audiences,
+		arg.Offline,
+		arg.AuthCredentialIds,
 	)
 	return err
 }
@@ -318,8 +335,26 @@ func (q *Queries) EraseUserGrants(ctx context.Context, arg EraseUserGrantsParams
 	return err
 }
 
+const extendOIDCToken = `-- name: ExtendOIDCToken :execrows
+UPDATE authn_oidc_tokens SET expires_at = ? WHERE realm_id = ? AND id = ?
+`
+
+type ExtendOIDCTokenParams struct {
+	ExpiresAt string
+	RealmID   string
+	ID        string
+}
+
+func (q *Queries) ExtendOIDCToken(ctx context.Context, arg ExtendOIDCTokenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, extendOIDCToken, arg.ExpiresAt, arg.RealmID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getClient = `-- name: GetClient :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint, fapi2_security_profile, jwt_access_tokens FROM authn_clients WHERE realm_id = ? AND id = ?
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint, fapi2_security_profile, jwt_access_tokens, offline_access FROM authn_clients WHERE realm_id = ? AND id = ?
 `
 
 type GetClientParams struct {
@@ -358,12 +393,13 @@ func (q *Queries) GetClient(ctx context.Context, arg GetClientParams) (AuthnClie
 		&i.CibaNotificationEndpoint,
 		&i.Fapi2SecurityProfile,
 		&i.JwtAccessTokens,
+		&i.OfflineAccess,
 	)
 	return i, err
 }
 
 const getClientByPublicID = `-- name: GetClientByPublicID :one
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint, fapi2_security_profile, jwt_access_tokens FROM authn_clients WHERE realm_id = ? AND public_id = ?
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint, fapi2_security_profile, jwt_access_tokens, offline_access FROM authn_clients WHERE realm_id = ? AND public_id = ?
 `
 
 type GetClientByPublicIDParams struct {
@@ -402,12 +438,13 @@ func (q *Queries) GetClientByPublicID(ctx context.Context, arg GetClientByPublic
 		&i.CibaNotificationEndpoint,
 		&i.Fapi2SecurityProfile,
 		&i.JwtAccessTokens,
+		&i.OfflineAccess,
 	)
 	return i, err
 }
 
 const getGrant = `-- name: GetGrant :one
-SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr, exchange, parent_id, actor_user_id, act, audiences FROM authn_oidc_grants WHERE realm_id = ? AND id = ?
+SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr, exchange, parent_id, actor_user_id, act, audiences, offline, auth_credential_ids FROM authn_oidc_grants WHERE realm_id = ? AND id = ?
 `
 
 type GetGrantParams struct {
@@ -438,6 +475,8 @@ func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (AuthnOidcGr
 		&i.ActorUserID,
 		&i.Act,
 		&i.Audiences,
+		&i.Offline,
+		&i.AuthCredentialIds,
 	)
 	return i, err
 }
@@ -470,7 +509,7 @@ func (q *Queries) GetOIDCToken(ctx context.Context, arg GetOIDCTokenParams) (Aut
 }
 
 const listClients = `-- name: ListClients :many
-SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint, fapi2_security_profile, jwt_access_tokens FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id
+SELECT id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks, id_token_alg, backchannel_logout_uri, created_at, updated_at, frontchannel_logout_uri, frontchannel_logout_session_required, device_grant, token_exchange, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value, ciba_mode, ciba_notification_endpoint, fapi2_security_profile, jwt_access_tokens, offline_access FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id
 `
 
 func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClient, error) {
@@ -510,6 +549,7 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 			&i.CibaNotificationEndpoint,
 			&i.Fapi2SecurityProfile,
 			&i.JwtAccessTokens,
+			&i.OfflineAccess,
 		); err != nil {
 			return nil, err
 		}
@@ -525,7 +565,7 @@ func (q *Queries) ListClients(ctx context.Context, realmID string) ([]AuthnClien
 }
 
 const listGrantsBySID = `-- name: ListGrantsBySID :many
-SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr, exchange, parent_id, actor_user_id, act, audiences FROM authn_oidc_grants WHERE realm_id = ? AND sid = ? ORDER BY created_at, id
+SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr, exchange, parent_id, actor_user_id, act, audiences, offline, auth_credential_ids FROM authn_oidc_grants WHERE realm_id = ? AND sid = ? ORDER BY created_at, id
 `
 
 type ListGrantsBySIDParams struct {
@@ -562,6 +602,62 @@ func (q *Queries) ListGrantsBySID(ctx context.Context, arg ListGrantsBySIDParams
 			&i.ActorUserID,
 			&i.Act,
 			&i.Audiences,
+			&i.Offline,
+			&i.AuthCredentialIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOfflineGrantsByUser = `-- name: ListOfflineGrantsByUser :many
+SELECT id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr, exchange, parent_id, actor_user_id, act, audiences, offline, auth_credential_ids FROM authn_oidc_grants WHERE realm_id = ? AND user_id = ? AND offline <> 0 ORDER BY created_at, id
+`
+
+type ListOfflineGrantsByUserParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) ListOfflineGrantsByUser(ctx context.Context, arg ListOfflineGrantsByUserParams) ([]AuthnOidcGrant, error) {
+	rows, err := q.db.QueryContext(ctx, listOfflineGrantsByUser, arg.RealmID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthnOidcGrant
+	for rows.Next() {
+		var i AuthnOidcGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.RealmID,
+			&i.ClientID,
+			&i.UserID,
+			&i.OrgID,
+			&i.Sid,
+			&i.Scopes,
+			&i.AuthMethods,
+			&i.AuthTime,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.RevokeReason,
+			&i.Acr,
+			&i.Exchange,
+			&i.ParentID,
+			&i.ActorUserID,
+			&i.Act,
+			&i.Audiences,
+			&i.Offline,
+			&i.AuthCredentialIds,
 		); err != nil {
 			return nil, err
 		}
@@ -668,6 +764,29 @@ func (q *Queries) PurgeMTLSBoundOIDCTokens(ctx context.Context, lim int64) (int6
 	return result.RowsAffected()
 }
 
+const purgeOfflineGrantTokens = `-- name: PurgeOfflineGrantTokens :exec
+DELETE FROM authn_oidc_tokens WHERE grant_id IN (
+    SELECT g.id FROM authn_oidc_grants g WHERE g.offline <> 0 ORDER BY g.id LIMIT ?1)
+`
+
+func (q *Queries) PurgeOfflineGrantTokens(ctx context.Context, lim int64) error {
+	_, err := q.db.ExecContext(ctx, purgeOfflineGrantTokens, lim)
+	return err
+}
+
+const purgeOfflineGrants = `-- name: PurgeOfflineGrants :execrows
+DELETE FROM authn_oidc_grants WHERE id IN (
+    SELECT g.id FROM authn_oidc_grants g WHERE g.offline <> 0 ORDER BY g.id LIMIT ?1)
+`
+
+func (q *Queries) PurgeOfflineGrants(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeOfflineGrants, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const retireSigningKey = `-- name: RetireSigningKey :execrows
 UPDATE authn_signing_keys SET retired_at = ? WHERE realm_id = ? AND id = ?
 `
@@ -717,7 +836,7 @@ const updateClient = `-- name: UpdateClient :execrows
 UPDATE authn_clients SET name = ?, trust_level = ?, redirect_uris = ?, post_logout_redirect_uris = ?, auth_method = ?, secret_hash = ?, jwks = ?,
     id_token_alg = ?, backchannel_logout_uri = ?, frontchannel_logout_uri = ?, frontchannel_logout_session_required = ?, updated_at = ?, token_exchange = ?, device_grant = ?,
     ciba_mode = ?, ciba_notification_endpoint = ?, require_par = ?, dpop_bound_access_tokens = ?, tls_bound_access_tokens = ?, tls_auth_field = ?, tls_auth_value = ?,
-    fapi2_security_profile = ?, jwt_access_tokens = ?
+    fapi2_security_profile = ?, jwt_access_tokens = ?, offline_access = ?
 WHERE realm_id = ? AND id = ?
 `
 
@@ -745,6 +864,7 @@ type UpdateClientParams struct {
 	TlsAuthValue                      string
 	Fapi2SecurityProfile              int64
 	JwtAccessTokens                   int64
+	OfflineAccess                     int64
 	RealmID                           string
 	ID                                string
 }
@@ -774,6 +894,7 @@ func (q *Queries) UpdateClient(ctx context.Context, arg UpdateClientParams) (int
 		arg.TlsAuthValue,
 		arg.Fapi2SecurityProfile,
 		arg.JwtAccessTokens,
+		arg.OfflineAccess,
 		arg.RealmID,
 		arg.ID,
 	)

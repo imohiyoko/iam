@@ -1550,8 +1550,11 @@ type Client struct {
 	Jwks                              *map[string]interface{} `json:"jwks,omitempty"`
 
 	// JwtAccessTokens JWT のアクセストークン（RFC 9068）を出す連携先だけ true を返す（出さないなら省く）
-	JwtAccessTokens        *bool    `json:"jwt_access_tokens,omitempty"`
-	Name                   string   `json:"name"`
+	JwtAccessTokens *bool  `json:"jwt_access_tokens,omitempty"`
+	Name            string `json:"name"`
+
+	// OfflineAccess offline_access を受ける連携先だけ true を返す（受けないなら省く）
+	OfflineAccess          *bool    `json:"offline_access,omitempty"`
 	PostLogoutRedirectUris []string `json:"post_logout_redirect_uris"`
 	RedirectUris           []string `json:"redirect_uris"`
 
@@ -1613,8 +1616,13 @@ type ClientInput struct {
 	// `jwt_access_tokens` が動いているときだけ true にできる（ADR 0123）。リソースサーバーは JWKS で署名を確かめられるが、失効・停止は
 	// 期限まで届かない（イントロスペクションは今までどおり即時）。省けば false（不透明なトークン）。Token Exchange で出す
 	// アクセストークンは、この設定にかかわらず不透明なトークン
-	JwtAccessTokens        *bool     `json:"jwt_access_tokens,omitempty"`
-	Name                   string    `json:"name"`
+	JwtAccessTokens *bool  `json:"jwt_access_tokens,omitempty"`
+	Name            string `json:"name"`
+
+	// OfflineAccess `offline_access` のスコープを受け、ログインの系列から切り離した認可（リフレッシュトークン）を出す（OIDC Core 11。ADR 0126）。
+	// フィーチャー `offline_access` が動いているときだけ true にできる。ログアウト・セッションの期限では失効せず、本人は
+	// `/v1/me/offline-access` で取り消せる。省けば false（`offline_access` を求めても、普通の認可にする）
+	OfflineAccess          *bool     `json:"offline_access,omitempty"`
 	PostLogoutRedirectUris *[]string `json:"post_logout_redirect_uris,omitempty"`
 
 	// RedirectUris 1 つ以上。`device_authorization_grant` を許すか `backchannel_token_delivery_mode` を登録した連携先だけは空でよい

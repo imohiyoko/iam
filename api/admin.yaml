@@ -4913,6 +4913,12 @@ components:
             `jwt_access_tokens` が動いているときだけ true にできる（ADR 0123）。リソースサーバーは JWKS で署名を確かめられるが、失効・停止は
             期限まで届かない（イントロスペクションは今までどおり即時）。省けば false（不透明なトークン）。Token Exchange で出す
             アクセストークンは、この設定にかかわらず不透明なトークン
+        offline_access:
+          type: boolean
+          description: |
+            `offline_access` のスコープを受け、ログインの系列から切り離した認可（リフレッシュトークン）を出す（OIDC Core 11。ADR 0126）。
+            フィーチャー `offline_access` が動いているときだけ true にできる。ログアウト・セッションの期限では失効せず、本人は
+            `/v1/me/offline-access` で取り消せる。省けば false（`offline_access` を求めても、普通の認可にする）
     Client:
       type: object
       required: [client_id, name, redirect_uris, post_logout_redirect_uris, token_endpoint_auth_method, id_token_signed_response_alg, trust_level, created_at, updated_at]
@@ -4947,6 +4953,7 @@ components:
         require_pushed_authorization_requests: { type: boolean, description: PAR を求める連携先だけ true を返す（求めないなら省く） }
         fapi2_security_profile: { type: boolean, description: FAPI 2.0 Security Profile を強いる連携先だけ true を返す（強いないなら省く） }
         jwt_access_tokens: { type: boolean, description: JWT のアクセストークン（RFC 9068）を出す連携先だけ true を返す（出さないなら省く） }
+        offline_access: { type: boolean, description: offline_access を受ける連携先だけ true を返す（受けないなら省く） }
         client_secret: { type: string, description: 作成と、認証方式を client_secret に変えたときだけ（1度だけ返す） }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }

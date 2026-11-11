@@ -113,6 +113,8 @@ var featureCatalog = map[string]struct {
 	feature.JWTAccessTokens: {provider.JWTAccessFeature, module + "/features/jwtaccesstokens"},
 	// ADR 0124。
 	feature.FormPost: {provider.FormPostFeature, module + "/features/formpost"},
+	// ADR 0126。
+	feature.OfflineAccess: {provider.OfflineAccessFeature, module + "/features/offlineaccess"},
 	// ADR 0116。
 	feature.WorkloadIdentity: {workloadidentity.Feature, module + "/features/workloadidentity"},
 	// ADR 0119。

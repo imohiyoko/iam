@@ -35,6 +35,8 @@ func testClients(t *testing.T, h Harness) {
 	b.FAPI2 = true
 	// JWT のアクセストークン（ADR 0123）。
 	b.JWTAccessTokens = true
+	// offline_access（ADR 0126）。
+	b.OfflineAccess = true
 	tx(t, s, func(ctx context.Context, tx port.Tx) error {
 		repo := tx.Clients()
 		for _, c := range []port.Client{a, b} {
@@ -70,6 +72,14 @@ func testClients(t *testing.T, h Harness) {
 		}
 		if got, err := repo.Get(ctx, r, a.ID); err != nil || !reflect.DeepEqual(got, a) {
 			return fmt.Errorf("after Update = %+v, %v", got, err)
+		}
+		// offline_access を外す更新（フィーチャーの無効化の片付けと同じ。ADR 0126）。
+		b.OfflineAccess, b.UpdatedAt = false, T0.Add(time.Hour)
+		if err := repo.Update(ctx, b); err != nil {
+			return err
+		}
+		if got, err := repo.Get(ctx, r, b.ID); err != nil || !reflect.DeepEqual(got, b) {
+			return fmt.Errorf("after clearing offline_access = %+v, %v", got, err)
 		}
 		if err := repo.Delete(ctx, r, a.ID); err != nil {
 			return err
@@ -211,6 +221,19 @@ func testGrants(t *testing.T, h Harness) {
 			return fmt.Errorf("UsedAt = %v", got.UsedAt)
 		}
 		if err := notFound("use missing", func() error { _, err := toks.Use(ctx, r, "atk_missing", T0); return err }()); err != nil {
+			return err
+		}
+		ext := T0.Add(30 * 24 * time.Hour)
+		if err := toks.Extend(ctx, r, t2.ID, ext); err != nil {
+			return fmt.Errorf("extend: %w", err)
+		}
+		if got, _ := toks.Get(ctx, r, t2.ID); !got.ExpiresAt.Equal(ext) || got.UsedAt == nil {
+			return fmt.Errorf("after Extend = %+v", got)
+		}
+		if err := notFound("extend other realm", toks.Extend(ctx, other, t2.ID, ext)); err != nil {
+			return err
+		}
+		if err := notFound("extend missing", toks.Extend(ctx, r, "rtk_missing", ext)); err != nil {
 			return err
 		}
 		return nil

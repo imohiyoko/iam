@@ -31,7 +31,7 @@ func toClient(r db.AuthnClient) (port.Client, error) {
 		TokenExchange: r.TokenExchange, RequirePAR: r.RequirePar != 0, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt),
 		CIBAMode: r.CibaMode, CIBANotificationEndpoint: r.CibaNotificationEndpoint, DPoPBoundAccessTokens: r.DpopBoundAccessTokens != 0,
 		TLSBoundAccessTokens: r.TlsBoundAccessTokens != 0, TLSAuthField: r.TlsAuthField, TLSAuthValue: r.TlsAuthValue,
-		FAPI2: r.Fapi2SecurityProfile != 0, JWTAccessTokens: r.JwtAccessTokens != 0}
+		FAPI2: r.Fapi2SecurityProfile != 0, JWTAccessTokens: r.JwtAccessTokens != 0, OfflineAccess: r.OfflineAccess != 0}
 	if p.err != nil {
 		return port.Client{}, p.err
 	}
@@ -56,7 +56,8 @@ func (r clients) Create(ctx context.Context, c port.Client) error {
 		FrontchannelLogoutSessionRequired: boolInt(c.FrontchannelLogoutSessionRequired), CreatedAt: formatTime(c.CreatedAt),
 		UpdatedAt: formatTime(c.UpdatedAt), TokenExchange: c.TokenExchange, CibaMode: c.CIBAMode, CibaNotificationEndpoint: c.CIBANotificationEndpoint,
 		RequirePar: boolInt(c.RequirePAR), DpopBoundAccessTokens: boolInt(c.DPoPBoundAccessTokens), TlsBoundAccessTokens: boolInt(c.TLSBoundAccessTokens),
-		TlsAuthField: c.TLSAuthField, TlsAuthValue: c.TLSAuthValue, Fapi2SecurityProfile: boolInt(c.FAPI2), JwtAccessTokens: boolInt(c.JWTAccessTokens)}))
+		TlsAuthField: c.TLSAuthField, TlsAuthValue: c.TLSAuthValue, Fapi2SecurityProfile: boolInt(c.FAPI2), JwtAccessTokens: boolInt(c.JWTAccessTokens),
+		OfflineAccess: boolInt(c.OfflineAccess)}))
 }
 
 func (r clients) Get(ctx context.Context, realmID, id string) (port.Client, error) {
@@ -90,7 +91,8 @@ func (r clients) Update(ctx context.Context, c port.Client) error {
 		TokenExchange: c.TokenExchange, DeviceGrant: boolInt(c.DeviceGrant), CibaMode: c.CIBAMode,
 		CibaNotificationEndpoint: c.CIBANotificationEndpoint, RequirePar: boolInt(c.RequirePAR), DpopBoundAccessTokens: boolInt(c.DPoPBoundAccessTokens),
 		TlsBoundAccessTokens: boolInt(c.TLSBoundAccessTokens), TlsAuthField: c.TLSAuthField, TlsAuthValue: c.TLSAuthValue,
-		Fapi2SecurityProfile: boolInt(c.FAPI2), JwtAccessTokens: boolInt(c.JWTAccessTokens), RealmID: c.RealmID, ID: c.ID})
+		Fapi2SecurityProfile: boolInt(c.FAPI2), JwtAccessTokens: boolInt(c.JWTAccessTokens), OfflineAccess: boolInt(c.OfflineAccess),
+		RealmID: c.RealmID, ID: c.ID})
 	return affected(n, err, "client")
 }
 
@@ -144,9 +146,16 @@ func toGrant(r db.AuthnOidcGrant) (port.Grant, error) {
 	var p times
 	g := port.Grant{ID: r.ID, RealmID: r.RealmID, ClientID: r.ClientID, UserID: r.UserID, OrgID: r.OrgID, SID: r.Sid,
 		AuthTime: p.at(r.AuthTime), CreatedAt: p.at(r.CreatedAt), ExpiresAt: p.at(r.ExpiresAt), RevokedAt: p.null(r.RevokedAt),
-		RevokeReason: r.RevokeReason, ACR: r.Acr, Exchange: r.Exchange, ParentID: r.ParentID, ActorUserID: r.ActorUserID, Act: r.Act}
+		RevokeReason: r.RevokeReason, ACR: r.Acr, Exchange: r.Exchange, ParentID: r.ParentID, ActorUserID: r.ActorUserID, Act: r.Act,
+		Offline: r.Offline != 0}
 	if p.err != nil {
 		return g, p.err
+	}
+	if err := json.Unmarshal([]byte(r.AuthCredentialIds), &g.AuthCredentialIDs); err != nil {
+		return g, err
+	}
+	if len(g.AuthCredentialIDs) == 0 {
+		g.AuthCredentialIDs = nil
 	}
 	if err := json.Unmarshal([]byte(r.Scopes), &g.Scopes); err != nil {
 		return g, err
@@ -164,7 +173,8 @@ func (r grants) Create(ctx context.Context, g port.Grant) error {
 	return mapErr(r.q.CreateGrant(ctx, db.CreateGrantParams{ID: g.ID, RealmID: g.RealmID, ClientID: g.ClientID, UserID: g.UserID, OrgID: g.OrgID,
 		Sid: g.SID, Scopes: jsonList(g.Scopes), AuthMethods: jsonList(g.AuthMethods), AuthTime: formatTime(g.AuthTime),
 		CreatedAt: formatTime(g.CreatedAt), ExpiresAt: formatTime(g.ExpiresAt), RevokedAt: nullTime(g.RevokedAt), RevokeReason: g.RevokeReason,
-		Acr: g.ACR, Exchange: g.Exchange, ParentID: g.ParentID, ActorUserID: g.ActorUserID, Act: g.Act, Audiences: jsonList(g.Audiences)}))
+		Acr: g.ACR, Exchange: g.Exchange, ParentID: g.ParentID, ActorUserID: g.ActorUserID, Act: g.Act, Audiences: jsonList(g.Audiences),
+		Offline: boolInt(g.Offline), AuthCredentialIds: jsonList(g.AuthCredentialIDs)}))
 }
 
 func (r grants) Get(ctx context.Context, realmID, id string) (port.Grant, error) {
@@ -192,6 +202,24 @@ func (r grants) PurgeExchanged(ctx context.Context, exchange string, limit int) 
 		return 0, mapErr(err)
 	}
 	n, err := r.q.PurgeExchangedGrants(ctx, db.PurgeExchangedGrantsParams{Exchange: exchange, Lim: int64(limit)})
+	return int(n), mapErr(err)
+}
+
+func (r grants) ListOfflineByUser(ctx context.Context, realmID, userID string) ([]port.Grant, error) {
+	rs, err := r.q.ListOfflineGrantsByUser(ctx, db.ListOfflineGrantsByUserParams{RealmID: realmID, UserID: userID})
+	return rows(rs, err, toGrant)
+}
+
+func (r grants) CountOffline(ctx context.Context) (int, error) {
+	n, err := r.q.CountOfflineGrants(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r grants) PurgeOffline(ctx context.Context, limit int) (int, error) {
+	if err := r.q.PurgeOfflineGrantTokens(ctx, int64(limit)); err != nil {
+		return 0, mapErr(err)
+	}
+	n, err := r.q.PurgeOfflineGrants(ctx, int64(limit))
 	return int(n), mapErr(err)
 }
 
@@ -229,6 +257,17 @@ func (r oidcTokens) Use(ctx context.Context, realmID, id string, at time.Time) (
 		return false, err
 	}
 	return false, nil
+}
+
+func (r oidcTokens) Extend(ctx context.Context, realmID, id string, expiresAt time.Time) error {
+	n, err := r.q.ExtendOIDCToken(ctx, db.ExtendOIDCTokenParams{ExpiresAt: formatTime(expiresAt), RealmID: realmID, ID: id})
+	if err != nil {
+		return mapErr(err)
+	}
+	if n == 0 {
+		_, err = r.Get(ctx, realmID, id)
+	}
+	return err
 }
 
 func (r oidcTokens) CountBound(ctx context.Context, binding string) (int, error) {

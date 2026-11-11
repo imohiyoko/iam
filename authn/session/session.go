@@ -147,6 +147,13 @@ type LineageHook interface {
 	LineageEnded(ctx context.Context, tx port.Tx, realmID, sid, reason, requestID string) error
 }
 
+// PrincipalHook は、ユーザーのセッションを except 以外まとめて失効させたことを受け取る（LineageHook が実装していれば呼ぶ）。
+// 終わった系列（ログアウト済みのものを含む）から切り離した認可（offline_access。ADR 0126）を一緒に失効させるのに使う。
+// keepSID は残したセッションの系列（無ければ空）。失効と同じトランザクションで呼ぶ。
+type PrincipalHook interface {
+	PrincipalRevoked(ctx context.Context, tx port.Tx, realmID, userID, keepSID, reason, requestID string) error
+}
+
 // OrgPicker はログインで入る Org を決めるもの（authn/org）。
 type OrgPicker interface {
 	Pick(ctx context.Context, tx port.Tx, u port.User, in OrgPick) (PickedOrg, error)
@@ -777,6 +784,8 @@ type Validated struct {
 	MaxAuthAge      time.Duration
 	AuthMethods     []string
 	AuthenticatedAt time.Time
+	// AuthCredentialIDs はセッションの認証に使った認証情報の ID（認可コードに写す。ADR 0126）。
+	AuthCredentialIDs []string
 	// Risk はリスクの種類ごとの点数（一覧で有効なものだけ。ADR 0084）。評価していない種類は無い。
 	Risk map[string]int
 	// Restriction は使える操作の制限（2要素目の確認待ちなど）。空なら制限なし。
@@ -787,23 +796,26 @@ type Validated struct {
 
 // cached はキャッシュに置く検証の結果。秘密は置かない。
 type cached struct {
-	Hash            []byte                  `json:"h"`
-	SID             string                  `json:"s,omitempty"`
-	PrincipalType   port.PrincipalType      `json:"pt"`
-	PrincipalID     string                  `json:"p"`
-	PublicID        string                  `json:"u"`
-	ActiveOrgID     string                  `json:"o,omitempty"`
-	OrgUnavailable  []string                `json:"ou,omitempty"`
-	MaxAuthAge      time.Duration           `json:"ma,omitempty"`
-	AuthMethods     []string                `json:"amr"`
-	AuthenticatedAt time.Time               `json:"at"`
-	Risk            map[string]int          `json:"rk,omitempty"`
-	CreatedAt       time.Time               `json:"c"`
-	NextCheck       time.Time               `json:"n"`
-	Restriction     port.SessionRestriction `json:"r,omitempty"`
+	Hash              []byte                  `json:"h"`
+	SID               string                  `json:"s,omitempty"`
+	PrincipalType     port.PrincipalType      `json:"pt"`
+	PrincipalID       string                  `json:"p"`
+	PublicID          string                  `json:"u"`
+	ActiveOrgID       string                  `json:"o,omitempty"`
+	OrgUnavailable    []string                `json:"ou,omitempty"`
+	MaxAuthAge        time.Duration           `json:"ma,omitempty"`
+	AuthMethods       []string                `json:"amr"`
+	AuthenticatedAt   time.Time               `json:"at"`
+	AuthCredentialIDs []string                `json:"ac,omitempty"`
+	Risk              map[string]int          `json:"rk,omitempty"`
+	CreatedAt         time.Time               `json:"c"`
+	NextCheck         time.Time               `json:"n"`
+	Restriction       port.SessionRestriction `json:"r,omitempty"`
 }
 
-func cacheKey(realmID, sessionID string) string { return "session:v1:" + realmID + ":" + sessionID }
+// cacheKey はセッションの検証結果のキャッシュのキー。v2 で認証情報の ID（ac）を足した。ac の無い v1 のエントリを
+// 「認証情報が無い」と読まないよう、名前空間を分ける（ADR 0126）。
+func cacheKey(realmID, sessionID string) string { return "session:v2:" + realmID + ":" + sessionID }
 
 // Validate はトークンを検証する。使えないセッションは ErrInvalid（理由はログにだけ出す）。
 // ストレージの障害では ErrInvalid 以外のエラーを返す（呼び出し側は Cookie を消さない）。
@@ -871,7 +883,7 @@ func (m *Manager) Validate(ctx context.Context, realmID, token string) (Validate
 			return err
 		}
 		c = cached{Risk: scores, Hash: s.TokenHash, SID: s.SID, PrincipalType: s.PrincipalType, PrincipalID: s.PrincipalID, PublicID: u.PublicID,
-			ActiveOrgID: s.ActiveOrgID, OrgUnavailable: slices.Compact(orgUnavailable), MaxAuthAge: lim.MaxAuthAge, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
+			ActiveOrgID: s.ActiveOrgID, OrgUnavailable: slices.Compact(orgUnavailable), MaxAuthAge: lim.MaxAuthAge, AuthMethods: s.AuthMethods, AuthenticatedAt: s.AuthenticatedAt, AuthCredentialIDs: s.AuthCredentialIDs, CreatedAt: s.CreatedAt, NextCheck: next, Restriction: s.Restriction}
 		return nil
 	})
 	if errors.Is(err, errRejected) || errors.Is(err, errs.NotFound) {
@@ -898,7 +910,7 @@ func (m *Manager) validated(realmID, sid string, c cached, now time.Time) Valida
 	}
 	v := Validated{SessionID: sid, SID: lineage, RealmID: realmID, PrincipalType: c.PrincipalType, PrincipalID: c.PrincipalID,
 		PublicID: c.PublicID, ActiveOrgID: c.ActiveOrgID, OrgUnavailable: c.OrgUnavailable, MaxAuthAge: c.MaxAuthAge, AuthMethods: c.AuthMethods,
-		AuthenticatedAt: c.AuthenticatedAt, Risk: c.Risk, Restriction: c.Restriction}
+		AuthenticatedAt: c.AuthenticatedAt, AuthCredentialIDs: c.AuthCredentialIDs, Risk: c.Risk, Restriction: c.Restriction}
 	if m.Config.RotationInterval > 0 && !now.Before(c.CreatedAt.Add(m.Config.RotationInterval)) {
 		v.RotateDue = true
 	}
@@ -1012,6 +1024,35 @@ func checkCredentials(ctx context.Context, tx port.Tx, s port.Session) error {
 		}
 	}
 	return nil
+}
+
+// CheckCredentials は、ユーザーの認証に使った認証情報 ids（外部 ID・汎用の認証情報・メール）がどれも無効化されていないかを
+// 確かめる（ログインの系列から切り離した OIDC の認可。ADR 0126）。無効化か削除されていれば ErrInvalid。
+// セッションと違い、ログインに使ったメール（パスワード・メールのリンクやコード）も、本人から外していないかを確かめる。
+func CheckCredentials(ctx context.Context, tx port.Tx, realmID, userID string, ids []string) error {
+	var emails []port.UserEmail
+	for _, c := range ids {
+		if !strings.HasPrefix(c, string(id.Email)+"_") {
+			continue
+		}
+		if emails == nil {
+			var err error
+			if emails, err = tx.Emails().ListByUser(ctx, realmID, userID); err != nil {
+				return err
+			}
+			if emails == nil {
+				emails = []port.UserEmail{}
+			}
+		}
+		if !slices.ContainsFunc(emails, func(e port.UserEmail) bool { return e.ID == c }) {
+			return ErrInvalid
+		}
+	}
+	err := checkCredentials(ctx, tx, port.Session{RealmID: realmID, PrincipalID: userID, AuthCredentialIDs: ids})
+	if errors.Is(err, errRejected) {
+		return ErrInvalid
+	}
+	return err
 }
 
 // successorTime は系列を継ぐセッションの作成時刻。系列の今のセッションは作成時刻の新しい方なので（GetCurrentBySID）、
@@ -1256,24 +1297,47 @@ func (m *Manager) RevokeAll(ctx context.Context, realmID, userID, except, reason
 // RevokeAllTx は RevokeAll を呼び出し側のトランザクションで行う。確定の後に ForgetIDs で返した ID のキャッシュを消す。
 func (m *Manager) RevokeAllTx(ctx context.Context, tx port.Tx, realmID, userID, except, reason string, actor audit.Actor, requestID string) ([]string, error) {
 	ids, err := tx.Sessions().RevokeByPrincipal(ctx, realmID, port.PrincipalUser, userID, except, m.Clock.Now(), reason)
-	if err != nil || len(ids) == 0 {
-		return nil, err
-	}
-	subject, err := userActor(ctx, tx, realmID, userID)
 	if err != nil {
 		return nil, err
 	}
-	_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
-		Type: "session.revoked", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
-		Details: map[string]any{"sessions": ids, "reason": reason, "user_id": subject.ID},
-	})
-	if err != nil {
-		return nil, err
+	if len(ids) > 0 {
+		subject, err := userActor(ctx, tx, realmID, userID)
+		if err != nil {
+			return nil, err
+		}
+		_, err = eventlog.Record(ctx, tx, m.Clock, audit.Event{
+			Type: "session.revoked", Result: audit.ResultSuccess, RealmID: realmID, Actor: actor, RequestID: requestID,
+			Details: map[string]any{"sessions": ids, "reason": reason, "user_id": subject.ID},
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := m.EndLineagesTx(ctx, tx, realmID, ids, reason, requestID); err != nil {
+			return nil, err
+		}
 	}
-	if err := m.EndLineagesTx(ctx, tx, realmID, ids, reason, requestID); err != nil {
+	if err := m.PrincipalRevokedTx(ctx, tx, realmID, userID, except, reason, requestID); err != nil {
 		return nil, err
 	}
 	return ids, nil
+}
+
+// PrincipalRevokedTx は、ユーザーのセッションを except 以外まとめて失効させたことを Lineages に伝える（PrincipalHook）。
+// 失効させたセッションが無くても（ログアウト済みでも）呼ぶ。RevokeAllTx を通らずにまとめて失効させたときに呼ぶ（復旧）。
+func (m *Manager) PrincipalRevokedTx(ctx context.Context, tx port.Tx, realmID, userID, except, reason, requestID string) error {
+	h, ok := m.Lineages.(PrincipalHook)
+	if !ok {
+		return nil
+	}
+	keepSID := ""
+	if except != "" {
+		s, err := tx.Sessions().Get(ctx, realmID, except)
+		if err != nil && !errors.Is(err, errs.NotFound) {
+			return err
+		}
+		keepSID = s.SID
+	}
+	return h.PrincipalRevoked(ctx, tx, realmID, userID, keepSID, reason, requestID)
 }
 
 // ForgetIDs はセッションの検証結果のキャッシュを消す（呼び出し側のトランザクションで失効させた後に呼ぶ）。

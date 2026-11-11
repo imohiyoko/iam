@@ -2,8 +2,8 @@
 INSERT INTO authn_clients (id, public_id, realm_id, name, trust_level, redirect_uris, post_logout_redirect_uris, auth_method, secret_hash, jwks,
     id_token_alg, backchannel_logout_uri, frontchannel_logout_uri, frontchannel_logout_session_required, created_at, updated_at, token_exchange, device_grant,
     ciba_mode, ciba_notification_endpoint, require_par, dpop_bound_access_tokens, tls_bound_access_tokens, tls_auth_field, tls_auth_value,
-    fapi2_security_profile, jwt_access_tokens)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    fapi2_security_profile, jwt_access_tokens, offline_access)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetClient :one
 SELECT * FROM authn_clients WHERE realm_id = ? AND id = ?;
@@ -18,7 +18,7 @@ SELECT * FROM authn_clients WHERE realm_id = ? ORDER BY created_at, id;
 UPDATE authn_clients SET name = ?, trust_level = ?, redirect_uris = ?, post_logout_redirect_uris = ?, auth_method = ?, secret_hash = ?, jwks = ?,
     id_token_alg = ?, backchannel_logout_uri = ?, frontchannel_logout_uri = ?, frontchannel_logout_session_required = ?, updated_at = ?, token_exchange = ?, device_grant = ?,
     ciba_mode = ?, ciba_notification_endpoint = ?, require_par = ?, dpop_bound_access_tokens = ?, tls_bound_access_tokens = ?, tls_auth_field = ?, tls_auth_value = ?,
-    fapi2_security_profile = ?, jwt_access_tokens = ?
+    fapi2_security_profile = ?, jwt_access_tokens = ?, offline_access = ?
 WHERE realm_id = ? AND id = ?;
 
 -- name: DeleteClient :execrows
@@ -38,8 +38,8 @@ DELETE FROM authn_signing_keys WHERE realm_id = ? AND id = ?;
 
 -- name: CreateGrant :exec
 INSERT INTO authn_oidc_grants (id, realm_id, client_id, user_id, org_id, sid, scopes, auth_methods, auth_time, created_at, expires_at, revoked_at, revoke_reason, acr,
-    exchange, parent_id, actor_user_id, act, audiences)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    exchange, parent_id, actor_user_id, act, audiences, offline, auth_credential_ids)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetGrant :one
 SELECT * FROM authn_oidc_grants WHERE realm_id = ? AND id = ?;
@@ -71,6 +71,20 @@ DELETE FROM authn_oidc_tokens WHERE grant_id IN (
 DELETE FROM authn_oidc_grants WHERE id IN (
     SELECT g.id FROM authn_oidc_grants g WHERE g.exchange = sqlc.arg(exchange) ORDER BY g.id LIMIT sqlc.arg(lim));
 
+-- name: ListOfflineGrantsByUser :many
+SELECT * FROM authn_oidc_grants WHERE realm_id = ? AND user_id = ? AND offline <> 0 ORDER BY created_at, id;
+
+-- name: CountOfflineGrants :one
+SELECT count(*) FROM authn_oidc_grants WHERE offline <> 0;
+
+-- name: PurgeOfflineGrantTokens :exec
+DELETE FROM authn_oidc_tokens WHERE grant_id IN (
+    SELECT g.id FROM authn_oidc_grants g WHERE g.offline <> 0 ORDER BY g.id LIMIT sqlc.arg(lim));
+
+-- name: PurgeOfflineGrants :execrows
+DELETE FROM authn_oidc_grants WHERE id IN (
+    SELECT g.id FROM authn_oidc_grants g WHERE g.offline <> 0 ORDER BY g.id LIMIT sqlc.arg(lim));
+
 -- name: DeleteClientGrantTokens :exec
 DELETE FROM authn_oidc_tokens WHERE grant_id IN (SELECT g.id FROM authn_oidc_grants g WHERE g.realm_id = sqlc.arg(realm_id) AND g.client_id = sqlc.arg(client_id));
 
@@ -97,3 +111,6 @@ DELETE FROM authn_oidc_tokens WHERE id IN (SELECT t.id FROM authn_oidc_tokens t 
 
 -- name: UseOIDCToken :execrows
 UPDATE authn_oidc_tokens SET used_at = ? WHERE realm_id = ? AND id = ? AND used_at IS NULL;
+
+-- name: ExtendOIDCToken :execrows
+UPDATE authn_oidc_tokens SET expires_at = ? WHERE realm_id = ? AND id = ?;
