@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"slices"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/imohiyoko/iam/authz/role"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/feature"
+	"github.com/imohiyoko/iam/shared/port"
 )
 
 // フィーチャー offline_access（OIDC Core 11。ADR 0126）を HTTP で確かめる。
@@ -410,7 +412,45 @@ func TestOfflineAccessExchange(t *testing.T) {
 		t.Fatalf("scope: %v", tok)
 	}
 	at := api.delegate(t, tok["access_token"].(string), down.clientID)
-	if in := down.introspect(t, at); in["active"] != true || in["scope"] != "openid email" {
-		t.Fatalf("exchanged token: %v", in)
+	orig := web.introspect(t, tok["access_token"].(string))
+	if in := down.introspect(t, at); in["active"] != true || in["scope"] != "openid email" || in["sub"] != orig["sub"] {
+		t.Fatalf("exchanged token: %v (original %v)", in, orig)
+	}
+	// 元の連携先から offline_access の許可を外せば、元の認可から交換したトークンも使えない（系列はまだ使える）。
+	body := map[string]any{"name": "RP", "redirect_uris": []string{web.redirect}, "token_endpoint_auth_method": "client_secret", "offline_access": false}
+	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/clients/"+web.clientID, body); code != 200 {
+		t.Fatalf("update client: %d %v", code, out)
+	}
+	if in := down.introspect(t, at); in["active"] != false {
+		t.Fatalf("exchanged token after the client opt-out: %v", in)
+	}
+}
+
+// TestOfflineAccessReauthBeforeExchange は、認可コードを出した後に系列で本人確認をやり直したら（ログインのやり直しなど）、
+// コードを Offline の認可に交換しないことを確かめる（今のセッションの認証情報はコードを出したときのものではない）。
+func TestOfflineAccessReauthBeforeExchange(t *testing.T) {
+	l := newOfflineEnv(t, true)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "offline_access": true})
+	code, _ := p.login(t, "alice@example.com", offlineScope)
+	l.advance(2 * time.Second)
+	uid := l.internalUserID(t, l.userID(t, "alice@example.com"))
+	err := l.a.deps.Storage.Tx(context.Background(), func(ctx context.Context, tx port.Tx) error {
+		ss, err := tx.Sessions().ListByPrincipal(ctx, l.a.realm.ID, port.PrincipalUser, uid)
+		if err != nil || len(ss) != 1 {
+			return fmt.Errorf("sessions: %v %v", ss, err)
+		}
+		// 同じ系列を、後で本人確認したセッションが継ぐ（ログインのやり直し）。
+		s := ss[0]
+		now := l.a.deps.Clock.Now()
+		s.ID, s.TokenHash, s.CreatedAt, s.LastSeenAt, s.AuthenticatedAt = "ses_reauth", []byte("reauth"), now, now, now
+		return tx.Sessions().Create(ctx, s)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, out := p.exchange(t, code, nil)
+	if status != 400 || out["error"] != "invalid_grant" {
+		t.Fatalf("exchange after reauth: %d %v", status, out)
 	}
 }

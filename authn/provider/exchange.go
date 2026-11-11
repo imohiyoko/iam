@@ -716,6 +716,14 @@ func (t *Tokens) grantAliveUntil(ctx context.Context, tx port.Tx, g port.Grant, 
 		if pg.RevokedAt != nil {
 			next = earliestOf(next, *pg.RevokedAt)
 		}
+		// Offline の元の認可（ADR 0126）は、系列の代わりに使う確かめ（連携先の許可・認証情報など）も満たすこと。
+		if pg.Offline && pg.Exchange == "" {
+			at, err := t.offlineAliveUntil(ctx, tx, pg, now)
+			if err != nil {
+				return time.Time{}, err
+			}
+			next = earliestOf(next, at)
+		}
 		p = pg.ParentID
 	}
 	if g.Exchange == port.ExchangeDelegation {
