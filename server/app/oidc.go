@@ -104,7 +104,11 @@ func newOIDCHandler(a *App) http.Handler {
 	mux.Handle(oidcIntrospect, ops)
 	mux.Handle(oidcRevoke, ops)
 	// 認可要求とその続きはブラウザのセッションを見る。
-	mux.Handle(oidcAuthorize, a.withSession(ops))
+	authorize := http.Handler(ops)
+	if a.formPost {
+		authorize = srv.withFormPostErrors(authorize)
+	}
+	mux.Handle(oidcAuthorize, a.withSession(authorize))
 	mux.Handle(oidcResume, a.withSession(http.HandlerFunc(srv.resume)))
 	if a.formPost {
 		mux.Handle(oidcFormPost, a.withSession(http.HandlerFunc(srv.formPost)))
@@ -509,7 +513,11 @@ func (s *oidcServer) VerifyAuthRequest(ctx context.Context, r *op.Request[oidc.A
 	if !pushed && s.parRequired(cl) {
 		return nil, oidc.ErrInvalidRequest().WithDescription("pushed authorization request required")
 	}
-	return s.clientRequest(ctx, r, cl)
+	cr, err := s.clientRequest(ctx, r, cl)
+	if err == nil {
+		noteFormPost(ctx, cr.Data)
+	}
+	return cr, err
 }
 
 // clientRequest は認可要求に連携先を結び付ける。resource（RFC 8707）があれば、この連携先に許したリソースを引いておく
@@ -652,6 +660,10 @@ func (a *App) loginURL(rid string) string {
 
 // complete はセッションで認可コードを発行し、連携先の戻り先への転送を返す。
 func (s *oidcServer) complete(ctx context.Context, req provider.AuthRequest, au auth) (*op.Redirect, error) {
+	// ログインの間にフィーチャー form_post が止まったら、預かった form_post の要求にはコードを出さない（ADR 0124）。
+	if req.ResponseMode == string(responseModeFormPost) && !s.a.formPost {
+		return s.errorRedirect(ctx, req, oidc.ErrInvalidRequest().WithDescription("response_mode is not supported"))
+	}
 	// active な Org が使えない（停止・有効期間の外など）セッションでは連携先に入れない（4.7）。
 	if len(au.OrgUnavailable) > 0 {
 		return s.errorRedirect(ctx, req, oidc.ErrAccessDenied())

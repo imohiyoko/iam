@@ -61,7 +61,7 @@ func TestFormPost(t *testing.T) {
 	if modes := responseModesOf(t, l); !slices.Contains(modes, "form_post") || !slices.Contains(modes, "query") {
 		t.Fatalf("discovery: %v", modes)
 	}
-	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "redirect_uris": []string{"https://rp.example.com/cb?tenant=1"}})
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret", "redirect_uris": []string{"https://rp.example.com/cb?tenant=1&state=fixed"}})
 	_, cookie := l.login(t, "alice@example.com")
 
 	// ログイン済みのブラウザ：認可エンドポイントは画面へ転送し、画面は戻り先へ code・state・iss を POST する。
@@ -70,12 +70,14 @@ func TestFormPost(t *testing.T) {
 		t.Fatalf("redirect = %s", u)
 	}
 	page := u.Path + "?" + u.RawQuery
-	// 別のブラウザ（セッションなし）では開けず、使い切らない。
+	// 別のブラウザ（セッションなし、別のセッション）では開けず、使い切らない。
 	if w := l.oidcDo(t, "GET", page, nil, ""); w.Code != 400 {
 		t.Fatalf("other browser: %d", w.Code)
 	}
-	u = location(t, l.oidcDo(t, "GET", p.authorizeURL(url.Values{"response_mode": {"form_post"}}), nil, cookie))
-	page = u.Path + "?" + u.RawQuery
+	_, bob := l.login(t, "bob@example.com")
+	if w := l.oidcDo(t, "GET", page, nil, bob); w.Code != 400 {
+		t.Fatalf("other session: %d", w.Code)
+	}
 	w := l.oidcDo(t, "GET", page, nil, cookie)
 	if w.Code != 200 {
 		t.Fatalf("form page: %d %s", w.Code, w.Body)
@@ -85,7 +87,9 @@ func TestFormPost(t *testing.T) {
 		t.Fatalf("headers: %v", w.Header())
 	}
 	action, fields := formFields(t, w.Body.String())
-	if action != "https://rp.example.com/cb?tenant=1" || fields.Get("state") != p.state || fields.Get("iss") != testIssuer || fields.Get("code") == "" || fields.Get("tenant") != "" {
+	// 戻り先が元から持つクエリ（state=fixed も）は action に残り、応答の値には混ざらない。
+	if action != "https://rp.example.com/cb?tenant=1&state=fixed" || !slices.Equal(fields["state"], []string{p.state}) || fields.Get("iss") != testIssuer ||
+		fields.Get("code") == "" || fields.Get("tenant") != "" {
 		t.Fatalf("form: %s %v", action, fields)
 	}
 	// 1 回限り。
@@ -108,8 +112,39 @@ func TestFormPost(t *testing.T) {
 	if _, fields := formFields(t, w.Body.String()); fields.Get("error") != "login_required" || fields.Get("state") != p.state || fields.Get("code") != "" {
 		t.Fatalf("error form: %v", fields)
 	}
+	// op が自分で返すエラー（prompt の検証）も POST で返す。
+	u = location(t, l.oidcDo(t, "GET", p.authorizeURL(url.Values{"response_mode": {"form_post"}, "prompt": {"none login"}}), nil, cookie))
+	if u.Path != oidcFormPost {
+		t.Fatalf("op error redirect = %s", u)
+	}
+	w = l.oidcDo(t, "GET", u.Path+"?"+u.RawQuery, nil, cookie)
+	if w.Code != 200 || len(w.Body.String()) == 0 {
+		t.Fatalf("op error page: %d %s", w.Code, w.Body)
+	}
+	if action, fields := formFields(t, w.Body.String()); action != "https://rp.example.com/cb?tenant=1&state=fixed" || fields.Get("error") != "invalid_request" ||
+		!slices.Equal(fields["state"], []string{p.state}) || fields.Get("tenant") != "" || fields.Get("code") != "" {
+		t.Fatalf("op error form: %s %v", action, fields)
+	}
 	// 既定（query）は今までどおり戻り先へ転送する。
 	if u := location(t, l.oidcDo(t, "GET", p.authorizeURL(nil), nil, cookie)); u.Host != "rp.example.com" || u.Query().Get("code") == "" {
 		t.Fatalf("query mode: %s", u)
+	}
+}
+
+// TestFormPostDisabledDuringLogin は、ログインの間にフィーチャーが止まったら、預かった form_post の要求にコードを出さないことを確かめる。
+func TestFormPostDisabledDuringLogin(t *testing.T) {
+	l := senderEnv(t, nil, feature.FormPost)
+	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
+	p := l.registerRP(t, owner, map[string]any{"token_endpoint_auth_method": "client_secret"})
+	u := location(t, l.oidcDo(t, "GET", p.authorizeURL(url.Values{"response_mode": {"form_post"}}), nil, ""))
+	back := u.Query().Get("return_to")
+	if u.Path != "/login" || !strings.HasPrefix(back, oidcResume+"?request=") {
+		t.Fatalf("not sent to login: %s", u)
+	}
+	l.a.formPost = false
+	_, cookie := l.login(t, "alice@example.com")
+	u = location(t, l.oidcDo(t, "GET", back, nil, cookie))
+	if u.Host != "rp.example.com" || u.Query().Get("error") != "invalid_request" || u.Query().Get("code") != "" || u.Query().Get("state") != p.state {
+		t.Fatalf("resume after disable: %s", u)
 	}
 }
