@@ -106,7 +106,8 @@ func newOpaque(prefix id.Prefix) (tokenID, token string, hash []byte, err error)
 
 func splitOpaque(token string) (string, []byte, bool) {
 	tid, secret, ok := strings.Cut(token, ".")
-	if !ok || tid == "" || secret == "" {
+	// 秘密に "." は含まない。JWT のアクセストークンを "<jti>." で包んで不透明のトークンとして通すことも防ぐ（ADR 0123）。
+	if !ok || tid == "" || secret == "" || strings.Contains(secret, ".") {
 		return "", nil, false
 	}
 	h := sha256.Sum256([]byte(secret))
