@@ -205,7 +205,13 @@ func (s *oidcServer) authorizationServerMetadata(w http.ResponseWriter, r *http.
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.metadata())
+	d, err := s.metadata(r.Context())
+	if err != nil {
+		s.a.deps.Logger.ErrorContext(r.Context(), "authorization server metadata", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
 }
 
 // resourceMetadata は IAM 自身の API の Protected Resource Metadata（RFC 9728 2）。
