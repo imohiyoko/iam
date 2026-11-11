@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
@@ -233,10 +234,21 @@ func TestDisableRS256WithFederation(t *testing.T) {
 	l.metadataCerts(t, wsfed.MetadataPath)
 	err = l.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		ok, err := l.a.keys.HasActive(ctx, tx, l.a.realm.ID, port.AlgRS256)
-		if err == nil && ok {
-			t.Fatal("rs256 key recreated by metadata after disable")
+		if err != nil || ok {
+			t.Fatalf("rs256 key recreated by metadata after disable: %v", err)
 		}
-		return err
+		// 片付けの前に読んだ RS256 の設定で署名しても（鍵は退役済み）、ES256 の鍵で署名し、RSA の鍵は作らない。
+		key, sk, err := l.a.keys.XMLSigner(ctx, tx, l.a.realm.ID, port.AlgRS256)
+		if err != nil || key.Alg != port.AlgES256 {
+			t.Fatalf("signer for a stale RS256 config: %+v %v", key, err)
+		}
+		if _, ok := sk.Public().(*ecdsa.PublicKey); !ok {
+			t.Fatalf("stale RS256 config signs with %T", sk.Public())
+		}
+		if ok, err := l.a.keys.HasActive(ctx, tx, l.a.realm.ID, port.AlgRS256); err != nil || ok {
+			t.Fatalf("rs256 key recreated by a stale config: %v", err)
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -260,13 +260,15 @@ func (k *Keys) Published(ctx context.Context, tx port.Tx, realmID string) ([]por
 	return k.published(ctx, tx, realmID)
 }
 
-// signingAlg は alg で署名するときに実際に使うアルゴリズム。フィーチャー rs256 が止まっていれば RS256 の鍵を新しく作らない。
+// signingAlg は alg で署名するときに実際に使うアルゴリズム。RS256 は使っている RS256 の鍵があるときだけ（鍵を新しく作らない）。
 // 片付けで鍵が退役した後は、連携先の選択も ES256 に戻っている（片付けは連携先を先に戻す）ので、片付けの前に読んだ連携先の
 // 署名も ES256 にする（ADR 0122）。
 func (k *Keys) signingAlg(ctx context.Context, tx port.Tx, realmID, alg string) (string, error) {
-	if alg != port.AlgRS256 || k.RS256 {
+	if alg != port.AlgRS256 {
 		return alg, nil
 	}
+	// フィーチャーが動いていても、署名では RS256 の鍵を作らない（起動のときに Ensure が作る）。片付けが鍵を退役させた後に、
+	// 止める前から動いているインスタンスが、片付けの前に読んだ連携先の設定で鍵を作り直さないように。
 	ok, err := k.hasActive(ctx, tx, realmID, port.AlgRS256)
 	if err != nil || ok {
 		return alg, err
