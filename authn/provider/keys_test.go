@@ -2,7 +2,9 @@ package provider_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +117,121 @@ func TestKeysVerifyType(t *testing.T) {
 			if b, err := keys.VerifyType(ctx, tx, k.RealmID, idt, "JWT"); err != nil || !strings.Contains(string(b), `"sub"`) {
 				t.Fatalf("%s: id token = %s, %v", alg, b, err)
 			}
+		}
+		return nil
+	})
+}
+
+// TestKeysRS256 はフィーチャー rs256 の鍵（ADR 0122）を確かめる：オフなら用意せず、オンなら JWKS に RSA を alg 付きで出し、
+// 署名と検証が通り、書き換えた署名は通らない。
+func TestKeysRS256(t *testing.T) {
+	k := testkit.New(t)
+	ctx := context.Background()
+	off := &provider.Keys{Crypter: k.Crypter, Clock: k.Clock, RetiredKeyTTL: 24 * time.Hour}
+	if slices.Contains(off.Algs(), port.AlgRS256) {
+		t.Fatalf("algs while off: %v", off.Algs())
+	}
+	keys := &provider.Keys{Crypter: k.Crypter, Clock: k.Clock, RetiredKeyTTL: 24 * time.Hour, RS256: true}
+	var jws string
+	k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		if err := keys.Ensure(ctx, tx, k.RealmID); err != nil {
+			return err
+		}
+		b, err := keys.JWKS(ctx, tx, k.RealmID)
+		if err != nil {
+			return err
+		}
+		var set struct {
+			Keys []map[string]any `json:"keys"`
+		}
+		if err := json.Unmarshal(b, &set); err != nil {
+			return err
+		}
+		found := false
+		for _, x := range set.Keys {
+			if x["kty"] == "RSA" {
+				found = x["alg"] == "RS256" && x["d"] == nil
+			}
+		}
+		if !found || len(set.Keys) != 3 {
+			t.Fatalf("jwks = %s", b)
+		}
+		jws, err = keys.Sign(ctx, tx, k.RealmID, port.AlgRS256, "JWT", []byte(`{"sub":"x"}`))
+		return err
+	})
+	err := k.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+		if b, err := keys.VerifyType(ctx, tx, k.RealmID, jws, "JWT"); err != nil || string(b) != `{"sub":"x"}` {
+			t.Fatalf("verify = %s, %v", b, err)
+		}
+		parts := strings.Split(jws, ".")
+		if _, err := keys.Verify(ctx, tx, k.RealmID, parts[0]+"."+parts[1]+"."+parts[2][:len(parts[2])-4]+"AAAA"); err == nil {
+			t.Fatal("tampered verified")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// フィーチャー rs256 を無効にしている間（片付けの前）は RS256 を Discovery に載せて署名し続け、片付けで鍵が退役した後は
+// RS256 の鍵を作り直さずに ES256 で署名する。退役した鍵は RetiredKeyTTL の間 JWKS に残る。
+func TestKeysRS256Disabling(t *testing.T) {
+	k := testkit.New(t)
+	on := &provider.Keys{Crypter: k.Crypter, Clock: k.Clock, RetiredKeyTTL: 24 * time.Hour, RS256: true}
+	off := &provider.Keys{Crypter: k.Crypter, Clock: k.Clock, RetiredKeyTTL: 24 * time.Hour}
+	alg := func(jws string) string {
+		h, _ := base64.RawURLEncoding.DecodeString(strings.Split(jws, ".")[0])
+		var x struct {
+			Alg string `json:"alg"`
+		}
+		_ = json.Unmarshal(h, &x)
+		return x.Alg
+	}
+	k.Tx(t, func(ctx context.Context, tx port.Tx) error {
+		if err := on.Ensure(ctx, tx, k.RealmID); err != nil {
+			return err
+		}
+		if algs, err := off.Advertised(ctx, tx, k.RealmID); err != nil || !slices.Contains(algs, port.AlgRS256) {
+			t.Fatalf("advertised while disabling = %v, %v", algs, err)
+		}
+		jws, err := off.Sign(ctx, tx, k.RealmID, port.AlgRS256, "JWT", []byte(`{"sub":"x"}`))
+		if err != nil || alg(jws) != "RS256" {
+			t.Fatalf("sign while disabling = %s, %v", alg(jws), err)
+		}
+		// 片付けで RS256 の鍵を退役させる。
+		ks, err := tx.SigningKeys().List(ctx, k.RealmID)
+		if err != nil {
+			return err
+		}
+		for _, x := range ks {
+			if x.Alg == port.AlgRS256 {
+				if err := tx.SigningKeys().Retire(ctx, k.RealmID, x.ID, k.Clock.Now()); err != nil {
+					return err
+				}
+			}
+		}
+		if algs, err := off.Advertised(ctx, tx, k.RealmID); err != nil || slices.Contains(algs, port.AlgRS256) {
+			t.Fatalf("advertised after purge = %v, %v", algs, err)
+		}
+		if jws, err = off.Sign(ctx, tx, k.RealmID, port.AlgRS256, "JWT", []byte(`{"sub":"x"}`)); err != nil || alg(jws) != "ES256" {
+			t.Fatalf("sign after purge = %s, %v", alg(jws), err)
+		}
+		ks, err = tx.SigningKeys().List(ctx, k.RealmID)
+		if err != nil {
+			return err
+		}
+		for _, x := range ks {
+			if x.Alg == port.AlgRS256 && x.RetiredAt == nil {
+				t.Fatalf("rsa key recreated: %s", x.ID)
+			}
+		}
+		b, err := off.JWKS(ctx, tx, k.RealmID)
+		if err != nil {
+			return err
+		}
+		if !strings.Contains(string(b), `"kty":"RSA"`) {
+			t.Fatalf("retired rsa key not published: %s", b)
 		}
 		return nil
 	})

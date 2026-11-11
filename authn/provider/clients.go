@@ -63,6 +63,8 @@ type Clients struct {
 	// FAPI2 はフィーチャー fapi2 が動いているか（fapi2_security_profile を受け付けるか）。RealmFAPI2 は realm の設定で
 	// FAPI 2.0 Security Profile を強いるか（この realm の連携先はすべて条件を満たさなければならない。ADR 0117）。
 	FAPI2, RealmFAPI2 bool
+	// RS256 はフィーチャー rs256 が動いているか（id_token_signed_response_alg に RS256 を受け付けるか。ADR 0122）。
+	RS256 bool
 }
 
 // ClientInput は登録・変更の内容。
@@ -143,7 +145,7 @@ func Origin(s string) (string, bool) {
 	return o, true
 }
 
-func (in ClientInput) normalize(deviceFlow, ciba bool) (ClientInput, error) {
+func (in ClientInput) normalize(deviceFlow, ciba, rs256 bool) (ClientInput, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || utf8.RuneCountInString(in.Name) > MaxClientNameLength {
 		return in, invalidClient("name")
@@ -182,7 +184,7 @@ func (in ClientInput) normalize(deviceFlow, ciba bool) (ClientInput, error) {
 		// 既定は ES256（ML-DSA-65 を検証できる RP がまだ少ないため。9.3）。
 		in.IDTokenAlg = port.AlgES256
 	}
-	if !slices.Contains(Algs, in.IDTokenAlg) {
+	if !slices.Contains(Algs, in.IDTokenAlg) && (!rs256 || in.IDTokenAlg != port.AlgRS256) {
 		return in, invalidClient("id_token_signed_response_alg")
 	}
 	if in.AuthMethod == port.ClientAuthTLS {
@@ -363,7 +365,7 @@ func (c *Clients) checkFAPI2(cl port.Client, prev port.Client) error {
 
 // Create は連携先を登録する。client_secret なら秘密を1度だけ返す（保存するのはハッシュだけ）。
 func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
-	in, err := in.normalize(c.DeviceFlow, c.CIBA)
+	in, err := in.normalize(c.DeviceFlow, c.CIBA, c.RS256)
 	if err != nil {
 		return port.Client{}, "", err
 	}
@@ -401,7 +403,7 @@ func (c *Clients) Create(ctx context.Context, tx port.Tx, realmID string, in Cli
 
 // Update は連携先の内容を置き換える。認証方式を client_secret に変えたときは新しい秘密を返す。
 func (c *Clients) Update(ctx context.Context, tx port.Tx, cl port.Client, in ClientInput, actor audit.Actor, requestID string) (port.Client, string, error) {
-	in, err := in.normalize(c.DeviceFlow, c.CIBA)
+	in, err := in.normalize(c.DeviceFlow, c.CIBA, c.RS256)
 	if err != nil {
 		return port.Client{}, "", err
 	}

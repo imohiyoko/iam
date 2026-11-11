@@ -250,6 +250,29 @@ var cleaners = map[string]cleaner{
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
 			return tx.SAMLIdP().Purge(ctx, limit)
 		}},
+	// 連携先の RS256 を ES256 に戻し、RS256 の鍵を退役させる（ADR 0122）。退役した鍵は oidc.retired_key_ttl の間 JWKS に残り、
+	// 発行済みの ID トークンはその間検証できる。
+	feature.RS256: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		n, err := eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.IDTokenAlg == port.AlgRS256, nil })
+		if err != nil {
+			return 0, err
+		}
+		k, err := eachRSAKey(ctx, tx, -1, time.Time{})
+		return n + k, err
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		n, err := eachClient(ctx, tx, limit, func(c port.Client) (bool, error) {
+			if c.IDTokenAlg != port.AlgRS256 {
+				return false, nil
+			}
+			c.IDTokenAlg, c.UpdatedAt = port.AlgES256, now
+			return true, tx.Clients().Update(ctx, c)
+		})
+		if err != nil || n >= limit {
+			return n, err
+		}
+		k, err := eachRSAKey(ctx, tx, limit-n, now)
+		return n + k, err
+	}},
 	// 連携先と realm の FAPI 2.0 Security Profile を外す（ADR 0117）。PAR の必須・送信者制約の設定は連携先に残したもののまま。
 	feature.FAPI2: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		n, err := eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.FAPI2, nil })
@@ -354,6 +377,37 @@ func eachClient(ctx context.Context, tx port.Tx, limit int, fn func(port.Client)
 			}
 			if ok {
 				n++
+			}
+		}
+	}
+	return n, nil
+}
+
+// eachRSAKey は全 realm の退役していない RS256 の署名鍵を数え、now が零でなければ退役させる（limit が負なら上限なし）。
+func eachRSAKey(ctx context.Context, tx port.Tx, limit int, now time.Time) (int, error) {
+	realms, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range realms {
+		ks, err := tx.SigningKeys().List(ctx, r.ID)
+		if err != nil {
+			return n, err
+		}
+		for _, k := range ks {
+			if k.Alg != port.AlgRS256 || k.RetiredAt != nil {
+				continue
+			}
+			if limit >= 0 && n >= limit {
+				return n, nil
+			}
+			n++
+			if now.IsZero() {
+				continue
+			}
+			if err := tx.SigningKeys().Retire(ctx, r.ID, k.ID, now); err != nil {
+				return n, err
 			}
 		}
 	}

@@ -34,6 +34,8 @@ const TrustFirstParty = "first_party"
 const (
 	AlgES256   = "ES256"
 	AlgMLDSA65 = "ML-DSA-65"
+	// AlgRS256 はフィーチャー rs256 で連携先ごとに選べる（ADR 0122）。
+	AlgRS256 = "RS256"
 )
 
 // Client は clients の1行（連携先）。
@@ -51,7 +53,7 @@ type Client struct {
 	SecretHash []byte
 	// JWKS は private_key_jwt の公開鍵（JWKS の JSON）。
 	JWKS []byte
-	// IDTokenAlg は id_token_signed_response_alg（ES256 / ML-DSA-65）。
+	// IDTokenAlg は id_token_signed_response_alg（ES256 / ML-DSA-65。フィーチャー rs256 なら RS256 も）。
 	IDTokenAlg string
 	// BackchannelLogoutURI は Back-Channel Logout の送り先（空なら送らない。5.2）。
 	BackchannelLogoutURI string

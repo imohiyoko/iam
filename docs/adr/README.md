@@ -131,4 +131,5 @@
 | [0119](0119-openid4vci-issuer.md) | OpenID4VCI の発行者は realm の issuer と同じ認可サーバーにし、SD-JWT VC を realm の ES256 の鍵で署名して、Token Status List で失効させる | 承認 |
 | [0120](0120-introspection-principals-and-callers.md) | イントロスペクションに主体の種類と認証の方式を載せ、API キーの検証とリソースを確かめてよい連携先の限定はどちらも既定オフで足す | 承認 |
 | [0121](0121-connected-permission-namespace.md) | 連携先の権限は登録したカタログの接頭辞の下に置き、IAM 自身の権限と字面で分け、判定は呼び出し元が受け持つカタログに限る | 承認 |
+| [0122](0122-rs256-id-tokens.md) | RS256 の ID トークンは既定オフのフィーチャーにし、realm ごとに RSA 3072 の鍵を足して連携先ごとに選ばせる | 承認 |
 | [0118](0118-shared-signals-framework.md) | Shared Signals Framework は監査ログを outbox にした送信側と、許した動作だけを行う受信側の 2 つのフィーチャーにする | 承認 |

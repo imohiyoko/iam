@@ -41,6 +41,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/push"
 	_ "github.com/imohiyoko/iam/features/quota"
 	_ "github.com/imohiyoko/iam/features/resourceindicators"
+	_ "github.com/imohiyoko/iam/features/rs256"
 	_ "github.com/imohiyoko/iam/features/saml"
 	_ "github.com/imohiyoko/iam/features/samlidp"
 	_ "github.com/imohiyoko/iam/features/serviceaccounts"

@@ -1752,7 +1752,7 @@ paths:
       description: |
         権限 `clients:manage`。ファーストパーティだけ（同意画面を出さない）。`redirect_uris` は https か loopback の http（フラグメントなし）。
         `token_endpoint_auth_method` が `client_secret` なら、応答の `client_secret` を1度だけ返す（保存するのはハッシュだけ）。
-        `private_key_jwt` なら公開鍵だけの `jwks` が要る。`id_token_signed_response_alg` は `ES256`（既定）か `ML-DSA-65`。
+        `private_key_jwt` なら公開鍵だけの `jwks` が要る。`id_token_signed_response_alg` は `ES256`（既定）か `ML-DSA-65`（フィーチャー `rs256` なら `RS256` も）。
         内容が正しくなければ `400 invalid_client_metadata`。`client.created` を監査ログに残す。
       requestBody:
         required: true
@@ -1898,7 +1898,7 @@ paths:
       summary: ID トークンの署名鍵を新しくする（9.3）
       description: |
         権限 `signing_keys:rotate`（realm:owner）。新しい鍵で署名を始め、古い鍵は `oidc.retired_key_ttl` の間 JWKS に残す。
-        `signing_key.rotated` を監査ログに残す。
+        `RS256` はフィーチャー `rs256` が動いているときだけ（ADR 0122）。`signing_key.rotated` を監査ログに残す。
       requestBody:
         required: true
         content:
@@ -1907,7 +1907,7 @@ paths:
               type: object
               required: [alg]
               properties:
-                alg: { type: string, enum: [ES256, ML-DSA-65] }
+                alg: { type: string, enum: [ES256, ML-DSA-65, RS256] }
       responses:
         "200":
           description: 新しい鍵
@@ -4872,7 +4872,10 @@ components:
           type: object
           additionalProperties: true
           description: "`private_key_jwt` の公開鍵（JWKS）"
-        id_token_signed_response_alg: { type: string, enum: [ES256, ML-DSA-65] }
+        id_token_signed_response_alg:
+          type: string
+          enum: [ES256, ML-DSA-65, RS256]
+          description: ID トークンと Logout Token の署名。`RS256` はフィーチャー `rs256` が動いているときだけ選べる（ADR 0122）
         backchannel_logout_uri: { type: string }
         frontchannel_logout_uri:
           type: string

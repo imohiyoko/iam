@@ -9,6 +9,7 @@ import (
 	"crypto/elliptic"
 	"crypto/mldsa"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -21,17 +22,25 @@ import (
 
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/errs"
+	"github.com/imohiyoko/iam/shared/feature"
 	"github.com/imohiyoko/iam/shared/id"
 	"github.com/imohiyoko/iam/shared/pii"
 	"github.com/imohiyoko/iam/shared/port"
 )
 
 // ID トークンの署名鍵（9.3、ADR 0040、0041）。realm ごとに ES256 と ML-DSA-65 の鍵を1つずつ使い、JWKS に並べる。
+// フィーチャー rs256 が動いていれば RS256 の鍵も足す（ADR 0122）。
 // 秘密鍵はマスター鍵から導いた鍵で暗号化して Storage に置く。退役した鍵は RetiredKeyTTL の間 JWKS に残す
 // （発行済みの ID トークンを検証できるように）。
 
-// Algs は署名に使うアルゴリズム（JWKS に並べる順）。
+// Algs は署名に使うアルゴリズム（JWKS に並べる順）。フィーチャー rs256 の RS256 は含まない（Keys.Algs で足す）。
 var Algs = []string{port.AlgMLDSA65, port.AlgES256}
+
+// RS256Feature は RS256 の署名のフィーチャー（既定オフ。ADR 0122）。
+var RS256Feature = feature.Feature{Name: feature.RS256, DataVersion: 1}
+
+// RSAKeyBits は RS256 の鍵の大きさ。P-256 と同じ 128 bit の強さ（NIST SP 800-57）にし、2030 年より後も使える大きさにする。
+const RSAKeyBits = 3072
 
 // AlgMLDSA65 は JOSE のアルゴリズム名（RFC 9964）。
 const AlgMLDSA65 jose.SignatureAlgorithm = port.AlgMLDSA65
@@ -45,6 +54,29 @@ type Keys struct {
 	Clock   clock.Clock
 	// RetiredKeyTTL は退役した鍵を JWKS に残す期間（ID トークンの寿命より長くする）。
 	RetiredKeyTTL time.Duration
+	// RS256 はフィーチャー rs256 が動いているか。動いていれば RS256 の鍵を用意し、連携先が選べる（ADR 0122）。
+	RS256 bool
+}
+
+// Algs は realm で用意する署名のアルゴリズム（JWKS に並べる順。Discovery の id_token_signing_alg_values_supported）。
+func (k *Keys) Algs() []string {
+	if k.RS256 {
+		return append(slices.Clone(Algs), port.AlgRS256)
+	}
+	return Algs
+}
+
+// Advertised は Discovery の id_token_signing_alg_values_supported に載せるアルゴリズム。フィーチャー rs256 を無効にしている
+// 間（片付けで RS256 の鍵が退役するまで）は、RS256 の連携先にまだ RS256 で署名するので RS256 も載せる（ADR 0122）。
+func (k *Keys) Advertised(ctx context.Context, tx port.Tx, realmID string) ([]string, error) {
+	if k.RS256 {
+		return k.Algs(), nil
+	}
+	ok, err := k.hasActive(ctx, tx, realmID, port.AlgRS256)
+	if err != nil || !ok {
+		return Algs, err
+	}
+	return append(slices.Clone(Algs), port.AlgRS256), nil
 }
 
 func sealPurpose(kid string) string { return "signing_key\x00" + kid }
@@ -55,7 +87,7 @@ func (k *Keys) Ensure(ctx context.Context, tx port.Tx, realmID string) error {
 	if err != nil {
 		return err
 	}
-	for _, alg := range Algs {
+	for _, alg := range k.Algs() {
 		if !slices.ContainsFunc(ks, func(x port.SigningKey) bool { return x.Alg == alg && x.RetiredAt == nil }) {
 			if _, err := k.create(ctx, tx, realmID, alg); err != nil {
 				return err
@@ -85,6 +117,17 @@ func (k *Keys) create(ctx context.Context, tx port.Tx, realmID, alg string) (por
 			return port.SigningKey{}, err
 		}
 		pub, priv = sk.PublicKey().Bytes(), sk.Bytes()
+	case port.AlgRS256:
+		sk, err := rsa.GenerateKey(rand.Reader, RSAKeyBits)
+		if err != nil {
+			return port.SigningKey{}, err
+		}
+		if pub, err = x509.MarshalPKIXPublicKey(&sk.PublicKey); err != nil {
+			return port.SigningKey{}, err
+		}
+		if priv, err = x509.MarshalPKCS8PrivateKey(sk); err != nil {
+			return port.SigningKey{}, err
+		}
 	default:
 		return port.SigningKey{}, errs.New(errs.KindInvalid, "unsupported alg %s", alg)
 	}
@@ -134,7 +177,7 @@ func (k *Keys) published(ctx context.Context, tx port.Tx, realmID string) ([]por
 	return out, nil
 }
 
-// JWKS は realm の公開鍵の集合（RFC 7517）を返す。AKP（ML-DSA-65）と EC（ES256）を並べる。
+// JWKS は realm の公開鍵の集合（RFC 7517）を返す。AKP（ML-DSA-65）と EC（ES256）、あれば RSA（RS256）を並べる。
 func (k *Keys) JWKS(ctx context.Context, tx port.Tx, realmID string) ([]byte, error) {
 	ks, err := k.published(ctx, tx, realmID)
 	if err != nil {
@@ -156,8 +199,13 @@ func (k *Keys) JWKS(ctx context.Context, tx port.Tx, realmID string) ([]byte, er
 		if err := j.Set(jwk.KeyUsageKey, "sig"); err != nil {
 			return nil, err
 		}
-		if x.Alg == port.AlgES256 {
+		switch x.Alg {
+		case port.AlgES256:
 			if err := j.Set(jwk.AlgorithmKey, jwa.ES256()); err != nil {
+				return nil, err
+			}
+		case port.AlgRS256:
+			if err := j.Set(jwk.AlgorithmKey, jwa.RS256()); err != nil {
 				return nil, err
 			}
 		}
@@ -170,12 +218,21 @@ func (k *Keys) JWKS(ctx context.Context, tx port.Tx, realmID string) ([]byte, er
 
 func publicKey(x port.SigningKey) (any, error) {
 	switch x.Alg {
-	case port.AlgES256:
+	case port.AlgES256, port.AlgRS256:
 		return x509.ParsePKIXPublicKey(x.Public)
 	case port.AlgMLDSA65:
 		return mldsa.NewPublicKey(mldsa.MLDSA65(), x.Public)
 	}
 	return nil, errs.New(errs.KindInternal, "unsupported alg %s", x.Alg)
+}
+
+// hasActive は realm に alg の使っている鍵があるか。
+func (k *Keys) hasActive(ctx context.Context, tx port.Tx, realmID, alg string) (bool, error) {
+	ks, err := tx.SigningKeys().List(ctx, realmID)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(ks, func(x port.SigningKey) bool { return x.Alg == alg && x.RetiredAt == nil }), nil
 }
 
 // active は alg の使っている鍵を返す。無ければ作る。
@@ -220,6 +277,17 @@ func (k *Keys) ECSigner(ctx context.Context, tx port.Tx, realmID string) (port.S
 
 // Sign は claims（JSON）を alg の使っている鍵で署名した JWS（compact）を返す。ヘッダーに kid と typ を付ける（ADR 0040）。
 func (k *Keys) Sign(ctx context.Context, tx port.Tx, realmID, alg, typ string, claims []byte) (string, error) {
+	if alg == port.AlgRS256 && !k.RS256 {
+		// フィーチャー rs256 が止まっていれば RS256 の鍵を新しく作らない。片付けで鍵が退役した後は、連携先の選択も
+		// ES256 に戻っている（片付けは連携先を先に戻す）ので、片付けの前に読んだ連携先の署名も ES256 にする。
+		ok, err := k.hasActive(ctx, tx, realmID, port.AlgRS256)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			alg = port.AlgES256
+		}
+	}
 	key, err := k.active(ctx, tx, realmID, alg)
 	if err != nil {
 		return "", err
@@ -242,6 +310,20 @@ func (k *Keys) Sign(ctx context.Context, tx port.Tx, realmID, alg, typ string, c
 			return "", err
 		}
 		sk = jose.SigningKey{Algorithm: AlgMLDSA65, Key: mldsaSigner{p}}
+	case port.AlgRS256:
+		// フィーチャー rs256 を無効にしている間も、片付けで連携先の選択が ES256 に戻るまでは RS256 で署名し続ける
+		// （黙って ES256 にすると RP の検証が通らなくなるため。ADR 0122）。鍵が退役した後は上で ES256 にしている。
+		p, err := x509.ParsePKCS8PrivateKey(raw)
+		if err != nil {
+			return "", err
+		}
+		rk, ok := p.(*rsa.PrivateKey)
+		if !ok {
+			return "", errs.New(errs.KindInternal, "signing key %s is not RSA", key.ID)
+		}
+		sk = jose.SigningKey{Algorithm: jose.RS256, Key: rk}
+	default:
+		return "", errs.New(errs.KindInvalid, "unsupported alg %s", alg)
 	}
 	signer, err := jose.NewSigner(sk, (&jose.SignerOptions{}).WithType(jose.ContentType(typ)).WithHeader(jose.HeaderKey("kid"), key.ID))
 	if err != nil {
@@ -262,7 +344,7 @@ func (k *Keys) Verify(ctx context.Context, tx port.Tx, realmID, compact string) 
 // VerifyType は Verify に加えて、ヘッダーの typ が typ であることを確かめる（空なら確かめない）。同じ鍵で署名する
 // ID トークン（JWT）と Logout Token（logout+jwt）を取り違えないように使う。
 func (k *Keys) VerifyType(ctx context.Context, tx port.Tx, realmID, compact, typ string) ([]byte, error) {
-	sig, err := jose.ParseSigned(compact, []jose.SignatureAlgorithm{jose.ES256, AlgMLDSA65})
+	sig, err := jose.ParseSigned(compact, []jose.SignatureAlgorithm{jose.ES256, AlgMLDSA65, jose.RS256})
 	if err != nil {
 		return nil, errs.WithCode(errs.KindInvalid, "invalid_token", "malformed jws")
 	}

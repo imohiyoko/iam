@@ -29,8 +29,8 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
 
 ## 既知の差異
 
-- **RS256 で署名しない。** ID トークンは ES256 か ML-DSA-65（9.3）。Basic OP の試験は RS256 を前提にするので、ES256 で登録して
-  実行する
+- **既定では RS256 で署名しない。** ID トークンは ES256 か ML-DSA-65（9.3）。Basic OP の試験は RS256 を前提にするので、
+  フィーチャー `rs256`（ADR 0122）を有効にして連携先を `RS256` で登録するか、ES256 で登録して実行する
 - **PKCE を必ず求める。** 機密の連携先にも S256 を求める（OAuth 2.0 Security BCP）。PKCE を送らない試験は `invalid_request`
   で戻る。試験の設定で PKCE を有効にする
 - **`response_mode` は `query` だけ。** `form_post`・`fragment`、`response_type` の `code` 以外は扱わない
