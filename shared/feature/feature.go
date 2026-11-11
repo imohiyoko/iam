@@ -86,6 +86,8 @@ const (
 	RS256 = "rs256"
 	// JWTAccessTokens はアクセストークンを連携先ごとに JWT（RFC 9068）で出せるようにする（ADR 0123）。
 	JWTAccessTokens = "jwt_access_tokens"
+	// FormPost は認可応答の response_mode=form_post（OAuth 2.0 Form Post Response Mode）を受けるようにする（ADR 0124）。
+	FormPost = "form_post"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

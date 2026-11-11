@@ -579,6 +579,8 @@ GET    /v1/admin/signing-keys
 
 - ブラウザ：サーバーサイドセッション（Cookie）
 - 連携先：**ID トークンは JWT**（9.3）。**アクセストークンは不透明**で、イントロスペクション（RFC 7662）で確認する（ADR 0021）。リソースサーバーは結果を 5.3 の上限以内でキャッシュしてよい
+- フィーチャー `form_post`（既定オフ。ADR 0124）なら、認可要求の `response_mode=form_post` を受け、応答を 1 回限り・1 分で預けて
+  `/oauth2/authorize/form_post` の自動 POST の画面で redirect_uri に返す（ログイン後の応答はそのセッションに結び付ける）
 - フィーチャー `jwt_access_tokens`（既定オフ。ADR 0123）なら、連携先ごとの `jwt_access_tokens` でアクセストークンを RFC 9068 の JWT（`typ: at+jwt`、
   連携先の `id_token_signed_response_alg`）にできる。トークンの行は残し、iam の側の検証と失効は今までどおり即時。JWKS だけで確かめるリソースサーバーには、
   失効が `exp` まで届かない。Token Exchange のトークンは不透明のまま
@@ -1003,6 +1005,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | 自前の API に向けたトークン（5.10、ADR 0112） | オフ | ― | `resource` を authorize では見ず、`/v1/admin/token` では `invalid_target`。リソースの管理 API は `404 resource_indicators_disabled`、発行済みのトークンは使えない。無効化でリソースの登録を消して完了 |
 | API キーのイントロスペクション（5.1、ADR 0120） | オフ | サービスアカウント | API キーのイントロスペクションは `active: false`。持つデータは無い |
 | JWT のアクセストークン（5.1、ADR 0123） | オフ | ― | 連携先に `jwt_access_tokens` を新しく置けず、JWT の形のアクセストークンはどこでも通らない。無効化で連携先の設定を外して完了 |
+| `form_post` の応答（5.1、ADR 0124） | オフ | ― | `response_mode=form_post` を受けず `query` で返し、`/oauth2/authorize/form_post` は 404。Discovery に出さない。持つデータは無い |
 | RS256 の ID トークン（9.3、ADR 0122） | オフ | ― | RS256 の鍵を作らず、JWKS・Discovery に出さない。連携先とローテーションで `RS256` を選べない。無効化で連携先を ES256 に戻し、RS256 の鍵を退役させて完了（`oidc.retired_key_ttl` の間 JWKS に残る） |
 | FAPI 2.0 Security Profile（5.12、ADR 0117） | オフ | ― | 連携先と realm の `fapi2_security_profile` を新しく置けず、realm の設定は効かない（連携先の設定は外れるまで強いる）。前提の `par` と `dpop` か `mtls_client_auth` は登録で確かめる。無効化で連携先と realm の設定を外して完了 |
 | Workload Identity Federation（5.13、ADR 0116） | オフ | サービスアカウント | `/v1/admin/token` の交換は `unsupported_grant_type`、管理 API は `404 workload_identity_disabled`。結び付けで発行したトークンは通らない。無効化で発行者・結び付け・発行したトークンを消して完了 |

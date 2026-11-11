@@ -104,8 +104,15 @@ func newOIDCHandler(a *App) http.Handler {
 	mux.Handle(oidcIntrospect, ops)
 	mux.Handle(oidcRevoke, ops)
 	// 認可要求とその続きはブラウザのセッションを見る。
-	mux.Handle(oidcAuthorize, a.withSession(ops))
+	authorize := http.Handler(ops)
+	if a.formPost {
+		authorize = srv.withFormPostErrors(authorize)
+	}
+	mux.Handle(oidcAuthorize, a.withSession(authorize))
 	mux.Handle(oidcResume, a.withSession(http.HandlerFunc(srv.resume)))
+	if a.formPost {
+		mux.Handle(oidcFormPost, a.withSession(http.HandlerFunc(srv.formPost)))
+	}
 	mux.Handle(oidcUserinfo, a.withDPoPNonce(http.HandlerFunc(srv.userinfo)))
 	mux.HandleFunc(wellKnownAS, srv.authorizationServerMetadata)
 	mux.HandleFunc(wellKnownResource, srv.protectedResourceMetadata)
@@ -240,6 +247,14 @@ func (s *oidcServer) scopes() []string {
 	return provider.Scopes
 }
 
+// responseModes は Discovery の response_modes_supported。フィーチャー form_post なら form_post も（ADR 0124）。
+func (s *oidcServer) responseModes() []string {
+	if s.a.formPost {
+		return []string{string(oidc.ResponseModeQuery), string(responseModeFormPost)}
+	}
+	return []string{string(oidc.ResponseModeQuery)}
+}
+
 func (s *oidcServer) claims() []string {
 	out := []string{"iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "sid", "azp", "org_id", "email", "email_verified"}
 	if s.a.attributes != nil {
@@ -315,7 +330,7 @@ func (s *oidcServer) metadata(ctx context.Context) (discovery, error) {
 		JwksURI:                           s.endpoint(oidcKeys),
 		ScopesSupported:                   s.scopes(),
 		ResponseTypesSupported:            []string{string(oidc.ResponseTypeCode)},
-		ResponseModesSupported:            []string{string(oidc.ResponseModeQuery)},
+		ResponseModesSupported:            s.responseModes(),
 		GrantTypesSupported:               s.grantTypes(),
 		SubjectTypesSupported:             []string{"public"},
 		IDTokenSigningAlgValuesSupported:  algs,
@@ -498,7 +513,11 @@ func (s *oidcServer) VerifyAuthRequest(ctx context.Context, r *op.Request[oidc.A
 	if !pushed && s.parRequired(cl) {
 		return nil, oidc.ErrInvalidRequest().WithDescription("pushed authorization request required")
 	}
-	return s.clientRequest(ctx, r, cl)
+	cr, err := s.clientRequest(ctx, r, cl)
+	if err == nil {
+		noteFormPost(ctx, cr.Data)
+	}
+	return cr, err
 }
 
 // clientRequest は認可要求に連携先を結び付ける。resource（RFC 8707）があれば、この連携先に許したリソースを引いておく
@@ -546,6 +565,16 @@ func errInvalidTarget() *oidc.Error {
 // Authorize は検証済みの認可要求（戻り先・スコープ・response_type は op が確かめた）を受け、ログイン済みなら認可コードを、
 // そうでなければログイン画面への転送を返す。ここで返すエラーは戻り先に転送される。
 func (s *oidcServer) Authorize(ctx context.Context, r *op.ClientRequest[oidc.AuthRequest]) (*op.Redirect, error) {
+	red, err := s.authorize(ctx, r)
+	var oe *oidc.Error
+	if err != nil && s.a.formPost && r.Data.ResponseMode == responseModeFormPost && errors.As(err, &oe) {
+		// op はエラーをクエリで戻り先に転送するので、form_post の要求のエラーはここで画面に回す（ADR 0124）。
+		return s.errorRedirect(ctx, provider.AuthRequest{RedirectURI: r.Data.RedirectURI, State: r.Data.State, ResponseMode: string(responseModeFormPost)}, oe)
+	}
+	return red, err
+}
+
+func (s *oidcServer) authorize(ctx context.Context, r *op.ClientRequest[oidc.AuthRequest]) (*op.Redirect, error) {
 	req, err := s.authRequest(r)
 	if err != nil {
 		return nil, err
@@ -584,7 +613,7 @@ func (s *oidcServer) authRequest(r *op.ClientRequest[oidc.AuthRequest]) (provide
 	if !slices.Contains(d.Scopes, provider.ScopeOpenID) && !credential {
 		return provider.AuthRequest{}, oidc.ErrInvalidScope().WithDescription("the openid scope is required")
 	}
-	if d.ResponseMode != "" && d.ResponseMode != oidc.ResponseModeQuery {
+	if d.ResponseMode != "" && d.ResponseMode != oidc.ResponseModeQuery && (!s.a.formPost || d.ResponseMode != responseModeFormPost) {
 		return provider.AuthRequest{}, oidc.ErrInvalidRequest().WithDescription("response_mode is not supported")
 	}
 	// PKCE は S256 だけで、どの連携先にも求める（OAuth 2.0 Security BCP）。
@@ -631,6 +660,10 @@ func (a *App) loginURL(rid string) string {
 
 // complete はセッションで認可コードを発行し、連携先の戻り先への転送を返す。
 func (s *oidcServer) complete(ctx context.Context, req provider.AuthRequest, au auth) (*op.Redirect, error) {
+	// ログインの間にフィーチャー form_post が止まったら、預かった form_post の要求にはコードを出さない（ADR 0124）。
+	if req.ResponseMode == string(responseModeFormPost) && !s.a.formPost {
+		return s.errorRedirect(ctx, req, oidc.ErrInvalidRequest().WithDescription("response_mode is not supported"))
+	}
 	// active な Org が使えない（停止・有効期間の外など）セッションでは連携先に入れない（4.7）。
 	if len(au.OrgUnavailable) > 0 {
 		return s.errorRedirect(ctx, req, oidc.ErrAccessDenied())
@@ -647,12 +680,11 @@ func (s *oidcServer) complete(ctx context.Context, req provider.AuthRequest, au 
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
-	u, err := op.AuthResponseURL(req.RedirectURI, oidc.ResponseTypeCode, oidc.ResponseMode(req.ResponseMode),
-		&op.CodeResponseType{Code: code, State: req.State}, s.responseEncoder())
+	red, err := s.authResponse(ctx, req, &op.CodeResponseType{Code: code, State: req.State}, au.SID)
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
-	return op.NewRedirect(u), nil
+	return red, nil
 }
 
 // requestedACR は要求された acr の値（ADR 0093）。claims パラメーター（OpenID Connect Core 5.5）の id_token.acr に
@@ -696,11 +728,15 @@ func errUnmetAuthentication() *oidc.Error {
 
 func (s *oidcServer) errorRedirect(ctx context.Context, req provider.AuthRequest, e *oidc.Error) (*op.Redirect, error) {
 	e.State = req.State
-	u, err := op.AuthResponseURL(req.RedirectURI, oidc.ResponseTypeCode, oidc.ResponseMode(req.ResponseMode), e, s.responseEncoder())
+	sid := ""
+	if au, ok := authFrom(ctx); ok {
+		sid = au.SID
+	}
+	red, err := s.authResponse(ctx, req, e, sid)
 	if err != nil {
 		return nil, s.fail(ctx, err)
 	}
-	return op.NewRedirect(u), nil
+	return red, nil
 }
 
 // resume はログイン画面から戻ったブラウザに、預かった認可要求の認可コードを発行する。
