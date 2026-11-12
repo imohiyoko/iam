@@ -80,6 +80,10 @@ func TestStandardClaims(t *testing.T) {
 		}
 	}
 	// 更新でも確かめ、claim を省けば対応付けを外す。
+	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/attributes/mobile_ok", map[string]any{"user_editable": true, "claim": "phone_number_verified"}); code != 400 ||
+		out["error"] != "invalid_attribute" {
+		t.Fatalf("make phone_number_verified user-editable: %d %v", code, out)
+	}
 	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/attributes/department", map[string]any{"in_token": true, "claim": "name"}); code != 409 ||
 		out["error"] != "claim_taken" {
 		t.Fatalf("update to taken claim: %d %v", code, out)

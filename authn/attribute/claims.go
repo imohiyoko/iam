@@ -90,6 +90,10 @@ func (s *Service) checkClaim(ctx context.Context, tx port.Tx, d port.AttributeDe
 	if !s.StandardClaims || !ok || !slices.Contains(c.types, d.Type) {
 		return ErrInvalidDef
 	}
+	// *_verified は iam（運営者）が確かめたことを表す（OIDC Core 5.1）。本人が書ける属性には対応付けない。
+	if strings.HasSuffix(d.Claim, "_verified") && d.UserEditable {
+		return ErrInvalidDef
+	}
 	ds, err := tx.Attributes().ListDefs(ctx, d.RealmID)
 	if err != nil {
 		return err
