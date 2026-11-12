@@ -38,8 +38,8 @@ OpenID Foundation の適合試験（Basic OP、`oidcc-basic-certification-test-p
   フィーチャー acr がオンなら `claims` の `id_token.acr` だけを読む（`claims_parameter_supported` は出さない）
 - **満たせない `acr_values` は任意の要求でも断る。** フィーチャー acr がオンなら、ログインし直しても満たさないとき
   `unmet_authentication_requirements` で戻る（ADR 0093）。`essential` の有無を区別しない
-- **スコープは `openid` と `email` だけ。** `profile`・`address`・`phone` は無視し、そのクレームを返さない
-  （`oidcc-scope-profile` などは警告になる）
+- **スコープは既定で `openid` と `email` だけ。** フィーチャー `standard_claims`（ADR 0127）なら `profile`・`address`・`phone` も扱い、
+  カスタム属性に対応付けたクレームを返す（対応付けの無いクレームは返さないので、`oidcc-scope-profile` などは属性の定義しだいで警告になる）
 - **同意画面を出さない。** 連携先はファーストパーティだけ（ADR 0026）。`prompt=consent` は無視する
 - **動的クライアント登録をしない**（連携先は管理 API で登録する。M5 の対象外）
 - リフレッシュで出す ID トークンには `nonce` を入れない（OIDC Core 12.2。最初の nonce を照合する RP では、リフレッシュの後の

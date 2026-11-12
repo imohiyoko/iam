@@ -254,6 +254,12 @@ var cleaners = map[string]cleaner{
 	// 連携先の JWT のアクセストークンを外す（ADR 0123）。発行済みの JWT は無効化の後は受けない（期限で消える）。
 	// 連携先の offline_access を外し、Offline の認可を消す（ADR 0126）。
 	feature.OfflineAccess: offlineCleaner,
+	// カスタム属性の定義から標準クレームの対応付けを外す（ADR 0127）。属性と値は custom_attributes のもの。
+	feature.StandardClaims: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
+		return eachClaimedAttribute(ctx, tx, -1, time.Time{})
+	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
+		return eachClaimedAttribute(ctx, tx, limit, now)
+	}},
 	feature.JWTAccessTokens: {Count: func(ctx context.Context, tx port.Tx) (int, error) {
 		return eachClient(ctx, tx, -1, func(c port.Client) (bool, error) { return c.JWTAccessTokens, nil })
 	}, Purge: func(ctx context.Context, tx port.Tx, now time.Time, limit int) (int, error) {
@@ -928,6 +934,38 @@ func eachRealmPasskeyPolicy(ctx context.Context, tx port.Tx, limit int, now time
 		r.UpdatedAt = now
 		if err := tx.Realms().Update(ctx, r); err != nil {
 			return n, err
+		}
+	}
+	return n, nil
+}
+
+// eachClaimedAttribute は全 realm の、標準クレームに対応付けたカスタム属性の定義を数え、now が零でなければ対応付けを外す
+// （limit が負なら上限なし。ADR 0127）。
+func eachClaimedAttribute(ctx context.Context, tx port.Tx, limit int, now time.Time) (int, error) {
+	realms, err := tx.Realms().List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range realms {
+		ds, err := tx.Attributes().ListDefs(ctx, r.ID)
+		if err != nil {
+			return n, err
+		}
+		for _, d := range ds {
+			if limit >= 0 && n >= limit {
+				return n, nil
+			}
+			if d.Claim == "" {
+				continue
+			}
+			if !now.IsZero() {
+				d.Claim, d.UpdatedAt = "", now
+				if err := tx.Attributes().UpdateDef(ctx, d); err != nil {
+					return n, err
+				}
+			}
+			n++
 		}
 	}
 	return n, nil

@@ -1952,7 +1952,8 @@ paths:
         `integer`（±2^53−1）・`boolean`・`enum`（`values` に 1〜50 個）。`type` と `encrypted` は後から変えられない。
         `encrypted` なら値をユーザーのデータ鍵で暗号化する（ユーザーの削除で読めなくなる）。`in_token` ならスコープ `attributes` の
         ID トークン・UserInfo の `attributes` クレームに載せる。realm に 50 まで（`409 attribute_limit`）。同じ key は `409 attribute_exists`、
-        定義の誤りは `400 invalid_attribute`。`attribute.defined` を監査ログに残す。
+        定義の誤りは `400 invalid_attribute`。`claim`（ADR 0127）はフィーチャー standard_claims が動いているときだけ置け（オフなら
+        `400 invalid_attribute`）、realm でほかの属性に対応付けた標準クレームは `409 claim_taken`。`attribute.defined` を監査ログに残す。
       requestBody:
         required: true
         content:
@@ -1975,8 +1976,9 @@ paths:
       operationId: updateAttributeDef
       summary: カスタム属性の定義を変える
       description: |
-        権限 `attributes:manage`。`values`・`max_length`・`user_editable`・`in_token` を置き換える（`type` と `encrypted` は変えない）。
-        制約を厳しくしても、既にある値はそのまま（次に書くときに確かめる）。`attribute.updated` を監査ログに残す。
+        権限 `attributes:manage`。`values`・`max_length`・`user_editable`・`in_token`・`claim` を置き換える（`type` と `encrypted` は変えない）。
+        制約を厳しくしても、既にある値はそのまま（次に書くときに確かめる）。`claim` は作成と同じ（`400`・`409 claim_taken`）。
+        `attribute.updated` を監査ログに残す。
       parameters:
         - { name: key, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -1994,6 +1996,7 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
 
   /v1/admin/attributes/{key}:delete:
     post:
@@ -4013,6 +4016,7 @@ components:
         user_editable: { type: boolean }
         in_token: { type: boolean }
         encrypted: { type: boolean }
+        claim: { type: string, description: "対応付けた OIDC の標準クレーム（無ければ省く。ADR 0127）" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AttributeDefInput:
@@ -4026,6 +4030,15 @@ components:
         user_editable: { type: boolean, default: false }
         in_token: { type: boolean, default: false }
         encrypted: { type: boolean, default: false }
+        claim:
+          type: string
+          maxLength: 40
+          description: |
+            対応付ける OIDC の標準クレーム（フィーチャー standard_claims。ADR 0127）。profile のスコープの `name`・`family_name`・
+            `given_name`・`middle_name`・`nickname`・`preferred_username`・`profile`・`picture`・`website`・`gender`・`birthdate`・
+            `zoneinfo`・`locale`、phone の `phone_number`・`phone_number_verified`、address の `address.formatted`・
+            `address.street_address`・`address.locality`・`address.region`・`address.postal_code`・`address.country`。
+            `phone_number_verified` は boolean、ほかは string か enum。空なら対応付けない
     AttributeDefUpdate:
       type: object
       properties:
@@ -4033,6 +4046,15 @@ components:
         max_length: { type: integer, minimum: 1, maximum: 1024 }
         user_editable: { type: boolean, default: false }
         in_token: { type: boolean, default: false }
+        claim:
+          type: string
+          maxLength: 40
+          description: |
+            対応付ける OIDC の標準クレーム（フィーチャー standard_claims。ADR 0127）。profile のスコープの `name`・`family_name`・
+            `given_name`・`middle_name`・`nickname`・`preferred_username`・`profile`・`picture`・`website`・`gender`・`birthdate`・
+            `zoneinfo`・`locale`、phone の `phone_number`・`phone_number_verified`、address の `address.formatted`・
+            `address.street_address`・`address.locality`・`address.region`・`address.postal_code`・`address.country`。
+            `phone_number_verified` は boolean、ほかは string か enum。空なら対応付けない
     UserAttributes:
       type: object
       required: [attributes]

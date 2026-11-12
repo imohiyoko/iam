@@ -1,6 +1,6 @@
 -- name: CreateAttributeDef :exec
-INSERT INTO authn_attribute_defs (realm_id, key, type, enum_values, max_length, user_editable, in_token, encrypted, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO authn_attribute_defs (realm_id, key, type, enum_values, max_length, user_editable, in_token, encrypted, claim, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetAttributeDef :one
 SELECT * FROM authn_attribute_defs WHERE realm_id = ? AND key = ?;
@@ -9,7 +9,7 @@ SELECT * FROM authn_attribute_defs WHERE realm_id = ? AND key = ?;
 SELECT * FROM authn_attribute_defs WHERE realm_id = ? ORDER BY key;
 
 -- name: UpdateAttributeDef :execrows
-UPDATE authn_attribute_defs SET enum_values = ?, max_length = ?, user_editable = ?, in_token = ?, updated_at = ? WHERE realm_id = ? AND key = ?;
+UPDATE authn_attribute_defs SET enum_values = ?, max_length = ?, user_editable = ?, in_token = ?, claim = ?, updated_at = ? WHERE realm_id = ? AND key = ?;
 
 -- name: DeleteAttributeDef :execrows
 DELETE FROM authn_attribute_defs WHERE realm_id = ? AND key = ?;

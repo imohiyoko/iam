@@ -17,7 +17,7 @@ func testAttributes(t *testing.T, h Harness) {
 	s, _ := open(t, h)
 	r, other := id.New(id.Realm), id.New(id.Realm)
 	dept := port.AttributeDef{RealmID: r, Key: "department", Type: port.AttributeString, Values: []string{}, MaxLength: 64, UserEditable: true,
-		InToken: true, CreatedAt: T0, UpdatedAt: T0}
+		InToken: true, Claim: "nickname", CreatedAt: T0, UpdatedAt: T0}
 	tier := port.AttributeDef{RealmID: r, Key: "tier", Type: port.AttributeEnum, Values: []string{"gold", "silver"}, Encrypted: true,
 		CreatedAt: T0, UpdatedAt: T0}
 	u, v := newUser(r), newUser(r)
@@ -31,6 +31,18 @@ func testAttributes(t *testing.T, h Harness) {
 		if err := conflict("same key", repo.CreateDef(ctx, dept)); err != nil {
 			return err
 		}
+		// 標準クレームは realm で 1 つの定義にだけ対応付く（ADR 0127）。別の realm なら同じでよい。
+		nick := port.AttributeDef{RealmID: r, Key: "nick", Type: port.AttributeString, Values: []string{}, MaxLength: 8, Claim: "nickname", CreatedAt: T0, UpdatedAt: T0}
+		if err := conflict("same claim", repo.CreateDef(ctx, nick)); err != nil {
+			return err
+		}
+		nick.RealmID = other
+		if err := repo.CreateDef(ctx, nick); err != nil {
+			return err
+		}
+		if err := repo.DeleteDef(ctx, other, "nick"); err != nil {
+			return err
+		}
 		ds, err := repo.ListDefs(ctx, r)
 		if err != nil || !reflect.DeepEqual(ds, []port.AttributeDef{dept, tier}) {
 			return fmt.Errorf("ListDefs = %+v, %v", ds, err)
@@ -40,13 +52,18 @@ func testAttributes(t *testing.T, h Harness) {
 		}
 		upd := tier
 		upd.Values, upd.MaxLength, upd.UserEditable, upd.InToken, upd.UpdatedAt = []string{"gold"}, 0, true, true, T0.Add(time.Hour)
+		upd.Claim = "nickname"
+		if err := conflict("update to a taken claim", repo.UpdateDef(ctx, upd)); err != nil {
+			return err
+		}
+		upd.Claim = "locale"
 		upd.Type, upd.Encrypted = port.AttributeString, false // 型と暗号化は変わらない
 		if err := repo.UpdateDef(ctx, upd); err != nil {
 			return err
 		}
 		got, err := repo.GetDef(ctx, r, "tier")
 		want := tier
-		want.Values, want.UserEditable, want.InToken, want.UpdatedAt = []string{"gold"}, true, true, T0.Add(time.Hour)
+		want.Values, want.UserEditable, want.InToken, want.Claim, want.UpdatedAt = []string{"gold"}, true, true, "locale", T0.Add(time.Hour)
 		if err != nil || !reflect.DeepEqual(got, want) {
 			return fmt.Errorf("GetDef after update = %+v, %v", got, err)
 		}

@@ -15,7 +15,7 @@ type attributes struct{ q *db.Queries }
 func toAttributeDef(r db.AuthnAttributeDef) (port.AttributeDef, error) {
 	var p times
 	d := port.AttributeDef{RealmID: r.RealmID, Key: r.Key, Type: port.AttributeType(r.Type), MaxLength: int(r.MaxLength),
-		UserEditable: r.UserEditable != 0, InToken: r.InToken != 0, Encrypted: r.Encrypted != 0, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
+		UserEditable: r.UserEditable != 0, InToken: r.InToken != 0, Encrypted: r.Encrypted != 0, Claim: r.Claim, CreatedAt: p.at(r.CreatedAt), UpdatedAt: p.at(r.UpdatedAt)}
 	if err := json.Unmarshal([]byte(r.EnumValues), &d.Values); err != nil {
 		return port.AttributeDef{}, err
 	}
@@ -36,7 +36,7 @@ func (r attributes) CreateDef(ctx context.Context, d port.AttributeDef) error {
 		return err
 	}
 	return mapErr(r.q.CreateAttributeDef(ctx, db.CreateAttributeDefParams{RealmID: d.RealmID, Key: d.Key, Type: string(d.Type), EnumValues: vs,
-		MaxLength: int64(d.MaxLength), UserEditable: boolInt(d.UserEditable), InToken: boolInt(d.InToken), Encrypted: boolInt(d.Encrypted),
+		MaxLength: int64(d.MaxLength), UserEditable: boolInt(d.UserEditable), InToken: boolInt(d.InToken), Encrypted: boolInt(d.Encrypted), Claim: d.Claim,
 		CreatedAt: formatTime(d.CreatedAt), UpdatedAt: formatTime(d.UpdatedAt)}))
 }
 
@@ -56,7 +56,7 @@ func (r attributes) UpdateDef(ctx context.Context, d port.AttributeDef) error {
 		return err
 	}
 	n, err := r.q.UpdateAttributeDef(ctx, db.UpdateAttributeDefParams{EnumValues: vs, MaxLength: int64(d.MaxLength), UserEditable: boolInt(d.UserEditable),
-		InToken: boolInt(d.InToken), UpdatedAt: formatTime(d.UpdatedAt), RealmID: d.RealmID, Key: d.Key})
+		InToken: boolInt(d.InToken), Claim: d.Claim, UpdatedAt: formatTime(d.UpdatedAt), RealmID: d.RealmID, Key: d.Key})
 	return affected(n, err, "attribute")
 }
 

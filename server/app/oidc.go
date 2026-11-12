@@ -14,6 +14,7 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/op"
 	"golang.org/x/text/language"
 
+	"github.com/imohiyoko/iam/authn/attribute"
 	"github.com/imohiyoko/iam/authn/credential"
 	"github.com/imohiyoko/iam/authn/dpop"
 	"github.com/imohiyoko/iam/authn/pat"
@@ -248,6 +249,9 @@ func (s *oidcServer) scopes() []string {
 	if s.a.tokens.Offline {
 		out = append(slices.Clone(out), provider.ScopeOfflineAccess) // ADR 0126
 	}
+	if s.a.attributes != nil && s.a.attributes.StandardClaims {
+		out = append(slices.Clone(out), attribute.ClaimScopes...) // ADR 0127
+	}
 	return out
 }
 
@@ -263,6 +267,9 @@ func (s *oidcServer) claims() []string {
 	out := []string{"iss", "sub", "aud", "exp", "iat", "auth_time", "nonce", "amr", "sid", "azp", "org_id", "email", "email_verified"}
 	if s.a.attributes != nil {
 		out = append(out, "attributes")
+		if s.a.attributes.StandardClaims {
+			out = append(out, attribute.SupportedClaims()...)
+		}
 	}
 	if s.a.acrActive() {
 		out = append(out, "acr")

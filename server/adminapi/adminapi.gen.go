@@ -1301,6 +1301,8 @@ type AdminUserSummaryStatus string
 
 // AttributeDef defines model for AttributeDef.
 type AttributeDef struct {
+	// Claim 対応付けた OIDC の標準クレーム（無ければ省く。ADR 0127）
+	Claim     *string   `json:"claim,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	Encrypted bool      `json:"encrypted"`
 	InToken   bool      `json:"in_token"`
@@ -1321,6 +1323,12 @@ type AttributeDefType string
 
 // AttributeDefInput defines model for AttributeDefInput.
 type AttributeDefInput struct {
+	// Claim 対応付ける OIDC の標準クレーム（フィーチャー standard_claims。ADR 0127）。profile のスコープの `name`・`family_name`・
+	// `given_name`・`middle_name`・`nickname`・`preferred_username`・`profile`・`picture`・`website`・`gender`・`birthdate`・
+	// `zoneinfo`・`locale`、phone の `phone_number`・`phone_number_verified`、address の `address.formatted`・
+	// `address.street_address`・`address.locality`・`address.region`・`address.postal_code`・`address.country`。
+	// `phone_number_verified` は boolean、ほかは string か enum。空なら対応付けない
+	Claim        *string               `json:"claim,omitempty"`
 	Encrypted    *bool                 `json:"encrypted,omitempty"`
 	InToken      *bool                 `json:"in_token,omitempty"`
 	Key          string                `json:"key"`
@@ -1335,6 +1343,12 @@ type AttributeDefInputType string
 
 // AttributeDefUpdate defines model for AttributeDefUpdate.
 type AttributeDefUpdate struct {
+	// Claim 対応付ける OIDC の標準クレーム（フィーチャー standard_claims。ADR 0127）。profile のスコープの `name`・`family_name`・
+	// `given_name`・`middle_name`・`nickname`・`preferred_username`・`profile`・`picture`・`website`・`gender`・`birthdate`・
+	// `zoneinfo`・`locale`、phone の `phone_number`・`phone_number_verified`、address の `address.formatted`・
+	// `address.street_address`・`address.locality`・`address.region`・`address.postal_code`・`address.country`。
+	// `phone_number_verified` は boolean、ほかは string か enum。空なら対応付けない
+	Claim        *string   `json:"claim,omitempty"`
 	InToken      *bool     `json:"in_token,omitempty"`
 	MaxLength    *int      `json:"max_length,omitempty"`
 	UserEditable *bool     `json:"user_editable,omitempty"`
@@ -9380,6 +9394,20 @@ func (response UpdateAttributeDef404JSONResponse) VisitUpdateAttributeDefRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDef409JSONResponse Error
+
+func (response UpdateAttributeDef409JSONResponse) VisitUpdateAttributeDefResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }

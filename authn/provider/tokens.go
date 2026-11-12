@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -304,6 +305,14 @@ func (t *Tokens) userClaims(ctx context.Context, tx port.Tx, g port.Grant) (map[
 		if len(vs) > 0 {
 			claims["attributes"] = vs
 		}
+	}
+	if t.Attributes != nil {
+		// 標準クレーム（profile・phone・address。フィーチャー standard_claims。ADR 0127）。
+		std, err := t.Attributes.Claims(ctx, tx, u, g.Scopes)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(claims, std)
 	}
 	if !slices.Contains(g.Scopes, ScopeEmail) {
 		return claims, nil

@@ -19,6 +19,7 @@ type AuthnAttributeDef struct {
 	Encrypted    int64
 	CreatedAt    string
 	UpdatedAt    string
+	Claim        string
 }
 
 type AuthnClient struct {

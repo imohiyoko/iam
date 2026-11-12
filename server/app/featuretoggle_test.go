@@ -317,7 +317,7 @@ func TestDisableNestedGroupsWithData(t *testing.T) {
 
 // custom_attributes は値と定義を消す。
 func TestDisableCustomAttributesWithData(t *testing.T) {
-	l := allFeaturesEnv(t)
+	l := allFeaturesEnvWithout(t, feature.CustomAttributes) // standard_claims は依存するので外す
 	_, owner := l.operator(t, "root@example.com", role.RealmOwner)
 	if code, out := l.adminDo(t, "POST", owner, "/v1/admin/attributes", map[string]any{"key": "tier", "type": "string"}); code != 201 {
 		t.Fatalf("define: %d %v", code, out)

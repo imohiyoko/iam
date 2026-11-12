@@ -532,7 +532,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.cibaHTTP = eventsub.PublicClient(cfg.Dev)
 	}
 	if plan.IsActive(feature.CustomAttributes) {
-		a.attributes = &attribute.Service{Clock: d.Clock, Crypter: a.pii}
+		a.attributes = &attribute.Service{Clock: d.Clock, Crypter: a.pii, StandardClaims: plan.IsActive(feature.StandardClaims)}
 	}
 	if plan.IsActive(feature.EventSubscriptions) {
 		// 公開でないアドレスへの送信は開発ビルドだけ許す（ADR 0100）。

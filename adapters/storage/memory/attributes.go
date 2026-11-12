@@ -35,8 +35,24 @@ func (r attributes) CreateDef(_ context.Context, d port.AttributeDef) error {
 	if _, ok := r.t.s.attrDefs[k]; ok {
 		return errs.New(errs.KindConflict, "attribute exists")
 	}
+	if r.claimTaken(d) {
+		return errs.New(errs.KindConflict, "claim taken")
+	}
 	setKey(r.t, r.t.s.attrDefs, k, cloneDef(d))
 	return nil
+}
+
+// claimTaken は、同じ realm のほかの定義が同じ標準クレームに対応付いているか（SQL の部分一意索引と同じ）。
+func (r attributes) claimTaken(d port.AttributeDef) bool {
+	if d.Claim == "" {
+		return false
+	}
+	for _, o := range r.t.s.attrDefs {
+		if o.RealmID == d.RealmID && o.Key != d.Key && o.Claim == d.Claim {
+			return true
+		}
+	}
+	return false
 }
 
 func (r attributes) GetDef(_ context.Context, realmID, key string) (port.AttributeDef, error) {
@@ -64,7 +80,10 @@ func (r attributes) UpdateDef(_ context.Context, d port.AttributeDef) error {
 	if !ok {
 		return errs.New(errs.KindNotFound, "attribute")
 	}
-	old.Values, old.MaxLength, old.UserEditable, old.InToken, old.UpdatedAt = d.Values, d.MaxLength, d.UserEditable, d.InToken, d.UpdatedAt
+	if r.claimTaken(d) {
+		return errs.New(errs.KindConflict, "claim taken")
+	}
+	old.Values, old.MaxLength, old.UserEditable, old.InToken, old.Claim, old.UpdatedAt = d.Values, d.MaxLength, d.UserEditable, d.InToken, d.Claim, d.UpdatedAt
 	setKey(r.t, r.t.s.attrDefs, k, cloneDef(old))
 	return nil
 }
