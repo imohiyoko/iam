@@ -160,6 +160,10 @@ func (s *Service) Update(ctx context.Context, tx port.Tx, realmID string, in Def
 	if err != nil {
 		return port.AttributeDef{}, err
 	}
+	// *_verified は定義を作るときにだけ対応付ける。既にある値は本人が書いたものかもしれない（ADR 0127）。
+	if verifiedClaim(in.Claim) && in.Claim != d.Claim {
+		return port.AttributeDef{}, ErrInvalidDef
+	}
 	d.Values, d.MaxLength, d.UserEditable, d.InToken, d.UpdatedAt = slices.Clone(in.Values), in.MaxLength, in.UserEditable, in.InToken, s.Clock.Now()
 	d.Claim = in.Claim
 	if err := check(&d); err != nil {

@@ -81,6 +81,9 @@ func SupportedClaims() []string {
 	return out
 }
 
+// verifiedClaim は、iam（運営者）が確かめたことを表すクレーム（*_verified）かを返す。
+func verifiedClaim(c string) bool { return strings.HasSuffix(c, "_verified") }
+
 // checkClaim は定義の claim を確かめる（フィーチャー、名前、型、realm での重複）。
 func (s *Service) checkClaim(ctx context.Context, tx port.Tx, d port.AttributeDef) error {
 	if d.Claim == "" {
@@ -91,7 +94,7 @@ func (s *Service) checkClaim(ctx context.Context, tx port.Tx, d port.AttributeDe
 		return ErrInvalidDef
 	}
 	// *_verified は iam（運営者）が確かめたことを表す（OIDC Core 5.1）。本人が書ける属性には対応付けない。
-	if strings.HasSuffix(d.Claim, "_verified") && d.UserEditable {
+	if verifiedClaim(d.Claim) && d.UserEditable {
 		return ErrInvalidDef
 	}
 	ds, err := tx.Attributes().ListDefs(ctx, d.RealmID)

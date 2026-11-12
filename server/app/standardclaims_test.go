@@ -84,6 +84,14 @@ func TestStandardClaims(t *testing.T) {
 		out["error"] != "invalid_attribute" {
 		t.Fatalf("make phone_number_verified user-editable: %d %v", code, out)
 	}
+	// 本人が書けた属性を後から *_verified に対応付けることもできない（既にある値は本人が書いたものかもしれない）。
+	if code, out := define(map[string]any{"key": "self_ok", "type": "boolean", "user_editable": true}); code != 201 {
+		t.Fatalf("define self_ok: %d %v", code, out)
+	}
+	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/attributes/self_ok", map[string]any{"claim": "phone_number_verified"}); code != 400 ||
+		out["error"] != "invalid_attribute" {
+		t.Fatalf("map an existing attribute to phone_number_verified: %d %v", code, out)
+	}
 	if code, out := l.adminDo(t, "PUT", owner, "/v1/admin/attributes/department", map[string]any{"in_token": true, "claim": "name"}); code != 409 ||
 		out["error"] != "claim_taken" {
 		t.Fatalf("update to taken claim: %d %v", code, out)
@@ -146,7 +154,7 @@ func TestStandardClaims(t *testing.T) {
 	}
 	err = l.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		ds, err := tx.Attributes().ListDefs(ctx, l.a.realm.ID)
-		if err != nil || len(ds) != 7 {
+		if err != nil || len(ds) != 8 {
 			t.Fatalf("defs after disable: %+v %v", ds, err)
 		}
 		for _, d := range ds {

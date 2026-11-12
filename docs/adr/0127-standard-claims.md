@@ -16,7 +16,7 @@ iam のスコープは `openid` と `email` だけで、`profile`・`phone`・`a
 - カスタム属性の定義に `claim`（標準クレームの名前）を足す。値はカスタム属性のもので、ユーザーに新しい項目は足さない
   - profile：`name`・`family_name`・`given_name`・`middle_name`・`nickname`・`preferred_username`・`profile`・`picture`・`website`・
     `gender`・`birthdate`・`zoneinfo`・`locale`（string か enum）
-  - phone：`phone_number`（string か enum）、`phone_number_verified`（boolean。iam が確かめたことを表すので、本人が書ける属性（user_editable）には対応付けない）
+  - phone：`phone_number`（string か enum）、`phone_number_verified`（boolean。iam が確かめたことを表すので、本人が書ける属性（user_editable）には対応付けない。既にある値は本人が書いたものかもしれないので、対応付けは定義を作るときだけで、後から付けることはできない）
   - address：`address.formatted`・`address.street_address`・`address.locality`・`address.region`・`address.postal_code`・
     `address.country`（string か enum）。ID トークン・UserInfo では `address` のオブジェクトにまとめる
   - `email`・`email_verified`・`sub`・`updated_at` は対応付けない（iam が持つ値か、属性から作れない値）
