@@ -80,17 +80,20 @@ func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Vali
 	_, revoke, _ := bindingActions(obs.Found)
 	var found []sessionbinding.Anomaly
 	var notify bool
+	var learned *sessionbinding.Visit
 	var changed []string
 	var applied map[string]int
 	err = a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		found, changed, applied = slices.Clone(obs.Found), nil, nil
+		found, changed, applied, learned = slices.Clone(obs.Found), nil, nil, nil
 		if obs.Visit != nil {
-			// 一覧と比べて足す。一覧を読めない（鍵を消したユーザーなど）ときは、ほかの兆候の記録を止めない。
-			learned, err := a.binding.Learn(ctx, tx, a.realm.ID, v.PrincipalID, *obs.Visit)
+			// 一覧と比べて足す。一覧を読めない（鍵を取り出せないなど）ときは、ほかの兆候の記録を止めず、次の要求で比べ直す。
+			more, err := a.binding.Learn(ctx, tx, a.realm.ID, v.PrincipalID, *obs.Visit)
 			if err != nil {
 				a.deps.Logger.WarnContext(ctx, "session binding profile", "session_id", v.SessionID, "error", err)
+			} else {
+				learned = obs.Visit
 			}
-			found = append(found, learned...)
+			found = append(found, more...)
 		}
 		var raise map[string]int
 		raise, revoke, notify = bindingActions(found)
@@ -127,7 +130,7 @@ func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Vali
 	}
 	// 要求が切られても、記録できたことは覚える（要求の ctx の取り消しに巻き込まない）。
 	detached := context.WithoutCancel(ctx)
-	a.binding.Confirm(detached, a.realm.ID, v.SID, found, obs.Visit)
+	a.binding.Confirm(detached, a.realm.ID, v.SID, found, learned)
 	a.sessions.ForgetIDs(detached, a.realm.ID, changed)
 	if notify {
 		// 通知は別のトランザクションにし、失敗しても記録・リスク・失効を取り消さない（ログに残すだけ）。

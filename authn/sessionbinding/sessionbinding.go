@@ -183,9 +183,9 @@ type state struct {
 	Nets    []seen `json:"n,omitempty"`
 	// Reported は知らせ済みの兆候（系列ごとに 1 回だけ記録し、アクションを取る）。
 	Reported []Signal `json:"r,omitempty"`
-	// Pending は普段の接続元の一覧にまだ足せていないネットワークの ID。足せる（記録のトランザクションがコミットする）まで、
-	// 同じネットワークからの要求でも Visit を返す。
-	Pending string `json:"p,omitempty"`
+	// Pending は普段の接続元の一覧にまだ足せていないネットワークの ID。足せる（一覧と比べ、記録のトランザクションがコミットする）
+	// まで、同じネットワークからの要求でも Visit を返す。別のネットワークに移っても残す（数は Nets と同じに抑える）。
+	Pending []string `json:"p,omitempty"`
 }
 
 func key(realmID, sid string) string { return "sesbind:v1:" + realmID + ":" + sid }
@@ -302,10 +302,13 @@ func (g *Guard) Observe(ctx context.Context, in Request) (Observation, error) {
 		}
 		changed, added := g.touch(&st, id, now)
 		dirty = changed || dirty
-		if added && g.ProfilesEnabled() && st.Pending != id {
-			st.Pending, dirty = id, true
+		if added && g.ProfilesEnabled() && !slices.Contains(st.Pending, id) {
+			st.Pending, dirty = append(st.Pending, id), true
+			if limit := max(g.Config.MaxNetworks, 1) * 2; len(st.Pending) > limit {
+				st.Pending = st.Pending[len(st.Pending)-limit:]
+			}
 		}
-		if st.Pending == id && g.ProfilesEnabled() {
+		if g.ProfilesEnabled() && slices.Contains(st.Pending, id) {
 			visit = &Visit{Network: cidr(ip), ASN: loc.ASN, Country: loc.Country, Family: uaFamily(in.UserAgent), UserAgent: in.UserAgent,
 				Reported: slices.Clone(st.Reported), net: id}
 		}
@@ -362,7 +365,8 @@ func (g *Guard) distinct(st state, now time.Time) int {
 	return n
 }
 
-// Confirm は found を知らせ済みにし、visit を一覧に足し終えたことにする（アクションと一覧を記録できた後に呼ぶ）。書けなければ
+// Confirm は found を知らせ済みにし、visit を一覧に足し終えたことにする（アクションと一覧を記録できた後に呼ぶ。一覧と比べられ
+// なかったときは visit に nil を渡し、次の要求で比べ直す）。書けなければ
 // 次の要求でもう一度見つかる（記録とアクションが重なり、一覧の回数が 1 つ多くなるだけで、リスクの引き上げと失効は同じ結果になる）。
 func (g *Guard) Confirm(ctx context.Context, realmID, sid string, found []Anomaly, visit *Visit) {
 	if len(found) == 0 && visit == nil {
@@ -383,8 +387,8 @@ func (g *Guard) Confirm(ctx context.Context, realmID, sid string, found []Anomal
 			st.Reported = append(st.Reported, x.Signal)
 		}
 	}
-	if visit != nil && st.Pending == visit.net {
-		st.Pending = ""
+	if visit != nil {
+		st.Pending = slices.DeleteFunc(st.Pending, func(s string) bool { return s == visit.net })
 	}
 	if b, err := json.Marshal(st); err == nil {
 		if err := g.Cache.Set(ctx, k, b, g.Config.TTL); err != nil {

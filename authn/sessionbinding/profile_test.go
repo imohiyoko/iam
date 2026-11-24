@@ -72,9 +72,20 @@ func TestVisitPendingUntilConfirmed(t *testing.T) {
 	if after, _ := g.Observe(ctx, in); after.Visit != nil {
 		t.Fatalf("visit after confirm: %+v", after.Visit)
 	}
-	// 別のネットワークに移れば、また Visit を返す。
-	if moved, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "198.51.100.1", UserAgent: "a"}); moved.Visit == nil {
+	// 別のネットワークに移れば、また Visit を返す。足せないまま（B）さらに移り（C を足し）、B に戻っても比べ直す。
+	b := Request{RealmID: "r", SID: "s", IP: "198.51.100.1", UserAgent: "a"}
+	if moved, _ := g.Observe(ctx, b); moved.Visit == nil {
 		t.Fatal("no visit after moving")
+	}
+	c, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "203.0.113.1", UserAgent: "a"})
+	g.Confirm(ctx, "r", "s", nil, c.Visit)
+	if back, _ := g.Observe(ctx, b); back.Visit == nil || back.Visit.Network != "198.51.100.0/24" {
+		t.Fatalf("no visit back on the pending network: %+v", back.Visit)
+	}
+	// 比べられなかった（Confirm に nil）なら、まだ返す。
+	g.Confirm(ctx, "r", "s", nil, nil)
+	if again, _ := g.Observe(ctx, b); again.Visit == nil {
+		t.Fatal("visit dropped without learning")
 	}
 	// 一覧を作らない設定なら返さない。
 	g.Config.Profile.Enabled = false
