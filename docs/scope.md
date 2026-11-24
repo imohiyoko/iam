@@ -49,6 +49,7 @@ iam が最終的に持つ機能の一覧（ADR [0089](adr/0089-enterprise-full-s
 | `acr`・`acr_values`・AAL | S（OIDC、SP 800-63B） | ✅ | フィーチャー acr（ADR 0093）。AAL3・`phrh` は、ハードウェアの CA を設定した X.509（ADR 0103）で届く |
 | リスクに応じた追加認証 | P | ✅ | フィーチャー `login_risk`（ADR 0105）。端末・国・ASN・impossible travel を点数にし、`risk_at_most` と `aal_at_least` で step-up |
 | 新しい端末・異常な場所の検知 | P | ✅ | フィーチャー `device_recognition`・`login_risk`（ADR 0105）。通知 `new_device_login`、警告 `new_device`、端末の一覧と削除。GeoIP の mmdb のアダプタは後続 |
+| セッションの乗っ取りの検知 | P | ✅ | フィーチャー `session_binding`（ADR 0128）。ログインの後の端末の Cookie・User-Agent・国・ASN の変化とネットワークの渡り歩き、普段の接続元（CIDR・ASN）とブラウザの一覧に無いもの。記録・リスクの引き上げ・失効・通知 |
 | ブルートフォース対策・ロックアウト | P C | ✅ | レートリミットと、フィーチャー `account_lockout`（ADR 0105）の接続元を問わない待ち時間とロック、運営者の解除 |
 | ボット対策（CAPTCHA など） | P | △ | フィーチャー `bot_protection`（ADR 0105）。siteverify の検証のポート。ホスト型の画面のウィジェットは後続 |
 | Shared Signals（CAEP、RISC） | S | ✅ | フィーチャー `ssf_transmitter`・`ssf_receiver`（ADR 0118）。SSF 1.0 の送信側（push・poll）と受信側（許した動作だけ）。端末の準拠状態は入力として置くだけ |

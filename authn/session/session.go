@@ -76,6 +76,8 @@ const (
 	// ReasonSuspended と ReasonValidity は、ユーザーの停止・有効期間の外でログインの系列を終えたこと（EndUserTx。失効はしない）。
 	ReasonSuspended = "user_suspended"
 	ReasonValidity  = "outside_validity"
+	// ReasonAnomaly はセッションが別の端末・接続元から使われた兆候で、ログインの系列を失効させたこと（ADR 0128）。
+	ReasonAnomaly = "session_anomaly"
 )
 
 // 2要素目の種類（LoginResult の second_factor_methods）。
@@ -1338,6 +1340,27 @@ func (m *Manager) PrincipalRevokedTx(ctx context.Context, tx port.Tx, realmID, u
 		keepSID = s.SID
 	}
 	return h.PrincipalRevoked(ctx, tx, realmID, userID, keepSID, reason, requestID)
+}
+
+// RevokeLineageTx は sessionID のログインの系列の、まだ失効していないセッション（ID の入れ替えの猶予の中の古い ID を含む）を
+// すべて失効させ、失効させた ID を返す（セッションの接続元の監視。ADR 0128）。確定の後に ForgetIDs でキャッシュを消す。
+func (m *Manager) RevokeLineageTx(ctx context.Context, tx port.Tx, realmID, sessionID, reason string, actor audit.Actor, requestID string) ([]string, error) {
+	targets, err := m.lineage(ctx, tx, realmID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	now := m.Clock.Now()
+	var ids []string
+	for _, s := range targets {
+		if (s.RevokedAt != nil && !now.Before(*s.RevokedAt)) || !now.Before(s.ExpiresAt) {
+			continue
+		}
+		if err := m.revokeInTx(ctx, tx, s, reason, actor, requestID); err != nil {
+			return nil, err
+		}
+		ids = append(ids, s.ID)
+	}
+	return ids, nil
 }
 
 // ForgetIDs はセッションの検証結果のキャッシュを消す（呼び出し側のトランザクションで失効させた後に呼ぶ）。

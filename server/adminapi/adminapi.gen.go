@@ -2947,6 +2947,47 @@ type UserLockout struct {
 	SecondFactor LockoutState `json:"second_factor"`
 }
 
+// UserNetwork defines model for UserNetwork.
+type UserNetwork struct {
+	// Asn GeoIP で引けた ASN
+	Asn *int64 `json:"asn,omitempty"`
+
+	// Browsers このネットワークで使われたブラウザの種類（最後に見た時刻の新しい順）
+	Browsers []UserNetworkBrowser `json:"browsers"`
+
+	// Cidr 接続元の CIDR（IPv4 は /24、IPv6 は /64）
+	Cidr  string `json:"cidr"`
+	Count int    `json:"count"`
+
+	// Country GeoIP で引けた国（ISO 3166-1 alpha-2）
+	Country   *string   `json:"country,omitempty"`
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
+}
+
+// UserNetworkBrowser defines model for UserNetworkBrowser.
+type UserNetworkBrowser struct {
+	Count int `json:"count"`
+
+	// Family User-Agent から版の数字を除いたもの（比べる単位）
+	Family    string    `json:"family"`
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
+
+	// UserAgent 最後に見た User-Agent
+	UserAgent string `json:"user_agent"`
+}
+
+// UserNetworks defines model for UserNetworks.
+type UserNetworks struct {
+	// Established 一覧が育ったか（observations が profile.min_observations 以上）。育つまでは unfamiliar_* を見ない
+	Established bool          `json:"established"`
+	Networks    []UserNetwork `json:"networks"`
+
+	// Observations 数えた回数の合計
+	Observations int `json:"observations"`
+}
+
 // UserPasskey defines model for UserPasskey.
 type UserPasskey struct {
 	// Aaguid 認証器のモデルの ID（attested でなければ認証器の自己申告）
@@ -4066,6 +4107,9 @@ type ServerInterface interface {
 	// ListUserMemberships ユーザーの Membership の一覧（終了したものも含む。ADR 0097）
 	// (GET /v1/admin/users/{id}/memberships)
 	ListUserMemberships(w http.ResponseWriter, r *http.Request, id string)
+	// GetUserNetworks ユーザーが普段使う接続元と、そこで使うブラウザの種類（フィーチャー session_binding。ADR 0128）
+	// (GET /v1/admin/users/{id}/networks)
+	GetUserNetworks(w http.ResponseWriter, r *http.Request, id string)
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)
 	RevokeUserPassword(w http.ResponseWriter, r *http.Request, id string)
@@ -7822,6 +7866,32 @@ func (siw *ServerInterfaceWrapper) ListUserMemberships(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GetUserNetworks operation middleware
+func (siw *ServerInterfaceWrapper) GetUserNetworks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUserNetworks(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RevokeUserPassword operation middleware
 func (siw *ServerInterfaceWrapper) RevokeUserPassword(w http.ResponseWriter, r *http.Request) {
 
@@ -8812,6 +8882,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:login_link", wrapper.IssueLoginLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:recovery_link", wrapper.IssueRecoveryLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/lockout", wrapper.GetUserLockout)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/networks", wrapper.GetUserNetworks)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}:unlock", wrapper.UnlockUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/v1/admin/users/{id}/credentials", wrapper.ListUserCredentials)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/v1/admin/users/{id}/credentials/{credential_id}:revoke", wrapper.RevokeUserCredential)
@@ -19307,6 +19378,70 @@ func (response ListUserMemberships404JSONResponse) VisitListUserMembershipsRespo
 	return err
 }
 
+type GetUserNetworksRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetUserNetworksResponseObject interface {
+	VisitGetUserNetworksResponse(w http.ResponseWriter) error
+}
+
+type GetUserNetworks200JSONResponse UserNetworks
+
+func (response GetUserNetworks200JSONResponse) VisitGetUserNetworksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserNetworks401JSONResponse struct{ ErrorJSONResponse }
+
+func (response GetUserNetworks401JSONResponse) VisitGetUserNetworksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserNetworks403JSONResponse Error
+
+func (response GetUserNetworks403JSONResponse) VisitGetUserNetworksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserNetworks404JSONResponse Error
+
+func (response GetUserNetworks404JSONResponse) VisitGetUserNetworksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RevokeUserPasswordRequestObject struct {
 	Id string `json:"id"`
 }
@@ -22261,6 +22396,9 @@ type StrictServerInterface interface {
 	// ListUserMemberships ユーザーの Membership の一覧（終了したものも含む。ADR 0097）
 	// (GET /v1/admin/users/{id}/memberships)
 	ListUserMemberships(ctx context.Context, request ListUserMembershipsRequestObject) (ListUserMembershipsResponseObject, error)
+	// GetUserNetworks ユーザーが普段使う接続元と、そこで使うブラウザの種類（フィーチャー session_binding。ADR 0128）
+	// (GET /v1/admin/users/{id}/networks)
+	GetUserNetworks(ctx context.Context, request GetUserNetworksRequestObject) (GetUserNetworksResponseObject, error)
 	// RevokeUserPassword ユーザーのパスワードを無効化する（フィーチャー password）
 	// (POST /v1/admin/users/{id}/password:revoke)
 	RevokeUserPassword(ctx context.Context, request RevokeUserPasswordRequestObject) (RevokeUserPasswordResponseObject, error)
@@ -26347,6 +26485,32 @@ func (sh *strictHandler) ListUserMemberships(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListUserMembershipsResponseObject); ok {
 		if err := validResponse.VisitListUserMembershipsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUserNetworks operation middleware
+func (sh *strictHandler) GetUserNetworks(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetUserNetworksRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUserNetworks(ctx, request.(GetUserNetworksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUserNetworks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUserNetworksResponseObject); ok {
+		if err := validResponse.VisitGetUserNetworksResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

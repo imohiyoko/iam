@@ -50,6 +50,7 @@ import (
 	"github.com/imohiyoko/iam/authn/samlidp"
 	"github.com/imohiyoko/iam/authn/serviceaccount"
 	"github.com/imohiyoko/iam/authn/session"
+	"github.com/imohiyoko/iam/authn/sessionbinding"
 	"github.com/imohiyoko/iam/authn/ssf"
 	"github.com/imohiyoko/iam/authn/vci"
 	"github.com/imohiyoko/iam/authn/warning"
@@ -162,6 +163,8 @@ type App struct {
 	// 動いていなければ nil。
 	lockout *lockout.Guard
 	devices *device.Service
+	// binding はログインの後のセッションの端末・接続元の監視（フィーチャー session_binding。ADR 0128）。nil なら見ない。
+	binding *sessionbinding.Guard
 	bot     *botcheck.Guard
 	links   *loginlink.Service
 	// recovery はリカバリーコードと復旧の完了（4.12）。
@@ -633,6 +636,7 @@ func (a *App) assemble(ctx context.Context, realm port.Realm, rs realmSettings, 
 		a.credentials.Directory = a.ldap.UserBy
 	}
 	a.loginProtection(cfg, d, plan)
+	a.sessionBinding(cfg, d, plan)
 	a.credentials.Lockout = a.lockout
 	if a.ciba != nil {
 		// 本人の端末（プッシュの承認）が CIBA の要求に答えたら、要求に判断を記録する（ADR 0114）。

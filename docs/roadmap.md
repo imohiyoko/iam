@@ -520,7 +520,13 @@ Group のネスト、Org 階層（M7）。
 - [x] フィーチャー `bot_protection`：ポート `BotVerifier`（汎用の siteverify の HTTP と開発用のアダプタ）。ログインと復旧の入口で、
   いつも（`always`）か接続元の失敗が続いた後（`suspicious`）に `IAM-Bot-Token` を求め、確かめられなければ `403`（fail closed）
 - [x] memory・SQLite・PostgreSQL の契約テスト、GeoIP の CSV の解析のファジング、HTTP の通しのテスト
+- [x] フィーチャー `session_binding`（ADR 0128）：ログインの後に同じセッションが別の端末の Cookie・User-Agent・国・ASN から
+  使われる、短い時間にネットワークを渡り歩くことを見つけ、`session.anomaly_detected` に残し、リスクの引き上げ（step-up）・
+  系列の失効・本人への通知 `suspicious_session` を兆候ごとに選べる。ユーザーが普段使う接続元（CIDR・ASN・国）とブラウザの種類の
+  一覧を育て、一覧に無いものを `unfamiliar_network`・`unfamiliar_browser` にする。運営者は一覧を API で見る
 - ホスト型のログイン画面の CAPTCHA のウィジェット、MaxMind の mmdb の GeoIP のアダプタ、ロックの本人への通知
+- 普段の接続元の一覧をログインのリスク（`login_risk`）の材料にする。本人が自分の一覧を見る API
+- `session.anomaly_detected` を SSF の CAEP（`session-revoked`・`credential-change` など）に対応付けて連携先に送る
 
 #### Kerberos / SPNEGO（ADR 0107）
 

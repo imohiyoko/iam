@@ -96,3 +96,45 @@ func (r knownDevices) Purge(_ context.Context, limit int) (int, error) {
 	}
 	return len(keys), nil
 }
+
+// networkProfiles はユーザーが普段使う接続元の一覧（ADR 0128）。
+type networkProfiles struct{ t *tx }
+
+func profileKey(realmID, userID string) string { return realmID + "\x00" + userID }
+
+func (r networkProfiles) Get(_ context.Context, realmID, userID string) (port.NetworkProfile, error) {
+	p, ok := r.t.s.networkProfiles[profileKey(realmID, userID)]
+	if !ok {
+		return port.NetworkProfile{}, errs.New(errs.KindNotFound, "network profile")
+	}
+	p.Data = bytes.Clone(p.Data)
+	return p, nil
+}
+
+func (r networkProfiles) Put(_ context.Context, p port.NetworkProfile) error {
+	p.Data = bytes.Clone(p.Data)
+	setKey(r.t, r.t.s.networkProfiles, profileKey(p.RealmID, p.UserID), p)
+	return nil
+}
+
+func (r networkProfiles) Delete(_ context.Context, realmID, userID string) error {
+	deleteKey(r.t, r.t.s.networkProfiles, profileKey(realmID, userID))
+	return nil
+}
+
+func (r networkProfiles) Count(context.Context) (int, error) { return len(r.t.s.networkProfiles), nil }
+
+func (r networkProfiles) Purge(_ context.Context, limit int) (int, error) {
+	keys := make([]string, 0, len(r.t.s.networkProfiles))
+	for k := range r.t.s.networkProfiles {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > limit {
+		keys = keys[:max(limit, 0)]
+	}
+	for _, k := range keys {
+		deleteKey(r.t, r.t.s.networkProfiles, k)
+	}
+	return len(keys), nil
+}

@@ -92,6 +92,8 @@ const (
 	OfflineAccess = "offline_access"
 	// StandardClaims はカスタム属性を OIDC の標準クレーム（profile・phone・address のスコープ）に対応付ける（ADR 0127）。
 	StandardClaims = "standard_claims"
+	// SessionBinding はログインの後のセッションの端末・接続元の変化を見て、乗っ取りの兆候を見つける（ADR 0128）。
+	SessionBinding = "session_binding"
 )
 
 // Feature はバイナリに含まれるフィーチャーの宣言。

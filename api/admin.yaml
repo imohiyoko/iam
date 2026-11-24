@@ -193,6 +193,28 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/admin/users/{id}/networks:
+    get:
+      operationId: getUserNetworks
+      summary: ユーザーが普段使う接続元と、そこで使うブラウザの種類（フィーチャー session_binding。ADR 0128）
+      description: |
+        権限 `users:read` と `audit:read_client_data`（接続元の CIDR と User-Agent は、監査ログの接続元と同じく個人情報）。
+        監査ログ `user.pii_read`（fields は `networks`）。
+        フィーチャーが動いていないか、一覧を作らない設定（`security.session_binding.profile.enabled: false`）なら 404。
+        ログインの系列が新しいネットワークから使われるたびに数えたもので、最後に見た時刻の新しい順。CIDR は IPv4 は /24、IPv6 は /64。
+        まだ記録が無ければ空の一覧。
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: 最後に見た時刻の新しい順
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserNetworks" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/admin/users/{id}:unlock:
     post:
       operationId: unlockUser
@@ -4327,6 +4349,40 @@ components:
         locked: { type: boolean, description: どちらかがロックか待ち時間の間か }
         login_id: { $ref: "#/components/schemas/LockoutState" }
         second_factor: { $ref: "#/components/schemas/LockoutState" }
+    UserNetworks:
+      type: object
+      required: [observations, established, networks]
+      properties:
+        observations: { type: integer, description: 数えた回数の合計 }
+        established:
+          type: boolean
+          description: 一覧が育ったか（observations が profile.min_observations 以上）。育つまでは unfamiliar_* を見ない
+        networks:
+          type: array
+          items: { $ref: "#/components/schemas/UserNetwork" }
+    UserNetwork:
+      type: object
+      required: [cidr, count, first_seen, last_seen, browsers]
+      properties:
+        cidr: { type: string, description: 接続元の CIDR（IPv4 は /24、IPv6 は /64） }
+        asn: { type: integer, format: int64, description: GeoIP で引けた ASN }
+        country: { type: string, description: GeoIP で引けた国（ISO 3166-1 alpha-2） }
+        count: { type: integer }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        browsers:
+          type: array
+          description: このネットワークで使われたブラウザの種類（最後に見た時刻の新しい順）
+          items: { $ref: "#/components/schemas/UserNetworkBrowser" }
+    UserNetworkBrowser:
+      type: object
+      required: [family, user_agent, count, first_seen, last_seen]
+      properties:
+        family: { type: string, description: User-Agent から版の数字を除いたもの（比べる単位） }
+        user_agent: { type: string, description: 最後に見た User-Agent }
+        count: { type: integer }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
     LockoutState:
       type: object
       required: [failures, level]

@@ -48,6 +48,7 @@ import (
 	_ "github.com/imohiyoko/iam/features/saml"
 	_ "github.com/imohiyoko/iam/features/samlidp"
 	_ "github.com/imohiyoko/iam/features/serviceaccounts"
+	_ "github.com/imohiyoko/iam/features/sessionbinding"
 	_ "github.com/imohiyoko/iam/features/sms"
 	_ "github.com/imohiyoko/iam/features/ssfreceiver"
 	_ "github.com/imohiyoko/iam/features/ssftransmitter"
