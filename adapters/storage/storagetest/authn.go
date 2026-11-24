@@ -37,6 +37,7 @@ var authnTests = []struct {
 	{"CredentialDeliveryMethods", testCredentialDeliveryMethods},
 	{"KnownDevices", testKnownDevices},
 	{"KnownDeviceLookupConcurrent", testKnownDeviceLookupConcurrent},
+	{"NetworkProfiles", testNetworkProfiles},
 	{"PersonalAccessTokens", testPersonalAccessTokens},
 	{"PersonalAccessTokenPolicies", testPersonalAccessTokenPolicies},
 	{"RecoveryCodes", testRecoveryCodes},
@@ -675,7 +676,9 @@ func testUserDeletion(t *testing.T, h Harness) {
 			}
 		}
 		for _, err := range []error{tx.Emails().Create(ctx, e), tx.Emails().Create(ctx, oe), tx.Sessions().Create(ctx, ses), tx.Sessions().Create(ctx, os),
-			tx.Credentials().Create(ctx, cr), tx.Credentials().Create(ctx, ocr), tx.KnownDevices().Create(ctx, dv), tx.KnownDevices().Create(ctx, odv), tx.PersonalAccessTokens().Create(ctx, pt), tx.PersonalAccessTokens().Create(ctx, opt), tx.RecoveryCodes().Replace(ctx, r, u.ID, []port.RecoveryCode{rc}),
+			tx.Credentials().Create(ctx, cr), tx.Credentials().Create(ctx, ocr), tx.KnownDevices().Create(ctx, dv), tx.KnownDevices().Create(ctx, odv),
+			tx.NetworkProfiles().Put(ctx, port.NetworkProfile{RealmID: r, UserID: u.ID, Data: []byte("np"), UpdatedAt: T0}),
+			tx.NetworkProfiles().Put(ctx, port.NetworkProfile{RealmID: r, UserID: other.ID, Data: []byte("np"), UpdatedAt: T0}), tx.PersonalAccessTokens().Create(ctx, pt), tx.PersonalAccessTokens().Create(ctx, opt), tx.RecoveryCodes().Replace(ctx, r, u.ID, []port.RecoveryCode{rc}),
 			tx.RoleBindings().Create(ctx, rb), tx.Groups().Create(ctx, g), tx.Groups().Create(ctx, g2),
 			tx.Groups().AddMember(ctx, r, member(g.ID, u.ID)), tx.Groups().AddMember(ctx, r, member(g.ID, other.ID)),
 			tx.Groups().AddMember(ctx, r2, member(g2.ID, u.ID))} {
@@ -709,6 +712,12 @@ func testUserDeletion(t *testing.T, h Harness) {
 		}
 		if err := notFound("erased session", second(tx.Sessions().Get(ctx, r, ses.ID))); err != nil {
 			return err
+		}
+		if err := notFound("erased network profile", second(tx.NetworkProfiles().Get(ctx, r, u.ID))); err != nil {
+			return err
+		}
+		if _, err := tx.NetworkProfiles().Get(ctx, r, other.ID); err != nil {
+			return fmt.Errorf("other network profile: %v", err)
 		}
 		for name, n := range map[string]func() (int, error){
 			"credentials": func() (int, error) { return count(tx.Credentials().ListByUser(ctx, r, u.ID, "")) },

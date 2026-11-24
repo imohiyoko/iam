@@ -207,6 +207,10 @@ func (s *Service) Merge(ctx context.Context, tx port.Tx, into port.User, token s
 	if _, err := tx.KnownDevices().DeleteByUser(ctx, from.RealmID, from.ID); err != nil {
 		return Merged{}, err
 	}
+	// 統合元の普段の接続元の一覧も忘れる（ADR 0128。統合先の一覧は統合先のログインで育つ）。
+	if err := tx.NetworkProfiles().Delete(ctx, from.RealmID, from.ID); err != nil {
+		return Merged{}, err
+	}
 	// 統合元の Personal Access Token は取り消す（ADR 0109。統合元は使えなくなるので、本人の権限を引き継がせない）。
 	pats, err := tx.PersonalAccessTokens().RevokeByUser(ctx, from.RealmID, from.ID, now, pat.ReasonMerged)
 	if err != nil {

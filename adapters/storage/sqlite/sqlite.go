@@ -194,6 +194,7 @@ func (t *tx) Identities() port.IdentityRepo                  { return identities
 func (t *tx) DirectoryGroups() port.DirectoryGroupRepo       { return dirGroups{t.q} }
 func (t *tx) Credentials() port.CredentialRepo               { return authnCredentials{t.q} }
 func (t *tx) KnownDevices() port.KnownDeviceRepo             { return knownDevices{t.q} }
+func (t *tx) NetworkProfiles() port.NetworkProfileRepo       { return networkProfiles{t.q} }
 func (t *tx) RecoveryCodes() port.RecoveryCodeRepo           { return recoveryCodes{t.q} }
 func (t *tx) Suspensions() port.SuspensionRepo               { return suspensions{t.q} }
 func (t *tx) ScheduledEvents() port.ScheduledEventRepo       { return scheduledEvents{t.q} }

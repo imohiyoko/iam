@@ -172,6 +172,7 @@ func TestSessionBindingFlapping(t *testing.T) {
 		c.Security.SessionBinding.MaxNetworks = 3
 		c.Security.SessionBinding.IgnoreNetworks = []string{"10.0.0.0/8"}
 		c.Security.SessionBinding.NetworkFlapping.Actions = []string{"risk"}
+		c.Security.SessionBinding.Profile.Enabled = false // 普段の接続元の一覧は TestSessionBindingProfile で見る
 	})
 	l.hdr = []string{"X-Forwarded-For", "100.64.1.1"}
 	_, cookie := l.login(t, "pat@example.com")
@@ -250,6 +251,88 @@ func TestSessionBindingOff(t *testing.T) {
 	}
 	if got := l.anomalies(t); len(got) != 0 {
 		t.Fatalf("anomalies without the feature: %v", got)
+	}
+}
+
+// 普段の接続元の一覧：ログインの系列が新しいネットワークから使われるたびに CIDR・ASN・国とブラウザの種類を数え、一覧が育ったら
+// 一覧に無いネットワーク・ブラウザの種類を記録する。運営者は一覧を見られる（audit:read_client_data が要る）。
+func TestSessionBindingProfile(t *testing.T) {
+	l := newBindingEnv(t, nil, func(c *config.Config) {
+		c.Security.SessionBinding.Profile.MinObservations = 3
+		c.Security.SessionBinding.UnfamiliarNetwork.Actions = []string{"risk"}
+	})
+	firefox := "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
+	visit := func(ip, ua string) {
+		t.Helper()
+		l.advance(time.Minute)
+		l.hdr, l.ua = []string{"X-Forwarded-For", ip}, ua
+		_, cookie := l.login(t, "pat@example.com")
+		if code, _ := l.meDo(t, "GET", cookie, "/v1/me", nil); code != 200 {
+			t.Fatalf("%s: %d", ip, code)
+		}
+	}
+	// 育つまで（3 回）は何も記録しない。同じ系列で同じネットワークから使い続けても数えない。
+	visit("198.51.100.10", firefox)
+	visit("198.51.100.20", firefox)
+	visit("192.0.2.5", firefox)
+	if got := l.anomalies(t); len(got) != 0 {
+		t.Fatalf("while learning: %v", got)
+	}
+	// 同じ ASN の別の CIDR は知っているネットワーク（ブラウザの更新も同じ種類）。
+	visit("198.51.100.99", strings.ReplaceAll(firefox, "132.0", "133.0"))
+	if got := l.anomalies(t); len(got) != 0 {
+		t.Fatalf("same ASN: %v", got)
+	}
+	// 知らない国・ASN。
+	visit("203.0.113.7", firefox)
+	if got := l.anomalies(t); len(got) != 1 || got[0] != "unfamiliar_network" {
+		t.Fatalf("unfamiliar network: %v", got)
+	}
+	ev := l.lastAudit(t, sessionbinding.EventAnomaly)
+	if ev.Details["network"] != "203.0.113.0/24" || ev.Details["asn"] != float64(64501) || ev.Details["country"] != "US" || ev.Details["known_networks"] != float64(2) {
+		t.Fatalf("anomaly: %+v", ev.Details)
+	}
+	if r := bindingRisk(l.auditOf(t, "session.risk_updated")); r["ip"] != float64(50) {
+		t.Fatalf("raised risk: %v", r)
+	}
+	// 一度使えば一覧に入る。
+	visit("203.0.113.8", firefox)
+	if got := l.anomalies(t); len(got) != 1 {
+		t.Fatalf("second visit: %v", got)
+	}
+	// 知らないブラウザの種類（記録だけ）。
+	visit("198.51.100.10", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	if got := l.anomalies(t); len(got) != 2 || got[1] != "unfamiliar_browser" {
+		t.Fatalf("unfamiliar browser: %v", got)
+	}
+
+	// 運営者の一覧。users:read だけでは見られない。
+	_, op := l.operator(t, "sec@example.com", role.RealmSecurity)
+	uid := l.userID(t, "pat@example.com")
+	code, out := l.adminDo(t, "GET", op, "/v1/admin/users/"+uid+"/networks", nil)
+	if code != 200 || out["established"] != true || out["observations"] != float64(7) {
+		t.Fatalf("networks: %d %v", code, out)
+	}
+	nets := out["networks"].([]any)
+	if len(nets) != 3 {
+		t.Fatalf("networks: %v", nets)
+	}
+	first := nets[0].(map[string]any)
+	if first["cidr"] != "198.51.100.0/24" || first["asn"] != float64(64500) || first["country"] != "JP" || first["count"] != float64(4) {
+		t.Fatalf("latest network: %v", first)
+	}
+	if bs := first["browsers"].([]any); len(bs) != 2 || !strings.Contains(bs[0].(map[string]any)["user_agent"].(string), "Chrome/131") {
+		t.Fatalf("browsers: %v", bs)
+	}
+	if ev := l.lastAudit(t, "user.pii_read"); ev.Details["user_id"] != uid {
+		t.Fatalf("pii read: %+v", ev)
+	}
+	_, support := l.operator(t, "support@example.com", role.RealmSupport)
+	if code, _ := l.adminDo(t, "GET", support, "/v1/admin/users/"+uid+"/networks", nil); code != 403 {
+		t.Fatalf("without audit:read_client_data: %d", code)
+	}
+	if code, _ := l.adminDo(t, "GET", op, "/v1/admin/users/usr_nope/networks", nil); code != 404 {
+		t.Fatalf("missing user: %d", code)
 	}
 }
 

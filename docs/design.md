@@ -999,7 +999,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | 端末の記憶（11.17） | オフ | ― | 端末の Cookie を置かない。警告 `new_device` と通知 `new_device_login` なし。端末の API は 404 |
 | ログインのリスクの点数（11.17） | オフ | 端末の記憶 | 組み込みのリスク `device`・`ip` を付けない（フックの点数はそのまま） |
 | ボット対策（11.17） | オフ | ― | ログインの入口で人の確認を求めない |
-| セッションの接続元の監視（11.17、ADR 0128） | オフ | ― | ログインの後のセッションの端末・接続元を比べない。監査ログ `session.anomaly_detected` と通知 `suspicious_session` なし |
+| セッションの接続元の監視（11.17、ADR 0128） | オフ | ― | ログインの後のセッションの端末・接続元を比べない。監査ログ `session.anomaly_detected` と通知 `suspicious_session` なし。普段の接続元の一覧を作らず、一覧の API は 404 |
 | LDAP / Active Directory（11.3、ADR 0102） | オフ | ― | LDAP の connection を使わない・同期しない（Org 専用には Org 管理ユーザーも要る） |
 | Kerberos / SPNEGO（4.1、ADR 0107） | オフ | ― | Negotiate のログインと登録なし（設定の無い realm でも）。無効化は認証情報が 0 件になって完了 |
 | 本人の Personal Access Token（11.18、ADR 0109） | オフ | ― | PAT の API は 404。`iampat_` のトークンはどの経路でも通らない。無効化でトークンと realm のポリシーを消す |
@@ -1237,7 +1237,10 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
   （`window` の内に `max_networks` 以上のネットワーク。ネットワークは ASN か /24・/64）を見つける。状態は EphemeralStore で、
   変化のときだけ書く。いつも `session.anomaly_detected` に残し、兆候ごとに（既定は記録だけ）`risk`（系列のリスク `device`・`ip` を上げる）・
   `revoke`（系列を失効。理由 `session_anomaly`）・`notify`（通知 `suspicious_session`）を選ぶ。同じ ASN の中の変化・
-  少し前のネットワークへの戻り・`ignore_networks` は数えない
+  少し前のネットワークへの戻り・`ignore_networks` は数えない。あわせて、ユーザーが普段使う接続元の一覧（`authn_network_profiles`。
+  CIDR〔/24・/64〕・ASN・国と、そこで使うブラウザの種類の回数。本人のデータ鍵で暗号化）を系列が新しいネットワークから使われるたびに
+  育て、育った後は一覧に無いものを `unfamiliar_network`（CIDR も ASN も無い）・`unfamiliar_browser` にする。運営者は
+  `GET /v1/admin/users/{id}/networks`（`users:read` と `audit:read_client_data`）
 
 ### 11.18 本人の Personal Access Token
 

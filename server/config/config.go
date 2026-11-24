@@ -482,6 +482,24 @@ type SessionBinding struct {
 	CountryChanged   SessionSignal `yaml:"country_changed"`
 	ASNChanged       SessionSignal `yaml:"asn_changed"`
 	NetworkFlapping  SessionSignal `yaml:"network_flapping"`
+	// unfamiliar_* はユーザーが普段使う接続元の一覧（profile）に無いネットワーク・ブラウザの種類。
+	UnfamiliarNetwork SessionSignal `yaml:"unfamiliar_network"`
+	UnfamiliarBrowser SessionSignal `yaml:"unfamiliar_browser"`
+	// Profile はユーザーが普段使う接続元の一覧。
+	Profile NetworkProfile `yaml:"profile"`
+}
+
+// NetworkProfile はユーザーが普段使う接続元（CIDR・ASN・国）と、そこで使うブラウザの種類の一覧の設定。
+type NetworkProfile struct {
+	// Enabled が偽なら一覧を作らない（unfamiliar_* も見ない）。
+	Enabled bool `yaml:"enabled"`
+	// MinObservations は一覧の回数の合計がこれに届いてから unfamiliar_* を見る。
+	MinObservations int `yaml:"min_observations"`
+	// MaxNetworks はユーザーごとに覚えるネットワークの数、MaxBrowsers はネットワークごとに覚えるブラウザの種類の数。
+	MaxNetworks int `yaml:"max_networks"`
+	MaxBrowsers int `yaml:"max_browsers"`
+	// Retention はこれより長く見ていないネットワーク・ブラウザを捨てる。
+	Retention Duration `yaml:"retention"`
 }
 
 // SessionSignal は兆候ごとの設定。見つければいつも監査ログ（session.anomaly_detected）に残す。
@@ -499,7 +517,8 @@ var KnownSessionBindingActions = []string{"risk", "revoke", "notify"}
 // Signals は兆候の名前ごとの設定。
 func (b SessionBinding) Signals() map[string]SessionSignal {
 	return map[string]SessionSignal{"device_changed": b.DeviceChanged, "user_agent_changed": b.UserAgentChanged,
-		"country_changed": b.CountryChanged, "asn_changed": b.ASNChanged, "network_flapping": b.NetworkFlapping}
+		"country_changed": b.CountryChanged, "asn_changed": b.ASNChanged, "network_flapping": b.NetworkFlapping,
+		"unfamiliar_network": b.UnfamiliarNetwork, "unfamiliar_browser": b.UnfamiliarBrowser}
 }
 
 // IgnorePrefixes は IgnoreNetworks を範囲にする。IP だけなら /32（IPv6 は /128）。誤った値があればエラー。
@@ -739,11 +758,14 @@ func Default() Config {
 				ImpossibleTravelScore: 90, MaxSpeedKmh: 1000},
 			BotProtection: BotProtection{Mode: "suspicious", AfterFailures: 5, Window: Duration(10 * time.Minute)},
 			SessionBinding: SessionBinding{Window: Duration(10 * time.Minute), MaxNetworks: 4,
-				DeviceChanged:    SessionSignal{Enabled: true, Score: 90, Actions: []string{}},
-				UserAgentChanged: SessionSignal{Enabled: true, Score: 60, Actions: []string{}},
-				CountryChanged:   SessionSignal{Enabled: true, Score: 70, Actions: []string{}},
-				ASNChanged:       SessionSignal{Enabled: true, Score: 30, Actions: []string{}},
-				NetworkFlapping:  SessionSignal{Enabled: true, Score: 70, Actions: []string{}}},
+				DeviceChanged:     SessionSignal{Enabled: true, Score: 90, Actions: []string{}},
+				UserAgentChanged:  SessionSignal{Enabled: true, Score: 60, Actions: []string{}},
+				CountryChanged:    SessionSignal{Enabled: true, Score: 70, Actions: []string{}},
+				ASNChanged:        SessionSignal{Enabled: true, Score: 30, Actions: []string{}},
+				NetworkFlapping:   SessionSignal{Enabled: true, Score: 70, Actions: []string{}},
+				UnfamiliarNetwork: SessionSignal{Enabled: true, Score: 50, Actions: []string{}},
+				UnfamiliarBrowser: SessionSignal{Enabled: true, Score: 50, Actions: []string{}},
+				Profile:           NetworkProfile{Enabled: true, MinObservations: 5, MaxNetworks: 20, MaxBrowsers: 5, Retention: Duration(90 * 24 * time.Hour)}},
 		},
 		Outbox:     Outbox{Interval: Duration(time.Second), Batch: 100},
 		OrgDomains: OrgDomains{Recheck: Duration(day), Grace: Duration(7 * day)},
@@ -1108,6 +1130,9 @@ func (c Config) validateLoginProtection() []string {
 	}
 	if _, err := sb.IgnorePrefixes(); err != nil {
 		problems = append(problems, err.Error())
+	}
+	if p := sb.Profile; p.MinObservations < 1 || p.MaxNetworks < 1 || p.MaxBrowsers < 1 || p.Retention.D() <= 0 {
+		problems = append(problems, "security.session_binding.profile: min_observations, max_networks, max_browsers and retention must be positive")
 	}
 	for _, name := range slices.Sorted(maps.Keys(sb.Signals())) {
 		sig := sb.Signals()[name]

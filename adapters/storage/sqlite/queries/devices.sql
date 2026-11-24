@@ -19,3 +19,19 @@ SELECT count(*) FROM authn_known_devices;
 
 -- name: PurgeKnownDevices :execrows
 DELETE FROM authn_known_devices WHERE id IN (SELECT d.id FROM authn_known_devices d ORDER BY d.id LIMIT sqlc.arg(lim));
+
+-- name: GetNetworkProfile :one
+SELECT * FROM authn_network_profiles WHERE realm_id = ? AND user_id = ?;
+
+-- name: PutNetworkProfile :exec
+INSERT INTO authn_network_profiles (realm_id, user_id, data, updated_at) VALUES (?, ?, ?, ?)
+ON CONFLICT (realm_id, user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at;
+
+-- name: DeleteNetworkProfile :exec
+DELETE FROM authn_network_profiles WHERE realm_id = ? AND user_id = ?;
+
+-- name: CountNetworkProfiles :one
+SELECT count(*) FROM authn_network_profiles;
+
+-- name: PurgeNetworkProfiles :execrows
+DELETE FROM authn_network_profiles WHERE (realm_id, user_id) IN (SELECT p.realm_id, p.user_id FROM authn_network_profiles p ORDER BY p.realm_id, p.user_id LIMIT sqlc.arg(lim));

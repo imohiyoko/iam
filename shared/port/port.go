@@ -51,6 +51,8 @@ type Tx interface {
 	Credentials() CredentialRepo
 	// KnownDevices は本人がログインした端末（フィーチャー device_recognition。ADR 0105）。
 	KnownDevices() KnownDeviceRepo
+	// NetworkProfiles はユーザーが普段使う接続元の一覧（フィーチャー session_binding。ADR 0128）。
+	NetworkProfiles() NetworkProfileRepo
 	RecoveryCodes() RecoveryCodeRepo
 	Suspensions() SuspensionRepo
 	ScheduledEvents() ScheduledEventRepo

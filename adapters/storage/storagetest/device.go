@@ -131,3 +131,76 @@ var knownDeviceIsolationCase = IsolationCase{
 		return n, nil
 	},
 }
+
+// ユーザーが普段使う接続元の一覧（authn_network_profiles。ADR 0128）の契約。
+
+func testNetworkProfiles(t *testing.T, h Harness) {
+	s, _ := open(t, h)
+	r, r2, u, other := id.New(id.Realm), id.New(id.Realm), id.New(id.User), id.New(id.User)
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		repo := tx.NetworkProfiles()
+		if err := notFound("missing profile", second(repo.Get(ctx, r, u))); err != nil {
+			return err
+		}
+		base, err := repo.Count(ctx)
+		if err != nil {
+			return err
+		}
+		a := port.NetworkProfile{RealmID: r, UserID: u, Data: []byte("v1"), UpdatedAt: T0}
+		for _, p := range []port.NetworkProfile{a, {RealmID: r, UserID: other, Data: []byte("o"), UpdatedAt: T0}, {RealmID: r2, UserID: u, Data: []byte("r2"), UpdatedAt: T0}} {
+			if err := repo.Put(ctx, p); err != nil {
+				return err
+			}
+		}
+		if got, err := repo.Get(ctx, r, u); err != nil || !reflect.DeepEqual(got, a) {
+			return fmt.Errorf("get = %+v, %v", got, err)
+		}
+		// 置き換える。
+		b := port.NetworkProfile{RealmID: r, UserID: u, Data: []byte("v2"), UpdatedAt: T0.Add(time.Hour)}
+		if err := repo.Put(ctx, b); err != nil {
+			return err
+		}
+		if got, err := repo.Get(ctx, r, u); err != nil || !reflect.DeepEqual(got, b) {
+			return fmt.Errorf("after replace = %+v, %v", got, err)
+		}
+		if got, err := repo.Get(ctx, r2, u); err != nil || string(got.Data) != "r2" {
+			return fmt.Errorf("other realm = %+v, %v", got, err)
+		}
+		if n, err := repo.Count(ctx); err != nil || n != base+3 {
+			return fmt.Errorf("count = %d, %v (base %d)", n, err, base)
+		}
+		if err := repo.Delete(ctx, r, u); err != nil {
+			return err
+		}
+		if err := notFound("deleted profile", second(repo.Get(ctx, r, u))); err != nil {
+			return err
+		}
+		// 無くてもエラーにしない。
+		if err := repo.Delete(ctx, r, u); err != nil {
+			return fmt.Errorf("delete missing: %w", err)
+		}
+		if got, err := repo.Get(ctx, r, other); err != nil || string(got.Data) != "o" {
+			return fmt.Errorf("other user = %+v, %v", got, err)
+		}
+		return nil
+	})
+	// 無効化の片付け。
+	tx(t, s, func(ctx context.Context, tx port.Tx) error {
+		for {
+			n, err := tx.NetworkProfiles().Purge(ctx, 1)
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				break
+			}
+			if n != 1 {
+				return fmt.Errorf("Purge(1) = %d", n)
+			}
+		}
+		if n, err := tx.NetworkProfiles().Count(ctx); err != nil || n != 0 {
+			return fmt.Errorf("after purge = %d, %v", n, err)
+		}
+		return nil
+	})
+}

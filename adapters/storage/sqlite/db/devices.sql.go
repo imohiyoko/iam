@@ -20,6 +20,17 @@ func (q *Queries) CountKnownDevices(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countNetworkProfiles = `-- name: CountNetworkProfiles :one
+SELECT count(*) FROM authn_network_profiles
+`
+
+func (q *Queries) CountNetworkProfiles(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countNetworkProfiles)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createKnownDevice = `-- name: CreateKnownDevice :exec
 INSERT INTO authn_known_devices (id, public_id, realm_id, user_id, lookup, data, created_at, last_seen_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -84,6 +95,41 @@ func (q *Queries) DeleteKnownDevicesByUser(ctx context.Context, arg DeleteKnownD
 	return result.RowsAffected()
 }
 
+const deleteNetworkProfile = `-- name: DeleteNetworkProfile :exec
+DELETE FROM authn_network_profiles WHERE realm_id = ? AND user_id = ?
+`
+
+type DeleteNetworkProfileParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) DeleteNetworkProfile(ctx context.Context, arg DeleteNetworkProfileParams) error {
+	_, err := q.db.ExecContext(ctx, deleteNetworkProfile, arg.RealmID, arg.UserID)
+	return err
+}
+
+const getNetworkProfile = `-- name: GetNetworkProfile :one
+SELECT realm_id, user_id, data, updated_at FROM authn_network_profiles WHERE realm_id = ? AND user_id = ?
+`
+
+type GetNetworkProfileParams struct {
+	RealmID string
+	UserID  string
+}
+
+func (q *Queries) GetNetworkProfile(ctx context.Context, arg GetNetworkProfileParams) (AuthnNetworkProfile, error) {
+	row := q.db.QueryRowContext(ctx, getNetworkProfile, arg.RealmID, arg.UserID)
+	var i AuthnNetworkProfile
+	err := row.Scan(
+		&i.RealmID,
+		&i.UserID,
+		&i.Data,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listKnownDevicesByUser = `-- name: ListKnownDevicesByUser :many
 SELECT id, public_id, realm_id, user_id, lookup, data, created_at, last_seen_at FROM authn_known_devices WHERE realm_id = ? AND user_id = ? ORDER BY created_at, id
 `
@@ -135,6 +181,40 @@ func (q *Queries) PurgeKnownDevices(ctx context.Context, lim int64) (int64, erro
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const purgeNetworkProfiles = `-- name: PurgeNetworkProfiles :execrows
+DELETE FROM authn_network_profiles WHERE (realm_id, user_id) IN (SELECT p.realm_id, p.user_id FROM authn_network_profiles p ORDER BY p.realm_id, p.user_id LIMIT ?1)
+`
+
+func (q *Queries) PurgeNetworkProfiles(ctx context.Context, lim int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, purgeNetworkProfiles, lim)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const putNetworkProfile = `-- name: PutNetworkProfile :exec
+INSERT INTO authn_network_profiles (realm_id, user_id, data, updated_at) VALUES (?, ?, ?, ?)
+ON CONFLICT (realm_id, user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
+`
+
+type PutNetworkProfileParams struct {
+	RealmID   string
+	UserID    string
+	Data      []byte
+	UpdatedAt string
+}
+
+func (q *Queries) PutNetworkProfile(ctx context.Context, arg PutNetworkProfileParams) error {
+	_, err := q.db.ExecContext(ctx, putNetworkProfile,
+		arg.RealmID,
+		arg.UserID,
+		arg.Data,
+		arg.UpdatedAt,
+	)
+	return err
 }
 
 const seeKnownDevice = `-- name: SeeKnownDevice :execrows

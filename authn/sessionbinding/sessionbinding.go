@@ -5,8 +5,10 @@
 // （sid）ごとに最初に見た端末の Cookie・User-Agent の種類・接続元を覚え、その後の要求と比べる。見つけた兆候は呼び出し側
 // （server）が監査ログに残し、設定に従ってセッションのリスクを上げる・系列を失効させる・本人に知らせる。
 //
-// 状態は EphemeralStore にだけ置き、接続元などが変わったときだけ書く（判定のホットパスで Storage に書かない）。状態が消えれば
+// 系列の状態は EphemeralStore に置き、接続元などが変わったときだけ書く（判定のホットパスで Storage に書かない）。状態が消えれば
 // （再起動など）次の要求を新しい起点として覚え直す。守りが一時的に緩むだけで、セッションは使える。
+//
+// あわせて、系列が新しいネットワークから使われるたびに、ユーザーが普段使う接続元の一覧（Storage。profile.go）と比べて育てる。
 package sessionbinding
 
 import (
@@ -25,6 +27,7 @@ import (
 	"github.com/imohiyoko/iam/authn/notify"
 	"github.com/imohiyoko/iam/shared/clock"
 	"github.com/imohiyoko/iam/shared/feature"
+	"github.com/imohiyoko/iam/shared/pii"
 	"github.com/imohiyoko/iam/shared/port"
 	"github.com/imohiyoko/iam/shared/risk"
 )
@@ -53,15 +56,20 @@ const (
 	SignalCountry Signal = "country_changed"
 	// SignalFlapping は window の内に max_networks 以上の別々のネットワークから使われたこと。
 	SignalFlapping Signal = "network_flapping"
+	// SignalUnfamiliarNetwork はユーザーが普段使わないネットワーク（CIDR も ASN も一覧に無い）から使われたこと。
+	// 一覧が育ってから（profile.min_observations）だけ見る。
+	SignalUnfamiliarNetwork Signal = "unfamiliar_network"
+	// SignalUnfamiliarBrowser はユーザーが普段使わないブラウザの種類（版の数字を除いた User-Agent）で使われたこと。
+	SignalUnfamiliarBrowser Signal = "unfamiliar_browser"
 )
 
 // Signals は兆候の一覧（評価と監査ログの順）。
-var Signals = []Signal{SignalDevice, SignalUserAgent, SignalCountry, SignalASN, SignalFlapping}
+var Signals = []Signal{SignalDevice, SignalUserAgent, SignalCountry, SignalASN, SignalFlapping, SignalUnfamiliarNetwork, SignalUnfamiliarBrowser}
 
 // RiskType は兆候が上げるリスクの種類（ADR 0084 の組み込みの種類）。
 func (s Signal) RiskType() string {
 	switch s {
-	case SignalDevice, SignalUserAgent:
+	case SignalDevice, SignalUserAgent, SignalUnfamiliarBrowser:
 		return risk.TypeDevice
 	default:
 		return risk.TypeIP
@@ -102,6 +110,8 @@ type Config struct {
 	Rules          map[Signal]Rule
 	// TTL は状態を覚えておく長さ（セッションの寿命の上限）。
 	TTL time.Duration
+	// Profile はユーザーが普段使う接続元の一覧。
+	Profile ProfileConfig
 }
 
 // Guard は監視。
@@ -114,7 +124,9 @@ type Guard struct {
 	// Notify と Accounts は ActionNotify の宛先を決める。Notify が nil なら知らせない。
 	Notify   *notify.Service
 	Accounts *account.Service
-	Log      *slog.Logger
+	// Crypter は普段の接続元の一覧をユーザーのデータ鍵で暗号化する。nil なら一覧を作らない。
+	Crypter *pii.Crypter
+	Log     *slog.Logger
 }
 
 // Request はセッションで来た要求の接続元。
@@ -137,6 +149,15 @@ type Anomaly struct {
 	Actions []Action
 	// Details は監査ログに足す内容（国のコード・数えたネットワークの数など。IP は監査ログの接続元に入る）。
 	Details map[string]any
+}
+
+// Observation は Observe の結果。
+type Observation struct {
+	// Found はまだ知らせていない兆候。
+	Found []Anomaly
+	// Visit は系列が新しいネットワークから使われたこと（ログインの後の最初の要求を含む）。nil でなければ、呼び出し側は
+	// Learn で普段の接続元の一覧に足す。
+	Visit *Visit
 }
 
 // Has は兆候のアクションに a があるか。
@@ -197,12 +218,7 @@ func (g *Guard) network(ctx context.Context, ip netip.Addr) (string, port.GeoLoc
 	if located && loc.ASN != 0 {
 		return "as" + strconv.FormatUint(uint64(loc.ASN), 10), loc, true
 	}
-	bits := 24
-	if ip.Is6() {
-		bits = 64
-	}
-	p, _ := ip.Prefix(bits)
-	return p.String(), loc, located
+	return cidr(ip), loc, located
 }
 
 func (g *Guard) ignored(ip netip.Addr) bool {
@@ -224,16 +240,16 @@ func (g *Guard) logger() *slog.Logger {
 // Observe は要求 in を系列の状態と比べ、まだ知らせていない兆候を返す。状態は変わったときだけ書く。返した兆候は、呼び出し側が
 // アクションを記録した後に Confirm で知らせ済みにする。
 // 状態を読めない・書けないときはエラーを返す（呼び出し側は要求を止めない）。
-func (g *Guard) Observe(ctx context.Context, in Request) ([]Anomaly, error) {
+func (g *Guard) Observe(ctx context.Context, in Request) (Observation, error) {
 	if in.SID == "" {
-		return nil, nil
+		return Observation{}, nil
 	}
 	now := g.Clock.Now()
 	k := key(in.RealmID, in.SID)
 	var st state
 	b, hit, err := g.Cache.Get(ctx, k)
 	if err != nil {
-		return nil, err
+		return Observation{}, err
 	}
 	fresh := !hit
 	if hit && json.Unmarshal(b, &st) != nil {
@@ -241,6 +257,7 @@ func (g *Guard) Observe(ctx context.Context, in Request) ([]Anomaly, error) {
 	}
 	dirty := fresh
 	var found []Anomaly
+	var visit *Visit
 	report := func(s Signal, details map[string]any) {
 		r, ok := g.Config.Rules[s]
 		if !ok || !r.Enabled || slices.Contains(st.Reported, s) {
@@ -280,7 +297,12 @@ func (g *Guard) Observe(ctx context.Context, in Request) ([]Anomaly, error) {
 		case located && loc.ASN != 0 && st.ASN != 0 && loc.ASN != st.ASN:
 			report(SignalASN, map[string]any{"from_asn": st.ASN, "to_asn": loc.ASN})
 		}
-		dirty = g.touch(&st, id, now) || dirty
+		changed, added := g.touch(&st, id, now)
+		dirty = changed || dirty
+		if added && g.ProfilesEnabled() {
+			visit = &Visit{Network: cidr(ip), ASN: loc.ASN, Country: loc.Country, Family: uaFamily(in.UserAgent), UserAgent: in.UserAgent,
+				Reported: slices.Clone(st.Reported)}
+		}
 		if n := g.distinct(st, now); g.Config.MaxNetworks > 0 && n >= g.Config.MaxNetworks {
 			report(SignalFlapping, map[string]any{"networks": n, "window_seconds": int(g.Config.Window / time.Second)})
 		}
@@ -289,13 +311,14 @@ func (g *Guard) Observe(ctx context.Context, in Request) ([]Anomaly, error) {
 	if dirty {
 		b, err := json.Marshal(st)
 		if err != nil {
-			return nil, err
+			return Observation{}, err
 		}
 		if err := g.Cache.Set(ctx, k, b, g.Config.TTL); err != nil {
-			return found, err
+			// 系列の状態を書けなければ、次の要求でも新しいネットワークに見えるので、一覧には足さない（数え過ぎない）。
+			return Observation{Found: found}, err
 		}
 	}
-	return found, nil
+	return Observation{Found: found, Visit: visit}, nil
 }
 
 // live は覚えたネットワークの時刻 at が数える範囲にあるか。同じネットワークの時刻は window の 1/4 ごとにしか更新しないので、
@@ -303,15 +326,15 @@ func (g *Guard) Observe(ctx context.Context, in Request) ([]Anomaly, error) {
 func (g *Guard) live(at, now time.Time) bool { return now.Sub(at) <= g.Config.Window+g.Config.Window/4 }
 
 // touch はネットワーク id を見たことを覚える。書き込みを減らすため、同じネットワークの時刻は window の 1/4 より古くなったら
-// 更新する。変えたら真を返す。
-func (g *Guard) touch(st *state, id string, now time.Time) bool {
+// 更新する。変えたら changed、覚えていないネットワーク（数える範囲を過ぎて捨てたものを含む）なら added を真にする。
+func (g *Guard) touch(st *state, id string, now time.Time) (changed, added bool) {
 	i := slices.IndexFunc(st.Nets, func(s seen) bool { return s.ID == id })
 	if i >= 0 {
 		if now.Sub(st.Nets[i].At) < g.Config.Window/4 {
-			return false
+			return false, false
 		}
 		st.Nets[i].At = now
-		return true
+		return true, false
 	}
 	st.Nets = append(st.Nets, seen{ID: id, At: now})
 	// 数える範囲を過ぎたものを捨て、数を抑える（数えるのに要るのは max_networks まで）。
@@ -319,7 +342,7 @@ func (g *Guard) touch(st *state, id string, now time.Time) bool {
 	if limit := max(g.Config.MaxNetworks, 1) * 2; len(st.Nets) > limit {
 		st.Nets = st.Nets[len(st.Nets)-limit:]
 	}
-	return true
+	return true, true
 }
 
 // distinct は window の内に見た別々のネットワークの数。少し前に見たネットワークに戻るだけ（2 つの回線の行き来）は増えない。

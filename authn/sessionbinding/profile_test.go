@@ -1,0 +1,54 @@
+package sessionbinding
+
+import (
+	"net/netip"
+	"testing"
+	"time"
+)
+
+func TestProfileAddAndLimits(t *testing.T) {
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	pc := ProfileConfig{MaxNetworks: 2, MaxBrowsers: 2, Retention: 24 * time.Hour}
+	var p Profile
+	v := func(net string, asn uint32, fam string) Visit {
+		return Visit{Network: net, ASN: asn, Country: "JP", Family: fam, UserAgent: fam + "/1"}
+	}
+	p.add(v("192.0.2.0/24", 64500, "a"), t0, pc)
+	p.add(v("192.0.2.0/24", 64500, "a"), t0.Add(time.Minute), pc)
+	if len(p.Networks) != 1 || p.Networks[0].Count != 2 || p.Networks[0].Browsers[0].Count != 2 || p.Observations() != 2 {
+		t.Fatalf("after 2 visits = %+v", p)
+	}
+	// 同じ ASN の別の CIDR は、知っているネットワーク（モバイル回線の IP の変化）。
+	if !p.knowsNetwork(v("198.51.100.0/24", 64500, "a")) || p.knowsNetwork(v("198.51.100.0/24", 64501, "a")) || p.knowsNetwork(v("198.51.100.0/24", 0, "a")) {
+		t.Fatal("knowsNetwork")
+	}
+	if !p.knowsBrowser("a") || p.knowsBrowser("b") {
+		t.Fatal("knowsBrowser")
+	}
+	// ブラウザの数の上限（最後に見た時刻の古いものから捨てる）。
+	p.add(v("192.0.2.0/24", 64500, "b"), t0.Add(2*time.Minute), pc)
+	p.add(v("192.0.2.0/24", 64500, "c"), t0.Add(3*time.Minute), pc)
+	if bs := p.Networks[0].Browsers; len(bs) != 2 || bs[0].Family != "c" || bs[1].Family != "b" {
+		t.Fatalf("browsers = %+v", bs)
+	}
+	// ネットワークの数の上限。
+	p.add(v("198.51.100.0/24", 64501, "a"), t0.Add(4*time.Minute), pc)
+	p.add(v("203.0.113.0/24", 64502, "a"), t0.Add(5*time.Minute), pc)
+	if len(p.Networks) != 2 || p.Networks[0].CIDR != "203.0.113.0/24" || p.Networks[1].CIDR != "198.51.100.0/24" {
+		t.Fatalf("networks = %+v", p.Networks)
+	}
+	// 古いものを捨てる。
+	p.add(v("192.0.2.0/24", 0, "a"), t0.Add(30*time.Hour), pc)
+	p.prune(t0.Add(30*time.Hour), pc.Retention)
+	if len(p.Networks) != 1 || p.Networks[0].CIDR != "192.0.2.0/24" || p.Networks[0].ASN != 0 {
+		t.Fatalf("after prune = %+v", p.Networks)
+	}
+}
+
+func TestCIDR(t *testing.T) {
+	for in, want := range map[string]string{"192.0.2.77": "192.0.2.0/24", "2001:db8:1:2:3::9": "2001:db8:1:2::/64"} {
+		if got := cidr(netip.MustParseAddr(in)); got != want {
+			t.Errorf("cidr(%s) = %s, want %s", in, got, want)
+		}
+	}
+}

@@ -121,6 +121,8 @@ var cleaners = map[string]cleaner{
 	feature.Impersonation: impersonationCleaner,
 	// 端末の記録を消す（ADR 0105）。ロックアウトとボット対策の状態は EphemeralStore にあり、期限で消える。
 	feature.DeviceRecognition: deviceCleaner,
+	// 普段の接続元の一覧を消す（ADR 0128）。系列の状態は EphemeralStore にあり、期限で消える。
+	feature.SessionBinding: networkProfileCleaner,
 	// 購読と署名の鍵（データ鍵）を消す（ADR 0100）。
 	feature.EventSubscriptions: {Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.EventSubscriptions().Count(ctx) },
 		Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {

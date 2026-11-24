@@ -4,9 +4,13 @@ import (
 	"context"
 	"maps"
 	"net/http"
+	"slices"
+	"time"
 
 	"github.com/imohiyoko/iam/authn/session"
 	"github.com/imohiyoko/iam/authn/sessionbinding"
+	"github.com/imohiyoko/iam/authz/role"
+	"github.com/imohiyoko/iam/server/adminapi"
 	"github.com/imohiyoko/iam/server/config"
 	"github.com/imohiyoko/iam/shared/audit"
 	"github.com/imohiyoko/iam/shared/eventlog"
@@ -33,14 +37,26 @@ func (a *App) sessionBinding(cfg config.Config, d Deps, plan feature.Plan) {
 		rules[sessionbinding.Signal(name)] = r
 	}
 	ttl := max(cfg.Security.Session.AbsoluteLifetime.Default.D(), cfg.Security.Session.AbsoluteLifetime.Max.D())
-	a.binding = &sessionbinding.Guard{Cache: d.Ephemeral, GeoIP: d.GeoIP, Clock: d.Clock, Notify: a.notify, Accounts: a.accounts, Log: d.Logger,
-		Config: sessionbinding.Config{Window: sb.Window.D(), MaxNetworks: sb.MaxNetworks, IgnoreNetworks: ignore, Rules: rules, TTL: ttl}}
+	pc := sessionbinding.ProfileConfig{Enabled: sb.Profile.Enabled, MinObservations: sb.Profile.MinObservations, MaxNetworks: sb.Profile.MaxNetworks,
+		MaxBrowsers: sb.Profile.MaxBrowsers, Retention: sb.Profile.Retention.D()}
+	a.binding = &sessionbinding.Guard{Cache: d.Ephemeral, GeoIP: d.GeoIP, Clock: d.Clock, Notify: a.notify, Accounts: a.accounts, Crypter: a.pii,
+		Log: d.Logger, Config: sessionbinding.Config{Window: sb.Window.D(), MaxNetworks: sb.MaxNetworks, IgnoreNetworks: ignore, Rules: rules, TTL: ttl,
+			Profile: pc}}
+}
+
+// networkProfileCleaner はフィーチャー session_binding の片付け。普段の接続元の一覧を消す（系列の状態は EphemeralStore の TTL で消える）。
+var networkProfileCleaner = cleaner{
+	Count: func(ctx context.Context, tx port.Tx) (int, error) { return tx.NetworkProfiles().Count(ctx) },
+	Purge: func(ctx context.Context, tx port.Tx, _ time.Time, limit int) (int, error) {
+		return tx.NetworkProfiles().Purge(ctx, limit)
+	},
 }
 
 // bindingActor は監視が取ったアクション（リスクの引き上げ・失効）の監査ログの主体。
 var bindingActor = audit.Actor{Type: "system", ID: "session_binding"}
 
-// checkBinding はセッションの要求を系列の端末・接続元と比べ、兆候があれば監査ログに残し、設定のアクションを取る。
+// checkBinding はセッションの要求を系列の端末・接続元と比べ、系列が新しいネットワークから使われたら普段の接続元の一覧と比べて
+// 一覧に足し、兆候があれば監査ログに残し、設定のアクションを取る。
 // 系列を失効させたら偽を返す（呼び出し側は未ログインとして扱う）。リスクを上げたら v の点数も上げる（この要求から効く）。
 // 監視の障害（状態を読めない・書けない、記録できない）では要求を止めない（ログに残し、そのまま通す）。
 func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Validated, viaCookie bool) bool {
@@ -52,29 +68,32 @@ func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Vali
 	if ck, err := r.Cookie(a.cookie(deviceCookie)); err == nil {
 		device = ck.Value
 	}
-	found, err := a.binding.Observe(ctx, sessionbinding.Request{RealmID: a.realm.ID, SID: v.SID, IP: c.IP, UserAgent: c.UserAgent,
+	obs, err := a.binding.Observe(ctx, sessionbinding.Request{RealmID: a.realm.ID, SID: v.SID, IP: c.IP, UserAgent: c.UserAgent,
 		Device: device, ViaCookie: viaCookie})
 	if err != nil {
 		a.deps.Logger.WarnContext(ctx, "session binding", "session_id", v.SessionID, "error", err)
 	}
-	if len(found) == 0 {
+	if len(obs.Found) == 0 && obs.Visit == nil {
 		return true
 	}
 	actor, reqID := v.Actor(), requestID(ctx)
-	raise := map[string]int{}
-	revoke, notify := false, false
-	for _, x := range found {
-		if x.Has(sessionbinding.ActionRisk) {
-			t := x.Signal.RiskType()
-			raise[t] = max(raise[t], x.Score)
-		}
-		revoke = revoke || x.Has(sessionbinding.ActionRevoke)
-		notify = notify || x.Has(sessionbinding.ActionNotify)
-	}
+	_, revoke, _ := bindingActions(obs.Found)
+	var found []sessionbinding.Anomaly
+	var notify bool
 	var changed []string
 	var applied map[string]int
 	err = a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
-		changed, applied = nil, nil
+		found, changed, applied = slices.Clone(obs.Found), nil, nil
+		if obs.Visit != nil {
+			// 一覧と比べて足す。一覧を読めない（鍵を消したユーザーなど）ときは、ほかの兆候の記録を止めない。
+			learned, err := a.binding.Learn(ctx, tx, a.realm.ID, v.PrincipalID, *obs.Visit)
+			if err != nil {
+				a.deps.Logger.WarnContext(ctx, "session binding profile", "session_id", v.SessionID, "error", err)
+			}
+			found = append(found, learned...)
+		}
+		var raise map[string]int
+		raise, revoke, notify = bindingActions(found)
 		for _, x := range found {
 			details := map[string]any{"signal": string(x.Signal), "sid": v.SID, "user_id": v.PublicID, "actions": nonNilActions(x.Actions)}
 			for k, val := range x.Details {
@@ -101,7 +120,8 @@ func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Vali
 		return nil
 	})
 	if err != nil {
-		// 記録できなければ知らせ済みにしないので、次の要求でもう一度見つかる。失効させるはずだったなら、この要求は止める。
+		// 記録できなければ知らせ済みにしないので、次の要求でもう一度見つかる（一覧との比べは、系列が次に新しいネットワークから
+		// 使われるまで行わない）。失効させるはずだったなら、この要求は止める。
 		a.deps.Logger.ErrorContext(ctx, "session binding actions", "session_id", v.SessionID, "error", err)
 		return !revoke
 	}
@@ -132,10 +152,90 @@ func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Vali
 	return true
 }
 
+// bindingActions は兆候のアクションをまとめる（上げるリスクの点数、失効させるか、知らせるか）。
+func bindingActions(found []sessionbinding.Anomaly) (raise map[string]int, revoke, notify bool) {
+	raise = map[string]int{}
+	for _, x := range found {
+		if x.Has(sessionbinding.ActionRisk) {
+			t := x.Signal.RiskType()
+			raise[t] = max(raise[t], x.Score)
+		}
+		revoke = revoke || x.Has(sessionbinding.ActionRevoke)
+		notify = notify || x.Has(sessionbinding.ActionNotify)
+	}
+	return raise, revoke, notify
+}
+
 // nonNilActions は監査ログに残すアクション（無ければ null ではなく空の配列）。
 func nonNilActions(xs []sessionbinding.Action) []sessionbinding.Action {
 	if xs == nil {
 		return []sessionbinding.Action{}
 	}
 	return xs
+}
+
+// GetUserNetworks はユーザーが普段使う接続元の一覧（ADR 0128）。接続元とブラウザは監査ログの接続元と同じ扱いで、
+// audit:read_client_data も要る。
+func (s adminServer) GetUserNetworks(ctx context.Context, req adminapi.GetUserNetworksRequestObject) (adminapi.GetUserNetworksResponseObject, error) {
+	p, d, err := s.a.authorize(ctx, role.PermUsersRead)
+	o, ok, err := outcomeOf(d, err)
+	if ok {
+		_, d, err = s.a.authorize(ctx, role.PermAuditReadClientData)
+		o, ok, err = outcomeOf(d, err)
+	}
+	if ok && (s.a.binding == nil || !s.a.binding.ProfilesEnabled()) {
+		o, ok = failed(http.StatusNotFound, "not_found"), false
+	}
+	if ok {
+		var out adminapi.UserNetworks
+		err = s.a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
+			u, err := tx.Users().GetByPublicID(ctx, s.a.realm.ID, req.Id)
+			if err != nil {
+				return err
+			}
+			prof, err := s.a.binding.LoadProfile(ctx, tx, s.a.realm.ID, u.ID)
+			if err != nil {
+				return err
+			}
+			out = userNetworksView(prof, s.a.binding.Established(prof))
+			_, err = eventlog.Record(ctx, tx, s.a.deps.Clock, audit.Event{Type: "user.pii_read", Result: audit.ResultSuccess, RealmID: s.a.realm.ID,
+				Actor: p.Actor, RequestID: requestID(ctx), Details: map[string]any{"user_id": u.PublicID, "fields": []string{"networks"}}})
+			return err
+		})
+		if o, ok, err = outcomeOf(nil, err); ok {
+			return adminapi.GetUserNetworks200JSONResponse(out), nil
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	switch o.status {
+	case http.StatusUnauthorized:
+		return adminapi.GetUserNetworks401JSONResponse{ErrorJSONResponse: adminapi.ErrorJSONResponse(o.body)}, nil
+	case http.StatusForbidden:
+		return adminapi.GetUserNetworks403JSONResponse(o.body), nil
+	default:
+		return adminapi.GetUserNetworks404JSONResponse(o.body), nil
+	}
+}
+
+func userNetworksView(p sessionbinding.Profile, established bool) adminapi.UserNetworks {
+	out := adminapi.UserNetworks{Observations: p.Observations(), Established: established, Networks: make([]adminapi.UserNetwork, 0, len(p.Networks))}
+	for _, n := range p.Networks {
+		v := adminapi.UserNetwork{Cidr: n.CIDR, Count: n.Count, FirstSeen: n.FirstSeen, LastSeen: n.LastSeen,
+			Browsers: make([]adminapi.UserNetworkBrowser, 0, len(n.Browsers))}
+		if n.ASN != 0 {
+			asn := int64(n.ASN)
+			v.Asn = &asn
+		}
+		if n.Country != "" {
+			v.Country = &n.Country
+		}
+		for _, b := range n.Browsers {
+			v.Browsers = append(v.Browsers, adminapi.UserNetworkBrowser{Family: b.Family, UserAgent: b.UserAgent, Count: b.Count,
+				FirstSeen: b.FirstSeen, LastSeen: b.LastSeen})
+		}
+		out.Networks = append(out.Networks, v)
+	}
+	return out
 }

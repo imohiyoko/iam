@@ -128,6 +128,14 @@ security:
   #   country_changed:    { enabled: true, score: 70, actions: [] }  # 国が変わった（geoip が要る）
   #   asn_changed:        { enabled: true, score: 30, actions: [] }  # 国は同じで ASN が変わった（geoip が要る）
   #   network_flapping:   { enabled: true, score: 70, actions: [] }
+  #   unfamiliar_network: { enabled: true, score: 50, actions: [] }  # 普段の接続元の一覧に CIDR も ASN も無い
+  #   unfamiliar_browser: { enabled: true, score: 50, actions: [] }  # 普段の接続元の一覧に無いブラウザの種類
+  #   profile:               # ユーザーが普段使う接続元（CIDR・ASN・国）とブラウザの種類の一覧（本人のデータ鍵で暗号化）
+  #     enabled: true
+  #     min_observations: 5  # 一覧の回数がこれに届いてから unfamiliar_* を見る
+  #     max_networks: 20     # ユーザーごとのネットワークの数
+  #     max_browsers: 5      # ネットワークごとのブラウザの種類の数
+  #     retention: 2160h     # これより長く見ていないものは捨てる（90 日）
 
 outbox:
   interval: 1s

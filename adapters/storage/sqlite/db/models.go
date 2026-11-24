@@ -110,6 +110,13 @@ type AuthnKnownDevice struct {
 	LastSeenAt string
 }
 
+type AuthnNetworkProfile struct {
+	RealmID   string
+	UserID    string
+	Data      []byte
+	UpdatedAt string
+}
+
 type AuthnOauthResource struct {
 	ID                   string
 	RealmID              string

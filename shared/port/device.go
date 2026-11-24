@@ -36,3 +36,26 @@ type KnownDeviceRepo interface {
 	// Purge は全 realm から最大 limit 件消し、消した件数を返す（フィーチャーの無効化）。
 	Purge(ctx context.Context, limit int) (int, error)
 }
+
+// NetworkProfile は authn_network_profiles の1行（フィーチャー session_binding。ADR 0128）。ユーザーが普段使う接続元の
+// ネットワークと、そこで使うブラウザの種類の一覧。Data の形は authn/sessionbinding で、ユーザーのデータ鍵で暗号化する。
+type NetworkProfile struct {
+	RealmID   string
+	UserID    string
+	Data      []byte
+	UpdatedAt time.Time
+}
+
+// NetworkProfileRepo は authn_network_profiles の Repository。ユーザーごとに 1 行。
+type NetworkProfileRepo interface {
+	// Get はユーザーの一覧を返す。無ければ errs.NotFound。
+	Get(ctx context.Context, realmID, userID string) (NetworkProfile, error)
+	// Put は作るか置き換える。
+	Put(ctx context.Context, p NetworkProfile) error
+	// Delete はユーザーの一覧を消す。無くてもエラーにしない。
+	Delete(ctx context.Context, realmID, userID string) error
+	// Count は全 realm の行の数（フィーチャーの無効化。11.12）。
+	Count(ctx context.Context) (int, error)
+	// Purge は全 realm から最大 limit 件消し、消した件数を返す（フィーチャーの無効化）。
+	Purge(ctx context.Context, limit int) (int, error)
+}

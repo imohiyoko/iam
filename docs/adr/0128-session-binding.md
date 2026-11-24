@@ -40,10 +40,32 @@ IPv4 と IPv6 のデュアルスタック、VPN の付け外し、ブラウザ�
 | `country_changed` | 接続元の国が起点と変わった（GeoIP が要る） | 70 | `ip` |
 | `asn_changed` | 国は同じで ASN が変わった（GeoIP が要る） | 30 | `ip` |
 | `network_flapping` | `window`（既定 10 分）の内に `max_networks`（既定 4）以上の別々のネットワークから使われた | 70 | `ip` |
+| `unfamiliar_network` | ユーザーが普段使う接続元の一覧（下記）に、CIDR も ASN も無いネットワークから使われた | 50 | `ip` |
+| `unfamiliar_browser` | ユーザーが普段使う接続元の一覧のどのネットワークでも使われていないブラウザの種類で使われた | 50 | `device` |
 
 - 「ネットワーク」は、GeoIP で ASN が引ければ ASN、引けなければ IPv4 の /24・IPv6 の /64 とする
 - 兆候は系列ごとに**種類ごとに 1 回だけ**記録し、アクションを取る（同じ兆候で監査ログ・DB の書き込みを繰り返さない）
 - 接続元は ADR 0088 の信頼できるプロキシの規則で決めた値を使う
+
+### ユーザーが普段使う接続元の一覧
+
+系列の中の変化だけでは、ログインの直後から攻撃者が使う場合や、ゆっくり移る場合を見られない。ユーザーをまたいで「普段どの
+ネットワークから、どのブラウザで使うか」を覚え、比べる。
+
+- 系列が新しいネットワークから使われるたび（ログインの後の最初の要求を含む。同じ系列で同じネットワークに居続ける間は数えない）に、
+  接続元の **CIDR**（IPv4 は /24、IPv6 は /64）・ASN・国と、そこで使った**ブラウザの種類**（版の数字を除いた User-Agent。
+  最後に見た User-Agent も）の回数・最初と最後に見た時刻を数える
+- ユーザーごとに 1 行（`authn_network_profiles`）。中身は**ユーザーのデータ鍵で暗号化**する（9.5。ユーザーを消せば読めなくなり、
+  行も消す。統合元の一覧は消す）。フィーチャーを止めれば片付けで消す
+- 上限：ネットワークは `profile.max_networks`（既定 20）、ネットワークごとのブラウザは `profile.max_browsers`（既定 5）。超えれば
+  最後に見た時刻の古いものから捨てる。`profile.retention`（既定 90 日）より長く見ていないものも捨てる
+- 一覧の回数の合計が `profile.min_observations`（既定 5）に届くまでは `unfamiliar_*` を見ない（育つ前は何でも知らないものになる）
+- 知っているネットワークかは、**CIDR が同じか ASN が同じか**で決める（モバイル回線は同じ事業者の中で /24 が変わる）
+- 比べて足すのは、兆候の記録と同じトランザクションで行う。系列が新しいネットワークから使われたときだけなので、Storage への書き込みは
+  ログインごと・ネットワークの移動ごとに 1 回程度。一覧を読めない（鍵を消したユーザーなど）ときは、ほかの兆候の記録を止めない。
+  記録できなければ、その一覧との比べは系列が次に新しいネットワークから使われるまで行わない
+- 運営者は `GET /v1/admin/users/{id}/networks` で一覧を見る（権限 `users:read` と `audit:read_client_data`。接続元と
+  User-Agent は監査ログの接続元と同じ扱い。監査ログ `user.pii_read`）。`profile.enabled: false` なら一覧を作らず、API は 404
 
 ### ホットパスを重くしない
 
@@ -75,7 +97,7 @@ IPv4 と IPv6 のデュアルスタック、VPN の付け外し、ブラウザ�
 
 - 監査ログ `session.anomaly_detected` にいつも残す（接続元は監査ログの IP・User-Agent に入る。ADR 0063）。`details` は
   `signal`・`sid`・`user_id`・`actions` と、兆候ごとの内容（`from_country`・`to_country`、`from_asn`・`to_asn`、`networks`・
-  `window_seconds`、`device_cookie`）。SIEM・イベントの購読・SSF の送信側に流れる
+  `window_seconds`、`device_cookie`、`unfamiliar_*` の `network`（CIDR）・`asn`・`country`・`known_networks`・`observations`）。SIEM・イベントの購読・SSF の送信側に流れる
 - アクション（兆候ごとに選ぶ。複数可）
   - `risk`：ログインの系列の、終わっていないセッションのリスクを、兆候の種類（`device`・`ip`）ごとに点数まで上げる
     （下げない。realm の一覧で止めた種類は入れない）。`session.risk_updated` に `source: session_binding` で残す。その要求の判定から
@@ -100,6 +122,14 @@ security:
     country_changed:    { enabled: true, score: 70, actions: [] }
     asn_changed:        { enabled: true, score: 30, actions: [] }
     network_flapping:   { enabled: true, score: 70, actions: [] }
+    unfamiliar_network: { enabled: true, score: 50, actions: [] }
+    unfamiliar_browser: { enabled: true, score: 50, actions: [] }
+    profile:
+      enabled: true
+      min_observations: 5
+      max_networks: 20
+      max_browsers: 5
+      retention: 2160h  # 90 日
 ```
 
 状態を覚える長さはセッションの寿命の上限（`security.session.absolute_lifetime` の `default` と `max` の大きい方）。
@@ -110,6 +140,10 @@ security:
   系列のリスクが上がり、要件に `risk_at_most` を書いた操作は step-up を求め、2 要素目を持たない攻撃者は通れない。`revoke` を選べば
   その場で使えなくなる
 - 短い時間に接続元が渡り歩くセッションは `network_flapping` で見つかる
+- ログインの直後から普段と違う国・事業者・ブラウザで使われるセッションは `unfamiliar_network`・`unfamiliar_browser` で見つかる。
+  運営者は調査のとき、そのユーザーが普段どの CIDR・ASN から、どのブラウザで使っているかを API で見られる
+- 一覧は Storage に置くので、系列が新しいネットワークから使われるたびに 1 行を読み書きする（要求ごとではない）。新しいネットワークへの
+  旅行・転居・ブラウザの乗り換えは、一覧に入るまで `unfamiliar_*` になる（既定は記録だけ）
 - ホットパスの増分は EphemeralStore の 1 回の読み（と GeoIP の表引き）で、書き込みは変化のときだけ
 - 状態は EphemeralStore にあるので、memory のままでは再起動で消える（新しい起点から見直す）
 - 起点は最初に見た要求なので、ログインの直後に攻撃者が先に使えば攻撃者が起点になる（本人の要求が兆候になるので、記録は残る）
@@ -128,3 +162,8 @@ security:
   ホットパスで外部を呼ぶか、ログを後から流して遅れる。組み込みで軽く見る
 - **ブラウザの指紋**：ADR 0105 と同じ理由で採らない
 - **IP の完全一致で比べる**：CGNAT・IPv6 のプライバシー拡張で、正当な利用でも要求ごとに変わる
+- **一覧を ASN だけで持つ**：調べるときに CIDR が分からない。GeoIP が無い構成で使えない。CIDR で持ち、ASN も添えて、比べるときは
+  どちらかが合えば知っているものとする
+- **一覧を端末の記録（`device_recognition`）に足す**：端末の記録はログインのときだけ書き、端末の Cookie ごとに分かれる。接続元の
+  一覧はセッションの使われ方から育て、端末の Cookie が無い（Bearer）要求も数えたい
+- **一覧を login_risk の評価に使う**：ログインの瞬間しか見ないので、ログインの後の盗用には効かない。ログインの評価に使うのは今後

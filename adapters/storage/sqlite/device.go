@@ -52,3 +52,36 @@ func (r knownDevices) Purge(ctx context.Context, limit int) (int, error) {
 	n, err := r.q.PurgeKnownDevices(ctx, int64(limit))
 	return int(n), mapErr(err)
 }
+
+// networkProfiles はユーザーが普段使う接続元の一覧（authn_network_profiles。ADR 0128）。
+type networkProfiles struct{ q *db.Queries }
+
+func toNetworkProfile(r db.AuthnNetworkProfile) (port.NetworkProfile, error) {
+	var p times
+	n := port.NetworkProfile{RealmID: r.RealmID, UserID: r.UserID, Data: r.Data, UpdatedAt: p.at(r.UpdatedAt)}
+	return n, p.err
+}
+
+func (r networkProfiles) Get(ctx context.Context, realmID, userID string) (port.NetworkProfile, error) {
+	row, err := r.q.GetNetworkProfile(ctx, db.GetNetworkProfileParams{RealmID: realmID, UserID: userID})
+	return one(row, err, toNetworkProfile)
+}
+
+func (r networkProfiles) Put(ctx context.Context, p port.NetworkProfile) error {
+	return mapErr(r.q.PutNetworkProfile(ctx, db.PutNetworkProfileParams{RealmID: p.RealmID, UserID: p.UserID, Data: nonNil(p.Data),
+		UpdatedAt: formatTime(p.UpdatedAt)}))
+}
+
+func (r networkProfiles) Delete(ctx context.Context, realmID, userID string) error {
+	return mapErr(r.q.DeleteNetworkProfile(ctx, db.DeleteNetworkProfileParams{RealmID: realmID, UserID: userID}))
+}
+
+func (r networkProfiles) Count(ctx context.Context) (int, error) {
+	n, err := r.q.CountNetworkProfiles(ctx)
+	return int(n), mapErr(err)
+}
+
+func (r networkProfiles) Purge(ctx context.Context, limit int) (int, error) {
+	n, err := r.q.PurgeNetworkProfiles(ctx, int64(limit))
+	return int(n), mapErr(err)
+}

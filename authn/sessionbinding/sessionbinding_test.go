@@ -66,12 +66,12 @@ func TestIPv6Prefix(t *testing.T) {
 	g, _, _ := newGuard(t)
 	ctx := context.Background()
 	for _, ip := range []string{"2001:db8:1:1::1", "2001:db8:1:1::2", "2001:db8:1:1:aaaa::9", "2001:db8:1:2::1"} {
-		found, err := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: ip, UserAgent: "ua"})
+		found, err := g.found(ctx, Request{RealmID: "r", SID: "s", IP: ip, UserAgent: "ua"})
 		if err != nil || len(found) != 0 {
 			t.Fatalf("%s: %v %v", ip, signals(found), err)
 		}
 	}
-	found, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "2001:db8:1:3::1", UserAgent: "ua"})
+	found, _ := g.found(ctx, Request{RealmID: "r", SID: "s", IP: "2001:db8:1:3::1", UserAgent: "ua"})
 	if len(found) != 1 || found[0].Signal != SignalFlapping {
 		t.Fatalf("third /64: %v", signals(found))
 	}
@@ -81,24 +81,24 @@ func TestIPv6Prefix(t *testing.T) {
 func TestBearerDisabledUnreport(t *testing.T) {
 	g, _, _ := newGuard(t)
 	ctx := context.Background()
-	if found, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "a", Device: "d1", ViaCookie: true}); len(found) != 0 {
+	if found, _ := g.found(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "a", Device: "d1", ViaCookie: true}); len(found) != 0 {
 		t.Fatalf("first: %v", signals(found))
 	}
-	if found, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "a"}); len(found) != 0 {
+	if found, _ := g.found(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "a"}); len(found) != 0 {
 		t.Fatalf("bearer: %v", signals(found))
 	}
 	r := g.Config.Rules[SignalUserAgent]
 	r.Enabled = false
 	g.Config.Rules[SignalUserAgent] = r
-	found, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true})
+	found, _ := g.found(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true})
 	if len(found) != 1 || found[0].Signal != SignalDevice {
 		t.Fatalf("device: %v", signals(found))
 	}
-	if again, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true}); len(again) != 1 {
+	if again, _ := g.found(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true}); len(again) != 1 {
 		t.Fatalf("before confirm: %v", signals(again))
 	}
 	g.Confirm(ctx, "r", "s", found)
-	if again, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true}); len(again) != 0 {
+	if again, _ := g.found(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true}); len(again) != 0 {
 		t.Fatalf("after confirm: %v", signals(again))
 	}
 }
@@ -109,7 +109,7 @@ func TestFlappingWithThinnedWrites(t *testing.T) {
 	ctx := context.Background()
 	at := func(ip string) []Anomaly {
 		t.Helper()
-		found, err := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: ip, UserAgent: "a"})
+		found, err := g.found(ctx, Request{RealmID: "r", SID: "s", IP: ip, UserAgent: "a"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,16 +131,22 @@ func TestFewWrites(t *testing.T) {
 	g, clk, st := newGuard(t)
 	ctx := context.Background()
 	in := Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "a"}
-	_, _ = g.Observe(ctx, in)
+	_, _ = g.found(ctx, in)
 	first := string(st.m[key("r", "s")])
 	clk.Advance(time.Minute)
-	_, _ = g.Observe(ctx, in)
+	_, _ = g.found(ctx, in)
 	if string(st.m[key("r", "s")]) != first {
 		t.Fatal("wrote within window/4")
 	}
 	clk.Advance(2 * time.Minute)
-	_, _ = g.Observe(ctx, in)
+	_, _ = g.found(ctx, in)
 	if string(st.m[key("r", "s")]) == first {
 		t.Fatal("did not refresh after window/4")
 	}
+}
+
+// found は Observe の兆候だけを返す。
+func (g *Guard) found(ctx context.Context, in Request) ([]Anomaly, error) {
+	o, err := g.Observe(ctx, in)
+	return o.Found, err
 }
