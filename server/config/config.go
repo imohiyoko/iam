@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/netip"
 	"net/url"
 	"os"
@@ -348,14 +349,19 @@ func (c ClientCertificates) validate(s Server) []string {
 
 // TrustedProxyPrefixes は TrustedProxies を範囲にする。IP だけなら /32（IPv6 は /128）。誤った値があればエラー。
 func (s Server) TrustedProxyPrefixes() ([]netip.Prefix, error) {
-	out := make([]netip.Prefix, 0, len(s.TrustedProxies))
-	for _, v := range s.TrustedProxies {
+	return parsePrefixes("server.trusted_proxies", s.TrustedProxies)
+}
+
+// parsePrefixes は IP か CIDR の一覧を範囲にする。IP だけなら /32（IPv6 は /128）。field はエラーに出す設定の項目。
+func parsePrefixes(field string, vs []string) ([]netip.Prefix, error) {
+	out := make([]netip.Prefix, 0, len(vs))
+	for _, v := range vs {
 		if p, err := netip.ParsePrefix(v); err == nil {
 			if p.Addr().Is4In6() {
 				// 照合は Unmap した IPv4 で行うので、IPv4 射影の CIDR は IPv4 の CIDR に直す。
 				// /96 より短いと IPv4 射影の外の IPv6 まで含むので受け付けない。
 				if p.Bits() < 96 {
-					return nil, fmt.Errorf("server.trusted_proxies: %q is an IPv4-mapped prefix shorter than /96", v)
+					return nil, fmt.Errorf("%s: %q is an IPv4-mapped prefix shorter than /96", field, v)
 				}
 				p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
 			}
@@ -364,7 +370,7 @@ func (s Server) TrustedProxyPrefixes() ([]netip.Prefix, error) {
 		}
 		a, err := netip.ParseAddr(v)
 		if err != nil {
-			return nil, fmt.Errorf("server.trusted_proxies: %q is not an IP or CIDR", v)
+			return nil, fmt.Errorf("%s: %q is not an IP or CIDR", field, v)
 		}
 		a = a.Unmap()
 		out = append(out, netip.PrefixFrom(a, a.BitLen()))
@@ -457,6 +463,48 @@ type Security struct {
 	LoginRisk LoginRisk `yaml:"login_risk"`
 	// BotProtection はボット対策（フィーチャー bot_protection。ADR 0105）。
 	BotProtection BotProtection `yaml:"bot_protection"`
+	// SessionBinding はログインの後のセッションの端末・接続元の監視（フィーチャー session_binding。ADR 0128）。
+	SessionBinding SessionBinding `yaml:"session_binding"`
+}
+
+// SessionBinding はセッションの端末・接続元の監視の設定。
+type SessionBinding struct {
+	// Window は別々のネットワークを数える時間。
+	Window Duration `yaml:"window"`
+	// MaxNetworks は window の内にこの数以上の別々のネットワーク（ASN か、引けなければ /24・/64）から使われたら
+	// network_flapping とする。
+	MaxNetworks int `yaml:"max_networks"`
+	// IgnoreNetworks は比較と数え上げから外す接続元（IP か CIDR。会社の出口・自前の VPN など）。
+	IgnoreNetworks []string `yaml:"ignore_networks"`
+	// 兆候ごとの設定。
+	DeviceChanged    SessionSignal `yaml:"device_changed"`
+	UserAgentChanged SessionSignal `yaml:"user_agent_changed"`
+	CountryChanged   SessionSignal `yaml:"country_changed"`
+	ASNChanged       SessionSignal `yaml:"asn_changed"`
+	NetworkFlapping  SessionSignal `yaml:"network_flapping"`
+}
+
+// SessionSignal は兆候ごとの設定。見つければいつも監査ログ（session.anomaly_detected）に残す。
+type SessionSignal struct {
+	Enabled bool `yaml:"enabled"`
+	// Score は actions の risk で上げるリスクの点数（0〜100）。
+	Score int `yaml:"score"`
+	// Actions は risk（系列のリスクを score まで上げる）・revoke（系列を失効させる）・notify（本人に知らせる）。
+	Actions []string `yaml:"actions"`
+}
+
+// KnownSessionBindingActions は security.session_binding.*.actions の値。
+var KnownSessionBindingActions = []string{"risk", "revoke", "notify"}
+
+// Signals は兆候の名前ごとの設定。
+func (b SessionBinding) Signals() map[string]SessionSignal {
+	return map[string]SessionSignal{"device_changed": b.DeviceChanged, "user_agent_changed": b.UserAgentChanged,
+		"country_changed": b.CountryChanged, "asn_changed": b.ASNChanged, "network_flapping": b.NetworkFlapping}
+}
+
+// IgnorePrefixes は IgnoreNetworks を範囲にする。IP だけなら /32（IPv6 は /128）。誤った値があればエラー。
+func (b SessionBinding) IgnorePrefixes() ([]netip.Prefix, error) {
+	return parsePrefixes("security.session_binding.ignore_networks", b.IgnoreNetworks)
 }
 
 // Lockout はアカウント単位のロックアウトの設定。
@@ -690,6 +738,12 @@ func Default() Config {
 			LoginRisk: LoginRisk{NewDeviceScore: 60, UnconfirmedDeviceScore: 30, NewCountryScore: 70, NewASNScore: 30,
 				ImpossibleTravelScore: 90, MaxSpeedKmh: 1000},
 			BotProtection: BotProtection{Mode: "suspicious", AfterFailures: 5, Window: Duration(10 * time.Minute)},
+			SessionBinding: SessionBinding{Window: Duration(10 * time.Minute), MaxNetworks: 4,
+				DeviceChanged:    SessionSignal{Enabled: true, Score: 90, Actions: []string{"risk"}},
+				UserAgentChanged: SessionSignal{Enabled: true, Score: 60, Actions: []string{"risk"}},
+				CountryChanged:   SessionSignal{Enabled: true, Score: 70, Actions: []string{"risk"}},
+				ASNChanged:       SessionSignal{Enabled: true, Score: 30, Actions: []string{"risk"}},
+				NetworkFlapping:  SessionSignal{Enabled: true, Score: 70, Actions: []string{"risk"}}},
 		},
 		Outbox:     Outbox{Interval: Duration(time.Second), Batch: 100},
 		OrgDomains: OrgDomains{Recheck: Duration(day), Grace: Duration(7 * day)},
@@ -1047,6 +1101,24 @@ func (c Config) validateLoginProtection() []string {
 	}
 	if r.MaxSpeedKmh < 1 {
 		problems = append(problems, "security.login_risk.max_speed_kmh must be positive")
+	}
+	sb := c.Security.SessionBinding
+	if sb.Window.D() <= 0 || sb.MaxNetworks < 2 {
+		problems = append(problems, "security.session_binding: window must be positive and max_networks at least 2")
+	}
+	if _, err := sb.IgnorePrefixes(); err != nil {
+		problems = append(problems, err.Error())
+	}
+	for _, name := range slices.Sorted(maps.Keys(sb.Signals())) {
+		sig := sb.Signals()[name]
+		if sig.Score < 0 || sig.Score > 100 {
+			problems = append(problems, fmt.Sprintf("security.session_binding.%s.score must be within [0, 100]", name))
+		}
+		for _, a := range sig.Actions {
+			if !slices.Contains(KnownSessionBindingActions, a) {
+				problems = append(problems, fmt.Sprintf("security.session_binding.%s.actions: unknown value %q (known: %v)", name, a, KnownSessionBindingActions))
+			}
+		}
 	}
 	b := c.Security.BotProtection
 	if !slices.Contains(KnownBotModes, b.Mode) {

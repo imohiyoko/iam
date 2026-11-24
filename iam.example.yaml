@@ -116,6 +116,17 @@ security:
     validity_max_delay: 30s  # 失効などが検証に反映されるまでの遅れの上限
     rotation_interval: 1h    # Cookie のセッションの ID を入れ替える間隔（0 で入れ替えない）
     rotation_grace: 1m       # 入れ替え前の ID を使える猶予
+  # ログインの後のセッションの端末・接続元の監視（フィーチャー session_binding。ADR 0128）。
+  # actions は risk（系列のリスクを score まで上げ、要件の risk_at_most で step-up）・revoke（系列を失効）・notify（本人に知らせる）。
+  # session_binding:
+  #   window: 10m          # 別々のネットワークを数える時間
+  #   max_networks: 4      # window の内にこの数以上のネットワーク（ASN か /24・/64）から使われたら network_flapping
+  #   ignore_networks: []  # 比べない接続元（会社の出口・自前の VPN など）
+  #   device_changed:     { enabled: true, score: 90, actions: [risk] }  # 別のブラウザ（端末の Cookie が違う）で使われた
+  #   user_agent_changed: { enabled: true, score: 60, actions: [risk] }  # ブラウザ・OS の種類が変わった（版の数字は見ない）
+  #   country_changed:    { enabled: true, score: 70, actions: [risk] }  # 国が変わった（geoip が要る）
+  #   asn_changed:        { enabled: true, score: 30, actions: [risk] }  # 国は同じで ASN が変わった（geoip が要る）
+  #   network_flapping:   { enabled: true, score: 70, actions: [risk] }
 
 outbox:
   interval: 1s

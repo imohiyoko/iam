@@ -113,6 +113,14 @@ func (a *App) withSession(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// 同じセッションが別の端末・接続元から使われる兆候（ADR 0128）。系列を失効させたら未ログインとして扱う。
+		if !a.checkBinding(ctx, r, &v, viaCookie) {
+			if viaCookie {
+				http.SetCookie(w, a.clearSessionCookie())
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		if viaCookie && v.RotateDue {
 			if is, err := a.sessions.Rotate(ctx, a.realm.ID, v.SessionID, requestID(ctx)); err == nil {
 				http.SetCookie(w, a.sessionCookieFor(is.Token, is.Session.ExpiresAt, a.deps.Clock.Now()))

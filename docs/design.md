@@ -98,7 +98,7 @@ IAM は**メールの文面も URL も作らない**。出来事を ID で外部
 ```
 
 - `user_id` は未登録のアドレス宛てなら無し、`org_id` は関係する場合のみ、`locale` は任意。`suspended` には種別を添える
-- 種類：`email_verification` `magic_link` `account_exists` `recovery` `new_device_login` `credential_added` `credential_revoked` `suspended` `membership_invited` `deletion_scheduled` など
+- 種類：`email_verification` `magic_link` `account_exists` `recovery` `new_device_login` `credential_added` `credential_revoked` `suspended` `suspicious_session` `membership_invited` `deletion_scheduled` など
 - **秘密（トークン・コード）と宛先はペイロードに入れない**。外部の配信側が `POST /v1/admin/notifications/{id}:claim` で**1回だけ**取り出す（`notifications:claim` 権限を持つ**配信用のサービスアカウント**が必要。これはサービスアカウントのフィーチャー（11.2）のオン・オフにかかわらず使え、権限は `notifications:claim` に固定）
   - 返すのは `to`・`token`・`expires_at`。利用者が入力した宛先は EphemeralStore に一時保持して返す（9.6 の最小化モードでも可）
   - IAM はトークンのハッシュだけを持つ。リンク先のアプリが公開 API（`/v1/magic-links:verify` など）で検証する
@@ -999,6 +999,7 @@ JWT をサービスアカウントのアクセストークン（11.2）に替え
 | 端末の記憶（11.17） | オフ | ― | 端末の Cookie を置かない。警告 `new_device` と通知 `new_device_login` なし。端末の API は 404 |
 | ログインのリスクの点数（11.17） | オフ | 端末の記憶 | 組み込みのリスク `device`・`ip` を付けない（フックの点数はそのまま） |
 | ボット対策（11.17） | オフ | ― | ログインの入口で人の確認を求めない |
+| セッションの接続元の監視（11.17、ADR 0128） | オフ | ― | ログインの後のセッションの端末・接続元を比べない。監査ログ `session.anomaly_detected` と通知 `suspicious_session` なし |
 | LDAP / Active Directory（11.3、ADR 0102） | オフ | ― | LDAP の connection を使わない・同期しない（Org 専用には Org 管理ユーザーも要る） |
 | Kerberos / SPNEGO（4.1、ADR 0107） | オフ | ― | Negotiate のログインと登録なし（設定の無い realm でも）。無効化は認証情報が 0 件になって完了 |
 | 本人の Personal Access Token（11.18、ADR 0109） | オフ | ― | PAT の API は 404。`iampat_` のトークンはどの経路でも通らない。無効化でトークンと realm のポリシーを消す |
@@ -1231,6 +1232,12 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - `bot_protection`：ログインと復旧の入口で、`always` ならいつも、`suspicious` なら接続元の失敗（401・429）が続いた後に
   `IAM-Bot-Token` ヘッダーを求め、ポート `BotVerifier`（汎用の siteverify の HTTP、開発用）で確かめる。無いか通らなければ
   `403 bot_check_required`。確かめられないときも通さない
+- `session_binding`（ADR 0128）：ログインの後のセッションの検証で、系列（`sid`）ごとに最初の要求の端末の Cookie・User-Agent の種類・
+  国と ASN を起点に覚え、`device_changed`・`user_agent_changed`・`country_changed`・`asn_changed`・`network_flapping`
+  （`window` の内に `max_networks` 以上のネットワーク。ネットワークは ASN か /24・/64）を見つける。状態は EphemeralStore で、
+  変化のときだけ書く。いつも `session.anomaly_detected` に残し、兆候ごとに `risk`（系列のリスク `device`・`ip` を上げる。既定）・
+  `revoke`（系列を失効。理由 `session_anomaly`）・`notify`（通知 `suspicious_session`）を選ぶ。同じ ASN の中の変化・
+  少し前のネットワークへの戻り・`ignore_networks` は数えない
 
 ### 11.18 本人の Personal Access Token
 
