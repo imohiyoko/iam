@@ -120,14 +120,14 @@ func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Vali
 		return nil
 	})
 	if err != nil {
-		// 記録できなければ知らせ済みにしないので、次の要求でもう一度見つかる（一覧との比べは、系列が次に新しいネットワークから
-		// 使われるまで行わない）。失効させるはずだったなら、この要求は止める。
+		// 記録できなければ知らせ済みにも一覧に足し終えたことにもしないので、次の要求（同じネットワークでも）でもう一度比べる。
+		// 失効させるはずだったなら、この要求は止める。
 		a.deps.Logger.ErrorContext(ctx, "session binding actions", "session_id", v.SessionID, "error", err)
 		return !revoke
 	}
 	// 要求が切られても、記録できたことは覚える（要求の ctx の取り消しに巻き込まない）。
 	detached := context.WithoutCancel(ctx)
-	a.binding.Confirm(detached, a.realm.ID, v.SID, found)
+	a.binding.Confirm(detached, a.realm.ID, v.SID, found, obs.Visit)
 	a.sessions.ForgetIDs(detached, a.realm.ID, changed)
 	if notify {
 		// 通知は別のトランザクションにし、失敗しても記録・リスク・失効を取り消さない（ログに残すだけ）。

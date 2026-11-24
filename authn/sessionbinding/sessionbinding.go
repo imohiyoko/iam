@@ -183,6 +183,9 @@ type state struct {
 	Nets    []seen `json:"n,omitempty"`
 	// Reported は知らせ済みの兆候（系列ごとに 1 回だけ記録し、アクションを取る）。
 	Reported []Signal `json:"r,omitempty"`
+	// Pending は普段の接続元の一覧にまだ足せていないネットワークの ID。足せる（記録のトランザクションがコミットする）まで、
+	// 同じネットワークからの要求でも Visit を返す。
+	Pending string `json:"p,omitempty"`
 }
 
 func key(realmID, sid string) string { return "sesbind:v1:" + realmID + ":" + sid }
@@ -299,9 +302,12 @@ func (g *Guard) Observe(ctx context.Context, in Request) (Observation, error) {
 		}
 		changed, added := g.touch(&st, id, now)
 		dirty = changed || dirty
-		if added && g.ProfilesEnabled() {
+		if added && g.ProfilesEnabled() && st.Pending != id {
+			st.Pending, dirty = id, true
+		}
+		if st.Pending == id && g.ProfilesEnabled() {
 			visit = &Visit{Network: cidr(ip), ASN: loc.ASN, Country: loc.Country, Family: uaFamily(in.UserAgent), UserAgent: in.UserAgent,
-				Reported: slices.Clone(st.Reported)}
+				Reported: slices.Clone(st.Reported), net: id}
 		}
 		if n := g.distinct(st, now); g.Config.MaxNetworks > 0 && n >= g.Config.MaxNetworks {
 			report(SignalFlapping, map[string]any{"networks": n, "window_seconds": int(g.Config.Window / time.Second)})
@@ -356,10 +362,10 @@ func (g *Guard) distinct(st state, now time.Time) int {
 	return n
 }
 
-// Confirm は found を知らせ済みにする（アクションを記録できた後に呼ぶ）。書けなければ次の要求でもう一度見つかる（記録とアクションが
-// 重なるだけで、リスクの引き上げと失効は同じ結果になる）。
-func (g *Guard) Confirm(ctx context.Context, realmID, sid string, found []Anomaly) {
-	if len(found) == 0 {
+// Confirm は found を知らせ済みにし、visit を一覧に足し終えたことにする（アクションと一覧を記録できた後に呼ぶ）。書けなければ
+// 次の要求でもう一度見つかる（記録とアクションが重なり、一覧の回数が 1 つ多くなるだけで、リスクの引き上げと失効は同じ結果になる）。
+func (g *Guard) Confirm(ctx context.Context, realmID, sid string, found []Anomaly, visit *Visit) {
+	if len(found) == 0 && visit == nil {
 		return
 	}
 	k := key(realmID, sid)
@@ -376,6 +382,9 @@ func (g *Guard) Confirm(ctx context.Context, realmID, sid string, found []Anomal
 		if !slices.Contains(st.Reported, x.Signal) {
 			st.Reported = append(st.Reported, x.Signal)
 		}
+	}
+	if visit != nil && st.Pending == visit.net {
+		st.Pending = ""
 	}
 	if b, err := json.Marshal(st); err == nil {
 		if err := g.Cache.Set(ctx, k, b, g.Config.TTL); err != nil {

@@ -19,12 +19,16 @@ import (
 
 func newBindingEnv(t *testing.T, extra []string, edit func(*config.Config)) *loginEnv {
 	t.Helper()
-	geo, err := static.Parse(strings.NewReader(riskGeo))
+	geo, err := static.Parse(strings.NewReader(riskGeo + bindingGeo))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return newProtectEnv(t, append([]string{feature.SessionBinding}, extra...), edit, func(d *Deps) { d.GeoIP = geo })
 }
+
+// bindingGeo は riskGeo に足す表（198.51.100.0/24 と同じ ASN の別の /24）。
+const bindingGeo = `198.51.101.0/24,JP,64500,35.68,139.76
+`
 
 // anomalies は監査ログの session.anomaly_detected の兆候の名前。
 func (l *loginEnv) anomalies(t *testing.T) []string {
@@ -279,7 +283,7 @@ func TestSessionBindingProfile(t *testing.T) {
 		t.Fatalf("while learning: %v", got)
 	}
 	// 同じ ASN の別の CIDR は知っているネットワーク（ブラウザの更新も同じ種類）。
-	visit("198.51.100.99", strings.ReplaceAll(firefox, "132.0", "133.0"))
+	visit("198.51.101.99", strings.ReplaceAll(firefox, "132.0", "133.0"))
 	if got := l.anomalies(t); len(got) != 0 {
 		t.Fatalf("same ASN: %v", got)
 	}
@@ -289,7 +293,7 @@ func TestSessionBindingProfile(t *testing.T) {
 		t.Fatalf("unfamiliar network: %v", got)
 	}
 	ev := l.lastAudit(t, sessionbinding.EventAnomaly)
-	if ev.Details["network"] != "203.0.113.0/24" || ev.Details["asn"] != float64(64501) || ev.Details["country"] != "US" || ev.Details["known_networks"] != float64(2) {
+	if ev.Details["network"] != "203.0.113.0/24" || ev.Details["asn"] != float64(64501) || ev.Details["country"] != "US" || ev.Details["known_networks"] != float64(3) {
 		t.Fatalf("anomaly: %+v", ev.Details)
 	}
 	if r := bindingRisk(l.auditOf(t, "session.risk_updated")); r["ip"] != float64(50) {
@@ -314,11 +318,11 @@ func TestSessionBindingProfile(t *testing.T) {
 		t.Fatalf("networks: %d %v", code, out)
 	}
 	nets := out["networks"].([]any)
-	if len(nets) != 3 {
+	if len(nets) != 4 {
 		t.Fatalf("networks: %v", nets)
 	}
 	first := nets[0].(map[string]any)
-	if first["cidr"] != "198.51.100.0/24" || first["asn"] != float64(64500) || first["country"] != "JP" || first["count"] != float64(4) {
+	if first["cidr"] != "198.51.100.0/24" || first["asn"] != float64(64500) || first["country"] != "JP" || first["count"] != float64(3) {
 		t.Fatalf("latest network: %v", first)
 	}
 	if bs := first["browsers"].([]any); len(bs) != 2 || !strings.Contains(bs[0].(map[string]any)["user_agent"].(string), "Chrome/131") {
@@ -352,5 +356,15 @@ func TestSessionBindingConfig(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
+	}
+	// 一覧を作らない設定なら、一覧の数は見ない。
+	off := config.Default()
+	off.Security.SessionBinding.Profile = config.NetworkProfile{Enabled: false}
+	if err := off.Validate(); err != nil && strings.Contains(err.Error(), "session_binding.profile") {
+		t.Fatalf("profile off: %v", err)
+	}
+	off.Security.SessionBinding.Profile.Enabled = true
+	if err := off.Validate(); err == nil || !strings.Contains(err.Error(), "session_binding.profile") {
+		t.Fatalf("profile on without limits: %v", err)
 	}
 }

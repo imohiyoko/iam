@@ -1,9 +1,12 @@
 package sessionbinding
 
 import (
+	"context"
 	"net/netip"
 	"testing"
 	"time"
+
+	"github.com/imohiyoko/iam/shared/pii"
 )
 
 func TestProfileAddAndLimits(t *testing.T) {
@@ -50,5 +53,32 @@ func TestCIDR(t *testing.T) {
 		if got := cidr(netip.MustParseAddr(in)); got != want {
 			t.Errorf("cidr(%s) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+// 一覧に足せる（Confirm）まで、同じネットワークからの要求でも Visit を返す（記録のトランザクションが失敗したときの再試行）。
+func TestVisitPendingUntilConfirmed(t *testing.T) {
+	g, clk, _ := newGuard(t)
+	g.Crypter, g.Config.Profile = &pii.Crypter{}, ProfileConfig{Enabled: true}
+	ctx := context.Background()
+	in := Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "a"}
+	first, _ := g.Observe(ctx, in)
+	clk.Advance(time.Second)
+	again, _ := g.Observe(ctx, in)
+	if first.Visit == nil || again.Visit == nil || again.Visit.Network != "192.0.2.0/24" {
+		t.Fatalf("visits before confirm: %+v %+v", first.Visit, again.Visit)
+	}
+	g.Confirm(ctx, "r", "s", nil, again.Visit)
+	if after, _ := g.Observe(ctx, in); after.Visit != nil {
+		t.Fatalf("visit after confirm: %+v", after.Visit)
+	}
+	// 別のネットワークに移れば、また Visit を返す。
+	if moved, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "198.51.100.1", UserAgent: "a"}); moved.Visit == nil {
+		t.Fatal("no visit after moving")
+	}
+	// 一覧を作らない設定なら返さない。
+	g.Config.Profile.Enabled = false
+	if off, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s2", IP: "192.0.2.1", UserAgent: "a"}); off.Visit != nil {
+		t.Fatal("visit with profiles off")
 	}
 }

@@ -1131,7 +1131,7 @@ func (c Config) validateLoginProtection() []string {
 	if _, err := sb.IgnorePrefixes(); err != nil {
 		problems = append(problems, err.Error())
 	}
-	if p := sb.Profile; p.MinObservations < 1 || p.MaxNetworks < 1 || p.MaxBrowsers < 1 || p.Retention.D() <= 0 {
+	if p := sb.Profile; p.Enabled && (p.MinObservations < 1 || p.MaxNetworks < 1 || p.MaxBrowsers < 1 || p.Retention.D() <= 0) {
 		problems = append(problems, "security.session_binding.profile: min_observations, max_networks, max_browsers and retention must be positive")
 	}
 	for _, name := range slices.Sorted(maps.Keys(sb.Signals())) {

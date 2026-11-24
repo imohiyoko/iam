@@ -97,7 +97,7 @@ func TestBearerDisabledUnreport(t *testing.T) {
 	if again, _ := g.found(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true}); len(again) != 1 {
 		t.Fatalf("before confirm: %v", signals(again))
 	}
-	g.Confirm(ctx, "r", "s", found)
+	g.Confirm(ctx, "r", "s", found, nil)
 	if again, _ := g.found(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true}); len(again) != 0 {
 		t.Fatalf("after confirm: %v", signals(again))
 	}

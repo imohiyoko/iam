@@ -45,6 +45,8 @@ type Visit struct {
 	UserAgent string
 	// Reported は Observe のときに系列で知らせ済みだった兆候。
 	Reported []Signal
+	// net は系列の状態のネットワークの ID（Confirm で足し終えたことにする）。
+	net string
 }
 
 // Profile は一覧（暗号化して置く中身）。
