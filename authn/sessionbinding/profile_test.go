@@ -2,6 +2,7 @@ package sessionbinding
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
@@ -87,6 +88,25 @@ func TestVisitPendingUntilConfirmed(t *testing.T) {
 	if again, _ := g.Observe(ctx, b); again.Visit == nil {
 		t.Fatal("visit dropped without learning")
 	}
+	// 足せないままのネットワークが上限（max_networks の 2 倍）を超えても、捨てたネットワークに戻れば比べ直す。
+	g2, _, _ := newGuard(t)
+	g2.Crypter, g2.Config.Profile, g2.Config.MaxNetworks = &pii.Crypter{}, ProfileConfig{Enabled: true}, 2
+	from := func(n int) Request { return Request{RealmID: "r", SID: "s", IP: fmt.Sprintf("100.64.%d.1", n), UserAgent: "a"} }
+	for _, n := range []int{0, 1, 2} { // A・B・C は足せない
+		_, _ = g2.Observe(ctx, from(n))
+	}
+	for _, n := range []int{3, 4, 5} { // D・E・F は足せる
+		o, _ := g2.Observe(ctx, from(n))
+		g2.Confirm(ctx, "r", "s", nil, o.Visit)
+	}
+	_, _ = g2.Observe(ctx, from(0)) // A に戻り、また足せない
+	for _, n := range []int{6, 7} { // G・H も足せない
+		_, _ = g2.Observe(ctx, from(n))
+	}
+	if back, _ := g2.Observe(ctx, from(0)); back.Visit == nil || back.Visit.Network != "100.64.0.0/24" {
+		t.Fatalf("no visit back on an evicted network: %+v", back.Visit)
+	}
+
 	// 一覧を作らない設定なら返さない。
 	g.Config.Profile.Enabled = false
 	if off, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s2", IP: "192.0.2.1", UserAgent: "a"}); off.Visit != nil {

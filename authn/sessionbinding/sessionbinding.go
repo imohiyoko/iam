@@ -302,9 +302,14 @@ func (g *Guard) Observe(ctx context.Context, in Request) (Observation, error) {
 		}
 		changed, added := g.touch(&st, id, now)
 		dirty = changed || dirty
-		if added && g.ProfilesEnabled() && !slices.Contains(st.Pending, id) {
-			st.Pending, dirty = append(st.Pending, id), true
+		if added && g.ProfilesEnabled() {
+			// 新しく足すか、まだ足せていないものを後ろへ（上限で捨てるのは長く比べ直していないものから）。
+			st.Pending = append(slices.DeleteFunc(st.Pending, func(s string) bool { return s == id }), id)
+			dirty = true
 			if limit := max(g.Config.MaxNetworks, 1) * 2; len(st.Pending) > limit {
+				// 捨てたネットワークは覚えているネットワークからも外し、次にそこから使われたら新しいネットワークとして比べ直す。
+				drop := st.Pending[:len(st.Pending)-limit]
+				st.Nets = slices.DeleteFunc(st.Nets, func(s seen) bool { return slices.Contains(drop, s.ID) })
 				st.Pending = st.Pending[len(st.Pending)-limit:]
 			}
 		}
