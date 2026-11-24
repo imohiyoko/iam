@@ -98,18 +98,25 @@ func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Vali
 			}
 			changed, applied = append(changed, ids...), kept
 		}
-		if notify {
-			return a.binding.NotifyUser(ctx, tx, a.realm.ID, v.PrincipalID, v.PublicID)
-		}
 		return nil
 	})
 	if err != nil {
-		// 記録できなければ、次の要求でもう一度見つけるよう知らせ済みを戻す。失効させるはずだったなら、この要求は止める。
+		// 記録できなければ知らせ済みにしないので、次の要求でもう一度見つかる。失効させるはずだったなら、この要求は止める。
 		a.deps.Logger.ErrorContext(ctx, "session binding actions", "session_id", v.SessionID, "error", err)
-		a.binding.Unreport(ctx, a.realm.ID, v.SID, found)
 		return !revoke
 	}
-	a.sessions.ForgetIDs(ctx, a.realm.ID, changed)
+	// 要求が切られても、記録できたことは覚える（要求の ctx の取り消しに巻き込まない）。
+	detached := context.WithoutCancel(ctx)
+	a.binding.Confirm(detached, a.realm.ID, v.SID, found)
+	a.sessions.ForgetIDs(detached, a.realm.ID, changed)
+	if notify {
+		// 通知は別のトランザクションにし、失敗しても記録・リスク・失効を取り消さない（ログに残すだけ）。
+		if err := a.deps.Storage.Tx(detached, func(ctx context.Context, tx port.Tx) error {
+			return a.binding.NotifyUser(ctx, tx, a.realm.ID, v.PrincipalID, v.PublicID)
+		}); err != nil {
+			a.deps.Logger.ErrorContext(ctx, "session binding notification", "session_id", v.SessionID, "error", err)
+		}
+	}
 	if revoke {
 		return false
 	}

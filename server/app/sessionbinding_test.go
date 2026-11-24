@@ -203,7 +203,7 @@ func TestSessionBindingFlapping(t *testing.T) {
 	l.hdr = []string{"X-Forwarded-For", "100.64.1.1"}
 	_, cookie = l.login(t, "pat@example.com")
 	for _, ip := range []string{"100.64.1.1", "100.64.2.1", "100.64.3.1", "100.64.4.1"} {
-		l.advance(6 * time.Minute)
+		l.advance(7 * time.Minute) // 数える範囲（window の 1.25 倍まで）に 2 つだけ
 		from(ip)
 	}
 	if got := l.anomalies(t); len(got) != 1 {

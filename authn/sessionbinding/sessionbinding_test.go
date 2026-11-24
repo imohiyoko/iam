@@ -77,7 +77,7 @@ func TestIPv6Prefix(t *testing.T) {
 	}
 }
 
-// Bearer（別のドメインのアプリ）の要求は端末の Cookie を比べない。止めた兆候は返さない。Unreport でもう一度見つける。
+// Bearer（別のドメインのアプリ）の要求は端末の Cookie を比べない。止めた兆候は返さない。Confirm するまでは何度でも見つける。
 func TestBearerDisabledUnreport(t *testing.T) {
 	g, _, _ := newGuard(t)
 	ctx := context.Background()
@@ -94,12 +94,35 @@ func TestBearerDisabledUnreport(t *testing.T) {
 	if len(found) != 1 || found[0].Signal != SignalDevice {
 		t.Fatalf("device: %v", signals(found))
 	}
-	if again, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true}); len(again) != 0 {
-		t.Fatalf("reported twice: %v", signals(again))
-	}
-	g.Unreport(ctx, "r", "s", found)
 	if again, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true}); len(again) != 1 {
-		t.Fatalf("after unreport: %v", signals(again))
+		t.Fatalf("before confirm: %v", signals(again))
+	}
+	g.Confirm(ctx, "r", "s", found)
+	if again, _ := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: "192.0.2.1", UserAgent: "b", Device: "d2", ViaCookie: true}); len(again) != 0 {
+		t.Fatalf("after confirm: %v", signals(again))
+	}
+}
+
+// 時刻の更新を間引いても、window の内に使ったネットワークを数え落とさない。
+func TestFlappingWithThinnedWrites(t *testing.T) {
+	g, clk, _ := newGuard(t)
+	ctx := context.Background()
+	at := func(ip string) []Anomaly {
+		t.Helper()
+		found, err := g.Observe(ctx, Request{RealmID: "r", SID: "s", IP: ip, UserAgent: "a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return found
+	}
+	at("192.0.2.1") // A（0 分）
+	clk.Advance(2 * time.Minute)
+	at("192.0.2.1") // A（2 分。window/4 の内なので書かない）
+	clk.Advance(8*time.Minute + 30*time.Second)
+	at("198.51.100.1") // B（10 分 30 秒）
+	clk.Advance(30 * time.Second)
+	if found := at("203.0.113.1"); len(found) != 1 || found[0].Signal != SignalFlapping { // C（11 分。直近 10 分に A・B・C）
+		t.Fatalf("A, B and C within the window: %v", signals(found))
 	}
 }
 

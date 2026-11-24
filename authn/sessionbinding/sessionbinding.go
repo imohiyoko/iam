@@ -221,7 +221,8 @@ func (g *Guard) logger() *slog.Logger {
 	return g.Log
 }
 
-// Observe は要求 in を系列の状態と比べ、まだ知らせていない兆候を返す。状態は変わったときだけ書く。
+// Observe は要求 in を系列の状態と比べ、まだ知らせていない兆候を返す。状態は変わったときだけ書く。返した兆候は、呼び出し側が
+// アクションを記録した後に Confirm で知らせ済みにする。
 // 状態を読めない・書けないときはエラーを返す（呼び出し側は要求を止めない）。
 func (g *Guard) Observe(ctx context.Context, in Request) ([]Anomaly, error) {
 	if in.SID == "" {
@@ -245,8 +246,7 @@ func (g *Guard) Observe(ctx context.Context, in Request) ([]Anomaly, error) {
 		if !ok || !r.Enabled || slices.Contains(st.Reported, s) {
 			return
 		}
-		st.Reported = append(st.Reported, s)
-		dirty = true
+		// 知らせ済みにするのは、呼び出し側がアクションを記録できた後（Confirm）。記録できなければ次の要求でもう一度見つかる。
 		found = append(found, Anomaly{Signal: s, Score: r.Score, Actions: slices.Clone(r.Actions), Details: details})
 	}
 
@@ -298,6 +298,10 @@ func (g *Guard) Observe(ctx context.Context, in Request) ([]Anomaly, error) {
 	return found, nil
 }
 
+// live は覚えたネットワークの時刻 at が数える範囲にあるか。同じネットワークの時刻は window の 1/4 ごとにしか更新しないので、
+// 最後に見た時刻より最大で window/4 古い。数え落とさないよう、その分だけ広く見る（数える範囲は window から window の 1.25 倍）。
+func (g *Guard) live(at, now time.Time) bool { return now.Sub(at) <= g.Config.Window+g.Config.Window/4 }
+
 // touch はネットワーク id を見たことを覚える。書き込みを減らすため、同じネットワークの時刻は window の 1/4 より古くなったら
 // 更新する。変えたら真を返す。
 func (g *Guard) touch(st *state, id string, now time.Time) bool {
@@ -310,8 +314,8 @@ func (g *Guard) touch(st *state, id string, now time.Time) bool {
 		return true
 	}
 	st.Nets = append(st.Nets, seen{ID: id, At: now})
-	// window を過ぎたものを捨て、数を抑える（数えるのに要るのは max_networks まで）。
-	st.Nets = slices.DeleteFunc(st.Nets, func(s seen) bool { return now.Sub(s.At) > g.Config.Window })
+	// 数える範囲を過ぎたものを捨て、数を抑える（数えるのに要るのは max_networks まで）。
+	st.Nets = slices.DeleteFunc(st.Nets, func(s seen) bool { return !g.live(s.At, now) })
 	if limit := max(g.Config.MaxNetworks, 1) * 2; len(st.Nets) > limit {
 		st.Nets = st.Nets[len(st.Nets)-limit:]
 	}
@@ -322,27 +326,34 @@ func (g *Guard) touch(st *state, id string, now time.Time) bool {
 func (g *Guard) distinct(st state, now time.Time) int {
 	n := 0
 	for _, s := range st.Nets {
-		if now.Sub(s.At) <= g.Config.Window {
+		if g.live(s.At, now) {
 			n++
 		}
 	}
 	return n
 }
 
-// Unreport は found を知らせ済みから外す（アクションを記録できなかったとき、次の要求でもう一度見つけるため）。ベストエフォート。
-func (g *Guard) Unreport(ctx context.Context, realmID, sid string, found []Anomaly) {
+// Confirm は found を知らせ済みにする（アクションを記録できた後に呼ぶ）。書けなければ次の要求でもう一度見つかる（記録とアクションが
+// 重なるだけで、リスクの引き上げと失効は同じ結果になる）。
+func (g *Guard) Confirm(ctx context.Context, realmID, sid string, found []Anomaly) {
+	if len(found) == 0 {
+		return
+	}
 	k := key(realmID, sid)
-	b, hit, err := g.Cache.Get(ctx, k)
-	if err != nil || !hit {
-		return
-	}
 	var st state
-	if json.Unmarshal(b, &st) != nil {
+	b, hit, err := g.Cache.Get(ctx, k)
+	if err != nil {
+		g.logger().WarnContext(ctx, "session binding state read failed", "error", err)
 		return
 	}
-	st.Reported = slices.DeleteFunc(st.Reported, func(s Signal) bool {
-		return slices.ContainsFunc(found, func(x Anomaly) bool { return x.Signal == s })
-	})
+	if hit && json.Unmarshal(b, &st) != nil {
+		st = state{}
+	}
+	for _, x := range found {
+		if !slices.Contains(st.Reported, x.Signal) {
+			st.Reported = append(st.Reported, x.Signal)
+		}
+	}
 	if b, err := json.Marshal(st); err == nil {
 		if err := g.Cache.Set(ctx, k, b, g.Config.TTL); err != nil {
 			g.logger().WarnContext(ctx, "session binding state write failed", "error", err)
