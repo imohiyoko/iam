@@ -57,7 +57,7 @@ func TestCIDR(t *testing.T) {
 	}
 }
 
-// 一覧に足せる（Confirm）まで、同じネットワークからの要求でも Visit を返す（記録のトランザクションが失敗したときの再試行）。
+// 一覧に足し終える（Confirm）まで、そのネットワークからの要求では Visit を返す（記録のトランザクションが失敗したときの再試行）。
 func TestVisitPendingUntilConfirmed(t *testing.T) {
 	g, clk, _ := newGuard(t)
 	g.Crypter, g.Config.Profile = &pii.Crypter{}, ProfileConfig{Enabled: true}
@@ -88,10 +88,12 @@ func TestVisitPendingUntilConfirmed(t *testing.T) {
 	if again, _ := g.Observe(ctx, b); again.Visit == nil {
 		t.Fatal("visit dropped without learning")
 	}
-	// 足せないままのネットワークが上限（max_networks の 2 倍）を超えても、捨てたネットワークに戻れば比べ直す。
+	// 足せないままのネットワークが多くても、どれに戻っても比べ直す。
 	g2, _, _ := newGuard(t)
 	g2.Crypter, g2.Config.Profile, g2.Config.MaxNetworks = &pii.Crypter{}, ProfileConfig{Enabled: true}, 2
-	from := func(n int) Request { return Request{RealmID: "r", SID: "s", IP: fmt.Sprintf("100.64.%d.1", n), UserAgent: "a"} }
+	from := func(n int) Request {
+		return Request{RealmID: "r", SID: "s", IP: fmt.Sprintf("100.64.%d.1", n), UserAgent: "a"}
+	}
 	for _, n := range []int{0, 1, 2} { // A・B・C は足せない
 		_, _ = g2.Observe(ctx, from(n))
 	}
@@ -105,6 +107,20 @@ func TestVisitPendingUntilConfirmed(t *testing.T) {
 	}
 	if back, _ := g2.Observe(ctx, from(0)); back.Visit == nil || back.Visit.Network != "100.64.0.0/24" {
 		t.Fatalf("no visit back on an evicted network: %+v", back.Visit)
+	}
+
+	// 一覧に足せないままでも、network_flapping の数え上げは変わらない（window 10 分、max_networks 2）。
+	g3, clk3, _ := newGuard(t)
+	g3.Crypter, g3.Config.Profile, g3.Config.MaxNetworks = &pii.Crypter{}, ProfileConfig{Enabled: true}, 2
+	g3.Config.Rules = map[Signal]Rule{SignalFlapping: {Enabled: true, Score: 70}}
+	for _, n := range []int{0, 1, 2, 3} {
+		_, _ = g3.Observe(ctx, from(n))
+	}
+	clk3.Advance(11 * time.Minute)
+	_, _ = g3.Observe(ctx, from(0))
+	clk3.Advance(2 * time.Minute)
+	if o, _ := g3.Observe(ctx, from(4)); len(o.Found) != 1 || o.Found[0].Signal != SignalFlapping || o.Found[0].Details["networks"] != 2 {
+		t.Fatalf("flapping with pending visits: %+v", o.Found)
 	}
 
 	// 一覧を作らない設定なら返さない。

@@ -183,9 +183,10 @@ type state struct {
 	Nets    []seen `json:"n,omitempty"`
 	// Reported は知らせ済みの兆候（系列ごとに 1 回だけ記録し、アクションを取る）。
 	Reported []Signal `json:"r,omitempty"`
-	// Pending は普段の接続元の一覧にまだ足せていないネットワークの ID。足せる（一覧と比べ、記録のトランザクションがコミットする）
-	// まで、同じネットワークからの要求でも Visit を返す。別のネットワークに移っても残す（数は Nets と同じに抑える）。
-	Pending []string `json:"p,omitempty"`
+	// Learned は、この系列で普段の接続元の一覧に足し終えた（一覧と比べ、記録のトランザクションがコミットした）ネットワークの ID。
+	// ここに無いネットワークからの要求では Visit を返す。Nets（network_flapping の数え上げ）とは別に持つ。数は抑え、
+	// 長く使っていないものから捨てる（捨てたネットワークに戻れば、一覧にもう一度数えるだけ）。
+	Learned []string `json:"ln,omitempty"`
 }
 
 func key(realmID, sid string) string { return "sesbind:v1:" + realmID + ":" + sid }
@@ -300,22 +301,16 @@ func (g *Guard) Observe(ctx context.Context, in Request) (Observation, error) {
 		case located && loc.ASN != 0 && st.ASN != 0 && loc.ASN != st.ASN:
 			report(SignalASN, map[string]any{"from_asn": st.ASN, "to_asn": loc.ASN})
 		}
-		changed, added := g.touch(&st, id, now)
+		changed, _ := g.touch(&st, id, now)
 		dirty = changed || dirty
-		if added && g.ProfilesEnabled() {
-			// 新しく足すか、まだ足せていないものを後ろへ（上限で捨てるのは長く比べ直していないものから）。
-			st.Pending = append(slices.DeleteFunc(st.Pending, func(s string) bool { return s == id }), id)
-			dirty = true
-			if limit := max(g.Config.MaxNetworks, 1) * 2; len(st.Pending) > limit {
-				// 捨てたネットワークは覚えているネットワークからも外し、次にそこから使われたら新しいネットワークとして比べ直す。
-				drop := st.Pending[:len(st.Pending)-limit]
-				st.Nets = slices.DeleteFunc(st.Nets, func(s seen) bool { return slices.Contains(drop, s.ID) })
-				st.Pending = st.Pending[len(st.Pending)-limit:]
+		if g.ProfilesEnabled() {
+			if i := slices.Index(st.Learned, id); i < 0 {
+				visit = &Visit{Network: cidr(ip), ASN: loc.ASN, Country: loc.Country, Family: uaFamily(in.UserAgent), UserAgent: in.UserAgent,
+					Reported: slices.Clone(st.Reported), net: id}
+			} else if changed && i != len(st.Learned)-1 {
+				// 使い続けているものを後ろへ（時刻を更新するときだけ。書き込みを増やさない）。
+				st.Learned = append(slices.Delete(st.Learned, i, i+1), id)
 			}
-		}
-		if g.ProfilesEnabled() && slices.Contains(st.Pending, id) {
-			visit = &Visit{Network: cidr(ip), ASN: loc.ASN, Country: loc.Country, Family: uaFamily(in.UserAgent), UserAgent: in.UserAgent,
-				Reported: slices.Clone(st.Reported), net: id}
 		}
 		if n := g.distinct(st, now); g.Config.MaxNetworks > 0 && n >= g.Config.MaxNetworks {
 			report(SignalFlapping, map[string]any{"networks": n, "window_seconds": int(g.Config.Window / time.Second)})
@@ -392,14 +387,22 @@ func (g *Guard) Confirm(ctx context.Context, realmID, sid string, found []Anomal
 			st.Reported = append(st.Reported, x.Signal)
 		}
 	}
-	if visit != nil {
-		st.Pending = slices.DeleteFunc(st.Pending, func(s string) bool { return s == visit.net })
+	if visit != nil && !slices.Contains(st.Learned, visit.net) {
+		st.Learned = append(st.Learned, visit.net)
+		if limit := g.learnedLimit(); len(st.Learned) > limit {
+			st.Learned = st.Learned[len(st.Learned)-limit:]
+		}
 	}
 	if b, err := json.Marshal(st); err == nil {
 		if err := g.Cache.Set(ctx, k, b, g.Config.TTL); err != nil {
 			g.logger().WarnContext(ctx, "session binding state write failed", "error", err)
 		}
 	}
+}
+
+// learnedLimit は Learned の数の上限。普段の接続元の一覧のネットワークの数と、数え上げの数の大きい方の 2 倍。
+func (g *Guard) learnedLimit() int {
+	return max(g.Config.Profile.MaxNetworks, g.Config.MaxNetworks, 1) * 2
 }
 
 // Forget は系列の状態を消す（ログアウトなど。消さなくても TTL で消える）。
