@@ -76,7 +76,7 @@ func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Vali
 	err = a.deps.Storage.Tx(ctx, func(ctx context.Context, tx port.Tx) error {
 		changed, applied = nil, nil
 		for _, x := range found {
-			details := map[string]any{"signal": string(x.Signal), "sid": v.SID, "user_id": v.PublicID, "actions": x.Actions}
+			details := map[string]any{"signal": string(x.Signal), "sid": v.SID, "user_id": v.PublicID, "actions": nonNilActions(x.Actions)}
 			for k, val := range x.Details {
 				details[k] = val
 			}
@@ -130,4 +130,12 @@ func (a *App) checkBinding(ctx context.Context, r *http.Request, v *session.Vali
 		}
 	}
 	return true
+}
+
+// nonNilActions は監査ログに残すアクション（無ければ null ではなく空の配列）。
+func nonNilActions(xs []sessionbinding.Action) []sessionbinding.Action {
+	if xs == nil {
+		return []sessionbinding.Action{}
+	}
+	return xs
 }

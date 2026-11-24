@@ -489,7 +489,7 @@ type SessionSignal struct {
 	Enabled bool `yaml:"enabled"`
 	// Score は actions の risk で上げるリスクの点数（0〜100）。
 	Score int `yaml:"score"`
-	// Actions は risk（系列のリスクを score まで上げる）・revoke（系列を失効させる）・notify（本人に知らせる）。
+	// Actions は risk（系列のリスクを score まで上げる）・revoke（系列を失効させる）・notify（本人に知らせる）。既定は空（記録だけ）。
 	Actions []string `yaml:"actions"`
 }
 
@@ -739,11 +739,11 @@ func Default() Config {
 				ImpossibleTravelScore: 90, MaxSpeedKmh: 1000},
 			BotProtection: BotProtection{Mode: "suspicious", AfterFailures: 5, Window: Duration(10 * time.Minute)},
 			SessionBinding: SessionBinding{Window: Duration(10 * time.Minute), MaxNetworks: 4,
-				DeviceChanged:    SessionSignal{Enabled: true, Score: 90, Actions: []string{"risk"}},
-				UserAgentChanged: SessionSignal{Enabled: true, Score: 60, Actions: []string{"risk"}},
-				CountryChanged:   SessionSignal{Enabled: true, Score: 70, Actions: []string{"risk"}},
-				ASNChanged:       SessionSignal{Enabled: true, Score: 30, Actions: []string{"risk"}},
-				NetworkFlapping:  SessionSignal{Enabled: true, Score: 70, Actions: []string{"risk"}}},
+				DeviceChanged:    SessionSignal{Enabled: true, Score: 90, Actions: []string{}},
+				UserAgentChanged: SessionSignal{Enabled: true, Score: 60, Actions: []string{}},
+				CountryChanged:   SessionSignal{Enabled: true, Score: 70, Actions: []string{}},
+				ASNChanged:       SessionSignal{Enabled: true, Score: 30, Actions: []string{}},
+				NetworkFlapping:  SessionSignal{Enabled: true, Score: 70, Actions: []string{}}},
 		},
 		Outbox:     Outbox{Interval: Duration(time.Second), Batch: 100},
 		OrgDomains: OrgDomains{Recheck: Duration(day), Grace: Duration(7 * day)},

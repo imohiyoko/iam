@@ -77,14 +77,15 @@ IPv4 と IPv6 のデュアルスタック、VPN の付け外し、ブラウザ�
   `signal`・`sid`・`user_id`・`actions` と、兆候ごとの内容（`from_country`・`to_country`、`from_asn`・`to_asn`、`networks`・
   `window_seconds`、`device_cookie`）。SIEM・イベントの購読・SSF の送信側に流れる
 - アクション（兆候ごとに選ぶ。複数可）
-  - `risk`（既定）：ログインの系列の、終わっていないセッションのリスクを、兆候の種類（`device`・`ip`）ごとに点数まで上げる
+  - `risk`：ログインの系列の、終わっていないセッションのリスクを、兆候の種類（`device`・`ip`）ごとに点数まで上げる
     （下げない。realm の一覧で止めた種類は入れない）。`session.risk_updated` に `source: session_binding` で残す。その要求の判定から
     効く。「リスクが高ければ再認証」は新しい仕組みを作らず、ADR 0084 の条件（`risk_at_most`）と ADR 0093 の step-up で書く
   - `revoke`：ログインの系列を失効させる（ID の入れ替えの猶予の中の古い ID も。理由 `session_anomaly`。Back-Channel Logout も
     動く）。その要求から未ログインとして扱い、Cookie を消す
   - `notify`：本人に通知 `suspicious_session`（ID だけ。ADR 0031。宛先は `new_device_login` と同じに決める）
-- 既定はすべての兆候で `risk` だけにする。VPN やモバイル回線の誤検知でログアウトさせると影響が大きく、`risk` なら重要な操作の前に
-  step-up で本人に確かめられる。`revoke` は運営者が選ぶ（例：`device_changed` だけ `revoke`）
+- 既定はすべての兆候でアクション無し（記録だけ）にする（オーナーの判断）。まず監査ログ・SIEM で誤検知の量を見てから、運営者が
+  兆候ごとにアクションを足す。VPN やモバイル回線の誤検知を考えると、足すならまず `risk`（重要な操作の前に step-up で本人に確かめる）、
+  確度の高い `device_changed` だけ `revoke`、のように段階的にする
 
 ### 設定
 
@@ -94,19 +95,20 @@ security:
     window: 10m
     max_networks: 4
     ignore_networks: [203.0.113.0/24]
-    device_changed:     { enabled: true, score: 90, actions: [risk] }
-    user_agent_changed: { enabled: true, score: 60, actions: [risk] }
-    country_changed:    { enabled: true, score: 70, actions: [risk] }
-    asn_changed:        { enabled: true, score: 30, actions: [risk] }
-    network_flapping:   { enabled: true, score: 70, actions: [risk] }
+    device_changed:     { enabled: true, score: 90, actions: [] }
+    user_agent_changed: { enabled: true, score: 60, actions: [] }
+    country_changed:    { enabled: true, score: 70, actions: [] }
+    asn_changed:        { enabled: true, score: 30, actions: [] }
+    network_flapping:   { enabled: true, score: 70, actions: [] }
 ```
 
 状態を覚える長さはセッションの寿命の上限（`security.session.absolute_lifetime` の `default` と `max` の大きい方）。
 
 ## 結果
 
-- 盗んだセッションの Cookie を別のブラウザで使うと、最初の要求で `device_changed` が記録され、系列のリスクが上がる。要件に
-  `risk_at_most` を書いた操作は step-up を求め、2 要素目を持たない攻撃者は通れない。`revoke` を選べばその場で使えなくなる
+- 盗んだセッションの Cookie を別のブラウザで使うと、最初の要求で `device_changed` が記録される（既定はここまで）。`risk` を選べば
+  系列のリスクが上がり、要件に `risk_at_most` を書いた操作は step-up を求め、2 要素目を持たない攻撃者は通れない。`revoke` を選べば
+  その場で使えなくなる
 - 短い時間に接続元が渡り歩くセッションは `network_flapping` で見つかる
 - ホットパスの増分は EphemeralStore の 1 回の読み（と GeoIP の表引き）で、書き込みは変化のときだけ
 - 状態は EphemeralStore にあるので、memory のままでは再起動で消える（新しい起点から見直す）
@@ -119,7 +121,8 @@ security:
 
 - **セッションの行（Storage）に起点を持つ**：再起動でも消えないが、要求ごとの比較の結果を書くのが DB になり、ホットパスが重い。
   起点を書くだけならログインのときでよいが、端末の Cookie は次の要求から届き、User-Agent と接続元の変化の記録は結局一時的な状態に要る
-- **接続元が変わったらすぐ失効させる**：モバイル回線・VPN・デュアルスタックで正当な利用者が頻繁にログアウトされる。既定は `risk`
+- **接続元が変わったらすぐ失効させる**：モバイル回線・VPN・デュアルスタックで正当な利用者が頻繁にログアウトされる。既定は記録だけ
+- **既定で `risk`**：誤検知の量を見る前に、正当な利用者に step-up を求めることになる。運営者が兆候ごとに選ぶ
 - **点数をログインの評価器（`login_risk`）に足す**：ログインの瞬間しか呼ばれず、ログインの後の盗用を見られない
 - **外部のリスクの評価器に任せる（評価器の管理 API。ADR 0084）**：今でもできるが、要求ごとの接続元を外に送ることになり、
   ホットパスで外部を呼ぶか、ログを後から流して遅れる。組み込みで軽く見る

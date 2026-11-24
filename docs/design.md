@@ -1235,7 +1235,7 @@ adapters: { storage: [postgres], ephemeral: [redis], notifier: [webhook], keysto
 - `session_binding`（ADR 0128）：ログインの後のセッションの検証で、系列（`sid`）ごとに最初の要求の端末の Cookie・User-Agent の種類・
   国と ASN を起点に覚え、`device_changed`・`user_agent_changed`・`country_changed`・`asn_changed`・`network_flapping`
   （`window` の内に `max_networks` 以上のネットワーク。ネットワークは ASN か /24・/64）を見つける。状態は EphemeralStore で、
-  変化のときだけ書く。いつも `session.anomaly_detected` に残し、兆候ごとに `risk`（系列のリスク `device`・`ip` を上げる。既定）・
+  変化のときだけ書く。いつも `session.anomaly_detected` に残し、兆候ごとに（既定は記録だけ）`risk`（系列のリスク `device`・`ip` を上げる）・
   `revoke`（系列を失効。理由 `session_anomaly`）・`notify`（通知 `suspicious_session`）を選ぶ。同じ ASN の中の変化・
   少し前のネットワークへの戻り・`ignore_networks` は数えない
 

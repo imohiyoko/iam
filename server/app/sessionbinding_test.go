@@ -49,7 +49,9 @@ func bindingRisk(evs []audit.Event) map[string]any {
 // 別の端末の Cookie でセッションが使われたら記録し、系列のリスクを上げる。要件の risk_at_most で step-up を求める。
 // 同じ兆候は系列ごとに 1 回だけ記録する。
 func TestSessionBindingDevice(t *testing.T) {
-	l := newBindingEnv(t, []string{feature.DeviceRecognition}, nil)
+	l := newBindingEnv(t, []string{feature.DeviceRecognition}, func(c *config.Config) {
+		c.Security.SessionBinding.DeviceChanged.Actions = []string{"risk"}
+	})
 	_, op := l.operator(t, "root@example.com", role.RealmOwner)
 	if code, out := l.adminDo(t, "PUT", op, "/v1/admin/action-namespaces/me", map[string]any{"requirements": map[string]any{
 		role.ActionMeDelete: map[string]any{"any": []any{
@@ -169,6 +171,7 @@ func TestSessionBindingFlapping(t *testing.T) {
 	l := newBindingEnv(t, nil, func(c *config.Config) {
 		c.Security.SessionBinding.MaxNetworks = 3
 		c.Security.SessionBinding.IgnoreNetworks = []string{"10.0.0.0/8"}
+		c.Security.SessionBinding.NetworkFlapping.Actions = []string{"risk"}
 	})
 	l.hdr = []string{"X-Forwarded-For", "100.64.1.1"}
 	_, cookie := l.login(t, "pat@example.com")
@@ -208,6 +211,29 @@ func TestSessionBindingFlapping(t *testing.T) {
 	}
 	if got := l.anomalies(t); len(got) != 1 {
 		t.Fatalf("slow moves: %v", got)
+	}
+}
+
+// 既定は記録だけ：監査ログには残すが、リスクは上げず、失効もさせない。
+func TestSessionBindingDefaultRecordOnly(t *testing.T) {
+	l := newBindingEnv(t, nil, nil)
+	l.hdr = []string{"X-Forwarded-For", "198.51.100.10"}
+	_, cookie := l.login(t, "pat@example.com")
+	if code, _ := l.meDo(t, "GET", cookie, "/v1/me", nil); code != 200 {
+		t.Fatalf("me: %d", code)
+	}
+	l.hdr = []string{"X-Forwarded-For", "203.0.113.10"}
+	if code, _ := l.meDo(t, "GET", cookie, "/v1/me", nil); code != 200 {
+		t.Fatalf("after the country change: %d", code)
+	}
+	if got := l.anomalies(t); len(got) != 1 || got[0] != "country_changed" {
+		t.Fatalf("anomalies: %v", got)
+	}
+	if ev := l.lastAudit(t, sessionbinding.EventAnomaly); ev.Details["actions"] == nil || len(ev.Details["actions"].([]any)) != 0 {
+		t.Fatalf("actions: %+v", ev.Details)
+	}
+	if r := bindingRisk(l.auditOf(t, "session.risk_updated")); r != nil {
+		t.Fatalf("risk raised by default: %v", r)
 	}
 }
 
